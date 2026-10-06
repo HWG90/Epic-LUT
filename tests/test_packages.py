@@ -27,8 +27,36 @@ with tempfile.TemporaryDirectory(prefix='epic-package-tests-') as temp:
     reject(lambda:import_package(corrupt,root/'bad-out'))
     workspace=root/'editor';editor=Editor(workspace)
     (workspace/'current.json').write_text(json.dumps({'luts':[{'key':'armor-test','hash':'0000000000001234','width':23,'height':8,'working':'live.dds'}]}))
-    editor.upload_package('packaged.zip',packaged.read_bytes());assert editor.matches==['armor-test']and load(workspace/'live.dds').tobytes()==data.tobytes()
+    editor.upload_package('packaged.zip',packaged.read_bytes());assert editor.matches==['armor-test']and not(workspace/'live.dds').exists()
+    editor.command('publish',{'target':'armor-test'});assert load(workspace/'live.dds').tobytes()==data.tobytes()
     wrong=Editor(root/'wrong');wrong.upload_package('packaged.zip',packaged.read_bytes());assert not wrong.matches and not(wrong.folder/'live.dds').exists(),'Wrong target applied automatically'
     multi=Editor(root/'multi');(multi.folder/'current.json').write_text(json.dumps({'luts':[{'key':kind,'hash':'0000000000001234','width':23,'height':8,'working':kind+'.dds'}for kind in('armor','helmet')]}))
     multi.upload_package('packaged.zip',packaged.read_bytes());assert len(multi.matches)==2 and not(multi.folder/'armor.dds').exists(),'Ambiguous target was applied'
+    batch=Editor(root/'batch');batch.resource=None
+    batch.data=data.copy()
+    entries=[{'key':kind+str(i),'kind':kind,'hash':str(i),'width':w,'height':h,'working':kind+str(i)+'.dds'} for kind,i,w,h in [('armor',1,23,8),('armor',2,23,8),('armor',3,3,1),('helmet',4,23,8)]]
+    (batch.folder/'current.json').write_text(json.dumps({'luts':entries}))
+    from lut_files import save
+    for v in entries:save(batch.folder/v['working'],np.zeros((v['height'],v['width'],4),dtype=np.float32))
+    result=batch.command('publish_all',{'kind':'armor'});assert result['applied_batch']['count']==2 and result['applied_batch']['skipped']==1
+    assert load(batch.folder/'armor1.dds').tobytes()==data.tobytes()and load(batch.folder/'armor2.dds').tobytes()==data.tobytes()
+    assert not load(batch.folder/'helmet4.dds').any()and not load(batch.folder/'armor3.dds').any()
+    prior=(batch.folder/'armor1.dds').read_bytes();(batch.folder/'armor2.dds').write_bytes(b'bad')
+    batch.data[:]=.125;reject(lambda:batch.command('publish_all',{'kind':'armor'}))
+    assert (batch.folder/'armor1.dds').read_bytes()==prior and not(batch.folder/'apply.lock').exists()and not list(batch.folder.glob('*.batch-*'))
+    save(batch.folder/'armor2.dds',data)
+    from unittest.mock import patch
+    import companion
+    real_replace=companion.os.replace;calls=[0]
+    def fail_second(source,target):
+        calls[0]+=1
+        if calls[0]==2:raise OSError('simulated commit failure')
+        return real_replace(source,target)
+    before={v['working']:(batch.folder/v['working']).read_bytes() for v in entries}
+    with patch.object(companion.os,'replace',fail_second):reject(lambda:batch.command('publish_all',{'kind':'armor'}))
+    assert all((batch.folder/name).read_bytes()==raw for name,raw in before.items())and not(batch.folder/'apply.lock').exists()
+    save(batch.folder/'palette1.dds',data);second=data.copy();second[:]=.625;save(batch.folder/'palette2.dds',second)
+    batch.imports=[{'name':'palette1.dds','resource':'1'},{'name':'palette2.dds','resource':'2'}]
+    batch.command('publish_all',{'kind':'armor'})
+    assert load(batch.folder/'armor1.dds').tobytes()==data.tobytes()and load(batch.folder/'armor2.dds').tobytes()==second.tobytes()
 print('PASS: raw DDS ZIP, packaged texture ZIP, traversal/malformed rejection, float fidelity, exact auto-match, unmatched/ambiguous target preview-only')

@@ -113,7 +113,7 @@ function X.new(m,state,ctx,note)
         end}
         pages[#pages+1]={id='semantic',name='Semantics / grid cell',require_confirmation=false,controls=controls}
         local file_controls={
-            {id='open_companion',type='button',label='Open file / archive picker',description='Local companion supports choosing or dropping DDS, EXR, ZIP and RAR. Exact unambiguous resource matches can hotload; other palettes need a target choice.',on_activate=function()return m.open_companion.open()end},
+            {id='open_companion',type='button',label='Import palette (opens local browser)',description='Opens the local import window. Choose or drop ZIP, RAR, DDS or EXR, then apply to a matching equipped target.',on_activate=function()return m.open_companion.open()end},
             {type='text',label='Float DDS loads in game. EXR is converted by the local companion. Files: '..ctx.dir..'/files'},
             {id='watch_files',type='toggle',label='Hotload working LUT files',default=true,description='Validated changes to this armor/LUT working DDS activate its rows. Invalid files retain the previous rendering.'},
             {id='autosave',type='toggle',label='Auto-save working float DDS',default=true},
@@ -170,15 +170,16 @@ function X.new(m,state,ctx,note)
     end
     function self.tick()
         if not self.attached or not state.handle then return end
+        local function locked()local f=io.open(ctx.dir..'/files/apply.lock','rb');if f then f:close();return true end;return false end
+        if locked()then return end
         if state.dirty and state.handle.get('autosave')then self.save_all()end
         if not state.handle.get('watch_files')or state.memory.time()-self.last_poll<.25 then return end
         self.last_poll=state.memory.time()
-        for name,d in pairs(self.document.documents)do
-            local ok,changed=pcall(self.document.poll,name)
-            if ok and changed then
-                local flags={enabled=true};for row=1,d.lut.height do flags[name..'_r'..row..'_on']=true end
-                batch(flags);state.dirty=true;self.sync();note('Validated float LUT hotloaded: '..name)
-            elseif not ok and d.error~=tostring(changed)then d.error=tostring(changed);note('Hotload rejected; previous texture retained: '..d.error)end
+        local ok,pending=pcall(self.document.poll_all,locked)
+        if not ok then if self.poll_error~=tostring(pending)then self.poll_error=tostring(pending);note('Hotload batch rejected; previous textures retained: '..self.poll_error)end;return end
+        if #pending>0 then local flags={enabled=true}
+            for _,p in ipairs(pending)do local d=self.document.documents[p.name];for row=1,d.lut.height do flags[p.name..'_r'..row..'_on']=true end end
+            batch(flags);state.dirty=true;self.sync();note('Validated float LUT batch hotloaded: '..#pending)
         end
     end
     return self

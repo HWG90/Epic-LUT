@@ -23,7 +23,7 @@ def safe_name(name):
 class Editor:
     def __init__(self,folder):
         self.folder=Path(folder).resolve();self.folder.mkdir(parents=True,exist_ok=True);self.data=None;self.path=None;self.undo=[];self.redo=[];self.clipboard=None;self.revision=0
-        self.lock=threading.RLock();self.imports=[];self.resource=None;self.matches=[]
+        self.lock=threading.RLock();self.imports=[];self.resource=None;self.matches=[];self.package_name=None
     def file(self,name):
         path=(self.folder/safe_name(name)).resolve()
         if path.parent!=self.folder:raise ValueError('Path leaves editor folder')
@@ -32,7 +32,7 @@ class Editor:
         self.undo.append(self.data.copy());self.undo=self.undo[-64:];self.redo=[]
     def state(self):
         if self.data is None:return {'loaded':False,'files':self.files(),'live':self.live()}
-        return {'loaded':True,'name':self.path.name if self.path else None,'width':self.data.shape[1],'height':self.data.shape[0],'values':self.data.tolist(),'columns':columns(self.data.shape[1]),'color_columns':sorted(COLOR_COLUMNS.get(self.data.shape[1],set())),'revision':self.revision,'undo':len(self.undo),'redo':len(self.redo),'files':self.files(),'live':self.live(),'imports':self.imports,'matches':self.matches,'resource':self.resource}
+        return {'loaded':True,'name':self.path.name if self.path else None,'width':self.data.shape[1],'height':self.data.shape[0],'values':self.data.tolist(),'columns':columns(self.data.shape[1]),'color_columns':sorted(COLOR_COLUMNS.get(self.data.shape[1],set())),'revision':self.revision,'undo':len(self.undo),'redo':len(self.redo),'files':self.files(),'live':self.live(),'imports':self.imports,'matches':self.matches,'resource':self.resource,'package_name':self.package_name}
     def files(self):return sorted(p.name for p in self.folder.iterdir() if p.is_file() and p.suffix.lower() in ('.dds','.exr','.json') and p.name!='current.json')
     def live(self):
         try:
@@ -46,6 +46,7 @@ class Editor:
     def match(self):
         self.matches=[v.get('key',v['hash'])for v in (self.live()or {}).get('luts',[])if self.resource and v['hash'].lower()==self.resource.lower()and (v['width'],v['height'])==(self.data.shape[1],self.data.shape[0])]
     def upload_package(self,name,raw):
+        self.package_name=name
         cache=self.folder/'archive-cache'/uuid.uuid4().hex;cache.mkdir(parents=True);path=cache/safe_name(name);path.write_bytes(raw)
         report=import_package(path,cache/'extracted');self.imports=[]
         for item in report:
@@ -54,8 +55,7 @@ class Editor:
     def open_import(self,name):
         item=next((v for v in self.imports if v['name']==name),None);self.open(name)
         if item:self.resource=item['resource'];self.match()
-        # Apply only an exact unambiguous resource/dimension match. Other palettes remain preview-only.
-        if len(self.matches)==1:self.command('publish',{'target':self.matches[0]})
+        # Import is preview-only; the user applies the selected target explicitly.
     def cells(self,rect):
         if self.data is None:raise ValueError('Open a LUT first')
         r0,r1,c0,c1=[int(v) for v in rect]
@@ -103,7 +103,7 @@ class Editor:
             if data.shape!=(1,self.data.shape[1],4):raise ValueError('Invalid row values')
             self.remember();self.data[row]=data[0];self.revision+=1
         elif action=='debug':
-            if self.data.shape[1]!=23:raise ValueError('Row debug colors require a material LUT')
+            if (self.data.shape[1]!=23 and len(self.imports)<=1):raise ValueError('Row debug colors require a material LUT')
             self.remember()
             import colorsys
             for row in range(self.data.shape[0]):self.data[row,0,:3]=colorsys.hsv_to_rgb(row/self.data.shape[0],1,1)
@@ -116,6 +116,43 @@ class Editor:
             live=self.live();target=next((v for v in (live or {}).get('luts',[]) if v.get('key',v['hash'])==args['target']),None)
             if target is None or target['width']!=self.data.shape[1] or target['height']!=self.data.shape[0]:raise ValueError('No compatible equipped LUT target')
             save(self.file(target['working']),self.data)
+        elif action=='publish_all':
+            kind=args.get('kind')
+            if kind not in ('armor','helmet') or self.data is None or (self.data.shape[1]!=23 and len(self.imports)<=1):raise ValueError('Choose armor or helmet and a 23-column material palette')
+            snapshot=self.file('current.json').read_bytes();live=json.loads(snapshot)
+            scoped=[v for v in live.get('luts',[]) if v.get('kind')==kind]
+            included=[v for v in scoped if (v['width'],v['height'])==(self.data.shape[1],self.data.shape[0])]
+            sources={}
+            if len(self.imports)>1:
+                for item in self.imports:
+                    resource=item.get('resource')
+                    if not resource:continue
+                    if resource in sources:raise ValueError('Archive has multiple palettes for one resource; choose a palette explicitly')
+                    sources[resource]=load(self.file(item['name']))
+                included=[v for v in scoped if v['hash'] in sources and sources[v['hash']].shape==(v['height'],v['width'],4)]
+            if not included:raise ValueError('No compatible equipped material LUTs')
+            payload=encode_dds(validate(self.data));planned=[];seen=set()
+            lock=self.file('apply.lock')
+            with lock.open('xb')as f:f.write(b'Applying validated palette batch')
+            try:
+                for v in included:
+                    path=self.file(v['working'])
+                    if path in seen:continue
+                    seen.add(path)
+                    candidate=sources[v['hash']] if sources else self.data
+                    if not path.exists() or load(path).shape!=candidate.shape:raise ValueError('Equipped working file changed or is unavailable')
+                    prior=path.read_bytes();staged=path.with_name(path.name+'.batch-'+uuid.uuid4().hex)
+                    planned.append((path,staged,prior));staged.write_bytes(encode_dds(candidate) if sources else payload)
+                if self.file('current.json').read_bytes()!=snapshot:raise ValueError('Equipment changed; choose targets again')
+                for path,staged,prior in planned:os.replace(staged,path)
+            except Exception:
+                for path,staged,prior in planned:
+                    if not staged.exists():path.write_bytes(prior)
+                raise
+            finally:
+                for _,staged,_ in planned:staged.unlink(missing_ok=True)
+                lock.unlink(missing_ok=True)
+            result=self.state();result['applied_batch']={'kind':kind,'count':len(planned),'resources':[v['hash'] for v in included],'skipped':len(scoped)-len(included)};return result
         elif action=='bulk':return {'results':convert_directory(self.folder,args['format'])}
         else:raise ValueError('Unknown action')
         return self.state()

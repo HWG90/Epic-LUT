@@ -63,6 +63,18 @@ function M.new(dds)
         local bytes=f:read(dds.MAX_BYTES+1);f:close();if bytes==d.stamp then return false end
         local data=dds.decode(bytes,d.lut.width,d.lut.height);self.replace(name,data);d.stamp=bytes;return true
     end
+    function self.poll_all(locked)
+        local pending={}
+        for name,d in pairs(self.documents)do
+            local f=io.open(d.path,'rb')
+            if f then local bytes=f:read(dds.MAX_BYTES+1);f:close()
+                if bytes~=d.stamp then pending[#pending+1]={name=name,bytes=bytes,data=dds.decode(bytes,d.lut.width,d.lut.height)}end
+            end
+        end
+        if locked()then return {}end
+        for _,p in ipairs(pending)do self.replace(p.name,p.data);self.documents[p.name].stamp=p.bytes end
+        return pending
+    end
     function self.compose(name,handle)
         local d=self.documents[name];if not d or not d.active then return nil end
         local data=clone(d.lut,d.lut.values)

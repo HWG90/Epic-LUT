@@ -1,10 +1,10 @@
 # Files and pre-made palettes
 
-Use **Files / hotload → Open file / archive picker** in MCM, or run `start_editor.ps1` and open its local URL. Set up codec dependencies once with `setup_companion.ps1`. Everything runs locally; the service has no game-memory access.
+Use **Files / hotload → Import palette (opens local browser)** in MCM, or run `start_editor.ps1` and open its local URL. Set up codec dependencies once with `setup_companion.ps1`. Everything runs locally; the service has no game-memory access.
 
 The companion accepts DDS, EXR, ZIP and RAR through **Open / drop file**. ZIP extraction uses a bounded data parser; RAR requires the installed 7-Zip executable. Raw float files and standard direct Stingray patch resources are supported. Encrypted, traversal/absolute-path/link, oversize and malformed packages are rejected. Package documents/scripts are not executed; the mod patch is not installed. Compressed/nonstandard resource archives are not claimed supported.
 
-An exact unambiguous resource-ID/dimension match can publish to its equipped armor/helmet lookup. Unmatched or multiple matches stay preview-only until a target is chosen. Palette reuse by dimensions is an explicit remap: matching 23×8 dimensions do not establish matching surface regions. Default game-side effect protection preserves non-color/emission controls; deliberate unlock is needed for full material changes.
+An exact resource-ID/dimension match is selected automatically; click Apply to use it. Import alone is preview-only. Choose All compatible armor LUTs for a deliberate group remap; incompatible pattern tables are skipped. Unmatched or multiple matches stay preview-only until a target is chosen. Palette reuse by dimensions is an explicit remap: matching 23×8 dimensions do not establish matching surface regions. Default game-side effect protection preserves non-color/emission controls; deliberate unlock is needed for full material changes.
 
 The checked Trailblazer example contained one texture patch resource, `028cfcfea3304e83`, 23×8 RGBA32F. Extraction produces a regular float DDS. The package filename alone does not prove which equipped item owns that resource. The sample was inspected/previewed, not applied or redistributed.
 

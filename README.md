@@ -22,7 +22,7 @@ Targets are equipped local armor non-skin pieces and local helmet pieces. Cape e
 
 Use each target's **Export preset / Import preset** for full-float v2 `.dbflut` interchange. Target kind/kit, body, resource hashes, dimensions, complete cells and activation flags are validated before one settings commit. Legacy armor RGB v1 imports remain supported. Helmet presets cannot silently apply to armor. Files are data, never executed. [Preset format](docs/PRESETS.md).
 
-For pre-made files/packages, use **Files / hotload > Open file / archive picker**, or `start_editor.ps1`. Choose/drop DDS, EXR, ZIP or RAR. Packages are extracted automatically in a private cache; documents/code are never executed and mod patches are not installed. An exact unambiguous resource/dimension match may publish to its equipped target; otherwise choose a target explicitly. [File/archive workflow and supported formats](docs/FILES.md).
+For pre-made files/packages, use **Files / hotload > Import palette (opens local browser)**, or `start_editor.ps1`. Choose/drop DDS, EXR, ZIP or RAR. Packages are extracted automatically in a private cache; documents/code are never executed and mod patches are not installed. An exact match is selected automatically; click Apply to use it. Import alone never applies a palette. The Advanced editor retains all editing tools. [File/archive workflow and supported formats](docs/FILES.md).
 
 The local companion includes semantic fields, pixel grid, rectangular clipboard, undo/redo, Ctrl+S, row presets, scratch RGB, camo and debug rows, and DDS/EXR bulk conversion. Set up codecs once using `setup_companion.ps1`. EXR conversion runs outside the game and publishes float DDS for hotloading. No third-party palette assets are included in this repository.
 
