@@ -1,0 +1,5 @@
+dist/
+BUILD-RECEIPT.json
+__pycache__/
+tests/presets/
+*.pending
