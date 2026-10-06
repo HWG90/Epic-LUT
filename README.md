@@ -26,7 +26,9 @@ This is editor preset interchange, not a game archive patch. Producing a distrib
 
 ## Build and validation
 
-`python build.py` produces `dist/Epic-LUT-R1.zip`; install its `armor_lut_editor` folder into the supported loader's Mods folder. Keep the stable folder name to preserve settings. Include the folder's `presets` subdirectory.
+`build.ps1 -Verify` produces `dist/Epic-LUT-R1.zip` using a non-Store Python interpreter. `-Python <path>` selects another non-Store runtime. Microsoft Store/WindowsApps Python is rejected before filesystem work. For the first reviewed installation, install the ZIP's `armor_lut_editor` folder including `presets`; keep the stable folder name to preserve settings.
+
+For subsequent authorized updates, use **`deploy.ps1`**. It validates the real absolute LLL destination and opened-handle path, rejects LocalCache/virtualized paths, preserves a hash-verified rollback, and checks the actual installed SHA-256 immediately and after reload. It stops on mismatches or unconfirmed reload instead of blindly retrying. Backups/receipts stay under ignored `dist/deployment-backups`. Run `tests/deploy_guards.ps1` for rejection checks. These protections cover the supported entrypoints; external copies can bypass them.
 
 `python verify.py` runs LuaJIT syntax and meaningful contracts. Set `LUA51_DLL` to the LuaJIT Lua 5.1 library and `MCM_SOURCE_DIR` to the DBF-MCM checkout if they differ from the defaults (Windows Steam library, sibling DBF-MCM). Tests cover non-color preservation, stale/foreign binding handling, partial failures, actual MCM picker commit/cancel, automatic activation, equipment lifecycle, complete preset round trip, malformed rejection and atomic-save failure.
 

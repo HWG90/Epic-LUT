@@ -1,9 +1,11 @@
 from pathlib import Path
 import hashlib,json,zipfile
+from tools.runtime_guard import require_physical_runtime
+require_physical_runtime()
 ROOT=Path(__file__).resolve().parent
 VENDOR=['bingus_runtime','bingus_memory','engine','avatar','kits','files','slim','texture']
 OWN=['palette','catalog','session','presets']
-parts=['-- Armor LUT Editor R1; isolated review candidate.\nlocal m={}\n']
+parts=['-- Epic LUT R1; LUT discovery and native adapters by CowboyBingus.\nlocal m={}\n']
 for name in VENDOR+OWN:
     folder='vendor' if name in VENDOR else 'src'
     parts.append(f'm.{name}=(function()\n'+(ROOT/folder/f'{name}.lua').read_text(encoding='utf-8')+'\nend)()\n')

@@ -1,4 +1,9 @@
 import ctypes,os
+from tools.runtime_guard import require_physical_runtime,blocked_path
+require_physical_runtime()
+assert blocked_path('C:/Users/test/AppData/Local/Microsoft/WindowsApps/python.exe')
+assert blocked_path('C:/Users/test/AppData/Local/Packages/PythonSoftwareFoundation.Python/LocalCache/Local/LLL/mod.lua')
+assert not blocked_path('C:/runtimes/python/python.exe')
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent;os.chdir(ROOT)
 (ROOT/'tests/presets').mkdir(exist_ok=True)
