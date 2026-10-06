@@ -115,7 +115,9 @@ local function update()
     end
     if state.result and register(state.result) and state.dirty then
         assert(not matching_conflict(),'Match Your Colors Armor Matches Helmet is active; set Color Matching to Off or Helmet Matches Armor first')
-        if state.handle.get('enabled') then state.session.apply(state.handle);note('Applied row colors; original bindings retained')
+        if state.handle.get('enabled') then
+            if #state.session.bindings==0 then state.session.capture(state.result,now.units)end
+            state.session.apply(state.handle);note('Applied row colors; original bindings retained')
         else
             assert(state.session.restore(),'Restoration pending')
             -- Retake original bindings before the next enabled edit.
@@ -134,6 +136,11 @@ local function update()
     if file and state.result and state.handle then
         local command=file:read('*a');file:close();os.remove(ctx.dir..'/TEST-ONCE.txt')
         if command:match('^restore') then assert(state.handle.set('enabled',false));state.dirty=true
+        elseif command:match('^roundtrip') then
+            local before=m.presets.encode(state.result,state.handle)
+            assert(state.handle.activate('export'));assert(state.handle.activate('reset_rows'));assert(state.handle.activate('import'))
+            assert(m.presets.encode(state.result,state.handle)==before,'Live preset round trip mismatch')
+            note('Live export/reset/import round trip verified all row colors and activation flags')
         elseif command:match('^export') then assert(state.handle.activate('export'))
         elseif command:match('^import') then assert(state.handle.activate('import'))
         elseif command:match('^reset_rows') then assert(state.handle.activate('reset_rows'))

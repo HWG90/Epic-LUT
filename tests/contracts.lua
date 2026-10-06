@@ -22,6 +22,7 @@ session.capture(cat,{{unit=1,type=0,slot=2}})
 local handle={get=function(id)if id:match('_on$')then return true else return '#00FF00'end end}
 session.apply(handle);assert(bound==200 and committed==1 and #retained.records==1)
 assert(session.restore() and bound==100)
+assert(not pcall(session.apply,handle),'Empty restored binding set accepted an edit')
 session.capture(cat,{{unit=1,type=0,slot=2}});bound=999
 assert(not pcall(session.apply,handle));assert(session.restore() and bound==999,'foreign binding overwritten')
 bound=100;session.capture(cat,{{unit=1,type=0,slot=2}});session.apply(handle);membership=false

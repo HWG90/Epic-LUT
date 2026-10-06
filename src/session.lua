@@ -49,6 +49,7 @@ function S.new(m,memory,native,retain)
     end
     function self.apply(handle)
         assert(self.catalog,'Armor catalogue not ready')
+        assert(#self.bindings>0,'Armor bindings must be recaptured after restoration')
         local planned={};local bytes=0
         for _,lut in ipairs(self.catalog.luts)do
             local overrides={};for row=0,lut.height-1 do
