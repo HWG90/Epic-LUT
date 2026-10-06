@@ -1,18 +1,22 @@
-# Preset format v1
+# Preset formats
 
-UTF-8/ASCII data with tab-separated fields, newline-terminated, at most 128 KiB. Strict order: header, armor, body, enabled, then LUT declarations and complete row records. Example (truncated for illustration; a real file must include every row and LUT):
+v2 is tab-separated data, at most 4 MiB, newline-terminated. It records `EPIC-LUT\t2`, `target\tarmor|helmet\t<kit-id>`, body type, master enabled state and effect-preservation flag. Every declared LUT has its exact resource hash/width/height, every row has its override flag and RGB preview metadata, and every cell has four Float32 values formatted for round-trip precision. No pointers, player IDs or arbitrary code are serialized.
+
+Example (incomplete for illustration):
 
 ```text
-DBF-ARMOR-LUT	1
-armor	12345678
+EPIC-LUT	2
+target	helmet	41dd184d
 body	0
 enabled	1
-lut	0123456789abcdef	23	8
-row	0123456789abcdef	1	1	#FF8000
+effects	1
+lut	0d8c20ce272a7a1d	23	8
+row	0d8c20ce272a7a1d	1	1	#FF8000
+float	0d8c20ce272a7a1d	1	1	1	0.5	0	0
 ```
 
-Armor is the applied 32-bit kit identity, body is its current body type, LUT IDs are stable 64-bit archive resource hashes, dimensions must match the current originals. A row is 1-based, with an override flag and canonical RGB color. All rows, including disabled rows, are present. Non-color values are preserved from current originals, not serialized. No runtime addresses, player IDs, paths or game asset pixels occur in this format.
+The target kind is `helmet` or `armor`. Full coverage is mandatory. Duplicate, missing, nonfinite/overflowing, wrong-target or incompatible records fail before mutation. Settings save atomically; document publication follows validation. HDR and negative non-color cells remain Float32 values.
 
-Compatibility is exact kit/body/LUT-layout matching. A Transmog custom kit may have a different kit identity even when appearances match; it is rejected rather than silently adapted. Presets are local renderer changes and do not imply replication to peers.
+Legacy `DBF-ARMOR-LUT\t1` contains armor RGB/row flags and imports only to matching armor; remaining material values are seeded from originals. v2 exports preserve the full document. A custom Transmog kit may have a different identity even when appearance matches, so compatibility is exact.
 
-Imports decode and validate completely before one authoritative MCM batch save. Callbacks run after persistence and do not auto-enable rows during import, so saved disable flags remain meaningful. Malformed files do not stage, persist or apply partial settings. File paths are restricted to a simple local filename. Export names include armor ID, timestamp and collision suffix; existing names are skipped.
+Exports skip existing filenames. Filename selection is simple/local and imports are never executed. Raw DDS/EXR palette imports are explicit resource/dimension workflows rather than target-specific preset imports.

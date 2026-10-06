@@ -34,7 +34,7 @@ print('PASS: non-color preservation, bounds, private copy, binding restore, fore
 local Core=dofile(assert(os.getenv('MCM_SOURCE_DIR'),'Set MCM_SOURCE_DIR to DBF-MCM source')..'/src/core.lua')
 local store={load=function()return {}end,save=function()return true end}
 DBFMCM=Core.new(store)
-local identity={player=1,avatar=2,armor=123,body=0,units_at=100}
+local identity={player=1,avatar=2,armor=123,helmet=234,body=0,units_at=100}
 local applied,restores=0,0
 local memory={verify_build=function()return true end,module=function()return 65536 end,address=function(a)return a end,time=os.clock}
 local Presets=dofile('src/presets.lua')
@@ -94,7 +94,7 @@ local resettext=Presets.encode(c,h);local resetvalues=Presets.decode(resettext,c
 print('PASS: Restore retains custom colors; row reset atomically restores original UI/persisted colors without activation; reset preset round trip')
 local ex1=Presets.export('tests/presets',c,h);local ex2=Presets.export('tests/presets',c,h);assert(ex1~=ex2,'Export overwrote prior filename')
 print('PASS: full preset round trip, strict malformed/path rejection, import disable semantics, atomic save failure and non-overwriting export')
-identity={player=1,avatar=2,armor=124,body=0,units_at=100};editor.on_update()
+identity={player=1,avatar=2,armor=124,helmet=234,body=0,units_at=100};editor.on_update()
 assert(not DBFMCM.mods[id] and DBFMCM.mods['dbf_armor_lut_0000007c_0'])
 assert(editor.on_disable() and not DBFMCM.mods['dbf_armor_lut_0000007c_0'] and restores>=3)
 print('PASS: real MCM color definitions, authoritative setting callbacks, immediate apply scheduling, equip registration, disable cleanup')

@@ -3,3 +3,8 @@ BUILD-RECEIPT.json
 __pycache__/
 tests/presets/
 *.pending
+.deps/
+files/
+working/
+companion-state/
+tests/tmp/
