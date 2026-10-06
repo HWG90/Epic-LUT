@@ -38,4 +38,4 @@ MCM batch integration is a narrowly scoped setter addition, not a replacement fr
 
 Textures are immutable per edit and retained in shared Lua storage until process exit. No elapsed-frame resource reuse/destruction assumption is imported. Pixel budget: 8 MiB; allocation-record budget: 2,048. Exhaustion restores originals and pauses. Unlimited sessions and GPU reclamation are outside R1.
 
-The editor loaded and updated armor bindings in a running game without restart; the user confirmed visible color editing works. MCM picker visibility, immediate controls, and restoration/readback through hot reload were observed. Comprehensive live equipment-change, peer visibility and long-session validation remain open. Offline tests do not prove native rendering.
+Live armor color editing has been verified in game without a restart. MCM picker visibility, immediate controls, and restoration/readback through hot reload were also verified. Comprehensive live equipment-change, peer visibility and long-session validation remain open. Offline tests do not prove native rendering.
