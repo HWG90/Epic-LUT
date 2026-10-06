@@ -53,7 +53,10 @@ with tempfile.TemporaryDirectory(prefix='epic-package-tests-') as temp:
         if calls[0]==2:raise OSError('simulated commit failure')
         return real_replace(source,target)
     before={v['working']:(batch.folder/v['working']).read_bytes() for v in entries}
-    with patch.object(companion.os,'replace',fail_second):reject(lambda:batch.command('publish_all',{'kind':'armor'}))
+    with patch.object(companion.os,'replace',fail_second):
+        try:batch.command('publish_all',{'kind':'armor'})
+        except OSError:pass
+        else:raise AssertionError('Simulated commit failure was ignored')
     assert all((batch.folder/name).read_bytes()==raw for name,raw in before.items())and not(batch.folder/'apply.lock').exists()
     save(batch.folder/'palette1.dds',data);second=data.copy();second[:]=.625;save(batch.folder/'palette2.dds',second)
     batch.imports=[{'name':'palette1.dds','resource':'1'},{'name':'palette2.dds','resource':'2'}]
