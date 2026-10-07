@@ -1,10 +1,10 @@
 -- Independently authored descriptions of public LUT research. Unknown fields remain explicitly unknown.
 local S={}
 S.columns={
- 'Base color / mode','Detail texture / mask controls','Detail color A','Detail mask A','Detail mask B',
- 'Detail inner color','Detail outer color / metal','Metal mask','Unknown 9','Gloss mask',
- 'Roughness / rim','Unknown 12','Curvature color','Emission','Tint override','Unknown 16',
- 'Camo color 1','Camo color 2','Camo color 3','Camo color 4','Camo fade','Camo selector / scale','Detail profile'}
+ 'Primary color / shader mode','Bump map / inversion controls','Bump mask 1 color','Bump mask 1','Bump mask 2',
+ 'Bump mask 2 inner color','Bump mask 2 outer color','Metallic mask','Unknown 9','Gloss / roughness mask',
+ 'Roughness / rim','Unknown 12','Curvature gradient','Emissive strength','Lighting tint override','Unknown 16',
+ 'Camo color 1','Camo color 2','Camo color 3','Camo color 4','Mask 5 inversion','Camo controls','Bump scaling / matte-gloss'}
 S.color_columns={[1]=true,[3]=true,[6]=true,[7]=true,[13]=true,[15]=true,[17]=true,[18]=true,[19]=true,[20]=true}
 function S.columns_for(width)
     if width==23 then return S.columns end
@@ -17,15 +17,29 @@ function S.is_color(width,column)
     return (width==3 and column==1) or (width==16 and column<=4)
 end
 S.hints={
- [1]='RGB: base color. Alpha: shader mode; keep unchanged unless explicitly editing it.',
- [2]='R: detail index 0-25. G: intensity. B/A: mask inversion controls.',
+ [1]='RGB sets primary color. Alpha selects shader behavior; curvature, emission and camo can depend on it.',
+ [2]='R selects bump-map index 0-25. G controls intensity; B/A affect mask inversion.',
+ [3]='RGB colors the first bump mask. Zero RGB disables its color contribution.',
+ [4]='First bump-mask layer. Signed values can reverse where its channels apply.',
+ [5]='Second bump-mask layer, above the first mask.',
+ [6]='Inner color of the second bump mask, strongest where that mask is strong.',
+ [7]='Outer color of the second bump mask. Alpha affects metallic-mask inversion.',
  [8]='RGBA metallic masks. Negative mask values may invert influence.',
- [9]='Unconfirmed mapping. Raw channels only.',[10]='RGBA gloss/roughness masks; signed values change influence.',
- [11]='R: roughness. B: rim effect; depends on base alpha mode.',[12]='Unconfirmed mapping. Raw channels only.',
- [13]='RGB curvature color; A intensity; depends on base alpha mode.',[14]='R: emission strength; the other channels are unconfirmed.',
- [15]='Nonzero tint can depend on lighting.',[16]='Unconfirmed mapping. Raw channels only.',
- [21]='A: camo fade; RGB effects are unconfirmed.',[22]='R: selector enable (20). G/B: scale. A: pattern index -1 (off) through 5.',
- [23]='XY/detail profile and gloss controls; alpha is unconfirmed.'}
+ [9]='Unconfirmed mapping. Raw channels only.',
+ [10]='RGBA gloss/roughness masks; signed values change influence.',
+ [11]='R: roughness. B: rim effect; depends on primary alpha mode.',
+ [12]='Unconfirmed mapping. Raw channels only.',
+ [13]='RGB curvature gradient; A intensity. Requires a compatible primary alpha mode.',
+ [14]='R: emissive strength, commonly 0.001-0.06. Other channels are unconfirmed.',
+ [15]='Usually keep RGBA at zero. Nonzero tint depends on lighting.',
+ [16]='Unconfirmed mapping. Raw channels only.',
+ [17]='First camo color. Alpha influences camo roughness; behavior depends on primary alpha mode.',
+ [18]='Second camo color. Alpha also participates in the fifth bump mask.',
+ [19]='Third camo color. Alpha also participates in the fifth bump mask.',
+ [20]='Fourth camo color; its use depends on pattern type. Alpha also affects the fifth mask.',
+ [21]='Alpha changes fifth-mask inversion; RGB behavior is unconfirmed.',
+ [22]='Camo strength, scale and pattern. Large scalar values can be valid. A selects pattern -1 (off) through 5.',
+ [23]='Bump-map scaling and matte/gloss controls. Some effects depend on overlapping masks.'}
 function S.index(row,column,channel,width,height)
     assert(row%1==0 and row>=1 and row<=height and column%1==0 and column>=1 and column<=width and channel%1==0 and channel>=1 and channel<=4,'Invalid grid cell')
     return ((row-1)*width+column-1)*4+channel-1

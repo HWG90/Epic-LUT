@@ -71,6 +71,7 @@ function F.new(m,ctx,deps)
         else self.input=deps.input;self.capture=deps.capture;self.view=deps.view;self.resolution=deps.resolution end
         self.api=m.ui_core.new(m.ui_store.new(folder),ctx.log,m.ui_grouping)
         self.menu=m.ui_menu.new(self.api,self.view.measure)
+        if m.direct_lut then self.menu.window_width=1800;self.menu.window_height=1000 end
         self.legacy=m.ui_legacy.new(self.api,ctx.log,m.ui_core,function(name)return name:lower():gsub('[^%w]','')=='matchyourcolors'end)
         if m.direct_menu_keys or m.diagnostic_without_binding_adapter then
             self.menu.toggle_key=121
@@ -125,7 +126,7 @@ function F.new(m,ctx,deps)
             assert(acquired,reason);self.waiting_capture=false
             if process_input then self.menu.tick(self.input)end
             if not self.menu.visible and self.capture.active then assert(self.capture.release())end
-            if self.menu.visible and not self.was_visible and self.default_mod_id then self.api.focus_page(self.default_mod_id,'quick_load')end
+            if self.menu.visible and not self.was_visible and self.default_mod_id then self.api.focus_page(self.default_mod_id,m.direct_lut and 'direct' or 'quick_load')end
             self.was_visible=self.menu.visible
             if self.preferences then local key=self.preferences.key();self.menu.menu_key_label=key>=112 and key<=135 and ('F'..(key-111))or key>=65 and key<=90 and string.char(key)or ('VK '..key)end
             self.menu.advance(dt);local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))

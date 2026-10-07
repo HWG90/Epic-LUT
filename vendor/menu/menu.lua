@@ -2,6 +2,16 @@
 
 local M={}
 
+-- Same dropdown + stepper combo for normal settings and custom editor workspaces.
+function M.choice(ui,control,value,x,y,width,change,open)
+    ui.rect(x,y,width,26,{35,62,90})
+    ui.text(x+width-43,y+5,'<',16,{224,230,234});ui.text(x+width-17,y+5,'>',16,{224,230,234});ui.text(x+width-70,y+5,'v',16,{224,230,234})
+    ui.bounded(x+8,y+5,tostring(control.choices[value]),15,{224,230,234},width-88)
+    ui.hit(x+width-50,y,24,26,function()if not control.disabled then change(-1)end end)
+    ui.hit(x+width-24,y,24,26,function()if not control.disabled then change(1)end end)
+    ui.hit(x,y,width-52,26,function()if not control.disabled then open()end end)
+end
+
 -- Whole-glyph viewport: never split UTF-8 or draw outside the allotted width.
 
 function M.flow(value,width,size,time,measure)
@@ -403,7 +413,7 @@ function M.new(api,measure)
 
         end
 
-        if code==9 then self.focus=self.focus=='mods' and 'settings' or 'mods';return end
+        if code==9 then self.focus=self.tabbed and 'settings' or (self.focus=='mods' and 'settings' or 'mods');return end
 
         if code==33 or code==34 then
 
@@ -512,6 +522,11 @@ function M.new(api,measure)
 
         end
 
+        local current_mod,current_page=active()
+        if current_page and current_page.on_wheel and self.window_bounds then
+            local b=self.window_bounds
+            if current_page.on_wheel((x-b.x)/b.scale,(y-b.y)/b.scale,delta)then return end
+        end
         if help_bounds and x>=help_bounds.x and x<=help_bounds.x+help_bounds.w and y>=help_bounds.y and y<=help_bounds.y+help_bounds.h then self.help_scroll=math.max(0,math.min(help_bounds.maximum,self.help_scroll-math.floor(delta/120)*3));return end
 
         if nav_bounds and x>=nav_bounds.x and x<=nav_bounds.x+nav_bounds.w and y>=nav_bounds.y and y<=nav_bounds.y+nav_bounds.h then
@@ -556,6 +571,7 @@ function M.new(api,measure)
         return true
     end
     function self.tick(input)
+        self.shift=input.down(16)
         if console then input=console.filter(input,self.visible)end
 
         if not self.visible then
@@ -586,7 +602,7 @@ function M.new(api,measure)
 
                 if valid then self.text_edit=nil end
 
-                for i=#hits,1,-1 do local h=hits[i];if x>=h.x and x<=h.x+h.w and y>=h.y and y<=h.y+h.h then if valid then h.click(x,y)end;break end end
+                for i=#hits,1,-1 do local h=hits[i];if x>=h.x and x<=h.x+h.w and y>=h.y and y<=h.y+h.h then if valid then h.click(x,y);self.redraw_revision=(self.redraw_revision or 0)+1 end;break end end
 
             end
 
@@ -688,6 +704,10 @@ function M.new(api,measure)
         self.window_width,self.window_height=ww,wh
         self.window_bounds={x=ox,y=oy,w=ww*s,h=wh*s,scale=s}
         self.sidebar_width=math.max(250,math.min(self.sidebar_width,ww-700))
+        local mods=api.list();local mod,page=active()
+        local tabbed=mod and mod.tabs_top;self.tabbed=tabbed
+        local rail=tabbed and 0 or self.sidebar_width
+        if tabbed then self.focus='settings' end
         local tree_visible=math.max(1,math.floor((wh-260)/31));local settings_visible=math.max(1,math.floor((wh-364)/38))
         self.tree_visible,self.settings_visible=tree_visible,settings_visible
 
@@ -701,11 +721,14 @@ function M.new(api,measure)
 
         local function text(x,y,value,size,color)
 
-            commands[#commands+1]={type='text',x=ox+x*s,y=oy+y*s,text=tostring(value),size=(size or 20)*s,c=color or white,a=1}
+            size=size or 20
+            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or 10 end
+            commands[#commands+1]={type='text',x=ox+x*s,y=oy+y*s,text=tostring(value),size=size*s,c=color or white,a=1}
 
         end
 
         local function bounded(x,y,value,size,color,width)
+            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or 10 end
 
             local key=tostring(value)..'|'..x..'|'..y..'|'..width
 
@@ -739,7 +762,7 @@ function M.new(api,measure)
 
         end
 
-        rect(0,0,ww,wh,{16,20,24},.98);rect(0,wh-60,ww,60,{28,33,38});rect(self.sidebar_width,60,2,wh-120,muted)
+        rect(0,0,ww,wh,{16,20,24},.98);rect(0,wh-60,ww,60,{28,33,38});if not tabbed then rect(rail,60,2,wh-120,muted)end
 
         hit(0,wh-60,ww,60,function(mx,my)
 
@@ -749,7 +772,7 @@ function M.new(api,measure)
 
         end)
 
-        wheel_bounds={x=ox,y=oy+196*s,w=ww*s,h=(wh-316)*s,split=ox+self.sidebar_width*s}
+        wheel_bounds={x=ox,y=oy+196*s,w=ww*s,h=(wh-316)*s,split=ox+rail*s}
 
         text(30,wh-43,'EPIC LUT',28,accent)
 
@@ -757,9 +780,17 @@ function M.new(api,measure)
 
         hit(ww-55,wh-45,38,30,function()self.visible=false;self.capture=false;self.dropdown=nil;self.text_edit=nil;self.color_picker=nil end)
 
+        if tabbed then
+            local width=(ww-50)/#mod.pages
+            for index,entry in ipairs(mod.pages)do
+                local target_page=index
+                local selected=index==self.page;local x=25+(index-1)*width
+                rect(x,wh-120,width-6,38,selected and {49,82,115}or {35,62,90})
+                bounded(x+10,wh-108,entry.name:gsub('^%d+%.%s*',''),18,white,width-25)
+                hit(x,wh-120,width-6,38,function()self.page=target_page;self.row=1;self.scroll=0;self.dropdown=nil;self.focus='settings';manual_scroll=false end)
+            end
+        else
         text(25,wh-105,'MODS',18,muted)
-
-        local mods=api.list();local mod,page=active()
 
         local sidebar=self.sidebar();tree_max=math.max(0,#sidebar-tree_visible);tree_scroll=math.max(0,math.min(tree_scroll,tree_max))
 
@@ -783,12 +814,12 @@ function M.new(api,measure)
 
                 local selected=entry.index==self.selected
 
-                if selected then rect(15,y-6,self.sidebar_width-30,30,accent)end
+                if selected then rect(15,y-6,rail-30,30,accent)end
 
                 text(x,y,entry.open and 'v' or '>',20,selected and selection_text or white)
-                bounded(x+24,y,entry.mod.name,20,selected and selection_text or white,math.max(0,self.sidebar_width-39-x))
+                bounded(x+24,y,entry.mod.name,20,selected and selection_text or white,math.max(0,rail-39-x))
 
-                hit(15,y-6,self.sidebar_width-30,30,function()
+                hit(15,y-6,rail-30,30,function()
 
                     self.selected=entry.index;tree_expanded[entry.mod.id]=not entry.open;self.page=1;self.row=1;self.scroll=0;self.focus='settings';tree_manual=true
 
@@ -826,22 +857,22 @@ function M.new(api,measure)
 
                 if entry.kind=='category' then
 
-                    rect(x-4,y-6,self.sidebar_width-15-x+4,30,{53,48,32})
+                    rect(x-4,y-6,rail-15-x+4,30,{53,48,32})
                     rect(x-4,y-6,3,30,accent)
                     text(x+5,y,entry.open and 'v' or '>',20,{255,225,120})
-                    bounded(x+29,y,entry.category.name,20,{255,225,120},math.max(0,self.sidebar_width-44-x))
+                    bounded(x+29,y,entry.category.name,20,{255,225,120},math.max(0,rail-44-x))
 
-                    hit(15,y-6,self.sidebar_width-30,30,function()expanded[entry.key]=not entry.open;tree_manual=true end)
+                    hit(15,y-6,rail-30,30,function()expanded[entry.key]=not entry.open;tree_manual=true end)
 
                 else
 
                     local selected=entry.mod_index==self.selected and entry.index==self.page
 
-                    rect(x-4,y-6,self.sidebar_width-15-x+4,30,selected and {79,62,28} or {40,39,31})
+                    rect(x-4,y-6,rail-15-x+4,30,selected and {79,62,28} or {40,39,31})
                     rect(x-4,y-6,3,30,selected and {255,225,120} or accent)
-                    bounded(x+5,y,entry.page.name,20,selected and {255,225,120} or white,math.max(0,self.sidebar_width-20-x))
+                    bounded(x+5,y,entry.page.name,20,selected and {255,225,120} or white,math.max(0,rail-20-x))
 
-                    hit(15,y-6,self.sidebar_width-30,30,function()self.selected=entry.mod_index;self.page=entry.index;self.row=1;self.scroll=0;manual_scroll=false;self.focus='settings';tree_manual=true end)
+                    hit(15,y-6,rail-30,30,function()self.selected=entry.mod_index;self.page=entry.index;self.row=1;self.scroll=0;manual_scroll=false;self.focus='settings';tree_manual=true end)
 
                 end
 
@@ -849,13 +880,15 @@ function M.new(api,measure)
 
         end
 
-        scrollbar('mods',self.sidebar_width-10,140,wh-262,#sidebar,tree_visible,tree_scroll)
+        scrollbar('mods',rail-10,140,wh-262,#sidebar,tree_visible,tree_scroll)
 
-        if not mod then text(self.sidebar_width+35,wh-150,'No mods registered. See the author example.',24)
+        end
+
+        if not mod then text(rail+35,wh-150,'No mods registered. See the author example.',24)
 
         else
 
-            bounded(self.sidebar_width+35,wh-108,mod.name,28,accent,ww-55-self.sidebar_width);bounded(self.sidebar_width+35,wh-146,page.name,22,white,ww-55-self.sidebar_width)
+            if not tabbed then bounded(rail+35,wh-108,mod.name,28,accent,ww-55-rail);bounded(rail+35,wh-146,page.name,22,white,ww-55-rail)end
 
             -- Sections are named in the sidebar; no redundant ordinal footer.
 
@@ -875,13 +908,56 @@ function M.new(api,measure)
 
             end
 
+            if type(page.render_layout)=='function' then
+                local primitives={rect=rect,text=text,hit=hit,bounded=bounded}
+                local ok,why=pcall(page.render_layout,{x=rail+20,y=110,w=ww-rail-40,h=wh-280,
+                    rect=rect,text=text,hit=hit,bounded=bounded,shift=function()return self.shift end,activate=function(id,direction)change(assert(mod.controls[id]),direction or 0)end,
+                    number=function(id,x,y,width,value,prepare,enabled,lo,hi,selected)
+                        local control=assert(mod.controls[id]);local track=width-92
+                        rect(x,y,width,21,enabled and {35,62,90}or {35,39,43})
+                        local ratio=math.max(0,math.min(1,(value-lo)/(hi-lo)))
+                        rect(x,y,track*ratio,21,{49,111,167})
+                        local editing=selected and self.text_edit and self.text_edit.mod==mod and self.text_edit.control==control
+                        bounded(x+track+5,y+5,editing and self.text_edit.text..'|'or string.format('%.7g',value),14,enabled and white or muted,85)
+                        hit(x,y,track,21,function(mx)
+                            if not enabled then return end;prepare()
+                            local item={mod=mod,control=control,value=value}
+                            function item.move(px)
+                                local fraction=math.max(0,math.min(1,(px-(ox+x*s))/(track*s)))
+                                item.value=math.min(control.max,control.min+math.floor(fraction*(control.max-control.min)/control.step+.5)*control.step)
+                                self.redraw_revision=(self.redraw_revision or 0)+1
+                            end
+                            drag=item;item.move(mx)
+                        end)
+                        hit(x+track,y,92,21,function()
+                            if not enabled then return end;prepare()
+                            self.text_edit={mod=mod,control=control,text=tostring(mod.handle.get(id)),replace=true};self.notice='Type value; Enter saves, Escape cancels'
+                        end)
+                    end,
+                    preset=function(input_id,choice_id,x,y,width)
+                        local input=assert(mod.controls[input_id]);local choice=assert(mod.controls[choice_id]);local value=mod.handle.get(choice_id)
+                        rect(x,y,width,26,{35,62,90});bounded(x+8,y+5,mod.handle.get(input_id),14,white,width-90)
+                        text(x+width-70,y+5,'v',16,white);text(x+width-43,y+5,'<',16,white);text(x+width-17,y+5,'>',16,white)
+                        hit(x,y,width-82,26,function()change(input,0)end)
+                        hit(x+width-82,y,28,26,function()self.dropdown={mod=mod,control=choice,selected=value,scroll=math.max(0,value-4),x=x,top=y-4,width=width}end)
+                        hit(x+width-50,y,24,26,function()change(choice,-1)end);hit(x+width-24,y,24,26,function()change(choice,1)end)
+                    end,
+                    choice=function(id,x,y,width,prepare)
+                        local control=assert(mod.controls[id],'Editor control missing: '..id);local value=mod.handle.get(id)
+                        M.choice(primitives,control,value,x,y,width,function(direction)if prepare then prepare()end;change(control,direction)end,function()
+                            if prepare then prepare();value=mod.handle.get(id)end
+                            self.dropdown={mod=mod,control=control,selected=value,scroll=math.max(0,math.min(math.max(0,#control.choices-8),value-4)),x=x,top=y-4,width=width}
+                        end)
+                    end})
+                if not ok then text(rail+35,wh-200,tostring(why),18,muted)end
+            else
             local rows=selectable(page);self.row=math.max(1,math.min(self.row,#rows));local selected=rows[self.row]
 
-            local compact=ww-self.sidebar_width<1135
+            local compact=ww-rail<1135
             local preview_popout=page.preview_popout or compact
             local wide=type(page.render_preview)~='function' or preview_popout
             for _,control in ipairs(page.controls)do if control.column and not compact then wide=false end end
-            local settings_x=self.sidebar_width+35
+            local settings_x=rail+35
             local available=ww-25-settings_x
             local row_width=wide and available or available/2-30
             local display={};local selected_at=1;local ordinal=0
@@ -1052,17 +1128,17 @@ function M.new(api,measure)
                             local arrow_bg=c.disabled and {65,73,80} or {216,166,49}
 
                             local cw=value_width
-                            local cx=vx+525-(presentation~='dropdown' and 30 or 0)-cw
+                            local cx=vx+525-(presentation~='dropdown' and 60 or 0)-cw
 
                             if presentation~='dropdown' then
 
-                                rect(cx-30,y-5,27,29,arrow_bg);text(cx-23,y,'<',18,symbol)
+                                rect(cx+cw+3,y-5,27,29,arrow_bg);text(cx+cw+10,y,'<',18,symbol)
 
-                                rect(cx+cw+3,y-5,27,29,arrow_bg);text(cx+cw+10,y,'>',18,symbol)
+                                rect(cx+cw+33,y-5,27,29,arrow_bg);text(cx+cw+40,y,'>',18,symbol)
 
-                                hit(cx-30,y-5,27,29,function()select();change(control,-1)end)
+                                hit(cx+cw+3,y-5,27,29,function()select();change(control,-1)end)
 
-                                hit(cx+cw+3,y-5,27,29,function()select();change(control,1)end)
+                                hit(cx+cw+33,y-5,27,29,function()select();change(control,1)end)
 
                             end
 
@@ -1132,7 +1208,7 @@ function M.new(api,measure)
 
             if help_key~=key then self.help_scroll=0;help_key=key end
 
-            local hx=self.sidebar_width+35;local hw=ww-40-hx
+            local hx=rail+35;local hw=ww-40-hx
 
             local lines=M.rich(help,hw*s,18*s,measure);local visible=3
 
@@ -1149,10 +1225,10 @@ function M.new(api,measure)
             end
 
             scrollbar('help',ww-30,126,64,#lines,visible,self.help_scroll)
-
+            end
         end
 
-        hit(self.sidebar_width-6,196,12,wh-310,function()split_drag={ox=ox,scale=s}end)
+        if not tabbed then hit(rail-6,196,12,wh-310,function()split_drag={ox=ox,scale=s}end)end
 
         rect(0,0,ww,55,{18,23,27})
         rect(0,55,ww,1,{110,88,35})

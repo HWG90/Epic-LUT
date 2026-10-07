@@ -18,8 +18,23 @@ with zipfile.ZipFile(candidate)as z:
     assert hashlib.sha256(library).hexdigest()=='7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
     assert library.hex().encode()in body and b"author='Goose'"in z.read('armor_lut_editor/mod.lua')
     assert not any(name.endswith(('.dds','.exr','.ini','.rar','.dbflut'))for name in z.namelist()if not name.startswith('armor_lut_editor/runtime/')) # Official runtime files are validated against its pinned manifest below.
-    assert 'tools/native_import.py'in z.namelist()and ('docs/BSL.md'in z.namelist()or 'docs/SYSTEM-PYTHON.md'in z.namelist())
-    if b'm.system_python=true'in body:
+    direct=b'direct_lut=true'in body
+    if direct:
+        assert not any(name.lower().endswith(('.py','.exe','.pyd','.zip','.whl'))for name in z.namelist())
+        assert [name for name in z.namelist()if name.endswith('.ps1')]==['tools/import_zip.ps1']
+        assert z.read('data/9ba626afa44a3aa3.patch_0.stream')==b''
+        assert b'm.service_files='not in body and b'm.runtime_hash='not in body
+        assert b'm.catalog='not in body and b'm.kits='not in body and b'm.slim='not in body
+        assert b'direct_menu_keys=true'in body
+        if candidate.name=='Epic-LUT-R3-standalone-tabs-test.zip':
+            assert b"rawget(_G,'DBFMCM')"not in body
+            assert b'm.ui_legacy='not in body and b'm.provider_menu='not in body
+            assert b'm.direct_setup='in body and b'compact_fonts=true'in body
+    else:
+        assert 'tools/native_import.py'in z.namelist()and ('docs/BSL.md'in z.namelist()or 'docs/SYSTEM-PYTHON.md'in z.namelist())
+    if direct:
+        pass
+    elif b'm.system_python=true'in body:
         assert not any(name.lower().endswith(('.exe','.pyd','.zip','.whl','.7z','.rar'))for name in z.namelist()),'System Python package includes executable runtime or nested archive'
         assert not any(name.startswith('armor_lut_editor/runtime')for name in z.namelist())
         assert z.read('data/9ba626afa44a3aa3.patch_0.stream')==b''
@@ -49,6 +64,7 @@ with zipfile.ZipFile(candidate)as z:
         assert struct.unpack_from('<I',z.read('data/9ba626afa44a3aa3.patch_0'),104+60)[0]==0,'Runtime sidecar became an engine resource dependency'
         assert b'm.runtime_hash='in body and runtime[:64].hex().encode()not in body,'Binary runtime expanded into startup Lua'
         if candidate.name=='Epic-LUT-R3.zip':assert b'm.direct_menu_keys=true'in body,'Ordinary release re-enabled the unproven binding adapter'
-    assert 'tools/game_catalog.py'in z.namelist()
-    assert b'waiting for archive worker'in body and b'loading validated original LUTs'in body,'Release contains the obsolete in-game archive reader'
+    if not direct:
+        assert 'tools/game_catalog.py'in z.namelist()
+        assert b'waiting for archive worker'in body and b'loading validated original LUTs'in body,'Release contains the obsolete in-game archive reader'
 print('PASS: single release ZIP, declared BSL resource/hash/envelope, same loose model, Goose metadata, exact reviewed DLL, helper dependencies, no user textures/settings, ZIP integrity')

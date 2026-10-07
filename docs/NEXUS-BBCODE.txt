@@ -11,96 +11,44 @@
 [size=4][b]Legendary looks.[/b][/size]
 [i]Defend Freedom in Style. [/i][/size][/center]
 [size=6]
-[b]Epic [color=#F4D44C]LUT[/color] [/b]lets you edit equipped armor and helmet colors live in Helldivers 2 through the Epic LUT menu, or compatible MCM when available. Pick a color, see it on your gear, and restore the originals when you want a fresh start.
+[b]Epic [color=#F4D44C]LUT R4 Alpha[/color] [/b]lets you edit equipped armor and helmet colors live in Helldivers 2 through the Epic LUT menu, or compatible MCM when available. Pick a color, see it on your gear, and restore the originals when you want a fresh start.
 
 LUT means [b]lookup table[/b]: the color and material data your gear uses. We're requisitioning a new paint job, not new equipment.
 
 [b]Built on CowboyBingus's original LUT discovery and Match Your Colors foundation.[/b] Thank you, CowboyBingus, for finding the path and sharing the tools that made this possible.
 
 [size=4][b][color=#F4D44C]WHAT'S IN THE FIELD KIT[/color][/b][/size][/size]
-
 [list]
-[*][size=6]Live RGB and float editing through MCM/LUT Menu, with separate armor and helmet controls.[/size][/*]
-[*][size=6]Find supported color fields and numbered rows under Base Color / regions, grouped into collapsible palettes. Base Color starts open; expand Detail, Inner, Outer, Tint, or Camo when you need them. Click a current-color square to open its picker, with the original color beside it. Advanced / float grid keeps the researched semantic fields and raw channels available.[/size][/*]
-[*][size=6]Reset Armor and Helmet together while keeping your custom work, restore either target independently, or reset custom rows for a clean slate.[/size][/*]
-[*][size=6]Export and import data-only .dbflut presets.[/size][/*]
-[*][size=6]Load supported DDS/EXR palettes and extract supported LUT data from ZIP/RAR mod archives with the automatically started bundled helper. Importing a file does not apply it until you choose Apply; saved enabled edits can return on later launches.[/size][/*]
-[*][size=6]Open a native Windows file picker from the in-game editor. Quick Load is the opening page. The local browser editor is optional.[/size][/*]
-[*][size=6]Use the advanced local editor for a pixel grid, copy/paste, undo/redo, quick save, row presets, and camo controls.[/size][/*]
-[*][size=6]Access CowboyBingus's original Match Your Colors settings through their original shared controls.[/size][/*]
+[*][size=6]Choose a DDS, ZIP or RAR with the Windows file picker. ZIP/RAR archives can contain supported DDS palettes or standard patch files with their sidecars. Imported patches are not installed.[/size][/*]
+[*][size=6]Import / Apply comes first. Choose an imported LUT with the left dropdown. Save LUT to Palette puts it in the editor. Check Helmet and/or Armor, then Apply LUT. Assigned palettes stay active when you choose another source. Per-LUT assignments also accumulate. Save applied setup resumes active palettes on later launches.[/size][/*]
+[*][size=6]The standalone LUT Editor uses a clickable pixel grid, row-based value editor, scratch color, Undo/Redo, row copy/paste, saved row presets and portable full-float DDS preset export. RAR needs installed 7-Zip. RGB editing preserves alpha. Advanced material/camo values require unlocking.[/size][/*]
+[*][size=6]No armor-name lookup, kit catalogues or installed game-archive scanning. Only local live LUT bindings are used.[/size][/*]
 [/list]
-[size=6]
-[size=4][b][color=#F4D44C]REQUIREMENTS[/color][/b][/size][/size]
-
-[list]
-[*][size=6]Helldivers 2 on Windows. The current native implementation targets Steam build 25480438; later game updates may require a compatible Epic LUT update.[/size][/*]
-[*][size=6]Bingus Shared Loader v15+, Live Lua Loader, or a compatible MDL API 2 lifecycle. Activate only ONE Epic LUT entrypoint.[/size][/*]
-[*][size=6]DBF-MCM is OPTIONAL. Epic LUT includes its own menu and RGB picker. If you use MCM, use a compatible build with per-mod storage, presentation links, RGB controls, and atomic batch setters; older versions may need updating.[/size][/*]
-[*][size=6]Python, NumPy, OpenEXR, and the file helper are INCLUDED for Windows x64. No separate Python installation, pip command, manual setup, or browser is required. Discovery and file actions start the private runtime automatically.[/size][/*]
-[*][size=6]For RAR extraction: 7-Zip installed. ZIP does not require it.[/size][/*]
-[/list]
-[size=6]
-[size=4][b][color=#F4D44C]INSTALLATION[/color][/b][/size]
-[b]Game editor[/b][/size]
-
+[size=4][b][color=#F4D44C]REQUIREMENTS & INSTALLATION[/color][/b][/size]
 [list=1]
-[*][size=6]Install a compatible loader and OPTIONALLY DBF-MCM first.[/size][/*]
-[*][size=6]Close the game for the initial installation. Extract the latest Epic LUT R3 alpha package.[/size][/*]
-[*][size=6]For Bingus Shared Loader, import the ZIP through Arsenal/HD2MM and enable its startup option alongside BSL. For LLL/MDL, install the complete armor_lut_editor folder through the compatible API-2 loader. Keep runtime.zip, the input library, and all supplied files together. Do not enable the loose folder and BSL startup option at the same time.[/size][/*]
-[*][size=6]Start the game, enable Epic LUT through your loader, and press F10. Quick Load opens first; Armor, Helmet, and General Settings are in the tree. The current alpha uses the direct keyboard path; the separate Bingus binding adapter is withheld while startup compatibility is investigated.[/size][/*]
+[*][size=6]Helldivers 2 on Windows and Bingus Shared Loader v15+. Native adapters currently target Steam build 25480438.[/size][/*]
+[*][size=6]Close the game, import the complete ZIP through Arsenal/HD2MM, enable its BSL startup option and deploy. Keep only one Epic LUT entry enabled.[/size][/*]
+[*][size=6]Launch and press F10. Use Choose DDS or ZIP..., choose a palette, refresh live LUTs, select the target and Apply. Restore before changing gear.[/size][/*]
 [/list]
-[size=6]
-[b]Your paint crew comes in the box.[/b]
-Python and the codecs are bundled. Epic LUT unpacks its private runtime in the background and starts the helper automatically for equipped-target discovery and file actions. You do not need to install Python or run setup scripts. RAR extraction still needs 7-Zip.
+[size=6][b]NO PYTHON REQUIRED. NO PYTHON BUNDLED. NO SETUP SCRIPT.[/b]
+Windows supplies the file picker and ZIP extraction. The short-lived worker exits after import; an open picker exits when its launching game ends. No browser is required.
 
-The game-launched helper exits when the game closes or crashes, including while a picker is pending. The optional browser editor can be started manually with start_editor.ps1 and has an independent lifetime. No browser is needed for the Windows picker.
+This is a standalone editor. MCM integration is not included in this lean build. Top tabs replace the left navigation rail; the value pane scrolls independently and uses 10-size body/value text. Expand a row for all 23 semantic columns, sliders, typed boxes and dropdown/stepper combos.
 
-[size=4][b][color=#F4D44C]RECOLOR YOUR LOADOUT[/color][/b][/size][/size]
+[size=4][b][color=#F4D44C]YOUR LUT AT WORK[/color][/b][/size]
+Click a grid cell to select its row and field, then edit its RGB color or explicitly unlock advanced RGBA values. Display colors clamp to 0–1; the actual finite float values are retained. Apply sends the edited palette to your selected live LUT. Saved DDS files and row presets live under %LOCALAPPDATA%\Epic LUT.
 
-[list=1]
-[*][size=6]Equip the armor and helmet you want to edit.[/size][/*]
-[*][size=6]Press F10 for Quick Load, or open Armor / Helmet → Base Color / regions for individual colors. Advanced / float grid is there when you want the raw details.[/size][/*]
-[*][size=6]Choose a discovered LUT, then click any current-color square in its visible row list. No extra region selector is needed to see the colors. Rows are data regions; their visible surfaces vary by item.[/size][/*]
-[*][size=6]Commit an RGB or supported float change. The edited row activates live. Opening or cancelling a color picker leaves the document unchanged.[/size][/*]
-[*][size=6]Save a .dbflut preset if you want to keep or share the palette data.[/size][/*]
-[/list]
-[size=6]
-For an external palette, use Quick Load or Files / hotload → Import LUT / mod archive. The helper starts automatically. Choose your file in the Windows picker, review the target, and use Apply. Cancel leaves your gear unchanged. A successful import switches the original Match Your Colors setting Off through its own controls. Canceled and invalid imports do not change that setting. The optional Advanced editor opens the local browser interface.
+If Match Your Colors is enabled, turn its matching Off before applying. This standalone build does not change other mods’ settings. Restore Original returns the game bindings and clears saved automatic application while retaining imported work. Remove LUT also unloads the document. Reset Custom LUT resets edits to the imported palette. Saved assignments use local slots, not process pointers or guessed gear identities.
 
-Quick Load remembers the imported filename and cached extracted palette. Seeing the old RAR name does not mean it is being extracted again or automatically Quick Applied every launch.
-
-Armor and helmet are independent targets. An archive name or matching table dimensions does not prove that a palette belongs to the gear you selected. Review the target before applying it. Archive extraction reads supported palette data; it does not install the original mod patch or execute package scripts.
-
-[b]A note on glow and materials:[/b] RGB-only edits leave other channels untouched, but base color can tint emitted light. Full-float imports and material edits can change more than color. Where available, turn on effect-preservation controls if you want to keep the originals for those fields; preservation is optional, not a guarantee of identical shader appearance. Unconfirmed fields are identified rather than assigned invented meanings.
-
-TL;DR - GLOWY [b]ON[/b]? Preserve [b]OFF[/b]
-GLOWY [b]OFF[/b]? Preserve [b]ON[/b]
-
-[i]That glow shorthand is not a universal on/off switch: it depends on the imported data and material. Base Color can tint existing glow either way.[/i]
-
-[size=4][b][color=#F4D44C]RESTORE / RESET / UNINSTALL[/color][/b][/size]
-[b]Restore original armor or helmet colors[/b] stops that target's custom application and keeps the edited document available. [b]Reset Custom LUT Rows[/b] resets the stored values from preserved originals and clears overrides. Use the correct target's controls, or [b]Reset Armor and Helmet[/b] to restore both together without throwing away your custom work.
-
-To uninstall, restore both targets, disable Epic LUT through your loader, then close the game. Remove its loader entry or installed armor_lut_editor folder through the method you used to install it. Back up any palettes you want to keep first. Your settings, files, presets, and runtime cache live under %LOCALAPPDATA%\Epic LUT; they are not migrated from or deleted in older loader folders. The game-launched helper shuts down automatically. A manually started browser helper is independent and should be closed separately. Leaving your loader and MCM installed is fine.
-
-[size=4][b][color=#F4D44C]KNOWN LIMITATIONS[/color][/b][/size][/size]
-
+[size=4][b][color=#F4D44C]KNOWN LIMITATIONS[/color][/b][/size]
 [list]
-[*][size=6]The live targets are equipped local armor and helmet pieces. Weapons, equipped capes, skin, and Armory previews are outside the current live editor.[/size][/*]
-[*][size=6]LUT layouts, row counts, and visible surface mappings vary. [/size][/*]
-[*][size=6]Some shader meanings remain research mappings. I did my best. Emission is not a confirmed general RGB field, and color edits can alter the hue of existing glow.[/size][/*]
-[*][size=6][b]DDS input supports bounded 2D uncompressed RGBA16F/RGBA32F LUTs, including MULTI-MIP files. Epic LUT reads the full-resolution color table and validates the mip chain; lower-resolution levels are not applied as separate palettes. Cube, volume, array, and unsupported/compressed formats remain unsupported. EXR supports bounded, non-deep RGBA data. Other image formats are not automatically interchangeable.[/b][/size][/*]
-[*][size=6]Not every game-resource archive is supported. Encrypted, malformed, oversized, compressed/nonstandard, or unsupported packages can be rejected.[/size][/*]
-[*][size=6]Sharing and visibility between players, comprehensive mission/equipment transitions, controller/focus scenarios, and long sessions have not been comprehensively validated. Although I do plan to investigate a way to 'broadcast' your LUT to other players using this mod.[/size]
-
-[/*]
-[*][size=6]Edited native textures are retained until exit. Reaching the budget restores originals and pauses application; unlimited editing sessions are not promised.[/size][/*]
-[*][size=6]Native compatibility depends on the game build (for now). [/size][/*]
+[*]23-column material LUTs only: bounded 2D RGBA16F/RGBA32F DDS, including valid MULTI-MIP files. The full-resolution level is applied. Cube, volume, array and compressed textures remain unsupported.
+[*]ZIP imports support standard patches and their GPU/stream sidecars. EXR, bulk conversion and pattern/cape layouts are outside this simplified version.
+[*]Surface meanings and original live dimensions are unknown. Armor/Helmet labels describe local slots, not identified equipment. Use a suitable palette for the selected LUT.
+[*]The user confirmed direct ZIP importing works. The redesigned file picker and grid UI pass offline checks but still need live visual/interaction confirmation. Multiplayer visibility, mission transitions and long sessions are not comprehensively validated.
+[*]Immutable replacement textures stay retained until exit, with a bounded session budget. Restoration checks ownership and does not overwrite another writer.
 [/list]
-
-[size=6]The Cadian Guardsman Armor Vanilla - Vanilla archive now passes offline extraction for all seven five-mip RGBA16F palettes with exact full-resolution values retained. Live verification of this import fix is still pending.
-
-The direct-keyboard functional candidate has passed user-reported repeated stable launches, Armor and Helmet application/restoration, native picker use, menu interaction, movement restoration, and normal helper shutdown. Earlier candidates crashed at startup, and the precise cause remains unproven. The NEW alpha UI passes offline checks but still needs live visual and interaction confirmation. These checks do not establish every item, mission, multiplayer, focus scenario, or long session.[/size]
+[/size]
 
 [size=4][size=4][b][color=#F4D44C]CREDITS & THANKS[/color][/b][/size][/size]
 [b][size=6]CowboyBingus[/size][/b][size=6] — original float-LUT discovery and the [/size][url=https://github.com/CowboyBingus/MatchYourColors][size=6]Match Your Colors[/size][/url][size=6] foundation, including reused discovery, resource-binding, native adapter, and file-decoding work. Epic LUT does not claim that original discovery. Reused modules retain CowboyBingus's Zero-Clause BSD license and attribution.[/size]

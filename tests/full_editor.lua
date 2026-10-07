@@ -55,7 +55,7 @@ menu.tick({down=function(code)return code==1 end,mouse=function()return click[1]
 assert(menu.color_picker and menu.color_picker.mod==armor_mod and menu.color_picker.control==armor_mod.controls.cell_color,'Swatch click did not open the authoritative picker')
 menu.color_picker=nil;menu.tick({down=function()return false end,mouse=function()return nil end,wheel=function()return 0 end})
 local header
-for _,command in ipairs(menu.compose(1920,1080))do if command.type=='text'and command.text:find('> Detail color A',1,true)then header={command.x+10,command.y+2};break end end
+for _,command in ipairs(menu.compose(1920,1080))do if command.type=='text'and command.text:find('> Bump mask 1 color',1,true)then header={command.x+10,command.y+2};break end end
 assert(header,'Detail Color collapse header missing')
 menu.tick({down=function(code)return code==1 end,mouse=function()return header[1],header[2]end,wheel=function()return 0 end})
 current_count=0;for _,command in ipairs(menu.compose(1920,1080))do if command.type=='text'and command.text=='Now'then current_count=current_count+1 end end

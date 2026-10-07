@@ -166,6 +166,17 @@ function Avatar.resolve(memory, game, read, out)
     return out
 end
 
+-- Binding-only editor: no customization manager, kit IDs or archive lookup.
+function Avatar.resolve_live(memory, game, read)
+    read = read or Avatar.reader(memory)
+    local out = {}
+    for _, step in ipairs({local_player, avatar_record}) do
+        local ok, why = step(read, game, out)
+        if not ok then return nil, why end
+    end
+    return out
+end
+
 -- A copy of an identity (resolve may refill the table it was given).
 function Avatar.copy(identity)
     local out = {}

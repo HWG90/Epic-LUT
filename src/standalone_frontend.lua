@@ -1,0 +1,95 @@
+-- Standalone editor frontend. No MCM detection, compatibility registry or binding adapter.
+local F={}
+function F.new(m,ctx,deps)
+    deps=deps or {};local self={}
+    local prior=package.loaded['dbf.epic_lut.frontend.v1'];assert(not prior or prior.closed,'Another Epic LUT frontend is active')
+    package.loaded['dbf.epic_lut.frontend.v1']=self
+    if deps.input then
+        self.input=deps.input;self.capture=deps.capture;self.view=deps.view;self.resolution=deps.resolution
+    else
+            local ffi=require('ffi');local bit=require('bit')
+            if not pcall(ffi.typeof,'epic_front_point')then ffi.cdef([[typedef struct {long x;long y;} epic_front_point;]])end
+            pcall(ffi.cdef,[[
+                short epic_front_key(int) __asm__("GetAsyncKeyState");
+                void *epic_front_foreground(void) __asm__("GetForegroundWindow");
+                int epic_front_cursor(epic_front_point *) __asm__("GetCursorPos");
+                int epic_front_client(void *,epic_front_point *) __asm__("ScreenToClient");
+                int epic_front_rect(void *,long *) __asm__("GetClientRect");
+                uint32_t epic_front_window_pid(void *,uint32_t *) __asm__("GetWindowThreadProcessId");
+                uint32_t epic_front_pid(void) __asm__("GetCurrentProcessId");
+                int mcm_install(void *);int mcm_capture(int);int mcm_captured(void);void mcm_release(void);int mcm_wheel(void);
+            ]])
+            local user=ffi.load('user32');local kernel=ffi.load('kernel32')
+            local native=ffi.load(ctx.dir..'/'..assert(m.frontend_native_name,'Packaged input runtime missing'))
+            for _,name in ipairs({'mcm_install','mcm_capture','mcm_captured','mcm_release','mcm_wheel'})do assert(native[name],'Input runtime interface missing '..name)end
+            local sr=assert(rawget(_G,'stingray'));local process=kernel.epic_front_pid();local foreground;local process_out=ffi.new('uint32_t[1]');local point=ffi.new('epic_front_point[1]');local rect=ffi.new('long[4]')
+            self.capture=m.ui_capture.new(native,assert(sr.Window),ctx.log)
+            self.view=m.ui_view.new(sr,nil,ctx.log)
+            self.input={poll=function()foreground=user.epic_front_foreground();user.epic_front_window_pid(foreground,process_out);if process_out[0]~=process then foreground=nil end end,
+                focused=function()return foreground~=nil end,window=function()return foreground end,
+                down=function(code)return foreground and bit.band(tonumber(user.epic_front_key(code)),0x8000)~=0 or false end,
+                wheel=function()return tonumber(native.mcm_wheel())end,
+                mouse=function()
+                    if not foreground or user.epic_front_cursor(point)==0 or user.epic_front_client(foreground,point)==0 or user.epic_front_rect(foreground,rect)==0 then return end
+                    local w,h=sr.Gui.resolution();local cw,ch=tonumber(rect[2]),tonumber(rect[3]);if cw<=0 or ch<=0 then return end
+                    return tonumber(point[0].x)*w/cw,h-tonumber(point[0].y)*h/ch
+                end}
+            self.resolution=sr.Gui.resolution
+    end
+    self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
+    self.menu=m.ui_menu.new(self.api,self.view.measure)
+    self.menu.window_width=1800;self.menu.window_height=1000;self.menu.toggle_key=121
+    self.menu.compact_fonts=true
+    self.api.focus_page=function(id,page_id)
+        for index,mod in ipairs(self.api.list())do if mod.id==id then
+            for at,page in ipairs(mod.pages)do if page.id==page_id then self.menu.selected=index;self.menu.page=at;self.menu.focus='settings';return true end end
+        end end
+        return false
+    end
+    function self.resolve()return self.api end
+    function self.tick(dt)
+        if self.closed then return end
+        local ok,why=pcall(function()
+            if self.preferences then
+                self.preferences.mount(self.api)
+                self.api.mods.epic_lut_preferences.hidden=true
+                self.menu.toggle_key=self.preferences.key()
+            end
+            self.input.poll();local focused=self.input.focused()
+            local process_input=self.menu.input_focus(focused,self.input)
+            if focused and self.menu.visible and not self.capture.active then
+                local loader=rawget(_G,'LiveLuaLoader')
+                if loader and type(loader.close_manager)=='function'then assert(loader.close_manager()~=false,'Loader cursor restoration pending')end
+            end
+            local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window())
+            if not acquired then
+                local text=tostring(reason)
+                if text:find('Cannot acquire input capture',1,true)or text:find('Input capture lost',1,true)or text:find('Window capture unavailable',1,true)then self.view.release();return end
+                error(text,0)
+            end
+            if process_input then self.menu.tick(self.input)end
+            if self.rendered_revision~=self.menu.redraw_revision then
+                if self.view.invalidate then self.view.invalidate()else self.view.clear()end
+                self.rendered_revision=self.menu.redraw_revision
+            end
+            if not self.menu.visible and self.capture.active then assert(self.capture.release())end
+            if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
+                self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
+            end
+            self.was_visible=self.menu.visible
+            local key=self.menu.toggle_key;self.menu.menu_key_label=key>=112 and key<=135 and ('F'..(key-111))or ('VK '..key)
+            self.menu.advance(dt);local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
+        end)
+        if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end
+    end
+    function self.close()
+        self.menu.visible=false
+        local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
+        self.view.release();self.closed=true
+        if package.loaded['dbf.epic_lut.frontend.v1']==self then package.loaded['dbf.epic_lut.frontend.v1']=nil end
+        return true
+    end
+    ctx.log('Epic LUT standalone frontend ready; no MCM integration')
+    return self
+end
+return F

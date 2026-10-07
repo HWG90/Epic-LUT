@@ -28,6 +28,9 @@ function M.new(sr,preview_only,diagnostic_log)
     function self.clear()
         if gui and live()then for _,item in ipairs(ids)do destroy_item(item)end end;ids={}
     end
+    function self.invalidate()
+        self.clear();if preview_view then preview_view.clear()end;if popup_view then popup_view.clear()end
+    end
     function self.release()if preview_view then preview_view.release()end;if popup_view then popup_view.release()end;reported=false;if gui and live()then self.clear();for _,g in pairs(preview_guis)do sr.World.destroy_gui(world,g)end;preview_guis={};sr.World.destroy_gui(world,gui)end;gui,world=nil,nil end
     function self.draw(commands)
         if preview_view then

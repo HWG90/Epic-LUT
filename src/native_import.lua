@@ -10,26 +10,7 @@ local function json(value,depth)
     error('Unsupported discovery metadata',0)
 end
 function N.configure(model,cache,options)N.model=model;N.cache=cache;N.options=options or {};N.port=N.options.port or 8765;assert(type(N.port)=='number'and N.port%1==0 and N.port>0 and N.port<65536)end
-function N.verify_interface()
-    local ffi=require('ffi')
-    if not pcall(ffi.typeof,'epic_native_hwnd')then ffi.cdef('typedef void *epic_native_hwnd;')end
-    local user=ffi.load('user32');local kernel=ffi.load('kernel32')
-    for _,entry in ipairs({
-        {user,'epic_native_foreground','epic_native_hwnd epic_native_foreground(void) __asm__("GetForegroundWindow");'},
-        {kernel,'epic_native_pid','uint32_t epic_native_pid(void) __asm__("GetCurrentProcessId");'},
-        {user,'epic_native_window_pid','uint32_t epic_native_window_pid(epic_native_hwnd,uint32_t *) __asm__("GetWindowThreadProcessId");'},
-        {user,'epic_native_allow_foreground','int epic_native_allow_foreground(uint32_t) __asm__("AllowSetForegroundWindow");'}
-        ,{kernel,'epic_native_attributes','uint32_t epic_native_attributes(const uint16_t *) __asm__("GetFileAttributesW");'}
-        ,{kernel,'epic_native_wide','int epic_native_wide(uint32_t,uint32_t,const char *,int,uint16_t *,int) __asm__("MultiByteToWideChar");'}
-        ,{kernel,'epic_native_move','int epic_native_move(const uint16_t *,const uint16_t *,uint32_t) __asm__("MoveFileExW");'}
-        ,{kernel,'epic_native_mkdir','int epic_native_mkdir(const uint16_t *,void *) __asm__("CreateDirectoryW");'}
-        ,{kernel,'epic_native_utf8','int epic_native_utf8(uint32_t,uint32_t,const uint16_t *,int,char *,int,const char *,int *) __asm__("WideCharToMultiByte");'}
-    })do
-        if not pcall(function()return entry[1][entry[2]]end)then ffi.cdef(entry[3])end
-        assert(entry[1][entry[2]],'Native import Windows API unavailable: '..entry[2])
-    end
-    return user,kernel
-end
+N.verify_interface=(m and m.windows or dofile('src/windows.lua')).verify_interface
 function N.new(folder,kind)
     local self={folder=folder,choices={},labels={'Import a file first'},session=nil,last=nil,sequence=0}
     local ffi=require('ffi')
@@ -38,6 +19,13 @@ function N.new(folder,kind)
     local wide=ffi.new('uint16_t[?]',count);assert(kernel.epic_native_wide(65001,8,path,-1,wide,count)==count)
     function self.locked()return tonumber(kernel.epic_native_attributes(wide))~=4294967295 end
     local function path_wide(text)local n=kernel.epic_native_wide(65001,8,text,-1,nil,0);assert(n>0);local value=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,text,-1,value,n)==n);return value end
+    local function game_data_folder()
+        local data,count=N.model.files.game_data_folder()
+        local length=kernel.epic_native_utf8(65001,0,data,count,nil,0,nil,nil);assert(length>0)
+        local bytes=ffi.new('char[?]',length)
+        assert(kernel.epic_native_utf8(65001,0,data,count,bytes,length,nil,nil)==length)
+        return ffi.string(bytes,length)
+    end
     local function read(path)local f=io.open(path,'rb');if not f then return nil end;local s=f:read(8193)or '';f:close();assert(#s<=8192,'Native import result too large');return s end
     local function ready()local value=tonumber(read(folder..'/native-ready.txt'));return value and math.abs(os.time()-value)<5 and (not N.model or not N.model.service_files or read(folder..'/native-version.txt')=='archive-worker-v4')end
     local function launch()
@@ -49,7 +37,7 @@ function N.new(folder,kind)
         kernel.epic_native_mkdir(path_wide(root),nil)
         for _,sub in ipairs({'tools','companion','dist','dist/companion'})do kernel.epic_native_mkdir(path_wide(root..'/'..sub),nil)end
         for name,hex in pairs(N.model.service_files)do
-            local f=assert(io.open(root..'/'..name,'wb'));assert(f:write(hex:gsub('%x%x',function(pair)return string.char(tonumber(pair,16))end)));assert(f:close())
+            local f=assert(io.open(root..'/'..name,'wb'));assert(f:write((hex:gsub('%x%x',function(pair)return string.char(tonumber(pair,16))end))));assert(f:close())
         end
         os.remove(self.start_error)
         local shell=ffi.load('shell32')
@@ -60,9 +48,7 @@ function N.new(folder,kind)
             assert(N.model.runtime_hash:match('^[a-f0-9]+$')and #N.model.runtime_hash==64,'Invalid bundled runtime identity')
             local game_data=N.options.game_data or ''
             if game_data==''and N.model.files then
-                local data,count=N.model.files.game_data_folder();local length=kernel.epic_native_utf8(65001,0,data,count,nil,0,nil,nil);assert(length>0)
-                local bytes=ffi.new('char[?]',length);assert(kernel.epic_native_utf8(65001,0,data,count,bytes,length,nil,nil)==length)
-                game_data=ffi.string(bytes,length):gsub('\\','/'):gsub('/+$','')
+                game_data=game_data_folder():gsub('\\','/'):gsub('/+$','')
             end
             local bundle=N.options.bundle_dir or ''
             assert(not game_data:find('"',1,true)and not bundle:find('"',1,true),'Invalid bundled runtime path')
@@ -87,9 +73,7 @@ function N.new(folder,kind)
     end
     function self.discover(kit,body,target)
         assert(not self.pending,'Previous discovery is still pending')
-        local data,count=N.model.files.game_data_folder();local length=kernel.epic_native_utf8(65001,0,data,count,nil,0,nil,nil);assert(length>0)
-        local bytes=ffi.new('char[?]',length);assert(kernel.epic_native_utf8(65001,0,data,count,bytes,length,nil,nil)==length)
-        return request('catalog',',"data_folder":'..json(ffi.string(bytes,length))..',"kit":'..json(kit)..',"body":'..json(body)..',"kind":'..json(target))
+        return request('catalog',',"data_folder":'..json(game_data_folder())..',"kit":'..json(kit)..',"body":'..json(body)..',"kind":'..json(target))
     end
     function self.pick()
         assert(not self.pending,'The previous native import is still pending')

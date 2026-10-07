@@ -133,7 +133,7 @@ function Engine.unit_materials(native, unit)
             local count = math.min(native.materials(mesh), MAX_MATERIALS)
             for j = 0, count - 1 do
                 local material = native.material(mesh, j)
-                if material ~= 0 then out[#out + 1] = {mesh = tonumber(mesh), material = tonumber(material)} end
+                if material ~= 0 then out[#out + 1] = {mesh = tonumber(mesh), material = tonumber(material), mesh_index = m, material_index = j} end
             end
         end
     end
