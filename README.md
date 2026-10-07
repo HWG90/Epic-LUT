@@ -1,3 +1,6 @@
+<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/5fe0be6e-66ca-45bc-879e-d0cd8192c648" />
+
+
 # Epic LUT
 
 **Author: Goose.** Armor and helmet LUT editing with native archive import, semantic controls and an optional advanced editor.
@@ -46,3 +49,4 @@ The direct-keyboard functional candidate has passed repeated user-reported launc
 LUT discovery and native adapters: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license. Semantic research references: [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor). Equivalent mapping/editor code is independently authored; no unlicensed Paydex implementation or third-party palette assets are included.
 
 A successful import switches the original Match Your Colors setting Off through its own provider. Cancel and invalid files leave that setting unchanged. The game-launched file service exits when the game closes or crashes. Manual browser-editor startup remains independent of game lifetime.
+<img width="1300" height="372" alt="image" src="https://github.com/user-attachments/assets/eabf4324-e83f-4e22-abe7-e6d55e5dee54" />
