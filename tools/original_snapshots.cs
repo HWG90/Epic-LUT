@@ -7,7 +7,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 public sealed class EpicOriginalReader : IDisposable {
  static int owner; static string progress; static Stopwatch pulse=Stopwatch.StartNew();
+ static Stopwatch health=Stopwatch.StartNew();static bool healthChecked;
  static void Check(){
+  if(healthChecked&&health.ElapsedMilliseconds<250)return;healthChecked=true;health.Restart();
   if(progress!=null&&File.Exists(progress+".cancel"))throw new Exception("Snapshot canceled");
   if(owner!=0){string heartbeat=Path.Combine(Path.GetDirectoryName(progress),"owner-heartbeat.txt");
    if(!File.Exists(heartbeat)||(DateTime.UtcNow-File.GetLastWriteTimeUtc(heartbeat)).TotalSeconds>15)throw new Exception("Game heartbeat expired");
