@@ -47,9 +47,14 @@ function O.new(m,paths,native,targets)
         local f=io.open(folder..'/progress.txt.cancel','wb');if f then f:write('cancel');f:close()end
         if self.worker then pcall(self.worker.stop);pcall(self.worker.close);self.worker=nil end
     end
+    local function heartbeat()
+        if self.owner and os.time()~=(self.last_heartbeat or 0)then
+            local f=assert(io.open(folder..'/owner-heartbeat.txt','wb'));assert(f:write(tostring(self.owner)));assert(f:close());self.last_heartbeat=os.time()
+        end
+    end
     function self.launch(index)
         os.remove(folder..'/error.txt');os.remove(folder..'/progress.txt')
-        local _,kernel=m.windows.verify_interface();local pid=tonumber(kernel.epic_native_pid())
+        local _,kernel=m.windows.verify_interface();local pid=tonumber(kernel.epic_native_pid());self.owner=pid;self.last_heartbeat=nil;heartbeat()
         self.phase=index and 'index'or 'capture'
         local extra=index and ' -IndexOnly'or ' -Wanted "'..folder..'/wanted.txt"'
         self.worker=m.windows.launch_worker('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'..paths.cache..'/original_snapshots.ps1" -Output "'..folder..'" -OwnerPID '..pid..extra..(m.windows.game_data and ' -GameData "'..m.windows.game_data()..'"'or ''),paths.cache)
@@ -76,6 +81,7 @@ function O.new(m,paths,native,targets)
     end
     local function tick()
         if self.worker then
+            heartbeat()
             self.status=exists(folder..'/progress.txt')or (self.phase=='index'and 'Starting resource index worker...'or 'Starting equipped LUT capture...')
             if os.time()-self.began>120 then cancel_worker();self.status='Original snapshot reader timed out; editor remains available';return end
             if not self.worker.running()then

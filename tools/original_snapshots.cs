@@ -4,9 +4,16 @@ using System.IO;
 using System.Text;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 public sealed class EpicOriginalReader : IDisposable {
  static int owner; static string progress; static Stopwatch pulse=Stopwatch.StartNew();
- static void Check(){if(progress!=null&&File.Exists(progress+".cancel"))throw new Exception("Snapshot canceled");if(owner!=0){try{if(Process.GetProcessById(owner).HasExited)throw new Exception("Game exited");}catch{throw new Exception("Game exited");}}}
+ static void Check(){
+  if(progress!=null&&File.Exists(progress+".cancel"))throw new Exception("Snapshot canceled");
+  if(owner!=0){string heartbeat=Path.Combine(Path.GetDirectoryName(progress),"owner-heartbeat.txt");
+   if(!File.Exists(heartbeat)||(DateTime.UtcNow-File.GetLastWriteTimeUtc(heartbeat)).TotalSeconds>15)throw new Exception("Game heartbeat expired");
+   try{int recorded;if(int.TryParse(File.ReadAllText(heartbeat).Trim(),out recorded)&&recorded!=owner)throw new Exception("Game owner changed");}catch(IOException){}
+  }
+ }
  static void Pulse(string text){Check();if(pulse.ElapsedMilliseconds>500){File.WriteAllText(progress,text);pulse.Restart();}}
  static uint U(byte[] b,int p){if(p<0||p>b.Length-4)throw new Exception("Truncated integer");return BitConverter.ToUInt32(b,p);}
  static ulong Q(byte[] b,int p){if(p<0||p>b.Length-8)throw new Exception("Truncated offset");return BitConverter.ToUInt64(b,p);}
