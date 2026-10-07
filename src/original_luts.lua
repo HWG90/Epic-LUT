@@ -123,12 +123,13 @@ function O.new(m,paths,native,targets)
 end
 function O.preserve(document,original)
     assert(original,'Original game LUT snapshot not found for this live resource. Unavailable pixels are not zero values.')
-    assert(original.width==document.width and original.height==document.height,'Original game LUT dimensions do not match the imported LUT')
-    local ffi=require('ffi');local data=ffi.new('float[?]',document.width*document.height*4);ffi.copy(data,document.data,document.width*document.height*16)
-    for row=0,document.height-1 do
+    assert(original.width==document.width,'Original game LUT columns do not match the imported LUT')
+    assert(document.height>=original.height,'Imported LUT has fewer rows than this original game LUT; cannot preserve missing color rows')
+    local ffi=require('ffi');local data=ffi.new('float[?]',document.width*original.height*4);ffi.copy(data,document.data,document.width*original.height*16)
+    for row=0,original.height-1 do
         data[row*document.width*4+3]=original.data[row*original.width*4+3]
         for ch=0,3 do data[(row*document.width+13)*4+ch]=original.data[(row*original.width+13)*4+ch]end
     end
-    return {data=data,width=document.width,height=document.height,source=document.source}
+    return {data=data,width=document.width,height=original.height,source=document.source}
 end
 return O

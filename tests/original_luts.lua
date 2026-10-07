@@ -23,3 +23,15 @@ local safe=O.new(fake,{files='tests/tmp/files',originals='tests/tmp/files',cache
 safe.start();assert(pcall(safe.tick),'Snapshot error escaped into editor update')
 assert(closed==1 and safe.status:find('paused',1,true),'Snapshot failure did not release ownership and report status')
 assert(pcall(safe.close),'Snapshot cleanup failure escaped')
+
+local five={width=23,height=5,data=ffi.new('float[?]',23*5*4)}
+local eight={width=23,height=8,data=ffi.new('float[?]',23*8*4)}
+for i=0,23*8*4-1 do eight.data[i]=i/100 end
+for row=0,4 do five.data[(row*23+13)*4]=row/10;five.data[row*23*4+3]=row%4 end
+local variant=O.preserve(eight,five)
+assert(variant.height==5 and variant.width==23,'Preservation did not retain target row count')
+for row=0,4 do
+ assert(variant.data[row*23*4]==eight.data[row*23*4],'Imported row colors were remapped')
+ assert(variant.data[(row*23+13)*4]==five.data[(row*23+13)*4],'Original five-row emissives changed')
+end
+assert(not pcall(O.preserve,five,eight),'Missing imported rows were invented')
