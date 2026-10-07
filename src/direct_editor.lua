@@ -389,6 +389,17 @@ local function register(current)
             end
         end},
         {id='palette_name',type='input',label='Palette name',default='my-palette'},
+        {id='populate_applied',type='button',label='Populate editor with current applied palette',on_activate=function()return action(function()
+            refresh()
+            local group=assert(groups[handle.get('lut')],'No live LUT selected');local source
+            for _,binding in ipairs(group.bindings)do if binding.document and binding.texture and binding.current==binding.texture.object then source=binding.document;break end end
+            assert(source,'No Epic LUT palette is applied to this Live LUT. Select another Live LUT or apply a file first.')
+            local data=ffi.new('float[?]',source.width*source.height*4);ffi.copy(data,source.data,source.width*source.height*16)
+            loaded={data=data,width=source.width,height=source.height,source='Current applied Live LUT '..handle.get('lut')}
+            preview_document=loaded;preview_revision=0;quick_selection=nil
+            if palette_editor then palette_editor.sync()end
+            return message('Editor populated from the selected applied Live LUT; game bindings unchanged.')
+        end)end},
         {id='save_palette',type='button',label='Save LUT to Palette',on_activate=function()return action(save_palette)end},
         {id='apply_checked',type='button',label='Apply LUT',on_activate=function()return action(apply_checked)end},
         {id='apply_editor',type='button',label='Apply edited palette',on_activate=function()return action(function()return apply_checked(assert(loaded,'Save a LUT to Palette first'))end)end},

@@ -175,7 +175,10 @@ function E.new(m,document,note,save,presets,live_document)
         panel(ui.x+left*.70,ui.y,left*.30,bottomh,'Scratch Pixel')
         if not d then
             ui.text(ui.x+12,top-58,'Choose a DDS or ZIP to begin.',18,white)
-            button(ui.x+12,top-102,180,'Choose file...', 'browse');return
+            button(ui.x+12,top-102,180,'Choose file...', 'browse')
+            button(ui.x+198,top-102,math.min(360,left-210),'Populate editor with current applied palette','populate_applied')
+            if ui.choice then ui.choice('lut',ui.x+12,top-145,math.min(360,left-24))end
+            ui.text(ui.x+12,top-169,'Uses the applied values from the selected Live LUT.',14,muted);return
         end
         ui.text(ui.x+10,top-49,d.height..' rows x '..d.width..' columns. Display clamps RGB; file values stay intact.',14,muted)
         if ui.choice then ui.choice('grid_tool',ui.x+10,top-82,170);ui.choice('grid_channel',ui.x+190,top-82,150)end

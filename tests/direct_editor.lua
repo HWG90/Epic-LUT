@@ -38,6 +38,10 @@ local data=ffi.new('float[?]',23*8*4);for i=0,23*8*4-1 do data[i]=(i-100)/9 end
 m.dds.write('tests/tmp/files/palette.dds',data,23,8)
 activate('load');activate('apply_checked')
 assert(bound[3]==200 and bound[4]==200 and bound[6]==200 and bound[8]==200,'File LUT did not apply immediately without saving it to the editor')
+local before_populate=creates
+activate('populate_applied')
+assert(creates==before_populate and bound[3]==200,'Populate editor wrote to game bindings')
+assert(#api.mods.epic_direct_lut.controls.edit_row.choices==8,'Applied LUT did not populate editor rows')
 activate('restore');activate('save_palette');activate('refresh')
 assert(bound[3]==100 and bound[8]==400,'Saving an import to the editor applied it to gear')
 local quick_path=test_root..'/tests/tmp/files/palette.dds'
