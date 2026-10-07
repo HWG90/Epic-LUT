@@ -1,42 +1,98 @@
-<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/5fe0be6e-66ca-45bc-879e-d0cd8192c648" />
+![Epic LUT banner](https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791319443-154441029.png)
 
+# Epic LUT R4 RC1
 
-# Epic LUT R4 Alpha
+**Legendary looks. Defend Freedom in Style.**
 
-**Goose's Python-free in-game LUT editor. Alpha / work in progress.**
+Goose's Python-free, in-game LUT editor for Helldivers 2 armor and helmets. **Release candidate: still extremely alpha and work in progress.**
+
+[Downloads](https://github.com/HWG90/Epic-LUT/releases) · [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+
+Source and local test candidates may be newer than published releases.
 
 ## Install
 
-Import the complete ZIP through Arsenal/HD2MM and enable its Bingus Shared Loader startup option alongside BSL v15+. Enable only one Epic LUT entry. The complete `armor_lut_editor` folder also supports a compatible API-2 loose loader.
+Import the complete ZIP through Arsenal/HD2MM. Enable its Bingus Shared Loader startup option alongside **BSL v15 or newer**, with only one Epic LUT entry. The included `armor_lut_editor` folder also supports a compatible API-2 loose loader.
 
-No Python interpreter, codec installation, pip, embedded runtime or persistent service is required. Windows PowerShell/.NET supplies the standard file picker and short-lived archive extraction worker. The reviewed native input DLL remains included.
+- **No Python installation or embedded Python runtime.**
+- Windows PowerShell/.NET provides the native file picker and temporary background readers.
+- **RAR requires installed 7-Zip.** DDS and ZIP do not.
+- **F10** opens the standalone editor. No MCM integration or separate binding adapter is required.
+- Turn Match Your Colors matching **Off** before editing the same gear.
 
-## Use
+## Import, edit, apply
 
-Press F10. **Import / Apply** opens first: choose a DDS, ZIP or RAR with the Windows picker, select an imported LUT on the left, use Save LUT to Palette to put it in the editor, then check Helmet/Armor and Apply LUT. Importing does not automatically apply a texture. If Match Your Colors is installed, turn its matching Off before applying. This standalone build does not change its settings.
+1. **Choose file** on Import / Apply. Open DDS, ZIP or RAR; import refreshes live LUTs automatically.
+2. Select an **Imported LUT** when a file contains multiple tables.
+3. **Apply LUT** sends the selected file LUT to checked **Armor / Helmet** targets.
+4. **Save LUT to Palette** overwrites the editor table. It does not apply to gear or export a file.
+5. Editor changes preview immediately while Armor and/or Helmet are checked. With both unchecked, edits stay in the editor.
 
-**LUT Editor** uses top tabs and a clickable pixel grid. Its independently scrolling value pane expands each row into all 23 named fields, sliders, typed values and selectors. Body and value text use size 10, with slightly larger headers. File actions, history, row presets and scratch color sit below the grid. Color edits preserve alpha; advanced material/camo values require explicit unlocking. Apply sends your edited palette to the selected live LUT. **Apply Armor** updates all local armor LUTs; **Apply Helmet** updates helmet LUTs without removing armor changes. Per-LUT applications are cumulative too. **Save applied setup** snapshots all active palettes and resumes them on later launches. **Restore Original** restores the original bindings and clears saved automatic application while retaining the imported document. **Remove LUT** also unloads that document. **Reset Custom LUT** resets edits to the imported palette and can be undone. Restore before changing equipment. This is a standalone editor: MCM detection, compatibility registration and the binding adapter are excluded.
+Applications are cumulative: selecting another source does not remove earlier assignments. **Live LUT #** is under Advanced; normal application uses the target checkboxes.
 
-Undo/Redo, row copy/paste, saved row presets and DDS export are available. Grid tools support channel selection, drawing, Shift-click rectangular selection, copy/paste and moving a selection. Dropdown/stepper combos select palettes, LUTs, rows, fields and modes. A saved setup uses local piece/mesh/material slot keys and all-armor/helmet defaults, never process addresses or guessed gear names. RGB is clamped only for display. Full finite float data is retained on disk.
+### Quick Scratch
+
+Toggle the movable **Quick Scratch** window. **Left-click selects a palette cell; right-click paints the held color.** Edits update the corresponding LUT Editor row/column, preserve alpha and support Undo/Redo. Ten saved swatch slots start empty each fresh run.
+
+Imported, Armor and Helmet tables retain separate previews. Identical tables within each section are grouped; **Show All LUTs** reveals them individually.
+
+### LUT Editor
+
+- Clickable pixel grid and scrolling **23-column** value editor grouped by rows.
+- RGB colors, typed floats, sliders and dropdowns. Advanced material/camo edits require unlocking.
+- Selection, drawing, channels, Shift-click rectangles, copy/paste and moving selected pixels.
+- Editable row-preset names with a saved-preset dropdown.
+- **Preview Palette / Preview Live LUT** open separate read-only swatch/RGBA windows.
+- A blank editor offers **Populate editor with current applied palette** from the selected Live LUT's Epic LUT assignment.
+- Last tab and chosen window size are retained. Initial opening uses the minimum size. **UI Scale (70–130%)** sits below Epic LUT / Goose in the footer and is limited to fit the display.
+
+## Restore, save and share
+
+**Restore Original** restores original game bindings and clears saved automatic application while retaining the editor document. **Restore Imported / Reset Custom LUT** resets edits to their imported starting values. **Remove LUT** also unloads the document.
+
+**Save applied setup** retains assignments for later launches. **Save / History → Export DDS preset to share** exports full finite float values to `%LOCALAPPDATA%/Epic LUT/files/<name>.dds`. Share that DDS for another user to import. Applying, populating the editor and exporting are separate actions.
+
+## Original-game snapshots
+
+A temporary background reader indexes base-game LUT metadata, matches it to the local equipped Armor/Helmet's original texture objects, and decodes only matching tables. No equipment names or kit IDs are required. Archive decoding runs outside the game thread.
+
+**Preserve Original Emissives** defaults **Off**. It preserves original emissive RGBA and primary shader mode, including zeros. Shorter original tables retain their native row count with corresponding imported color rows. Missing data or insufficient imported rows produces an error instead of guessed values.
+
+Snapshot stages show progress. Worker failures are contained; an expiring editor heartbeat controls reader lifetime. Private caches are separated by game-index fingerprint. No game textures are distributed.
 
 ## Formats and limits
 
-DDS: bounded 23-column 2D RGBA16F/RGBA32F material LUTs, including valid mip chains. ZIP/RAR: DDS files or standard game patch resources with GPU/stream sidecars. Imported archive contents are never installed or executed. EXR, bulk conversion and pattern/cape layouts are not part of this simplified runtime.
+Supports **23-column 2D RGBA16F/RGBA32F DDS**, including valid mip chains, and ZIP/RAR containing DDS or standard patch resources with matching GPU/stream sidecars. Archive contents are data, never installed or executed. EXR, bulk conversion and pattern/cape layouts are outside this version.
 
-No armor names, kit IDs, installed game archives or original pixel data are needed. The editor groups local live material LUT bindings; shared Armor/Helmet bindings are labeled accordingly. Original dimensions and surface meanings are unknown, so use a palette appropriate for the selected target. Other players' units are excluded.
+Other players' units are excluded. Restoration checks ownership and avoids overwriting another mod's changes. Immutable runtime texture buffers remain retained until process exit, bounded to **8 MiB / 2,048 textures**.
 
-Data lives in `%LOCALAPPDATA%/Epic LUT` (`files`, `presets`, `settings`, `cache`). GPU buffers are immutable and retained until process exit, bounded to 8 MiB / 2,048 textures. Restoration checks live membership and ownership and does not overwrite a different writer.
+Data lives under `%LOCALAPPDATA%/Epic LUT`: `files`, `presets`, `settings`, `cache`, `originals`.
 
-## Validation
+## Testing status
 
-The user confirmed direct ZIP importing works in game. The redesigned standalone tabs, picker, 23-column value pane and multi-target saving pass offline checks but still need live interaction/visual and restart confirmation. Native adapters target Steam build 25480438. Later game updates may require changes.
+Direct ZIP import and palette application have been confirmed in game during development. Offline checks cover editor interactions, RGB/alpha isolation, history, presets, cumulative assignments, import recovery, floating panels and package integrity.
+
+The reader indexed 2,312 material LUTs; 23 earlier snapshots matched exactly. Narrowed capture saved only requested tables with matching float values. Heartbeat-enabled indexing and heartbeat-expiry shutdown passed offline. **These checks do not certify live startup, snapshot matching, emissive behavior, restart persistence or final UI acceptance.**
+
+Native adapters target Steam build 25480438; game updates may require changes. A floating 3D Player Preview is under investigation, **not included**.
 
 ## Build
 
-Python is used only by developers to assemble and test the package: `python build.py`, then `python tests/test_direct_zip.py`, `python verify.py`, and `python tests/test_release.py dist/Epic-LUT-R4-Alpha.zip`. No build tools are shipped to users. The input DLL is pinned from sibling DBF-MCM or `EPIC_LUT_INPUT_LIBRARY`.
+Python is a **developer build tool only**; users do not need it.
+
+```powershell
+python build.py
+python tests/test_direct_zip.py
+python verify.py
+python tests/test_release.py dist/Epic-LUT-R4-RC1.zip
+```
+
+The input DLL is pinned from sibling DBF-MCM or `EPIC_LUT_INPUT_LIBRARY`. Snapshot-reader C# and PowerShell source is included; Windows .NET prepares the reader at runtime. No user presets, logs, snapshots or game textures are packaged.
 
 ## Credits
 
-Native adapters and the original LUT research: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license. [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor) is a semantic and layout reference; Epic LUT's editor implementation is independently authored. No third-party palettes or game assets are included.
+Native adapters and foundational LUT research: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license.
 
-RAR requires installed 7-Zip. Import / Apply uses grouped Armor/Helmet row previews and a loader throbber with cancel/retry recovery. Save LUT to Palette changes only the editor; Export DDS preset to share writes a portable full-float DDS.
+[Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor) inspired the semantic controls and layout. Epic LUT's editor implementation is independently authored.
+
+Made by **Goose**. Thank you to everyone testing this extremely alpha paint job.
