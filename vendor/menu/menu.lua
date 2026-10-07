@@ -379,7 +379,7 @@ function M.new(api,measure)
 
                 self.notice=ok and (d.control.page and d.control.page.require_confirmation and 'Pending confirmation' or 'Saved') or tostring(err)
 
-                self.dropdown=nil;return
+                self.dropdown=nil;if ok and d.control.input_control and d.selected==1 then change(d.control.input_control,0)end;return
 
             end
 
@@ -565,7 +565,7 @@ function M.new(api,measure)
         end
         if self.suspended then
             for code=1,255 do held[code]=input.down(code)end
-            self.mouse_held=input.down(1);self.suspended=false
+            self.mouse_held=input.down(1);self.right_mouse_held=input.down(2);self.suspended=false
             return false -- Do not replay keys/clicks held in another application.
         end
         return true
@@ -606,6 +606,15 @@ function M.new(api,measure)
 
             end
 
+            if x and y and input.down(2) and not self.right_mouse_held and not self.color_picker and not self.dropdown and not self.preview_window then
+                for i=#hits,1,-1 do local target=hits[i]
+                    if x>=target.x and x<=target.x+target.w and y>=target.y and y<=target.y+target.h then
+                        if target.right_click then target.right_click(x,y);self.redraw_revision=(self.redraw_revision or 0)+1 end
+                        break
+                    end
+                end
+            end
+            self.right_mouse_held=input.down(2)
             if palette_drag then
 
                 if not self.color_picker or not input.down(1)then palette_drag=nil
@@ -635,10 +644,11 @@ function M.new(api,measure)
             end
 
             if preview_drag then
-                if not self.visible or not self.preview_window or not input.down(1) then preview_drag=nil
+                local dragged=preview_drag.window or self.preview_window
+                if not self.visible or not dragged or not input.down(1) then preview_drag=nil
                 elseif x and y then
-                    self.preview_window.x=math.max(0,math.min(preview_drag.max_x,x-preview_drag.dx))
-                    self.preview_window.y=math.max(0,math.min(preview_drag.max_y,y-preview_drag.dy))
+                    dragged.x=math.max(0,math.min(preview_drag.max_x,x-preview_drag.dx))
+                    dragged.y=math.max(0,math.min(preview_drag.max_y,y-preview_drag.dy))
                 end
             end
             if window_resize then
@@ -686,7 +696,7 @@ function M.new(api,measure)
 
             self.mouse_held=input.down(1)
 
-        else self.mouse_held=input.down(1)end
+        else self.mouse_held=input.down(1);self.right_mouse_held=input.down(2)end
 
     end
 
@@ -698,8 +708,11 @@ function M.new(api,measure)
 
         if not self.visible then self.release_console();hits={};drag=nil;window_drag=nil;window_resize=nil;self.dropdown=nil;self.text_edit=nil;self.color_picker=nil;return {}end
 
-        local commands={};hits={};local s=math.min(w/1920,h/1080)
-        local ww=math.max(1100,math.min(w/s,self.window_width or 1500));local wh=math.max(600,math.min(h/s,self.window_height or 820))
+        local commands={};hits={};local floating_request;local s=math.min(w/1920,h/1080)*(self.ui_scale or 1)
+        local selected_mod=active()
+        local minimum_w=selected_mod and selected_mod.minimum_width or 1100;local minimum_h=selected_mod and selected_mod.minimum_height or 600
+        s=math.min(s,w/minimum_w,h/minimum_h)
+        local ww=math.max(minimum_w,math.min(w/s,self.window_width or 1500));local wh=math.max(minimum_h,math.min(h/s,self.window_height or 820))
         local ox,oy=math.max(0,math.min(w-ww*s,self.window_x or (w-ww*s)/2)),math.max(0,math.min(h-wh*s,self.window_y or (h-wh*s)/2))
         self.window_width,self.window_height=ww,wh
         self.window_bounds={x=ox,y=oy,w=ww*s,h=wh*s,scale=s}
@@ -722,13 +735,13 @@ function M.new(api,measure)
         local function text(x,y,value,size,color)
 
             size=size or 20
-            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or 10 end
+            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or math.min(size,10) end
             commands[#commands+1]={type='text',x=ox+x*s,y=oy+y*s,text=tostring(value),size=size*s,c=color or white,a=1}
 
         end
 
         local function bounded(x,y,value,size,color,width)
-            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or 10 end
+            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or math.min(size,10) end
 
             local key=tostring(value)..'|'..x..'|'..y..'|'..width
 
@@ -736,13 +749,17 @@ function M.new(api,measure)
 
             visible_text_age[key]=text_age[key]
 
+            -- Prefer a readable fitted label; ticker remains for unusually long text.
+            local total=0
+            for glyph in tostring(value):gmatch('[%z\1-\127\194-\244][\128-\191]*')do total=total+((measure and measure(glyph,size*s))or size*s*.62)end
+            if total>width*s then size=math.max(8, size*width*s/total)end
             local result=M.flow(value,width*s,size*s,elapsed-text_age[key],measure)
 
             text(x,y,result,size,color);commands[#commands].full_text=tostring(value);commands[#commands].text_width=width*s
 
         end
 
-        local function hit(x,y,rw,rh,fn)hits[#hits+1]={x=ox+x*s,y=oy+y*s,w=rw*s,h=rh*s,click=fn}end
+        local function hit(x,y,rw,rh,fn,right)hits[#hits+1]={x=ox+x*s,y=oy+y*s,w=rw*s,h=rh*s,click=fn,right_click=right}end
 
         local function scrollbar(role,x,y,height,total,visible,offset)
 
@@ -914,8 +931,12 @@ function M.new(api,measure)
                     rect=rect,text=text,hit=hit,bounded=bounded,shift=function()return self.shift end,activate=function(id,direction)change(assert(mod.controls[id]),direction or 0)end,
                     number=function(id,x,y,width,value,prepare,enabled,lo,hi,selected)
                         local control=assert(mod.controls[id]);local track=width-92
+                        value=tonumber(value)or tonumber(mod.handle.get(id))or tonumber(control.default)or 0
+                        lo=tonumber(lo)or control.min;hi=tonumber(hi)or control.max
+                        prepare=prepare or function()end
+                        if enabled==nil then enabled=not control.disabled end
                         rect(x,y,width,21,enabled and {35,62,90}or {35,39,43})
-                        local ratio=math.max(0,math.min(1,(value-lo)/(hi-lo)))
+                        local ratio=math.max(0,math.min(1,(value-lo)/math.max(1e-12,hi-lo)))
                         rect(x,y,track*ratio,21,{49,111,167})
                         local editing=selected and self.text_edit and self.text_edit.mod==mod and self.text_edit.control==control
                         bounded(x+track+5,y+5,editing and self.text_edit.text..'|'or string.format('%.7g',value),14,enabled and white or muted,85)
@@ -934,9 +955,25 @@ function M.new(api,measure)
                             self.text_edit={mod=mod,control=control,text=tostring(mod.handle.get(id)),replace=true};self.notice='Type value; Enter saves, Escape cancels'
                         end)
                     end,
+                    floating=function(id,draw,width,height,close)
+                        self.floating_positions=self.floating_positions or {}
+                        local position=self.floating_positions[id]or {x=math.max(0,w-(width+30)*s),y=math.max(0,(h-height*s)/2)}
+                        self.floating_positions[id]=position
+                        floating_request={position=position,draw=draw,width=width,height=height,close=close}
+                    end,
+                    set=function(id,value)
+                        local control=assert(mod.controls[id])
+                        if id=='quick_color'and mod.handle.get(id)==value and control.on_change then control.on_change(value);return true end
+                        return mod.handle.set(id,value)
+                    end,
+                    preview=function(render)
+                        self.preview_window={mod=mod,page={render_preview=render},title='PALETTE PREVIEW - RGBA values',width=1000,height=620,x=math.max(0,(w-1000*s)/2),y=math.max(0,(h-620*s)/2)}
+                    end,
                     preset=function(input_id,choice_id,x,y,width)
                         local input=assert(mod.controls[input_id]);local choice=assert(mod.controls[choice_id]);local value=mod.handle.get(choice_id)
-                        rect(x,y,width,26,{35,62,90});bounded(x+8,y+5,mod.handle.get(input_id),14,white,width-90)
+                        local editing=self.text_edit and self.text_edit.mod==mod and self.text_edit.control==input
+                        choice.input_control=input
+                        rect(x,y,width,26,{35,62,90});bounded(x+8,y+5,editing and self.text_edit.text..'|'or mod.handle.get(input_id),14,white,width-90)
                         text(x+width-70,y+5,'v',16,white);text(x+width-43,y+5,'<',16,white);text(x+width-17,y+5,'>',16,white)
                         hit(x,y,width-82,26,function()change(input,0)end)
                         hit(x+width-82,y,28,26,function()self.dropdown={mod=mod,control=choice,selected=value,scroll=math.max(0,value-4),x=x,top=y-4,width=width}end)
@@ -1233,7 +1270,15 @@ function M.new(api,measure)
         rect(0,0,ww,55,{18,23,27})
         rect(0,55,ww,1,{110,88,35})
         bounded(25,32,(self.menu_key_label or 'F10')..' / Esc Close   Tab Focus   Arrows Navigate / Change   Enter Select   Home Default   PgUp / PgDn Sections',14,muted,ww-380)
-        bounded(ww-320,32,'Epic LUT / Goose',16,{255,225,120},295)
+        bounded(ww-320,36,'Epic LUT / Goose',16,{255,225,120},295)
+        if mod and mod.controls.ui_scale then
+            local control=mod.controls.ui_scale;local value=mod.handle.get('ui_scale')or 100
+            bounded(ww-320,12,'UI Scale: '..value..'%',14,muted,210)
+            rect(ww-100,6,32,22,{35,62,90});text(ww-89,12,'<',14,white)
+            rect(ww-62,6,32,22,{35,62,90});text(ww-51,12,'>',14,white)
+            hit(ww-100,6,32,22,function()assert(mod.handle.set('ui_scale',math.max(control.min,value-control.step)))end)
+            hit(ww-62,6,32,22,function()assert(mod.handle.set('ui_scale',math.min(control.max,value+control.step)))end)
+        end
         -- A readable URL; no external browser is opened by menu rendering.
 
         -- Show the actual status, not a fixed character slice of a Lua error.
@@ -1258,7 +1303,7 @@ function M.new(api,measure)
             hit(x,y,rw,rh,function()
                 if drag or self.capture then return end
                 window_drag=nil;split_drag=nil
-                window_resize={edge=edge,left=ox,right=ox+ww*s,bottom=oy,top=oy+wh*s,min_w=1100*s,min_h=600*s,screen_w=w,screen_h=h,scale=s}
+                window_resize={edge=edge,left=ox,right=ox+ww*s,bottom=oy,top=oy+wh*s,min_w=minimum_w*s,min_h=minimum_h*s,screen_w=w,screen_h=h,scale=s}
             end)
         end
         resize_hit('w',0,14,6,wh-28);resize_hit('e',ww-6,14,6,wh-28)
@@ -1294,6 +1339,7 @@ function M.new(api,measure)
                     local ok,err=(d.mod.handle.edit or d.mod.handle.set)(d.control.id,choice)
 
                     self.notice=ok and (d.control.page and d.control.page.require_confirmation and 'Pending confirmation' or 'Saved') or tostring(err);self.dropdown=nil
+                    if ok and d.control.input_control and choice==1 then change(d.control.input_control,0)end
 
                 end)
 
@@ -1320,20 +1366,19 @@ function M.new(api,measure)
         local pv=self.preview_window
         if pv and api.mods[pv.mod.id]~=pv.mod then self.preview_window=nil;pv=nil end
         if pv then
-            local pw,ph=420*s,450*s
+            local vw,vh=pv.width or 420,pv.height or 450
+            local pw,ph=vw*s,vh*s
             pv.x=math.max(0,math.min(w-pw,pv.x));pv.y=math.max(0,math.min(h-ph,pv.y))
-            local px,py=pv.x,pv.y
+            local px,py=pv.x,pv.y;local vx,vy=(px-ox)/s,(py-oy)/s
             local first=#commands+1
-            rect((px-ox)/s,(py-oy)/s,420,450,{20,25,30},.98)
-            rect((px-ox)/s,(py-oy)/s+410,420,40,{35,42,48})
-            text((px-ox)/s+14,(py-oy)/s+423,'HUD PREVIEW',18,accent)
-            text((px-ox)/s+387,(py-oy)/s+422,'X',20,white)
-            hit((px-ox)/s,(py-oy)/s,420,450,function()end)
-            hit((px-ox)/s,(py-oy)/s+410,370,40,function(mx,my)
+            rect(vx,vy,vw,vh,{20,25,30},.98);rect(vx,vy+vh-40,vw,40,{35,42,48})
+            text(vx+14,vy+vh-27,pv.title or 'HUD PREVIEW',18,accent);text(vx+vw-33,vy+vh-28,'X',20,white)
+            hit(vx,vy,vw,vh,function()end)
+            hit(vx,vy+vh-40,vw-50,40,function(mx,my)
                 preview_drag={dx=mx-px,dy=my-py,max_x=math.max(0,w-pw),max_y=math.max(0,h-ph)}
             end)
-            hit((px-ox)/s+377,(py-oy)/s+410,43,40,function()self.preview_window=nil;preview_drag=nil end)
-            local ok,preview=pcall(pv.page.render_preview,{x=px+20*s,y=py+35*s,w=380*s,h=345*s,scale=s})
+            hit(vx+vw-43,vy+vh-40,43,40,function()self.preview_window=nil;preview_drag=nil end)
+            local ok,preview=pcall(pv.page.render_preview,{x=px+20*s,y=py+35*s,w=(vw-40)*s,h=(vh-105)*s,scale=s})
             if ok and type(preview)=='table' then
                 for _,command in ipairs(preview) do commands[#commands+1]=command end
             else text((px-ox)/s+15,(py-oy)/s+200,'Preview unavailable',18,muted) end
@@ -1341,6 +1386,17 @@ function M.new(api,measure)
             for i=first,#commands do commands[i].hud_preview=true;commands[i].layer=110+(i-first)*0.01 end
         end
 
+        if floating_request then
+            local f=floating_request;local p=f.position;local fw,fh=f.width*s,f.height*s
+            p.x=math.max(0,math.min(w-fw,p.x));p.y=math.max(0,math.min(h-fh,p.y))
+            local fx,fy=(p.x-ox)/s,(p.y-oy)/s;local first=#commands+1
+            hit(fx,fy,f.width,f.height,function()end)
+            f.draw(fx,fy,f.width,f.height)
+            hit(fx,fy+f.height-28,f.width-30,28,function(mx,my)preview_drag={window=p,dx=mx-p.x,dy=my-p.y,max_x=w-fw,max_y=h-fh}end)
+            text(fx+f.width-20,fy+f.height-20,'X',14,white)
+            hit(fx+f.width-28,fy+f.height-28,28,28,f.close)
+            for i=first,#commands do commands[i].popup=true;commands[i].layer=210 end
+        end
         if self.color_picker then
 
             local p=self.color_picker;local start=#commands+1;local px,py=math.max(0,math.min(ww-704,p.x or 400)),math.max(0,math.min(wh-434,p.y or 195))

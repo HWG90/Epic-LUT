@@ -21,7 +21,7 @@ with zipfile.ZipFile(candidate)as z:
     direct=b'direct_lut=true'in body
     if direct:
         assert not any(name.lower().endswith(('.py','.exe','.pyd','.zip','.whl'))for name in z.namelist())
-        assert [name for name in z.namelist()if name.endswith('.ps1')]==['tools/import_zip.ps1']
+        assert [name for name in z.namelist()if name.endswith('.ps1')]==['tools/import_zip.ps1','tools/original_snapshots.ps1']
         assert z.read('data/9ba626afa44a3aa3.patch_0.stream')==b''
         assert b'm.service_files='not in body and b'm.runtime_hash='not in body
         assert b'm.catalog='not in body and b'm.kits='not in body and b'm.slim='not in body

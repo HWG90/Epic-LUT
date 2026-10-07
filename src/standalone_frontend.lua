@@ -38,7 +38,7 @@ function F.new(m,ctx,deps)
     end
     self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
     self.menu=m.ui_menu.new(self.api,self.view.measure)
-    self.menu.window_width=1800;self.menu.window_height=1000;self.menu.toggle_key=121
+    self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
     self.menu.compact_fonts=true
     self.api.focus_page=function(id,page_id)
         for index,mod in ipairs(self.api.list())do if mod.id==id then
@@ -54,6 +54,8 @@ function F.new(m,ctx,deps)
                 self.preferences.mount(self.api)
                 self.api.mods.epic_lut_preferences.hidden=true
                 self.menu.toggle_key=self.preferences.key()
+                if self.preferences.scale then self.menu.ui_scale=self.preferences.scale()/100 end
+                if not self.size_loaded and self.preferences.size then self.menu.window_width,self.menu.window_height=self.preferences.size();self.size_loaded=true end
             end
             self.input.poll();local focused=self.input.focused()
             local process_input=self.menu.input_focus(focused,self.input)
@@ -76,6 +78,7 @@ function F.new(m,ctx,deps)
             if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
                 self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
             end
+            if self.was_visible and not self.menu.visible and self.preferences and self.preferences.save_size then self.preferences.save_size(self.menu.window_width,self.menu.window_height)end
             self.was_visible=self.menu.visible
             local key=self.menu.toggle_key;self.menu.menu_key_label=key>=112 and key<=135 and ('F'..(key-111))or ('VK '..key)
             self.menu.advance(dt);local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
@@ -83,6 +86,7 @@ function F.new(m,ctx,deps)
         if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end
     end
     function self.close()
+        if self.preferences and self.preferences.save_size then self.preferences.save_size(self.menu.window_width,self.menu.window_height)end
         self.menu.visible=false
         local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
         self.view.release();self.closed=true

@@ -24,7 +24,7 @@ OUT = ROOT / 'dist/armor_lut_editor'
 OUT.mkdir(parents=True, exist_ok=True)
 VENDOR = ['bingus_runtime', 'bingus_memory', 'engine', 'avatar']
 MENU = ['core', 'store', 'menu', 'view', 'capture']
-OWN = ['dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor', 'direct_setup', 'import_view', 'table_groups']
+OWN = ['dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor', 'direct_setup', 'import_view', 'table_groups', 'original_luts']
 NATIVE_NAME = 'mcm_input_9bc2033ffbb3.dll'
 NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
 native_path = Path(os.environ['EPIC_LUT_INPUT_LIBRARY']) if os.environ.get('EPIC_LUT_INPUT_LIBRARY') else ROOT.parent/'DBF-MCM/native/build'/NATIVE_NAME
@@ -38,6 +38,8 @@ def module(name, relative):
     return f'm.{name}=(function()\n{source(relative)}\nend)()\n'
 
 parts = [f'-- Epic LUT {DISPLAY_VERSION}: native adapters by CowboyBingus.\nlocal m={{direct_menu_keys=true,direct_lut=true}}\n']
+parts.append('m.original_snapshot_script=' + repr((ROOT/'tools/original_snapshots.ps1').read_bytes().hex()) + '\n')
+parts.append('m.original_snapshot_reader=' + repr((ROOT/'tools/original_snapshots.cs').read_bytes().hex()) + '\n')
 parts.append('m.zip_import_script=' + repr((ROOT/'tools/import_zip.ps1').read_bytes().hex()) + '\n')
 parts.append(f'm.frontend_native_name={NATIVE_NAME!r}\n')
 for name in MENU:
@@ -76,7 +78,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.writestr('data/9ba626afa44a3aa3.patch_0.'+suffix,b'')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R4.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R4.md'):
         package.write(ROOT/name,name)
 (ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)

@@ -10,6 +10,7 @@ table.insert(pages,1,{id='import',name='Import / Apply',require_confirmation=fal
     {id='target_armor',type='toggle',label='Armor',default=true},
     {id='save_palette',type='button',label='Save LUT to Palette',on_activate=function()end},
     {id='apply_checked',type='button',label='Apply LUT',on_activate=function()end},
+    {id='apply_editor',type='button',label='Apply edited palette',on_activate=function()end},
     {id='browse',type='button',label='Choose file',on_activate=function()end},
     {id='refresh',type='button',label='Refresh',on_activate=function()end},
     {id='lut',type='choice',label='Target',default=1,choices={'Armor LUT 1','Helmet LUT 2'}},
@@ -62,6 +63,12 @@ assert(d.data[0]==0 and math.abs(d.data[(4*23+2)*4]-0x12/255)<1e-6,'Move did not
 assert(h.activate('undo'));assert(math.abs(d.data[0]-0x12/255)<1e-6,'Move was not one undoable operation')
 assert(h.set('grid_tool',1));cells[23*2+1].click();editor.value_scroll=0;editor.focus_column=nil
 commands,hits={},{};editor.layout(ui)
+-- Import scratch uses the editor's authoritative RGB edit path and Undo.
+local scratch_at=((3-1)*23+6-1)*4;local scratch_alpha=d.data[scratch_at+3];local scratch_before=d.data[scratch_at]
+assert(editor.paint_rgb(3,6,'#123456'))
+assert(h.get('edit_row')==3 and h.get('edit_column')==6 and math.abs(d.data[scratch_at]-0x12/255)<1e-6,'Scratch paint missed its editor cell')
+assert(d.data[scratch_at+3]==scratch_alpha,'Scratch paint changed alpha');assert(h.activate('undo'));assert(d.data[scratch_at]==scratch_before)
+assert(h.set('edit_row',1));editor.focus_column=nil
 local menu=dofile('vendor/menu/menu.lua').new(api,function(text,size)return #text*size*.5 end)
 menu.visible=true;menu.selected=1;menu.page=2;menu.window_width=1800;menu.window_height=1000
 menu.compact_fonts=true
@@ -77,6 +84,24 @@ local function tap(x,y)
     menu.tick({down=function(k)return k==1 end,mouse=function()return x,y end,wheel=function()return 0 end})
     menu.tick({down=function()return false end,mouse=function()return x,y end,wheel=function()return 0 end})
 end
+-- Custom preset input must show keystrokes and commit the typed name.
+local preset_label
+for _,c in ipairs(rendered)do if c.full_text==h.get('row_preset')then preset_label=c;break end end
+assert(preset_label,'Preset name field missing');tap(preset_label.x+3,preset_label.y+2)
+assert(menu.text_edit and menu.text_edit.control.id=='row_preset','Preset field cannot be edited')
+menu.key(65);menu.key(66)
+local typing=false
+for _,c in ipairs(menu.compose(1920,1080))do if c.full_text=='AB|'then typing=true end end
+assert(typing,'Preset input does not display typed text');menu.key(13)
+assert(h.get('row_preset')=='AB','Preset input did not save typed name')
+local preview_button
+for _,c in ipairs(menu.compose(1920,1080))do if c.full_text=='Preview Palette'then preview_button=c end end
+assert(preview_button,'Palette preview button missing');tap(preview_button.x+2,preview_button.y+2)
+assert(menu.preview_window,'Preview did not open a separate window')
+local preview_commands=menu.compose(1920,1080);local values=0
+for _,c in ipairs(preview_commands)do if c.text and c.text:match('^[RGBA] ')then values=values+1 end end
+assert(values>=23*8*4,'Read-only preview missing RGBA values')
+menu.key(27);assert(not menu.preview_window and menu.visible,'Closing preview did not return to editor')
 -- A typed value must use its own field context, not a stale grid selection.
 local numeric
 for _,c in ipairs(rendered)do if c.full_text=='0.5'and c.x>menu.window_bounds.x+1200 then numeric=c;break end end

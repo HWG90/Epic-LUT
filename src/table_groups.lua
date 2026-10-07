@@ -15,7 +15,7 @@ function T.collapse(entries)
     for _,entry in ipairs(entries)do
         local key=T.key(entry);local group=by_key[key]
         if not group then
-            group={name=entry.name,width=entry.width,height=entry.height,data=entry.data,ids={},edited=entry.edited};by_key[key]=group;groups[#groups+1]=group
+            group={name=entry.name,width=entry.width,height=entry.height,data=entry.data,ids={},source=entry.source,index=entry.index,revision=entry.revision,edited=entry.edited};by_key[key]=group;groups[#groups+1]=group
         end
         group.ids[#group.ids+1]=entry.index or #groups
     end

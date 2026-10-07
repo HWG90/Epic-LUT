@@ -1,6 +1,6 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E={}
-function E.new(m,document,note,save,presets)
+function E.new(m,document,note,save,presets,live_document)
     local ffi=require('ffi');local self={undo={},redo={},busy=false,value_scroll=0}
     local color_columns={1,3,6,7,13,15,17,18,19,20}
     local color_labels={};for _,column in ipairs(color_columns)do color_labels[#color_labels+1]=m.semantics.columns[column]end
@@ -27,7 +27,19 @@ function E.new(m,document,note,save,presets)
     local function change(column,channel,value)
         if self.busy then return end
         local d=remember();local i=m.semantics.index(self.handle.get('edit_row'),column,channel,d.width,d.height)
-        d.data[i]=value;self.sync();note('Palette edited. Apply to update the selected live LUT.')
+        d.data[i]=value;self.sync();note('Palette edited. Live preview updates automatically.')
+    end
+    function self.focus_cell(row,column)
+        self.sync()
+        assert(self.handle.set('edit_row',row));assert(self.handle.set('edit_column',column))
+        for index,col in ipairs(color_columns)do if col==column then assert(self.handle.set('color_field',index));break end end
+        self.open_row=row;self.focus_column=column;self.selection={r1=row,r2=row,c1=column,c2=column}
+        self.sync()
+    end
+    function self.paint_rgb(row,column,hex)
+        self.focus_cell(row,column)
+        local d=remember();local at=m.semantics.index(row,column,1,d.width,d.height);local r,g,b=m.palette.rgb(hex)
+        d.data[at],d.data[at+1],d.data[at+2]=r,g,b;self.sync();return true
     end
     function self.sync()
         if not self.handle or self.busy then return end
@@ -76,7 +88,7 @@ function E.new(m,document,note,save,presets)
     end
     local function history(from,to)
         local d=assert(document(),'Import first');local value=table.remove(from);if not value then return note('No more history')end
-        to[#to+1]=snapshot(d);ffi.copy(d.data,value,#value);d.revision=(d.revision or 0)+1;self.sync();return note('Palette history updated. Apply to update the live LUT.')
+        to[#to+1]=snapshot(d);ffi.copy(d.data,value,#value);d.revision=(d.revision or 0)+1;self.sync();return note('Palette history updated. Live preview updates automatically.')
     end
     function self.attach(api,handle)
         self.api=api;self.handle=handle;self.sync()
@@ -100,7 +112,7 @@ function E.new(m,document,note,save,presets)
         for _,ch in ipairs(selected)do assert(editable(d,column,ch),'Unlock advanced edits to paint non-color channels')end
         d=remember();local r,g,b=m.palette.rgb(self.handle.get('scratch_color'));local values={r,g,b,self.handle.get('scratch_alpha')}
         for _,ch in ipairs(selected)do d.data[m.semantics.index(row,column,ch,d.width,d.height)]=values[ch]end
-        self.sync();return note('Pixel painted. Apply to update live LUTs.')
+        self.sync();return note('Pixel painted. Live preview updates automatically.')
     end
     function self.copy_selection()
         local d=assert(document(),'Import first');local s=self.selection or {r1=self.handle.get('edit_row'),r2=self.handle.get('edit_row'),c1=self.handle.get('edit_column'),c2=self.handle.get('edit_column')}
@@ -117,7 +129,7 @@ function E.new(m,document,note,save,presets)
         for r=0,clip.height-1 do for c=0,clip.width-1 do for _,ch in ipairs(selected)do
             d.data[m.semantics.index(row+r,column+c,ch,d.width,d.height)]=clip.data[(r*clip.width+c)*4+ch-1]
         end end end
-        self.sync();return note('Selection pasted. Apply to update live LUTs.')
+        self.sync();return note('Selection pasted. Live preview updates automatically.')
     end
     function self.move_selection(row,column)
         local d=assert(document(),'Import first');local s=assert(self.selection,'Select pixels first')
@@ -129,7 +141,20 @@ function E.new(m,document,note,save,presets)
         self.copy_selection();local clip=self.clip;d=remember()
         for r=s.r1,s.r2 do for c=s.c1,s.c2 do for _,ch in ipairs(selected)do d.data[m.semantics.index(r,c,ch,d.width,d.height)]=0 end end end
         for r=0,h-1 do for c=0,w-1 do for _,ch in ipairs(selected)do d.data[m.semantics.index(row+r,column+c,ch,d.width,d.height)]=clip.data[(r*w+c)*4+ch-1]end end end
-        self.selection={r1=row,r2=row+h-1,c1=column,c2=column+w-1};self.sync();return note('Selection moved. Apply to update live LUTs.')
+        self.selection={r1=row,r2=row+h-1,c1=column,c2=column+w-1};self.sync();return note('Selection moved. Live preview updates automatically.')
+    end
+    function self.preview(bounds,live)
+        local d=live and live_document and live_document()or (not live and document());local commands={};if not d then return {{type='text',x=bounds.x,y=bounds.y+bounds.h/2,text='Original live LUT pixels unavailable for this resource.',size=11*bounds.scale,c={224,230,234},a=1}}end
+        local scale=bounds.scale;local cell=bounds.w/d.width;local rowh=(bounds.h-24*scale)/d.height
+        local function label(x,y,value,size)commands[#commands+1]={type='text',x=x,y=y,text=value,size=size*scale,c={224,230,234},a=1}end
+        for column=1,d.width do label(bounds.x+(column-1)*cell,bounds.y+bounds.h-12*scale,'Col '..column,8)end
+        for row=1,d.height do for column=1,d.width do
+            local at=((row-1)*d.width+column-1)*4;local x=bounds.x+(column-1)*cell;local y=bounds.y+bounds.h-24*scale-row*rowh
+            commands[#commands+1]={type='rect',x=x,y=y,w=cell-2*scale,h=rowh-2*scale,c={30,35,40},a=1}
+            commands[#commands+1]={type='rect',x=x+2*scale,y=y+rowh-12*scale,w=cell-6*scale,h=9*scale,c=rgb(d.data,at),a=1}
+            for ch=0,3 do label(x+2*scale,y+rowh-(24+ch*10)*scale,({'R','G','B','A'})[ch+1]..' '..string.format('%.5g',tonumber(d.data[at+ch])),7)end
+        end end
+        return commands
     end
     function self.layout(ui)
         local d=document();local h=self.handle;local mod=self.api.mods[h.id]
@@ -140,6 +165,7 @@ function E.new(m,document,note,save,presets)
             ui.rect(x,y,w,height,dark);ui.rect(x,y+height-27,w,27,blue);ui.text(x+8,y+height-21,title,17,white)
         end
         local function button(x,y,w,label,id)
+            w=math.max(0,math.min(w,ui.x+ui.w-x-6));if w<20 then return end
             ui.rect(x,y,w,26,blue);ui.bounded(x+6,y+5,label,15,white,w-12);ui.hit(x,y,w,26,function()ui.activate(id)end)
         end
         panel(ui.x,gridbottom,left,ui.h-bottomh-12,'Pixel Grid')
@@ -258,14 +284,19 @@ function E.new(m,document,note,save,presets)
         local step=math.min(32,(bottomh-65)/7);local optionw=left*.4-20
         button(ui.x+10,optionsy,(optionw-5)/2,'Import file','browse');button(ui.x+15+(optionw-5)/2,optionsy,(optionw-5)/2,'Save LUT to Palette','save_palette')
         if ui.choice then
-            ui.choice('palette',ui.x+10,optionsy-step,optionw)
-            ui.choice('lut',ui.x+10,optionsy-step*2,optionw)
+            ui.choice('palette',ui.x+10,optionsy-step,optionw*.60-3)
+            local px=ui.x+10+optionw*.60+2
+            ui.rect(px,optionsy-step,optionw*.40-2,26,blue);ui.bounded(px+4,optionsy-step+5,'Preview Palette',15,white,optionw*.40-10)
+            ui.hit(px,optionsy-step,optionw*.40-2,26,function()if ui.preview then ui.preview(self.preview)end end)
+            ui.choice('lut',ui.x+10,optionsy-step*2,optionw*.60-3)
+            ui.rect(px,optionsy-step*2,optionw*.40-2,26,blue);ui.bounded(px+4,optionsy-step*2+5,'Preview Live LUT',15,white,optionw*.40-10)
+            ui.hit(px,optionsy-step*2,optionw*.40-2,26,function()if ui.preview then ui.preview(function(bounds)return self.preview(bounds,true)end)end end)
         end
         button(ui.x+10,optionsy-step*3,(optionw-5)/2,'Restore Original','restore')
         button(ui.x+15+(optionw-5)/2,optionsy-step*3,(optionw-5)/2,'Reset Custom LUT','reset_custom')
         button(ui.x+10,optionsy-step*4,(optionw-5)/2,'Undo','undo');button(ui.x+15+(optionw-5)/2,optionsy-step*4,(optionw-5)/2,'Redo','redo')
         button(ui.x+10,optionsy-step*5,optionw,'Save applied setup','save_setup')
-        button(ui.x+10,optionsy-step*6,optionw,'Apply LUT to checked targets','apply_checked')
+        button(ui.x+10,optionsy-step*6,optionw,'Apply edited palette to checked targets','apply_editor')
         button(ui.x+10,optionsy-step*7,(optionw-5)/2,'[ '..(h.get('target_helmet')and 'x'or ' ')..' ] Helmet','target_helmet')
         button(ui.x+15+(optionw-5)/2,optionsy-step*7,(optionw-5)/2,'[ '..(h.get('target_armor')and 'x'or ' ')..' ] Armor','target_armor')
         local presetx=ui.x+left*.40+10;local panelw=left*.30-20
@@ -330,7 +361,7 @@ function E.new(m,document,note,save,presets)
                     if self.busy then return end
                     local d=remember();local column=color_columns[self.handle.get('color_field')]
                     local i=m.semantics.index(self.handle.get('edit_row'),column,1,d.width,d.height)
-                    local r,g,b=m.palette.rgb(hex);d.data[i],d.data[i+1],d.data[i+2]=r,g,b;self.sync();note('Color edited. Apply to update the live LUT.')
+                    local r,g,b=m.palette.rgb(hex);d.data[i],d.data[i+1],d.data[i+2]=r,g,b;self.sync();note('Color edited. Live preview updates automatically.')
                 end},
                 {id='reset_color',type='button',label='Reset selected color to imported',on_activate=function()
                     local d=remember();local i=m.semantics.index(self.handle.get('edit_row'),color_columns[self.handle.get('color_field')],1,d.width,d.height)
@@ -342,10 +373,10 @@ function E.new(m,document,note,save,presets)
                 {id='scratch_alpha',type='slider',label='Scratch alpha',min=0,max=1,step=.001,default=1},
                 {id='paint_scratch',type='button',label='Paint selected RGB',on_activate=function()assert(m.semantics.is_color(23,self.handle.get('edit_column')),'Select a color column');return self.handle.set('cell_color',self.handle.get('scratch_color'))end},
                 {id='copy_row',type='button',label='Copy selected row',on_activate=function()local d=assert(document(),'Import first');self.row_clip=ffi.string(d.data+(self.handle.get('edit_row')-1)*d.width*4,d.width*16);return note('Row copied')end},
-                {id='paste_row',type='button',label='Paste row',on_activate=function()assert(self.row_clip,'Copy a row first');local d=remember();ffi.copy(d.data+(self.handle.get('edit_row')-1)*d.width*4,self.row_clip,#self.row_clip);self.sync();return note('Row pasted. Apply to update the live LUT.')end},
+                {id='paste_row',type='button',label='Paste row',on_activate=function()assert(self.row_clip,'Copy a row first');local d=remember();ffi.copy(d.data+(self.handle.get('edit_row')-1)*d.width*4,self.row_clip,#self.row_clip);self.sync();return note('Row pasted. Live preview updates automatically.')end},
                 {id='row_preset',type='input',label='Row preset name',default='my-row'},
                 {id='row_preset_select',type='choice',presentation='combined',label='Saved row presets',choices={'New preset...'},default=1,on_change=function(index)
-                    if not self.busy and index>1 then assert(self.handle.set('row_preset',self.preset_names[index-1]))end
+                    if not self.busy then assert(self.handle.set('row_preset',index>1 and self.preset_names[index-1]or ''))end
                 end},
                 {id='save_row',type='button',label='Save row preset',on_activate=function()
                     local d=assert(document(),'Import first');local name=self.handle.get('row_preset');assert(presets and name:match('^[%w _-]+$')and #name>0,'Invalid preset name')
@@ -354,7 +385,7 @@ function E.new(m,document,note,save,presets)
                 {id='load_row',type='button',label='Apply row preset',on_activate=function()
                     local name=self.handle.get('row_preset');assert(presets and name:match('^[%w _-]+$')and #name>0,'Invalid preset name')
                     local f=assert(io.open(presets..'/row-'..name..'.dds','rb'),'Preset not found');local bytes=f:read(m.dds.MAX_BYTES+1);f:close()
-                    local data=m.dds.decode(bytes,23,1);local d=remember();ffi.copy(d.data+(self.handle.get('edit_row')-1)*d.width*4,data,d.width*16);self.sync();return note('Row preset applied. Apply to update the live LUT.')
+                    local data=m.dds.decode(bytes,23,1);local d=remember();ffi.copy(d.data+(self.handle.get('edit_row')-1)*d.width*4,data,d.width*16);self.sync();return note('Row preset applied. Live preview updates automatically.')
                 end},
                 {id='undo',type='button',label='Undo',on_activate=function()return history(self.undo,self.redo)end},
                 {id='redo',type='button',label='Redo',on_activate=function()return history(self.redo,self.undo)end},

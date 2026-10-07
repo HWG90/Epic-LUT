@@ -36,11 +36,11 @@ function W.launch_worker(args,folder)
     assert(shell.epic_worker_shell(info)~=0 and info.process~=nil,'Windows could not start file import')
     local self={handle=info.process,pid=tonumber(kernel.epic_worker_pid(info.process))}
     function self.running()return self.handle~=nil and kernel.epic_worker_wait(self.handle,0)==258 end
-    function self.stop()if self.running()then assert(kernel.epic_worker_stop(self.handle,1)~=0,'Could not stop owned import worker')end end
+    function self.stop()if self.running()and kernel.epic_worker_stop(self.handle,1)==0 and self.running()then return false,'Could not stop owned import worker'end;return true end
     function self.close()if self.handle~=nil then kernel.epic_worker_close(self.handle);self.handle=nil end end
     return self
 end
-function W.row_presets(folder)
+function W.files(folder,filter)
     local ffi=require('ffi');local _,kernel=W.verify_interface()
     if not pcall(ffi.typeof,'epic_find_data')then ffi.cdef([[
         typedef struct {uint32_t header[11];uint16_t name[260],alternate[14];} epic_find_data;
@@ -48,17 +48,20 @@ function W.row_presets(folder)
         int epic_find_next(void *,epic_find_data *) __asm__("FindNextFileW");
         int epic_find_close(void *) __asm__("FindClose");
     ]])end
-    local pattern=folder..'/row-*.dds';local n=kernel.epic_native_wide(65001,8,pattern,-1,nil,0);local wide=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,pattern,-1,wide,n)==n)
+    local pattern=folder..'/'..filter;local n=kernel.epic_native_wide(65001,8,pattern,-1,nil,0);local wide=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,pattern,-1,wide,n)==n)
     local data=ffi.new('epic_find_data');local handle=kernel.epic_find_first(wide,data)
     if ffi.cast('intptr_t',handle)==-1 then return {}end
     local names={};local ok,why=pcall(function()
         repeat
             local length=kernel.epic_native_utf8(65001,0,data.name,-1,nil,0,nil,nil)
             if length>0 then local bytes=ffi.new('char[?]',length);kernel.epic_native_utf8(65001,0,data.name,-1,bytes,length,nil,nil)
-                local name=ffi.string(bytes):match('^row%-([%w _-]+)%.dds$');if name then names[#names+1]=name end
+                local name=ffi.string(bytes);names[#names+1]=name
             end
         until kernel.epic_find_next(handle,data)==0
     end)
     kernel.epic_find_close(handle);assert(ok,why);table.sort(names);return names
+end
+function W.row_presets(folder)
+    local names={};for _,file in ipairs(W.files(folder,'row-*.dds'))do local name=file:match('^row%-([%w _-]+)%.dds$');if name then names[#names+1]=name end end;return names
 end
 return W

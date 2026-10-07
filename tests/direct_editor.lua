@@ -9,7 +9,8 @@ local native={alive=function()return alive and 1 or 0 end,commit=function()end}
 local memory={verify_build=function()return true end,address=function()return 1 end,module=function()return 1 end,read_into=function()return true end}
 local test_root=assert(os.getenv('EPIC_LUT_TEST_ROOT'))
 os.remove(test_root..'/tests/tmp/direct-state/direct-applied.tsv')
-local m={dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
+local quick_select
+local m={ui_core=core,import_view={new=function(info,tables,select)quick_select=select;return {draw=function()end}end},dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
     direct_setup=dofile('src/direct_setup.lua'),native_import=dofile('src/windows.lua'),
     palette=dofile('src/palette.lua'),semantics=dofile('src/semantics.lua'),lut_editor=dofile('src/lut_editor.lua'),
     paths={new=function()return {files=test_root..'/tests/tmp/files',cache=test_root..'/tests/tmp/cache',settings=test_root..'/tests/tmp/direct-state',presets=test_root..'/tests/tmp/presets',storage=store}end},
@@ -35,13 +36,29 @@ local function activate(key)local ok,value=handle.activate(key);assert(ok,value)
 assert(activate('apply'):find('Load a DDS first',1,true))
 local data=ffi.new('float[?]',23*8*4);for i=0,23*8*4-1 do data[i]=(i-100)/9 end
 m.dds.write('tests/tmp/files/palette.dds',data,23,8)
-activate('load');activate('save_palette');activate('refresh')
+activate('load');activate('apply_checked')
+assert(bound[3]==200 and bound[4]==200 and bound[6]==200 and bound[8]==200,'File LUT did not apply immediately without saving it to the editor')
+activate('restore');activate('save_palette');activate('refresh')
 assert(bound[3]==100 and bound[8]==400,'Saving an import to the editor applied it to gear')
+local quick_path=test_root..'/tests/tmp/files/palette.dds'
+quick_select({width=23,height=8,data=data,source=quick_path,name='Table 1'},3,6)
+local before_quick=creates;assert(handle.set('target_armor',false));assert(handle.set('target_helmet',false))
+assert(handle.set('quick_color','#123456'))
+assert(handle.get('edit_row')==3 and handle.get('edit_column')==6,'Import selection did not focus exact editor cell')
+assert(math.abs(handle.get('cell_r')-0x12/255)<.0006,'Scratch edit did not sync editor table')
+activate('undo');assert(creates==before_quick,'Unchecked quick edit changed live bindings')
+activate('save_palette');assert(handle.set('edit_row',1));assert(handle.set('edit_column',1));assert(handle.set('color_field',1));assert(handle.set('target_armor',true));assert(handle.set('target_helmet',true))
 assert(handle.set('scope',1))
 assert(handle.get('preserve_emissives')==false,'Emissive preservation did not default Off')
-assert(handle.set('preserve_emissives',true));assert(activate('apply'):find('Original game emissive pixels',1,true)and bound[3]==100)
+assert(handle.set('preserve_emissives',true));assert(activate('apply'):find('Original game LUT reader',1,true)and bound[3]==100)
 assert(handle.set('preserve_emissives',false))
 assert(handle.set('edit_row',2));assert(handle.set('cell_color','#FF0080'))
+-- Saving the same source again must overwrite previous edits, without live writes.
+local before_save=creates
+activate('save_palette')
+assert(creates==before_save and bound[3]==100,'Save LUT to Palette applied to gear')
+assert(math.abs(handle.get('cell_r')-tonumber(data[23*4]))<.0001,'Save LUT to Palette reused stale edits instead of imported values')
+assert(handle.set('cell_color','#FF0080'))
 local edited_index=23*4
 assert(api.mods.epic_direct_lut.controls.cell_a.disabled,'Shader alpha was writable without unlocking')
 activate('undo');activate('redo');activate('undo')
@@ -87,6 +104,10 @@ local helmet_object=bound[8];assert(helmet_object~=armor_object and bound[3]==ar
 assert(handle.set('target_armor',false));assert(handle.set('target_helmet',false))
 assert(activate('apply_checked'):find('Check Armor',1,true)and bound[3]==armor_object)
 assert(handle.set('target_helmet',true));activate('apply_checked');assert(bound[3]==armor_object and bound[8]==helmet_object)
+assert(handle.set('cell_color','#FF0000'));activate('apply_checked')
+assert(bound[8]==helmet_object,'File Apply LUT incorrectly applied the unsaved editor changes')
+activate('apply_editor');assert(bound[8]~=helmet_object,'Editor apply did not use the edited table')
+activate('undo');activate('apply_editor');assert(bound[8]==helmet_object)
 assert(handle.set('save_name','shared-palette'));activate('save_dds')
 local shared=m.dds.read('tests/tmp/files/shared-palette.dds');assert(shared[0]==.25,'Shared preset did not retain full LUT data')
 activate('refresh');assert(bound[3]==armor_object and bound[8]==helmet_object,'Refresh removed applied LUTs')
