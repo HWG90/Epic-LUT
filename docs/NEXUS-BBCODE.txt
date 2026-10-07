@@ -71,7 +71,7 @@ Quick Load remembers the imported filename and cached extracted palette. Seeing 
 
 Armor and helmet are independent targets. An archive name or matching table dimensions does not prove that a palette belongs to the gear you selected. Review the target before applying it. Archive extraction reads supported palette data; it does not install the original mod patch or execute package scripts.
 
-[b]A note on glow and materials:[/b] RGB-only edits leave other channels untouched, but base color can tint emitted light. Full-float imports and material edits can change more than color. Where available, turn on effect-preservation controls if you want to keep the originals for those fields; preservation is optional, not a guarantee of identical shader appearance. Unconfirmed fields are identified rather than assigned invented meanings. 
+[b]A note on glow and materials:[/b] RGB-only edits leave other channels untouched, but base color can tint emitted light. Full-float imports and material edits can change more than color. Where available, turn on effect-preservation controls if you want to keep the originals for those fields; preservation is optional, not a guarantee of identical shader appearance. Unconfirmed fields are identified rather than assigned invented meanings.
 
 TL;DR - GLOWY [b]ON[/b]? Preserve [b]OFF[/b]
 GLOWY [b]OFF[/b]? Preserve [b]ON[/b]
@@ -120,4 +120,3 @@ And a personal thank you to [/size][b][size=6][url=https://github.com/CowboyBing
 I vibe-coded tf out of this. No shame. If I can never write another line of code again, that day [b]can't come soon enough[/b]. But I also know what I'm doing. And so does Bingus. Vibe-coded =/= Slop. No hubris here. Just decade+ experience programming in C#, Python, and my ass.[/i]
 
 [i][size=1][font=Courier New]Epic LUT is community-made and is not affiliated with or endorsed by Arrowhead, Sony, or Nexus Mods. Promotional rainbow-helmet artwork is an illustration, not an in-game screenshot or proof of a particular preset's appearance. No third-party palette packs or game assets are bundled with these release materials.[/font][/size][/i]
-
