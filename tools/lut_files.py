@@ -1,7 +1,9 @@
 """Independent, lossless float LUT codecs. No image normalization or gamma conversion."""
 from pathlib import Path
 import math,os,struct,sys,tempfile
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'.deps'))
+if not sys.flags.isolated:sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'.deps'))
+if not sys.flags.isolated and os.environ.get('LOCALAPPDATA'):
+    sys.path.insert(0,str(Path(os.environ['LOCALAPPDATA'])/'Epic LUT/cache/file-service/.deps'))
 import numpy as np
 MAX_BYTES=8*1024*1024
 
@@ -12,10 +14,11 @@ def validate(data):
     if not np.isfinite(result).all():raise ValueError('Nonfinite LUT values are not supported')
     return np.ascontiguousarray(result)
 
-def decode_dds(raw):
+def decode_dds(raw,*,base_level_only=False):
     if len(raw)>MAX_BYTES or len(raw)<128 or raw[:4]!=b'DDS ':raise ValueError('Invalid DDS file')
     words=struct.unpack_from('<31I',raw,4)
-    if words[0]!=124 or words[18]!=32 or words[5]!=0 or words[6]>1 or words[27]!=0:raise ValueError('Only single-mip 2D LUTs are supported')
+    if words[0]!=124 or words[18]!=32:raise ValueError('Invalid DDS header sizes')
+    if words[5]>1 or words[1]&0x800000 or words[27]!=0:raise ValueError('Only 2D LUTs are supported; cube and volume textures are unsupported')
     height,width=words[2:4];format=words[20];offset=128
     if format==0x30315844:
         if len(raw)<148:raise ValueError('Truncated DX10 header')
@@ -25,8 +28,11 @@ def decode_dds(raw):
     else:raise ValueError('DDS must contain RGBA16F or RGBA32F')
     if format not in (2,10) or not 1<=width<=64 or not 1<=height<=32:raise ValueError('Unsupported DDS LUT format or dimensions')
     size=width*height*4*(4 if format==2 else 2)
-    if len(raw)!=offset+size:raise ValueError('DDS payload size mismatch')
-    return validate(np.frombuffer(raw, dtype='<f4' if format==2 else '<f2',offset=offset).reshape(height,width,4).astype(np.float32))
+    levels=max(1,words[6])
+    if levels>max(width,height).bit_length():raise ValueError('DDS mip count exceeds texture dimensions')
+    expected=size if base_level_only else sum(max(1,width>>level)*max(1,height>>level)*4*(4 if format==2 else 2)for level in range(levels))
+    if len(raw)!=offset+expected:raise ValueError('DDS payload size mismatch')
+    return validate(np.frombuffer(raw, dtype='<f4' if format==2 else '<f2',offset=offset,count=width*height*4).reshape(height,width,4).astype(np.float32))
 
 def encode_dds(data):
     data=validate(data);height,width,_=data.shape

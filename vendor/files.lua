@@ -75,7 +75,7 @@ end
 -- The adapter Slim.open expects: open(name) -> handle, read(handle, at, size, buffer), close(handle).
 -- folder: UTF-16 units and their count (Files.game_data_folder) or a UTF-8 string ending in a separator;
 -- clock (optional): seconds, to keep the longest single read (self.longest, self.longest_size).
-function Files.new(folder, count, clock)
+function Files.new(folder, count, clock, trace)
     local k = bind()
     if type(folder) == 'string' then
         folder, count = join(nil, 0, folder), nil
@@ -84,7 +84,7 @@ function Files.new(folder, count, clock)
     end
     local overlapped = ffi.new(SENTINEL)
     local done = ffi.new('uint32_t[1]')
-    local self = {reads = 0, bytes = 0, opened = 0, longest = 0, longest_size = 0}
+    local self = {reads = 0, bytes = 0, opened = 0, longest = 0, longest_size = 0, trace = trace}
 
     function self.open(name)
         local path = join(folder, count, name)
@@ -96,6 +96,7 @@ function Files.new(folder, count, clock)
 
     function self.read(handle, at, size, buffer)
         if size == 0 then return end
+        if trace then trace('ReadFile begin offset '..at..' bytes '..size)end
         overlapped.offset = at % HIGH
         overlapped.offset_high = (at - at % HIGH) / HIGH
         overlapped.event = nil
@@ -103,6 +104,7 @@ function Files.new(folder, count, clock)
         if k.myc1_ReadFile(handle, buffer, size, done, overlapped) == 0 or done[0] ~= size then
             error('game file read failed', 0)
         end
+        if trace then trace('ReadFile complete bytes '..size)end
         if started then
             local took = clock() - started
             if took > self.longest then self.longest, self.longest_size = took, size end

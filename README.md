@@ -1,43 +1,48 @@
 # Epic LUT
 
-Live armor and helmet float-LUT editing through MCM, with a local DDS/EXR/archive companion.
+**Author: Goose.** Armor and helmet LUT editing with native archive import, semantic controls and an optional advanced editor.
 
-**Discovery and implementation credit: [CowboyBingus](https://github.com/CowboyBingus/MatchYourColors).** Epic LUT builds on the float-LUT discovery, resource binding, armor discovery and file-decoding work in Match Your Colors. The measured native adapters are reused under its Zero-Clause BSD license, preserved in `vendor/LICENSE`. The numbered-row editor, MCM integration, immutable lifetime policy and preset interchange are additions; we do not claim the original LUT discovery.
+**Alpha preview — features, layout, and behavior may change.**
 
-## Use
+## Requirements and installation
 
-Requires Live Lua Loader (or compatible MDL API 2 lifecycle), DBF-MCM with RGB color controls, and the batch setter supplied in `tools/mcm-set-many.lua` for preset imports. Supported native contract: Steam build 25480438, verified by executable/game SHA-256 and function-table addresses.
+Choose one entrypoint from `Epic-LUT-R3.zip`:
 
-Open **MCM > Epic LUT > Semantics / grid cell** for armor, or **Helmet – Semantics / grid cell**. Select an actual LUT resource, numbered row/region and semantic field. A committed RGB/float change automatically enables that row and live application. Opening/canceling a picker is inert. The old per-LUT row-page tree is removed; all discovered lookup resources remain in the selector. The full-float document is authoritative for rendering.
+- **Bingus Shared Loader:** import the ZIP through Arsenal/HD2MM and enable its startup option alongside Bingus Shared Loader v15+. MCM, LLL and MDL are optional.
+- **LLL / MDL:** install the complete `armor_lut_editor` folder through a compatible API-2 loader.
 
-**Restore original colors** disables application while retaining the document. **Reset Custom LUT Rows** resets stored/displayed values from preserved originals and clears overrides. Disabled rows render their originals. Legacy RGB metadata is retained for preset compatibility, not as another overriding render layer.
+Compatible MCM is used when present; otherwise Epic LUT provides its own in-game menu. Older MCM versions without per-mod storage and presentation support need updating or disabling. Activate only one Epic LUT entrypoint. The native adapters target Steam build 25480438.
 
-Armor and helmet have independent target-qualified discovery, documents, settings and restoration. The original **CowboyBingus – Match Your Colors** options are mounted through their original handles/setters/callbacks/persistence. Its mod is retained; competing armor/helmet modes pause the corresponding editor without silently changing the original mode.
+Python, NumPy and OpenEXR are bundled for Windows x64. Equipped-target discovery and file actions unpack and start the private runtime automatically; no Python installation, pip command, setup script or browser is required. RAR extraction still requires installed 7-Zip. The optional browser editor can be started with `start_editor.ps1`. [Installation and bindings](docs/BSL.md).
 
-**Preserve emission, modes and unknown effects** is on by default. It permits researched recoloring/camo controls and retains the other originals at rendering. Unavailable fields are disabled with a reason. Emission is not a confirmed RGB picker: its R channel is a researched strength parameter, other channels/dependencies are uncertain. Base RGB can tint glow. File HDR/signed values are not normalized or clamped. Deliberate material editing requires unlocking preservation. See the [mapping reference](docs/MAPPING.md).
+## Controls
 
-Targets are equipped local armor non-skin pieces and local helmet pieces. Cape equipment, skin, Armory previews and weapons are excluded. Every referenced texture slot is inspected for bounded float lookups; material, pattern and other discovered tables have separate identities and exact rows. Non-LUT/unsupported resources are retained and reported. Sharing with other player units is not comprehensively established.
+F10 is the initial standalone menu key. General Settings and Quick Load → Extras expose the same saved key preference. Quick Load opens by default. The current alpha uses the direct menu keyboard path; the separate Bingus binding adapter is withheld while startup compatibility is investigated.
 
-## Export and import
+**Quick Load** opens a Windows picker for ZIP, RAR, DDS or EXR. It shows the imported filename and source-row color swatches, then separate **Apply to Armor** and **Apply to Helmet** buttons. **Extras** contains independent material/emission preservation switches, both Off by default. Unknown fields retain their originals. Source swatches clip RGB for display only.
 
-Use each target's **Export preset / Import preset** for full-float v2 `.dbflut` interchange. Target kind/kit, body, resource hashes, dimensions, complete cells and activation flags are validated before one settings commit. Legacy armor RGB v1 imports remain supported. Helmet presets cannot silently apply to armor. Files are data, never executed. [Preset format](docs/PRESETS.md).
+Quick Load prefers exact resource matches, then maps known semantic fields deterministically. Rows use nearest proportional mapping with aligned endpoints. Different recognized layouts map shared Base Color RGB only; unsupported layouts are skipped and reported. Matching dimensions do not establish matching surfaces. [Mapping reference](docs/MAPPING.md).
 
-For pre-made files/packages, use **Files / hotload > Import palette (opens local browser)**, or `start_editor.ps1`. Choose/drop DDS, EXR, ZIP or RAR. Packages are extracted automatically in a private cache; documents/code are never executed and mod patches are not installed. An exact match is selected automatically; click Apply to use it. Import alone never applies a palette. The Advanced editor retains all editing tools. [File/archive workflow and supported formats](docs/FILES.md).
+Armor and Helmet provide independent **Equipped**, **Semantics / grid cell**, and **Files / hotload** pages. Features include float-channel editing, RGB colors, camos, undo/redo, row copy/paste, full-float presets, file hotloading and quick save. The optional browser editor adds a pixel grid, rectangular clipboard, row presets and bulk DDS/EXR conversion.
 
-The local companion includes semantic fields, pixel grid, rectangular clipboard, undo/redo, Ctrl+S, row presets, scratch RGB, camo and debug rows, and DDS/EXR bulk conversion. Set up codecs once using `setup_companion.ps1`. EXR conversion runs outside the game and publishes float DDS for hotloading. No third-party palette assets are included in this repository.
+Disable either override to restore original bindings while retaining its mapped document. Re-enable it to restore the retained mapping for that item. **Reset Custom LUT Rows** clears custom edits separately. Full imports may alter emission/modes while preservation is Off; Base Color can tint glow even when emission controls are preserved.
 
-## Build and validation
+The original CowboyBingus Match Your Colors options retain their provider's settings and callbacks. Conflicting modes pause the affected target editor.
 
-`build.ps1 -Verify` produces `dist/Epic-LUT-R2.zip` using a non-Store Python interpreter. `-Python <path>` selects another non-Store runtime. Microsoft Store/WindowsApps Python is rejected before filesystem work. For the first reviewed installation, install the ZIP's `armor_lut_editor` folder including `presets`; keep the stable folder name to preserve settings.
+## Storage and limits
 
-For subsequent authorized updates, use **`deploy.ps1`**. It validates the real absolute LLL destination and opened-handle path, rejects LocalCache/virtualized paths, preserves a hash-verified rollback, and checks the actual installed SHA-256 immediately and after reload. It stops on mismatches or unconfirmed reload instead of blindly retrying. Backups/receipts stay under ignored `dist/deployment-backups`. Run `tests/deploy_guards.ps1` for rejection checks. These protections cover the supported entrypoints; external copies can bypass them.
+Data uses `%LOCALAPPDATA%/Epic LUT`: `settings`, `files`, `presets` and `cache`. Legacy loader folders are neither migrated nor deleted. Files/packages are parsed as data; archive scripts are not executed and imported mod patches are not installed. [File formats](docs/FILES.md), [preset format](docs/PRESETS.md).
 
-`python verify.py` runs LuaJIT syntax and meaningful contracts. Set `LUA51_DLL` to the LuaJIT Lua 5.1 library and `MCM_SOURCE_DIR` to the DBF-MCM checkout if they differ from the defaults (Windows Steam library, sibling DBF-MCM). Tests cover non-color preservation, stale/foreign binding handling, partial failures, actual MCM picker commit/cancel, automatic activation, equipment lifecycle, complete preset round trip, malformed rejection and atomic-save failure.
+Targets are the local equipped armor and helmet. Cape equipment, skin, Armory previews and weapons are excluded. Immutable texture storage is limited to 8 MiB / 2,048 records; exhaustion restores originals and pauses editing. The own menu supports keyboard/mouse navigation. A live 3D armor panel is not included.
 
-MCM batch integration is a narrowly scoped setter addition, not a replacement framework build. [Integration instructions](docs/MCM-BATCH.md) explain how to add it without overwriting other MCM changes.
+The direct-keyboard functional candidate has passed repeated user-reported launches and Armor/Helmet application, restoration, movement, and helper-shutdown checks. Earlier candidates crashed; the exact cause remains unproven. The latest alpha UI still requires live visual and interaction confirmation. Controller activation through the withheld binding adapter is not claimed.
 
-## Runtime limits and evidence
+## Building
 
-Textures are immutable per edit and retained in shared Lua storage until process exit. No elapsed-frame resource reuse/destruction assumption is imported. Pixel budget: 8 MiB; allocation-record budget: 2,048. Exhaustion restores originals and pauses. Unlimited sessions and GPU reclamation are outside R2.
+`build.ps1 -Verify` creates the package and checks LuaJIT contracts. Set `LUA51_DLL` or `HD2_GAME_DIR` for the matching game library. The build uses the pinned input DLL from the sibling DBF-MCM checkout or `EPIC_LUT_INPUT_LIBRARY`. Deployment guards validate the physical destination, create a rollback and require a reload marker. No native input DLL is replaced by the Lua deployment script.
 
-Live armor color editing has been verified in game without a restart. MCM picker visibility, immediate controls, and restoration/readback through hot reload were also verified. Equipped helmet material/pattern discovery, provider submenu synchronization and the RGB-only Live Wire glow check have also been verified. Comprehensive mission transitions, peer visibility and long-session validation remain open. Offline tests do not prove native rendering.
+## Credits
+
+LUT discovery and native adapters: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license. Semantic research references: [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor). Equivalent mapping/editor code is independently authored; no unlicensed Paydex implementation or third-party palette assets are included.
+
+A successful import switches the original Match Your Colors setting Off through its own provider. Cancel and invalid files leave that setting unchanged. The game-launched file service exits when the game closes or crashes. Manual browser-editor startup remains independent of game lifetime.

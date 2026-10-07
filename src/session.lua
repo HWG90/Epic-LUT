@@ -4,17 +4,17 @@ function S.new(m,memory,native,retain)
     local ffi=require('ffi');local small,big=ffi.new('uint8_t[96]'),ffi.new('uint8_t[1024]')
     local function read(a,n,b)return memory.read_into(ffi.cast('const uint8_t *',a),n,b)end
     local function binding(material,slot)return m.engine.binding(read,material,slot or m.engine.LUT_SLOT,small,big)end
-    local self={bindings={},catalog=nil,resources={}}
+    local self={bindings={},catalog=nil}
     local function present(b)
         if native.alive(b.unit)==0 then return false end
         for _,v in ipairs(m.engine.unit_materials(native,b.unit))do if v.mesh==b.mesh and v.material==b.material then return true end end
         return false
     end
     function self.restore()
-        local pending={};local meshes={}
+        local pending={}
         for _,b in ipairs(self.bindings)do
             local current=present(b) and binding(b.material,b.slot)
-            if current and (current==b.current or current==b.previous) then
+            if current and current~=b.original and (current==b.current or current==b.previous) then
                 local ok=pcall(function()m.engine.bind(native,b.material,b.slot or m.engine.LUT_SLOT,b.original);native.commit(b.mesh)end)
                 if not ok or binding(b.material,b.slot)~=b.original then pending[#pending+1]=b end
             end
@@ -23,7 +23,7 @@ function S.new(m,memory,native,retain)
         return #pending==0
     end
     function self.capture(catalog,units)
-        assert(self.restore(),'Original binding restoration pending');self.catalog=catalog;self.resources={}
+        assert(self.restore(),'Original binding restoration pending');self.catalog=catalog
         local names,slots={},{}
         for _,lut in ipairs(catalog.luts)do local object=m.engine.texture_object(native,lut.name);if object then names[object]=lut end
             if lut.slots then for slot in pairs(lut.slots)do slots[slot]=true end else slots[m.engine.LUT_SLOT]=true end
@@ -63,9 +63,12 @@ function S.new(m,memory,native,retain)
             end
             if (documents and documents[lut.name]) or next(overrides)then
                 local data=documents and documents[lut.name] or m.palette.copy(lut.values,lut.width,lut.height,overrides,function(n)return ffi.new('float[?]',n)end,ffi.copy)
-                local cachekey=lut.width..':'..lut.height..':'..ffi.string(data,lut.width*lut.height*16)
+                local content=ffi.string(data,lut.width*lut.height*16)
+                if content~=ffi.string(lut.values,lut.width*lut.height*16)then
+                local cachekey=lut.width..':'..lut.height..':'..content
                 planned[lut.name]={lut=lut,data=data,key=cachekey,texture=retain.cache[cachekey]}
                 if not planned[lut.name].texture then bytes=bytes+lut.width*lut.height*16;allocations=allocations+1 end
+                end
             end
         end
         assert(retain.bytes+bytes<=8*1024*1024 and #retain.records+allocations<=2048,'Session texture budget exhausted; originals can still be restored')
@@ -83,9 +86,11 @@ function S.new(m,memory,native,retain)
         for _,b in ipairs(self.bindings)do
             local p=planned[b.lut.name];local object=p and p.texture.object or b.original
             -- Record intended ownership before bind, so partial failure remains restorable.
+            if object~=b.current then
             b.previous=b.current;b.current=object;m.engine.bind(native,b.material,b.slot or m.engine.LUT_SLOT,object);native.commit(b.mesh)
             assert(binding(b.material,b.slot)==object,'LUT binding readback failed')
             b.previous=nil
+            end
         end
         return true
     end

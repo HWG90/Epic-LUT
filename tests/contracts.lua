@@ -19,6 +19,12 @@ local m={palette=P,avatar={units=function()return {}end},engine={LUT_SLOT=1,
 local retained={records={},bytes=0};local session=S.new(m,{read_into=function()return true end},native,retained)
 local cat={luts={lut},pieces={['0:2']=true},identity={}}
 session.capture(cat,{{unit=1,type=0,slot=2}})
+failed=true
+assert(session.restore() and bound==100 and committed==0,'Untouched original binding invoked native restoration')
+failed=false;session.capture(cat,{{unit=1,type=0,slot=2}})
+failed=true
+assert(session.apply({get=function()return false end},{[lut.name]=original})and bound==100 and committed==0 and #retained.records==0,'Unchanged document created or rebound a texture')
+failed=false
 local handle={get=function(id)if id:match('_on$')then return true else return '#00FF00'end end}
 session.apply(handle);assert(bound==200 and committed==1 and #retained.records==1)
 assert(session.restore() and bound==100)

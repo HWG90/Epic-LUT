@@ -1,5 +1,7 @@
+local frontend,preferences,bindings
+local paths_factory=m.paths
 local function create(target)
--- Standalone LLL/MDL lifecycle; MCM is the sole authoritative settings owner.
+-- Standalone LLL/MDL lifecycle; The active frontend owns the authoritative settings handle.
 local ffi=require('ffi')
 local state,ctx
 local OWNER=target=='Helmet' and 'dbf.helmet_lut_editor.owner.v1' or 'dbf.armor_lut_editor.owner.v1'
@@ -17,9 +19,11 @@ local function unregister()
     state.api=nil
 end
 local function register(catalog)
-    local api=rawget(_G,'DBFMCM');if not api then return false end
+    if m.diagnostic_without_menu then return false end
+    local api;if frontend then api=frontend.resolve()else api=rawget(_G,'DBFMCM')end;if not api then return false end
     if state.api==api and state.handle then return true end
     unregister();state.api=api
+    if preferences then preferences.mount(api)end
     local pages={{id='session',name='Equipped '..target:lower(),require_confirmation=false,controls={
         {type='text',label=target..' '..string.format('%08x',catalog.identity.target_id or catalog.identity.armor)..' - local equipped target only'},
         {type='text',label='Numbered LUT rows have unknown surface mapping. Primary-color RGB only.'},
@@ -45,18 +49,20 @@ local function register(catalog)
     }}}
     pages[1].controls[#pages[1].controls+1]={id='preset_file',type='input',label='Preset filename (without .dbflut)',default='preset',description='Files live in the Epic LUT mod folder / presets. Simple filenames only.'}
     pages[1].controls[#pages[1].controls+1]={id='export',type='button',label='Export '..target:lower()..' preset',on_activate=function()
-        local path=m.presets.export(ctx.dir..'/presets',catalog,state.handle,state.features and state.features.document)
+        local path=m.presets.export(ctx.presets_dir or ctx.dir..'/presets',catalog,state.handle,state.features and state.features.document)
         local name=assert(path:match('/([^/]+)%.dbflut$'));local ok,err=state.handle.set('preset_file',name);assert(ok,err)
         note('Exported preset: '..path);return 'Exported: '..path
     end}
     pages[1].controls[#pages[1].controls+1]={id='import',type='button',label='Import '..target:lower()..' preset',on_activate=function()
         assert(type(state.handle.set_many)=='function','MCM batch-settings update required for atomic import')
-        local values,documents=m.presets.read(ctx.dir..'/presets',state.handle.get('preset_file')..'.dbflut',catalog)
+        local values,documents=m.presets.read(ctx.presets_dir or ctx.dir..'/presets',state.handle.get('preset_file')..'.dbflut',catalog)
         state.importing=true
         local called,ok,err=pcall(state.handle.set_many,values)
         state.importing=false;assert(called and ok,tostring(called and err or ok))
         if state.features then state.features.import_documents(documents,values)end
-        state.dirty=true;note('Validated preset imported in one settings commit');return 'Preset imported'
+        state.dirty=true
+        if m.provider_menu then local ok,why=m.provider_menu.disable_matching(state.api);assert(ok,why)end
+        note('Validated preset imported in one settings commit');return 'Preset imported'
     end}
     for index,lut in ipairs(catalog.luts)do
         local controls={{type='text',label='LUT '..index..' - '..lut.name..' - '..lut.height..' rows'}}
@@ -78,9 +84,22 @@ local function register(catalog)
         pages[#pages+1]={id='lut_'..index,name='LUT '..index..' rows',require_confirmation=false,controls=controls}
     end
     if state.features then state.features.pages(catalog,pages)end
-    if target=='Helmet' then for _,page in ipairs(pages)do page.name='Helmet - '..page.name end end
+    for _,page in ipairs(pages)do page.category=page.category or target:lower()end
+    if target=='Armor' and preferences then
+        local settings={}
+        local owner=api.mods.epic_lut_preferences
+        for _,id in ipairs({'menu_key','reset_key'})do
+            local control={}
+            for k,v in pairs(owner.controls[id])do control[k]=v end
+            control.id='general_'..id;control.source_mod_id=owner.id;control.source_control_id=id
+            settings[#settings+1]=control
+        end
+        table.insert(pages,1,{id='general_settings',name='General Settings',category='general',require_confirmation=false,controls=settings})
+    end
     state.handle=api.register({id='dbf_'..target:lower()..'_lut_'..string.format('%08x',catalog.identity.target_id or catalog.identity.armor)..'_'..catalog.identity.body,
-        name=target=='Helmet' and 'Epic LUT - Helmet' or 'Epic LUT',parent_name=target=='Helmet' and 'Epic LUT' or nil,description='Live float LUT editing for the equipped local '..target:lower()..'.',pages=pages})
+        name=target=='Helmet' and 'Epic LUT - Helmet' or 'Epic LUT',parent_name=target=='Helmet' and 'Epic LUT' or nil,description='Live float LUT editing for the equipped local '..target:lower()..'.',storage=m.paths and m.paths.storage or nil,categories={{id='general',name='General Settings',style=api.category_page_links and 'page' or nil},{id='quick_load',name='Quick Load'},{id='armor',name='Armor'},{id='helmet',name='Helmet'}},pages=pages})
+    if bindings and target=='Armor'then bindings.root_id=state.handle.id end
+    if frontend and target=='Armor'then frontend.default_mod_id=state.handle.id end
     -- Legacy row fields remain storage-compatible, but no second color-editing page/layer is exposed.
     if state.features then
         local id='dbf_'..target:lower()..'_lut_'..string.format('%08x',catalog.identity.target_id or catalog.identity.armor)..'_'..catalog.identity.body
@@ -125,30 +144,42 @@ local function update()
     end
     if state.job then
         local started=state.memory.time()
+        local resumes=0
         repeat
+            if ctx.phase then ctx.phase(target..' discovery: '..(state.catalog.phase or 'begin'))end
             local ok,result=coroutine.resume(state.job);assert(ok,result)
+            resumes=resumes+1
             if coroutine.status(state.job)=='dead' then
-                state.job=nil;state.result=result;state.session.capture(result,now.units);note('Captured '..#state.session.bindings..' armor material bindings');break
+                state.job=nil;state.result=result;if m.diagnostic_without_menu then note('DIAGNOSTIC: '..target..' catalog complete; menu and native application withheld');if ctx.phase then ctx.phase(target..' no-menu catalog complete')end end;break
             end
-        until state.memory.time()-started>=0.0015
+        until resumes>=8 or state.memory.time()-started>=0.0015
     end
     if state.result and register(state.result) then
         if state.provider_menu then state.provider_menu.poll(state.api)end
+        if state.features and state.features.tick()then state.dirty=true;return end
         if matching_conflict()then
             assert(state.session.restore(),'Writer-conflict restoration pending')
             if not state.blocked_writer then note('Editing paused: Match Your Colors owns the selected target LUTs. Its setting has not been changed.')end
             state.blocked_writer=true;return
         elseif state.blocked_writer then state.blocked_writer=false;state.dirty=true end
-        if state.features then state.features.tick()end
     end
     if state.result and state.handle and state.dirty then
+        for _,kind in ipairs({'armor','helmet'})do local owner=package.loaded['dbf.'..kind..'_lut_editor.owner.v1'];if not owner or not owner.result then return end end
+        if m.diagnostic_discovery_only then
+            if not state.diagnostic_reported then
+                state.diagnostic_reported=true
+                note('DIAGNOSTIC: discovery and menu ready; native binding capture and texture writes withheld')
+                if ctx.phase then ctx.phase(target..' discovery-only: menu ready; native application withheld')end
+            end
+            return
+        end
         if state.handle.get('enabled') then
             if #state.session.bindings==0 then state.session.capture(state.result,now.units)end
             state.session.apply(state.handle,state.features and state.features.compose());note('Applied LUT edits; original bindings retained')
         else
             assert(state.session.restore(),'Restoration pending')
             -- Retake original bindings before the next enabled edit.
-            state.session.capture(state.result,now.units);note('Original armor bindings active')
+            state.session.capture(state.result,now.units);note('Original '..target:lower()..' bindings active ('..#state.session.bindings..' material bindings)')
         end
         state.dirty=false
     end
@@ -158,26 +189,7 @@ local function update()
             if state.native.alive(b.unit)==0 then state.signature=nil;break end
         end
     end
-    -- Explicit bounded live-test command, issued only by the deployment operator.
-    local testpath=ctx.dir..(target=='Helmet' and '/TEST-HELMET.txt'or '/TEST-ONCE.txt')
-    local file=io.open(testpath,'rb')
-    if file and state.result and state.handle then
-        local command=file:read('*a');file:close();os.remove(testpath)
-        if command:match('^restore') then assert(state.handle.set('enabled',false));state.dirty=true
-        elseif command:match('^roundtrip') then
-            local before=m.presets.encode(state.result,state.handle,state.features and state.features.document)
-            assert(state.handle.activate('export'));assert(state.handle.activate('reset_rows'));assert(state.handle.activate('import'))
-            assert(m.presets.encode(state.result,state.handle,state.features and state.features.document)==before,'Live preset round trip mismatch')
-            note('Live export/reset/import round trip verified all row colors and activation flags')
-        elseif command:match('^export') then assert(state.handle.activate('export'))
-        elseif command:match('^import') then assert(state.handle.activate('import'))
-        elseif command:match('^reset_rows') then assert(state.handle.activate('reset_rows'))
-        elseif command:match('^test') then
-            local lut=state.result.luts[1];local id=lut.name..'_r1'
-            assert(state.handle.set(id..'_color','#FF00FF'));assert(state.handle.set(id..'_on',true));assert(state.handle.set('enabled',true));state.dirty=true
-            note('Bounded magenta row 1 test queued; issue restore after visual inspection')
-        end
-    elseif file then file:close()end
+
 end
 local function close()
     if not state then return true end
@@ -187,7 +199,7 @@ local function close()
     unregister();if package.loaded[OWNER]==state then package.loaded[OWNER]=nil end
     note('Disabled; original bindings restored, immutable resources retained until process exit');state=nil;return true
 end
-return {name='Epic LUT',author='David / Nova; LUT discovery and native adapters by CowboyBingus',
+return {name='Epic LUT',author='Goose',
     on_enable=function(context)
         ctx=context;assert(not package.loaded[OWNER],'Armor editor already active or retiring')
         local memory=m.bingus_memory.new(m.bingus_runtime)
@@ -196,9 +208,9 @@ return {name='Epic LUT',author='David / Nova; LUT discovery and native adapters 
         local game=memory.address(assert(memory.module('game.dll')));local exe=memory.address(assert(memory.module()))
         local native=assert(m.engine.open(memory,game,exe))
         state={target_kind=target:lower(),memory=memory,game=game,native=native,reader=m.avatar.reader(memory),frame=0,dirty=false}
-        state.catalog=m.catalog.new(m,memory,game,target);state.session=m.session.new(m,memory,native,retained);package.loaded[OWNER]=state
-        if m.editor_features then state.features=m.editor_features.new(m,state,context,note)end
-        if m.provider_menu and target=='Armor' then state.provider_menu=m.provider_menu.new()end
+        state.catalog=m.catalog.new(m,memory,game,target,ctx.phase and function(stage)ctx.phase(target..' discovery: '..stage)end);state.session=m.session.new(m,memory,native,retained);package.loaded[OWNER]=state
+        if m.editor_features and not m.diagnostic_without_menu then state.features=m.editor_features.new(m,state,context,note)end
+        if m.provider_menu and not m.diagnostic_without_menu and target=='Armor' then state.provider_menu=m.provider_menu.new()end
         context.on_cleanup(close);note('Native contracts verified; waiting for local armor and MCM')
     end,
     on_update=function()
@@ -215,8 +227,8 @@ return {name='Epic LUT',author='David / Nova; LUT discovery and native adapters 
 end
 local armor=create('Armor')
 local helmet=create('Helmet')
-return {name='Epic LUT',author='David / Nova; LUT discovery and native adapters by CowboyBingus',
- on_enable=function(ctx)armor.on_enable(ctx);helmet.on_enable(ctx)end,
- on_update=function(ctx,dt)armor.on_update(ctx,dt);helmet.on_update(ctx,dt)end,
- on_disable=function(ctx)local h=helmet.on_disable(ctx);local a=armor.on_disable(ctx);return h==true and a==true end,
- on_cleanup_poll=function(ctx)local h=helmet.on_cleanup_poll(ctx);local a=armor.on_cleanup_poll(ctx);return h==true and a==true end}
+return {name='Epic LUT',author='Goose',
+ on_enable=function(ctx)if paths_factory then m.paths=paths_factory.new(m);ctx.settings_dir=m.paths.settings;ctx.files_dir=m.paths.files;ctx.presets_dir=m.paths.presets;preferences=m.preferences.new(m.paths.storage);if m.native_import.configure then m.native_import.configure(m,m.paths.cache,{bundle_dir=ctx.dir})end end;if m.frontend and not m.diagnostic_without_menu then local created=m.frontend.new(m,ctx);frontend=created;ctx.on_cleanup(function()return created.close()end)end;if frontend then frontend.preferences=preferences end;if m.bindings and frontend and preferences and not m.diagnostic_registry_only and not m.diagnostic_readonly_menu and not m.diagnostic_without_binding_adapter and not m.direct_menu_keys then bindings=m.bindings.new(m,frontend,preferences,ctx)end;ctx.log('Epic LUT diagnostic identity: '..(m.grouped_colors and 'grouped-colors' or m.alpha_ui and 'alpha-ui' or m.diagnostic_texture_application and 'direct-f10-textures' or m.diagnostic_without_binding_adapter and 'direct-f10' or m.diagnostic_interactive_menu and 'interactive-menu' or m.diagnostic_readonly_menu and 'readonly-menu' or m.diagnostic_idle_poll and 'idle-poll-only' or m.diagnostic_input_library and 'input-library-only' or m.diagnostic_registry_only and 'registry-only' or m.diagnostic_without_menu and 'discovery-no-menu' or m.diagnostic_discovery_only and 'discovery-only' or m.direct_menu_keys and 'direct-keyboard' or 'full-editor'));armor.on_enable(ctx);helmet.on_enable(ctx)end,
+ on_update=function(ctx,dt)armor.on_update(ctx,dt);helmet.on_update(ctx,dt);if frontend then frontend.tick(dt)end;if bindings then bindings.tick()end end,
+ on_disable=function(ctx)if bindings then bindings.close()end;if preferences then preferences.close()end;local f=not frontend or frontend.close();local h=helmet.on_disable(ctx);local a=armor.on_disable(ctx);return f and h==true and a==true end,
+ on_cleanup_poll=function(ctx)if bindings then bindings.close()end;if preferences then preferences.close()end;local f=not frontend or frontend.close();local h=helmet.on_cleanup_poll(ctx);local a=armor.on_cleanup_poll(ctx);return f and h==true and a==true end}

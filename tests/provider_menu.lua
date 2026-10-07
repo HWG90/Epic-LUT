@@ -8,5 +8,8 @@ local rootmod;for _,mod in ipairs(api.list())do if mod.id=='epic'then rootmod=mo
 assert(rootmod and rootmod.handle.get('original__mode')==1)
 assert(rootmod.handle.set('original__mode',2));assert(h.get('mode')==2 and changed==1,'Mounted setter failed original callback')
 assert(h.set('mode',3));assert(rootmod.handle.get('original__mode')==3 and changed==2,'Original change did not reach mounted view')
+local ok,did_change=Mount.disable_matching(api);assert(ok and did_change and h.get('mode')==1 and changed==3,'Import Off did not use the original setter/callback')
+assert(Mount.disable_matching(api)and changed==3,'Already-Off import repeated the provider callback')
+assert(h.set('mode',3))
 mount.release();assert(original.parent_name==nil and original.pages[1].name=='Settings' and h.get('mode')==3)
 h.unregister();assert(not mount.poll(api));print('PASS: provider absent/present, original registration retained, shared authoritative setters/callbacks, bidirectional values and presentation restoration')

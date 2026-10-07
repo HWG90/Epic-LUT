@@ -1,5 +1,21 @@
 -- Presentation mount only: original options retain their provider's handles, callbacks and persistence.
 local M={}
+function M.disable_matching(api)
+    for _,mod in pairs(api and api.mods or {})do
+        if mod.legacy and mod.name:lower():gsub('[^%w]','')=='matchyourcolors'then
+            for _,control in pairs(mod.controls)do
+                if control.type=='choice'and (control.label or ''):lower():gsub('[^%w]','')=='colormatching'then
+                    for index,label in ipairs(control.choices or {})do if label:lower()=='off'then
+                        if mod.handle.get(control.id)==index then return true,false end
+                        local ok,why=mod.handle.set(control.id,index);return ok,ok and true or why
+                    end end
+                end
+            end
+            return false,'Original Color Matching control unavailable'
+        end
+    end
+    return true,false
+end
 function M.new()
     local self={api=nil,owner=nil,prior_parent=nil,pages={}}
     function self.release()

@@ -45,13 +45,16 @@ def patch_luts(path,output):
         elif stream_size+gpu_size>=needed:payload=(stream[stream_at:stream_at+stream_size]+gpu[gpu_at:gpu_at+gpu_size])[:needed]
         elif len(main)>=192+148+needed:payload=main[192+148:192+148+needed]
         else:raise ValueError('Float LUT has no complete pixel payload')
-        data=decode_dds(header+payload);name_hex=f'{name:016x}';destination=Path(output)/(name_hex+'.dds')
+        # Resource sidecars expose the full-resolution payload separately from lower mip storage.
+        data=decode_dds(header+payload,base_level_only=True);name_hex=f'{name:016x}';destination=Path(output)/(name_hex+'.dds')
         if destination.exists():raise ValueError('Extracted LUT output already exists; use another output folder')
         save(destination,data)
         report.append({'resource':name_hex,'type':'texture','width':width,'height':height,'input_format':'RGBA32F' if format==2 else 'RGBA16F','output':str(destination),'original_archive':str(path),'target_identity':'Resource ID only; armor/helmet ownership is not inferred from the package filename'})
     return report
 
 def extract(package,output,sevenzip):
+    from runtime_paths import seven_zip
+    sevenzip=seven_zip(sevenzip)
     package=Path(package).resolve();output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
     members=archive_members(package,sevenzip);selected=[m['name'] for m in members if not m['folder'] and (PATCH.fullmatch(PurePosixPath(m['name']).name)or Path(m['name']).suffix.lower()in('.dds','.exr'))]
     if not selected:raise ValueError('No LUT files or standard game patch archives found')
@@ -73,7 +76,7 @@ def extract(package,output,sevenzip):
     (output/'extraction.json').write_text(json.dumps({'package':str(package),'members':members,'luts':report,'installed_or_applied':False},indent=2))
     return report
 
-def import_package(package,output,sevenzip=Path(r'C:\Program Files\7-Zip\7z.exe')):
+def import_package(package,output,sevenzip=None):
     package=Path(package);output=Path(output);output.mkdir(parents=True,exist_ok=True)
     if package.suffix.lower()!='.zip':return extract(package,output,sevenzip)
     with zipfile.ZipFile(package) as archive, tempfile.TemporaryDirectory(prefix='epic-lut-zip-') as temp:
@@ -103,5 +106,5 @@ def import_package(package,output,sevenzip=Path(r'C:\Program Files\7-Zip\7z.exe'
         return report
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('package',type=Path);p.add_argument('--output',type=Path,required=True);p.add_argument('--sevenzip',type=Path,default=Path(r'C:\Program Files\7-Zip\7z.exe'));a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('package',type=Path);p.add_argument('--output',type=Path,required=True);p.add_argument('--sevenzip',type=Path,default=None);a=p.parse_args()
     print(json.dumps(extract(a.package,a.output,a.sevenzip),indent=2))

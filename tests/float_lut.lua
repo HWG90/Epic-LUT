@@ -4,6 +4,13 @@ for i=0,n-1 do original[i]=(i%101-40)/17 end
 original[0]=500000;original[3]=2;original[13*4]=8.5;original[13*4+1]=100000000;original[13*4+2]=-12.5;original[13*4+3]=.46
 local bytes=D.encode(original,23,8);local decoded,w,h=D.decode(bytes,23,8)
 assert(w==23 and h==8 and ffi.string(original,n*4)==ffi.string(decoded,n*4),'Float DDS round trip changed HDR/negative values')
+local function header_word(raw,offset,value)return raw:sub(1,offset)..string.char(value%256,math.floor(value/256)%256,math.floor(value/65536)%256,math.floor(value/16777216)%256)..raw:sub(offset+5)end
+local mipmapped=header_word(header_word(bytes,24,1),28,2)..string.rep('\0',11*4*16)
+assert(ffi.string(D.decode(mipmapped),n*4)==ffi.string(original,n*4),'Mipmapped DDS changed the full-resolution LUT')
+assert(not pcall(D.decode,mipmapped:sub(1,-2)),'Truncated mip chain accepted')
+assert(not pcall(D.decode,header_word(mipmapped,28,99)),'Impossible mip count accepted')
+assert(not pcall(D.decode,header_word(mipmapped,8,0x80100f)),'Volume texture accepted')
+assert(not pcall(D.decode,header_word(mipmapped,112,512)),'Cube texture accepted')
 local recolor=P.copy(original,23,8,{[0]='#FF0080'},function(count)return ffi.new('float[?]',count)end,ffi.copy)
 for i=3,n-1 do assert(recolor[i]==original[i],'Base recolor changed an untouched value')end
 local changed=ffi.new('float[?]',n);for i=0,n-1 do changed[i]=-123 end

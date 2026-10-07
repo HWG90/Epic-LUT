@@ -1,0 +1,19 @@
+{
+  "python": {
+    "version": "3.13.16",
+    "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
+    "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297"
+  },
+  "wheels": [
+    {
+      "name": "numpy-2.5.3-cp313-cp313-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/f3/ec/100f2b1794ede74a9b3d7ec6b9736927f56713414c1dfe19ab6c383494bf/numpy-2.5.3-cp313-cp313-win_amd64.whl",
+      "sha256": "71cad2b2a7451ab79d8f5e71b453485b6775963d5cf794179144a7463fe6e8ec"
+    },
+    {
+      "name": "openexr-3.5.2-cp313-cp313-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/0f/21/73d1b73146572283541b5d9a32a90d69d10e7a3f34d237d87dd90f2e17d6/openexr-3.5.2-cp313-cp313-win_amd64.whl",
+      "sha256": "e1e04f581d456d29c06aa985e8ebb9e693b35197ea5dd0434d955561f1807f44"
+    }
+  ]
+}

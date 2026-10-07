@@ -1,6 +1,8 @@
-param([string]$Python=(Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'),[switch]$Verify)
+param([string]$Python='',[switch]$Verify)
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\tools\deploy_guard.ps1"
+. "$PSScriptRoot\tools\runtime_paths.ps1"
+$Python=Resolve-PythonRuntime $Python
 Assert-UnvirtualizedPath $Python
 Assert-UnvirtualizedPath (Get-PhysicalFilePath $Python)
 Push-Location $PSScriptRoot

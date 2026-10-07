@@ -6,6 +6,7 @@ from runtime_guard import require_physical_runtime
 require_physical_runtime()
 from lut_files import load,save,validate,encode_dds,convert_directory,MAX_BYTES
 from extract_luts import import_package
+from native_import import NativeImporter
 from urllib.parse import unquote
 import numpy as np
 ROOT=Path(__file__).resolve().parents[1]
@@ -19,6 +20,13 @@ def safe_name(name):
     if not isinstance(name,str) or not name or len(name)>120 or name in('.', '..')or re.search(r'[<>:"/\\|?*\x00-\x1f]',name)or name[-1]in(' ','.'):raise ValueError('Use a simple local filename')
     if re.fullmatch(r'CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]',Path(name).stem,re.I):raise ValueError('Reserved filename')
     return name
+
+def sharing_retry(operation):
+    for attempt in range(100):
+        try:return operation()
+        except OSError as error:
+            if getattr(error,'winerror',None)not in (32,33)or attempt==99:raise
+            time.sleep(.01)
 
 class Editor:
     def __init__(self,folder):
@@ -55,7 +63,29 @@ class Editor:
     def open_import(self,name):
         item=next((v for v in self.imports if v['name']==name),None);self.open(name)
         if item:self.resource=item['resource'];self.match()
-        # Import is preview-only; the user applies the selected target explicitly.
+        # Import is preview-only; application requires an explicit target action.
+    def transaction(self,records,snapshot):
+        if not records:raise ValueError('No known semantic fields could be mapped; originals retained')
+        planned=[];seen=set();lock=self.file('apply.lock')
+        with lock.open('xb')as f:f.write(b'Applying validated palette batch')
+        try:
+            for path,data in records:
+                if path in seen:continue
+                seen.add(path);payload=encode_dds(validate(data))
+                if path.parent!=self.folder or not path.exists()or load(path).shape!=data.shape:raise ValueError('Equipped working file changed or is unavailable')
+                prior=path.read_bytes();staged=self.file(path.name+'.batch-'+uuid.uuid4().hex)
+                planned.append((path,staged,prior));staged.write_bytes(payload)
+            if self.file('current.json').read_bytes()!=snapshot:raise ValueError('Equipment changed; choose targets again')
+            for path,staged,prior in planned:sharing_retry(lambda:os.replace(staged,path))
+            if self.file('current.json').read_bytes()!=snapshot:raise ValueError('Equipment changed during application; originals retained')
+        except Exception:
+            for path,staged,prior in planned:
+                if not staged.exists():sharing_retry(lambda:path.write_bytes(prior))
+            raise
+        finally:
+            for _,staged,_ in planned:sharing_retry(lambda:staged.unlink(missing_ok=True))
+            sharing_retry(lambda:lock.unlink(missing_ok=True))
+        return len(planned)
     def cells(self,rect):
         if self.data is None:raise ValueError('Open a LUT first')
         r0,r1,c0,c1=[int(v) for v in rect]
@@ -131,28 +161,18 @@ class Editor:
                     sources[resource]=load(self.file(item['name']))
                 included=[v for v in scoped if v['hash'] in sources and sources[v['hash']].shape==(v['height'],v['width'],4)]
             if not included:raise ValueError('No compatible equipped material LUTs')
-            payload=encode_dds(validate(self.data));planned=[];seen=set()
-            lock=self.file('apply.lock')
-            with lock.open('xb')as f:f.write(b'Applying validated palette batch')
-            try:
-                for v in included:
-                    path=self.file(v['working'])
-                    if path in seen:continue
-                    seen.add(path)
-                    candidate=sources[v['hash']] if sources else self.data
-                    if not path.exists() or load(path).shape!=candidate.shape:raise ValueError('Equipped working file changed or is unavailable')
-                    prior=path.read_bytes();staged=path.with_name(path.name+'.batch-'+uuid.uuid4().hex)
-                    planned.append((path,staged,prior));staged.write_bytes(encode_dds(candidate) if sources else payload)
-                if self.file('current.json').read_bytes()!=snapshot:raise ValueError('Equipment changed; choose targets again')
-                for path,staged,prior in planned:os.replace(staged,path)
-            except Exception:
-                for path,staged,prior in planned:
-                    if not staged.exists():path.write_bytes(prior)
-                raise
-            finally:
-                for _,staged,_ in planned:staged.unlink(missing_ok=True)
-                lock.unlink(missing_ok=True)
-            result=self.state();result['applied_batch']={'kind':kind,'count':len(planned),'resources':[v['hash'] for v in included],'skipped':len(scoped)-len(included)};return result
+            records=[(self.file(v['working']),sources[v['hash']]if sources else self.data)for v in included]
+            count=self.transaction(records,snapshot)
+            result=self.state();result['applied_batch']={'kind':kind,'count':count,'resources':[v['hash']for v in included],'skipped':len(scoped)-len(included)};return result
+        elif action=='quick_apply':
+            from remap import plan
+            snapshot=self.file('current.json').read_bytes()
+            records,report=plan(self,args['kind'],bool(args.get('preserve_material')),bool(args.get('preserve_emission')))
+            count=self.transaction(records,snapshot)
+            self.file('quick-load-report.json').write_text(json.dumps({'kind':args['kind'],'row_mapping':'nearest proportional, endpoint-aligned; single row repeats','preserve_material':bool(args.get('preserve_material')),'preserve_emission':bool(args.get('preserve_emission')),'results':report},indent=2),encoding='utf-8')
+            scoped=[v for v in json.loads(snapshot).get('luts',[])if v.get('kind')==args['kind']]
+            prefix=scoped[0].get('key','').rsplit('-',1)[0]if scoped else ''
+            result=self.state();result['quick_result']={'kind':args['kind'],'attempted':len(report),'applied':count,'skipped':len(report)-count,'remapped':sum(v.get('match')=='semantic remap'for v in report),'partial':sum('base color RGB only'in v.get('detail','')for v in report),'prefix':prefix};return result
         elif action=='bulk':return {'results':convert_directory(self.folder,args['format'])}
         else:raise ValueError('Unknown action')
         return self.state()
@@ -160,7 +180,10 @@ class Editor:
 class Bridge(threading.Thread):
     def __init__(self,editor):super().__init__(daemon=True);self.editor=editor;self.stopped=threading.Event();self.seen={}
     def run(self):
+        native=NativeImporter(self.editor.folder,Editor)
         while not self.stopped.wait(.5):
+            try:native.tick()
+            except Exception:pass
             for file in self.editor.folder.glob('*.exr'):
                 try:
                     if file.resolve().parent!=self.editor.folder:continue
@@ -176,7 +199,7 @@ class Bridge(threading.Thread):
                 except Exception as e:
                     file.with_name(file.name+'.status.json').write_text(json.dumps({'ok':False,'error':str(e)}))
 
-def serve(folder,port=8765,ready=None):
+def serve(folder,port=8765,ready=None,owner_pid=0):
     editor=Editor(folder);token=secrets.token_urlsafe(32)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -217,10 +240,22 @@ def serve(folder,port=8765,ready=None):
                     else:raise ValueError('Unknown action path')
             except Exception as e:self.json({'error':str(e)},400)
     server=ThreadingHTTPServer(('127.0.0.1',port),Handler);bridge=Bridge(editor);bridge.start()
+    owner_stopped=threading.Event()
+    if owner_pid:
+        from owner_watch import process_alive
+        def watch_owner():
+            while not owner_stopped.wait(.5):
+                try:alive=process_alive(owner_pid)
+                except OSError:continue
+                if not alive:server.shutdown();return
+        threading.Thread(target=watch_owner,daemon=True,name='Epic-LUT-owner-watch').start()
     if ready:Path(ready).write_text(json.dumps({'url':f'http://127.0.0.1:{server.server_port}','workspace':str(editor.folder),'pid':os.getpid()}))
     print(f'Epic LUT local editor: http://127.0.0.1:{server.server_port}',flush=True)
     try:server.serve_forever()
-    finally:bridge.stopped.set();server.server_close()
+    finally:
+        owner_stopped.set();bridge.stopped.set();bridge.join(timeout=2);server.server_close()
+        if owner_pid:
+            (editor.folder/'native-ready.txt').unlink(missing_ok=True)
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--workspace',type=Path,required=True);p.add_argument('--port',type=int,default=8765);p.add_argument('--ready',type=Path);a=p.parse_args();serve(a.workspace,a.port,a.ready)
+    p=argparse.ArgumentParser();p.add_argument('--workspace',type=Path,required=True);p.add_argument('--port',type=int,default=8765);p.add_argument('--ready',type=Path);p.add_argument('--owner-pid',type=int,default=0);a=p.parse_args();serve(a.workspace,a.port,a.ready,a.owner_pid)

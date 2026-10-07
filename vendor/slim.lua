@@ -181,9 +181,11 @@ local function dsar(files, path, scratch)
         elseif compression == 3 then
             local packed = scratch.packed(packed_size)
             files.read(handle, packed_at, packed_size, packed)
+            if files.trace then files.trace('LZ4 begin '..path..' chunk '..k..' packed '..packed_size..' output '..size)end
             if Slim.lz4(packed, packed_size, out, size, scratch.yield) ~= size then
                 error('lz4: short chunk in ' .. path, 0)
             end
+            if files.trace then files.trace('LZ4 complete '..path..' chunk '..k)end
         else
             error(format('compression %d in %s', compression, path), 0)
         end
