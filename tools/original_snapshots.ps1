@@ -4,8 +4,10 @@ try {
  New-Item -ItemType Directory -Path $Output -Force | Out-Null
  $errorFile=Join-Path $Output 'error.txt';if(Test-Path -LiteralPath $errorFile){Remove-Item -LiteralPath $errorFile}
  $cancelFile=Join-Path $Output 'progress.txt.cancel';if(Test-Path -LiteralPath $cancelFile){Remove-Item -LiteralPath $cancelFile}
+ [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Locating game data...')
  if(!$GameData){$exe=(Get-Process -Id $OwnerPID -ErrorAction Stop).Path;$GameData=Join-Path (Split-Path $exe -Parent) 'data';if(!(Test-Path -LiteralPath (Join-Path $GameData 'bundles.nxa'))){$GameData=Join-Path (Split-Path (Split-Path $exe -Parent) -Parent) 'data'}}
  $index=Join-Path $GameData 'bundles.nxa'
+ [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Checking original LUT cache...')
  $stream=[IO.File]::OpenRead($index);$sha=[Security.Cryptography.SHA256]::Create()
  try {$stamp=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')} finally {$stream.Dispose();$sha.Dispose()}
  $marker=Join-Path $Output $(if($IndexOnly){'index-complete.txt'}else{'complete.txt'})
@@ -14,6 +16,7 @@ try {
  if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
  New-Item -ItemType Directory -Path $Output -Force | Out-Null
+ [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Preparing snapshot reader...')
  Add-Type -Path (Join-Path $PSScriptRoot 'original_snapshots.cs')
  $wantedPath=if($IndexOnly){$null}else{$Wanted}
  if(!$IndexOnly -and !(Test-Path -LiteralPath $Wanted)){throw 'Equipped LUT request missing'}

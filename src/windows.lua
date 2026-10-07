@@ -40,6 +40,15 @@ function W.launch_worker(args,folder)
     function self.close()if self.handle~=nil then kernel.epic_worker_close(self.handle);self.handle=nil end end
     return self
 end
+function W.game_data()
+    local ffi=require('ffi');local _,kernel=W.verify_interface()
+    if not pcall(function()return kernel.epic_worker_module_file end)then ffi.cdef('uint32_t epic_worker_module_file(void *,uint16_t *,uint32_t) __asm__("GetModuleFileNameW");')end
+    local path=ffi.new('uint16_t[32768]');local count=tonumber(kernel.epic_worker_module_file(nil,path,32768));assert(count>0 and count<32768,'Game executable path unavailable')
+    local length=kernel.epic_native_utf8(65001,0,path,count,nil,0,nil,nil);local bytes=ffi.new('char[?]',length+1);assert(kernel.epic_native_utf8(65001,0,path,count,bytes,length,nil,nil)==length)
+    local exe=ffi.string(bytes,length):gsub('\\','/');local parent=assert(exe:match('^(.*)/[^/]+$'))
+    if parent:lower():match('/bin$')then parent=parent:sub(1,-5)end
+    return parent..'/data'
+end
 function W.files(folder,filter)
     local ffi=require('ffi');local _,kernel=W.verify_interface()
     if not pcall(ffi.typeof,'epic_find_data')then ffi.cdef([[

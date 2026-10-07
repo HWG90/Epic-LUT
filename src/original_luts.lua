@@ -52,7 +52,7 @@ function O.new(m,paths,native,targets)
         local _,kernel=m.windows.verify_interface();local pid=tonumber(kernel.epic_native_pid())
         self.phase=index and 'index'or 'capture'
         local extra=index and ' -IndexOnly'or ' -Wanted "'..folder..'/wanted.txt"'
-        self.worker=m.windows.launch_worker('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'..paths.cache..'/original_snapshots.ps1" -Output "'..folder..'" -OwnerPID '..pid..extra,paths.cache)
+        self.worker=m.windows.launch_worker('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'..paths.cache..'/original_snapshots.ps1" -Output "'..folder..'" -OwnerPID '..pid..extra..(m.windows.game_data and ' -GameData "'..m.windows.game_data()..'"'or ''),paths.cache)
         self.began=os.time();self.status=index and 'Indexing original LUT resources: 0%'or 'Reading equipped original LUTs: 0%'
     end
     local function match_equipped()
@@ -76,7 +76,7 @@ function O.new(m,paths,native,targets)
     end
     local function tick()
         if self.worker then
-            self.status=exists(folder..'/progress.txt')or 'Reading original game LUT snapshots: 0%'
+            self.status=exists(folder..'/progress.txt')or (self.phase=='index'and 'Starting resource index worker...'or 'Starting equipped LUT capture...')
             if os.time()-self.began>120 then cancel_worker();self.status='Original snapshot reader timed out; editor remains available';return end
             if not self.worker.running()then
                 self.worker.close();self.worker=nil
