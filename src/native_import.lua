@@ -39,7 +39,7 @@ function N.new(folder,kind)
     function self.locked()return tonumber(kernel.epic_native_attributes(wide))~=4294967295 end
     local function path_wide(text)local n=kernel.epic_native_wide(65001,8,text,-1,nil,0);assert(n>0);local value=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,text,-1,value,n)==n);return value end
     local function read(path)local f=io.open(path,'rb');if not f then return nil end;local s=f:read(8193)or '';f:close();assert(#s<=8192,'Native import result too large');return s end
-    local function ready()local value=tonumber(read(folder..'/native-ready.txt'));return value and math.abs(os.time()-value)<5 and (not N.model or not N.model.runtime_hash or read(folder..'/native-version.txt')=='archive-worker-v4')end
+    local function ready()local value=tonumber(read(folder..'/native-ready.txt'));return value and math.abs(os.time()-value)<5 and (not N.model or not N.model.service_files or read(folder..'/native-version.txt')=='archive-worker-v4')end
     local function launch()
         if ready()then return end
         assert(N.model and N.cache,'Automatic file service is unavailable in this build')
@@ -67,8 +67,9 @@ function N.new(folder,kind)
             local bundle=N.options.bundle_dir or ''
             assert(not game_data:find('"',1,true)and not bundle:find('"',1,true),'Invalid bundled runtime path')
             args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'..root..'/tools/start_bundled.ps1" -RuntimeHash '..N.model.runtime_hash..' -BundleDirectory "'..bundle..'" -GameData "'..game_data..'" -Workspace "'..folder..'" -Port '..N.port
-            local protocol=read(folder..'/native-version.txt');if protocol and protocol~='archive-worker-v4'then args=args..' -RestartOwn'end
+            if N.model.flat_manifest_hash then assert(N.model.flat_manifest_hash:match('^[a-f0-9]+$')and #N.model.flat_manifest_hash==64);args=args..' -FlatManifestHash '..N.model.flat_manifest_hash end
         end
+        local protocol=read(folder..'/native-version.txt');if protocol and protocol~='archive-worker-v4'then args=args..' -RestartOwn'end
         args=args..' -OwnerPID '..tostring(N.options.owner_pid or tonumber(kernel.epic_native_pid()))
         local result=shell.epic_native_launch(nil,path_wide('open'),path_wide('powershell.exe'),path_wide(args),path_wide(root),0)
         assert(tonumber(ffi.cast('uintptr_t',result))>32,'Windows could not start the file service')
@@ -114,7 +115,7 @@ function N.new(folder,kind)
             local failure=read(self.start_error)
             if failure then
                 self.queued=nil;self.pending=nil;N.started=nil
-                return 'Bundled file runtime failed to start. Check startup-error.log in Epic LUT cache/file-service/dist/companion; reinstall the complete package if runtime files are missing.',1,{swatches={}}
+                return (N.model and N.model.system_python and 'System Python service failed to start. Install 64-bit non-Store Python and run setup_companion.ps1 once. Check startup-error.log in Epic LUT cache/file-service/dist/companion.'or 'Bundled file runtime failed to start. Check startup-error.log in Epic LUT cache/file-service/dist/companion; reinstall the complete package if runtime files are missing.'),1,{swatches={}}
             end
         end
         send();if self.queued and os.time()-self.queued.started>30 then self.queued=nil;self.pending=nil;return 'File service could not start. Check Python dependencies and the file-service logs in Epic LUT cache.',1,{swatches={}}end

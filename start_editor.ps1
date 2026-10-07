@@ -2,7 +2,7 @@ param([string]$Python='',[string]$Workspace=(Join-Path $env:LOCALAPPDATA 'Epic L
 $ErrorActionPreference='Stop'
 if(-not $Python -and (Test-Path -LiteralPath "$PSScriptRoot\armor_lut_editor\runtime-manifest.json")) {
     $runtime=Get-Content -LiteralPath "$PSScriptRoot\armor_lut_editor\runtime-manifest.json" -Raw | ConvertFrom-Json
-    & "$PSScriptRoot\tools\start_bundled.ps1" -RuntimeHash $runtime.sha256 -BundleDirectory "$PSScriptRoot\armor_lut_editor" -Workspace $Workspace -Port $Port -OwnerPID $OwnerPID
+    & "$PSScriptRoot\tools\start_bundled.ps1" -RuntimeHash $runtime.sha256 -BundleDirectory "$PSScriptRoot\armor_lut_editor" -Workspace $Workspace -Port $Port -OwnerPID $OwnerPID -FlatManifestHash $runtime.flat_manifest_sha256
     return
 }
 trap {

@@ -1,6 +1,6 @@
 from pathlib import Path
 import hashlib,json,zipfile,os,argparse
-parser=argparse.ArgumentParser();parser.add_argument('--diagnostic',action='store_true');parser.add_argument('--without-native-bindings',action='store_true');parser.add_argument('--discovery-only',action='store_true');parser.add_argument('--without-editor-menu',action='store_true');parser.add_argument('--registry-only',action='store_true');parser.add_argument('--input-library-only',action='store_true');parser.add_argument('--idle-poll-only',action='store_true');parser.add_argument('--readonly-menu',action='store_true');parser.add_argument('--interactive-menu',action='store_true');parser.add_argument('--without-binding-adapter',action='store_true');parser.add_argument('--with-texture-application',action='store_true');parser.add_argument('--alpha-ui',action='store_true');parser.add_argument('--grouped-colors',action='store_true');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--diagnostic',action='store_true');parser.add_argument('--without-native-bindings',action='store_true');parser.add_argument('--discovery-only',action='store_true');parser.add_argument('--without-editor-menu',action='store_true');parser.add_argument('--registry-only',action='store_true');parser.add_argument('--input-library-only',action='store_true');parser.add_argument('--idle-poll-only',action='store_true');parser.add_argument('--readonly-menu',action='store_true');parser.add_argument('--interactive-menu',action='store_true');parser.add_argument('--without-binding-adapter',action='store_true');parser.add_argument('--with-texture-application',action='store_true');parser.add_argument('--alpha-ui',action='store_true');parser.add_argument('--grouped-colors',action='store_true');parser.add_argument('--flat-runtime',action='store_true');parser.add_argument('--system-python',action='store_true');args=parser.parse_args()
 if args.grouped_colors:args.alpha_ui=True
 if args.alpha_ui:args.diagnostic=True;args.without_binding_adapter=True;args.with_texture_application=True
 if args.without_binding_adapter:args.interactive_menu=True
@@ -12,14 +12,20 @@ if args.with_texture_application:
     if not args.without_binding_adapter or not args.diagnostic:parser.error('--with-texture-application requires --diagnostic --without-binding-adapter')
     if args.without_editor_menu or args.registry_only or args.readonly_menu:parser.error('Texture application conflicts with non-interactive diagnostics')
     args.discovery_only=False
+if args.system_python and args.flat_runtime:parser.error('--system-python and --flat-runtime are mutually exclusive')
 from tools.runtime_guard import require_physical_runtime
 require_physical_runtime()
 ROOT=Path(__file__).resolve().parent
-runtime_path=ROOT/'dist/runtime/runtime.zip'
-if not runtime_path.exists():
-    import subprocess,sys
-    subprocess.run([sys.executable,str(ROOT/'tools/prepare_runtime.py')],check=True)
-runtime_bytes=runtime_path.read_bytes();runtime_hash=hashlib.sha256(runtime_bytes).hexdigest()
+runtime_bytes=b'';runtime_hash=None;flat_files=None;flat_hash=None
+if not args.system_python:
+    runtime_path=ROOT/'dist/runtime/runtime.zip'
+    if not runtime_path.exists():
+        import subprocess,sys
+        subprocess.run([sys.executable,str(ROOT/'tools/prepare_runtime.py')],check=True)
+    runtime_bytes=runtime_path.read_bytes();runtime_hash=hashlib.sha256(runtime_bytes).hexdigest()
+    if args.flat_runtime:
+        from tools.flat_runtime import flatten
+        flat_files,flat_hash=flatten(runtime_bytes)
 VENDOR=['bingus_runtime','bingus_memory','engine','avatar','kits','files','slim','texture']
 OWN=['palette','catalog','dds','semantics','document','provider_menu','open_companion','native_import','paths','preferences','bindings','frontend','editor_features','session','presets']
 parts=['-- Epic LUT R3; LUT discovery and native adapters by CowboyBingus.\nlocal m={}\n']
@@ -36,9 +42,12 @@ if args.without_binding_adapter:parts.append('m.diagnostic_without_binding_adapt
 if args.with_texture_application:parts.append('m.diagnostic_texture_application=true\n')
 if args.alpha_ui:parts.append('m.alpha_ui=true\n')
 if args.grouped_colors:parts.append('m.grouped_colors=true\n')
-service_files=['tools/owner_watch.py','start_editor.ps1','tools/start_bundled.ps1','tools/runtime_paths.ps1','tools/deploy_guard.ps1','tools/companion.py','tools/native_import.py','tools/game_catalog.py','tools/remap.py','tools/lut_files.py','tools/extract_luts.py','tools/runtime_guard.py','tools/runtime_paths.py','companion/index.html']
+service_files=['tools/install_flat_runtime.ps1','tools/owner_watch.py','start_editor.ps1','tools/start_bundled.ps1','tools/runtime_paths.ps1','tools/deploy_guard.ps1','tools/companion.py','tools/native_import.py','tools/game_catalog.py','tools/remap.py','tools/lut_files.py','tools/extract_luts.py','tools/runtime_guard.py','tools/runtime_paths.py','companion/index.html']
+if args.system_python:service_files=[name for name in service_files if name not in ('tools/start_bundled.ps1','tools/install_flat_runtime.ps1')]
 parts.append('m.service_files={'+','.join('['+repr(name)+']='+repr((ROOT/name).read_bytes().hex())for name in service_files)+'}\n')
-parts.append(f'm.runtime_hash={runtime_hash!r}\n')
+if runtime_hash:parts.append(f'm.runtime_hash={runtime_hash!r}\n')
+if args.system_python:parts.append('m.system_python=true\n')
+if flat_hash:parts.append(f'm.flat_manifest_hash={flat_hash!r}\n')
 MENU=['core','store','menu','view','capture','grouping','legacy']
 for name in MENU:
     parts.append(f'm.ui_{name}=(function()\n'+(ROOT/'vendor/menu'/f'{name}.lua').read_text(encoding='utf-8')+'\nend)()\n')
@@ -59,8 +68,8 @@ out=ROOT/'dist/armor_lut_editor';out.mkdir(parents=True,exist_ok=True)
 (out/'files').mkdir(exist_ok=True)
 (out/'files/README.txt').write_text('Working float DDS, external DDS/EXR and private original LUT snapshots live here. EXR conversion uses the local file service.\n')
 (out/native_name).write_bytes(native_path.read_bytes())
-(out/'runtime.zip').write_bytes(runtime_bytes)
-(out/'runtime-manifest.json').write_text(json.dumps({'sha256':runtime_hash,'bytes':len(runtime_bytes)},indent=2))
+if not args.system_python:(out/'runtime.zip').write_bytes(runtime_bytes)
+if not args.system_python:(out/'runtime-manifest.json').write_text(json.dumps({'sha256':runtime_hash,'bytes':len(runtime_bytes),'flat_manifest_sha256':flat_hash},indent=2))
 (out/'library.txt').write_text(native_name)
 (out/'LICENSE-CowboyBingus.txt').write_bytes((ROOT/'vendor/LICENSE').read_bytes())
 receipt={'name':'Epic LUT R3','author':'Goose',
@@ -85,15 +94,47 @@ archive=write({hash_name(entry_name):envelope})
 assert read(archive)[hash_name(entry_name)][1]==envelope
 assert startup.startswith('-- HD2-Addon: '+entry_name+'\n')
 manager={'Version':1,'Guid':'2ef4f437-4a43-47ed-b1d0-15505f11c761','Author':'Goose','Name':'Epic LUT R3','Description':'Requires Bingus Shared Loader v15+ for this manager entry. Uses MCM when compatible, own in-game menu otherwise. Includes its own Windows x64 Python runtime and codecs; no Python installation or setup is required.','Options':[{'Name':'Bingus Shared Loader startup','Include':['data']}]}
-release_name='Epic-LUT-R3-grouped-colors-test.zip'if args.grouped_colors else 'Epic-LUT-R3-alpha-ui-test.zip'if args.alpha_ui else 'Epic-LUT-R3-direct-f10-textures-test.zip'if args.with_texture_application else 'Epic-LUT-R3-direct-f10-test.zip'if args.without_binding_adapter else 'Epic-LUT-R3-interactive-menu-test.zip'if args.interactive_menu else 'Epic-LUT-R3-readonly-menu-test.zip'if args.readonly_menu else 'Epic-LUT-R3-idle-poll-only-test.zip'if args.idle_poll_only else 'Epic-LUT-R3-input-library-only-test.zip'if args.input_library_only else 'Epic-LUT-R3-registry-only-test.zip'if args.registry_only else 'Epic-LUT-R3-discovery-no-menu-test.zip'if args.without_editor_menu else 'Epic-LUT-R3-discovery-only-test.zip'if args.discovery_only else ('Epic-LUT-R3-reader-diagnostic.zip'if args.diagnostic else 'Epic-LUT-R3.zip')
+if args.flat_runtime:manager['Description']='Python and codecs are included as normal files. BSL users: extract this ZIP and run Install-Runtime.ps1 once before enabling the data option. LLL/MDL installs the complete armor_lut_editor folder automatically. MCM is optional.'
+if args.system_python:manager['Description']='Requires separately installed 64-bit non-Store Python and one-time setup_companion.ps1 codec setup. File service starts automatically afterward. MCM is optional.'
+release_name='Epic-LUT-R3-system-python.zip'if args.system_python else 'Epic-LUT-R3-flat-runtime-test.zip'if args.flat_runtime else 'Epic-LUT-R3-grouped-colors-test.zip'if args.grouped_colors else 'Epic-LUT-R3-alpha-ui-test.zip'if args.alpha_ui else 'Epic-LUT-R3-direct-f10-textures-test.zip'if args.with_texture_application else 'Epic-LUT-R3-direct-f10-test.zip'if args.without_binding_adapter else 'Epic-LUT-R3-interactive-menu-test.zip'if args.interactive_menu else 'Epic-LUT-R3-readonly-menu-test.zip'if args.readonly_menu else 'Epic-LUT-R3-idle-poll-only-test.zip'if args.idle_poll_only else 'Epic-LUT-R3-input-library-only-test.zip'if args.input_library_only else 'Epic-LUT-R3-registry-only-test.zip'if args.registry_only else 'Epic-LUT-R3-discovery-no-menu-test.zip'if args.without_editor_menu else 'Epic-LUT-R3-discovery-only-test.zip'if args.discovery_only else ('Epic-LUT-R3-reader-diagnostic.zip'if args.diagnostic else 'Epic-LUT-R3.zip')
 with zipfile.ZipFile(ROOT/'dist'/release_name,'w',zipfile.ZIP_DEFLATED) as z:
     z.writestr('manifest.json',json.dumps(manager,indent=2))
     z.writestr('data/9ba626afa44a3aa3.patch_0',archive)
-    z.writestr('data/9ba626afa44a3aa3.patch_0.stream',runtime_bytes)
+    z.writestr('data/9ba626afa44a3aa3.patch_0.stream',b''if args.flat_runtime else runtime_bytes)
     z.writestr('data/9ba626afa44a3aa3.patch_0.gpu_resources',b'')
     for name in ['mod.lua','manifest.json','library.txt',native_name,'runtime.zip','runtime-manifest.json','LICENSE-CowboyBingus.txt','files/README.txt','presets/README.txt']:
+        if (args.flat_runtime and name=='runtime.zip')or(args.system_python and name in ('runtime.zip','runtime-manifest.json')):continue
         z.write(out/name,'armor_lut_editor/'+name)
     helpers=['README.md','requirements-companion.txt','setup_companion.ps1','start_editor.ps1','companion/index.html','tools/companion.py','tools/native_import.py','tools/remap.py','tools/lut_files.py','tools/extract_luts.py','tools/runtime_guard.py','tools/runtime_paths.py','tools/runtime_paths.ps1','tools/deploy_guard.ps1','docs/FILES.md','docs/MAPPING.md','docs/FRONTEND.md','docs/BSL.md','docs/NEXUS.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R3.md']
-    helpers+=['tools/owner_watch.py','tools/start_bundled.ps1','tools/game_catalog.py','tools/runtime-lock.json']
-    for name in helpers:z.write(ROOT/name,name)
+    helpers+=['tools/install_flat_runtime.ps1','tools/owner_watch.py','tools/start_bundled.ps1','tools/game_catalog.py','tools/runtime-lock.json']
+    for name in helpers:
+        if args.system_python and name in ('tools/start_bundled.ps1','tools/install_flat_runtime.ps1','tools/runtime-lock.json'):continue
+        if args.system_python and name=='README.md':
+            z.writestr(name,(ROOT/'docs/SYSTEM-PYTHON.md').read_text(encoding='utf-8'));continue
+        if args.system_python and name.startswith('docs/'):
+            continue # Variant-specific requirements replace bundled-runtime documentation.
+        if args.flat_runtime and name.startswith(('docs/','README')):
+            text=(ROOT/name).read_text(encoding='utf-8')
+            text=text.replace('no Python installation, pip command, setup script or browser is required','no separate Python installation, pip command, codec setup or browser is required')
+            text=text.replace('runtime.zip','the flat runtime folder')
+            if name=='README.md':text='''# Flat-runtime installation
+
+Python, NumPy, OpenEXR and the standard library are included as ordinary files. There are no nested ZIPs.
+
+BSL / Arsenal / HD2MM: extract the complete download, run Install-Runtime.ps1 once in PowerShell, then install/enable its data option. The script verifies and copies the runtime into your local Epic LUT cache; it does not install system Python. Keep the extracted package available until installation completes.
+
+LLL / MDL: install the complete armor_lut_editor folder, including runtime. First-time runtime copying and startup are automatic.
+
+The EXE and DLL files remain visible for normal platform scanning and may require Nexus review. Older zipped packages and existing private caches remain compatible. No game restart, file installation, or publication was performed when creating this package.
+
+'''+text
+            z.writestr(name,text)
+        else:z.write(ROOT/name,name)
+    if args.system_python:z.write(ROOT/'docs/SYSTEM-PYTHON.md','docs/SYSTEM-PYTHON.md')
+    if flat_files:
+        for name,data in sorted(flat_files.items()):z.writestr('armor_lut_editor/runtime/'+name,data)
+        installer="$ErrorActionPreference='Stop'\n& (Join-Path $PSScriptRoot 'tools/install_flat_runtime.ps1') -SourceRuntime (Join-Path $PSScriptRoot 'armor_lut_editor/runtime') -DestinationRuntime (Join-Path $env:LOCALAPPDATA 'Epic LUT/cache/file-service/runtime-%s') -RuntimeHash '%s' -ManifestHash '%s'\nWrite-Output 'Epic LUT runtime installed. You can now start the game.'\n"%(runtime_hash[:16],runtime_hash,flat_hash)
+        z.writestr('Install-Runtime.ps1',installer)
+        z.writestr('FLAT-RUNTIME-INSTALL.txt','Python and codecs are included as normal files; no nested archives.\nBSL: extract the ZIP and run Install-Runtime.ps1 once before launching the game. Then install the data option through Arsenal/HD2MM.\nLLL/MDL: install the complete armor_lut_editor folder; runtime installation is automatic.\nDo not install both entrypoints. Existing private runtimes remain compatible. EXE/DLL files still require platform review.\n')
+
 print(out/'mod.lua')
