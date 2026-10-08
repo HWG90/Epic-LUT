@@ -1,0 +1,35 @@
+-- Shared, immutable guidance for custom editor controls.
+local basic = {
+    browse = 'Choose a DDS file or an archive. Importing loads colors; use an Apply button to put them on gear.',
+    populate_worn = 'Read the current colors from your worn Armor and Helmet.',
+    apply_matching = 'Apply imported LUTs whose resource IDs match your worn gear. Unmatched tables are left unchanged.',
+    apply_file_armor = 'Apply the imported LUT selected on the right to every LUT on your worn Armor.',
+    apply_file_helmet = 'Apply the imported LUT selected on the right to every LUT on your worn Helmet.',
+    apply_import_armor = 'Import the selected lut00X.dds on the right panel into this Armor table only.',
+    apply_import_helmet = 'Import the selected lut00X.dds on the right panel into this Helmet table only.',
+    basic_copy_helmet = 'Copy the selected Helmet table into the selected Armor table. Colors apply live.',
+    basic_copy_helmet_all = 'Copy the selected Helmet table into every worn Armor table. Colors apply live.',
+    basic_copy_armor = 'Copy the selected Armor table into the selected Helmet table. Colors apply live.',
+    outfit_apply_armor = 'Apply only the Armor half of the selected Armory preset.',
+    outfit_apply_helmet = 'Apply only the Helmet half of the selected Armory preset.',
+    save_setup = 'Save your current gear colors to The Armory. Choose Armor Only, Helmet Only, or Both, then name it.',
+    restore = 'Restore Arrowhead original LUT bindings and refresh the displayed gear colors.',
+    restore_imported = 'Reset editor values to the imported file. The imported file remains available.',
+    stop_identify = 'Stop the flashing region highlight and restore the colors shown before highlighting.',
+    undo = 'Undo the last color edit.',
+    redo = 'Redo the last undone color edit.',
+}
+local imported = {
+    browse = 'Import a DDS or select one variant from an archive. This does not apply colors to gear.',
+    apply_matching = 'Match imported resource IDs to worn gear and apply only matching LUTs.',
+    apply_file_armor = 'Apply the selected imported LUT to all worn Armor LUTs.',
+    apply_file_helmet = 'Apply the selected imported LUT to all worn Helmet LUTs.',
+    save_palette = 'Copy the selected imported LUT into the LUT Editor. Gear stays unchanged.',
+    restore = 'Restore Arrowhead original gear LUTs and refresh the palettes.',
+    restore_imported = 'Reset editor values to the imported file.',
+    global_undo = 'Undo the last action, including imports and gear applications.',
+    global_redo = 'Redo the last undone action.',
+    save_setup = 'Choose Armor, Helmet, or Both and save a named Armory preset.',
+    preserve_emissives = 'Keep original game emissive values and shader modes when applying imported colors.',
+}
+return { basic = basic, imported = imported }

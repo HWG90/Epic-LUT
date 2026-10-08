@@ -1,4 +1,4 @@
-import ctypes,os
+import os
 from tools.runtime_guard import require_physical_runtime,blocked_path
 require_physical_runtime()
 assert blocked_path('C:/Users/test/AppData/Local/Microsoft/WindowsApps/python.exe')
@@ -13,16 +13,20 @@ os.environ['EPIC_LUT_TEST_ROOT']=str(ROOT)
 (ROOT/'tests/tmp/direct-state').mkdir(parents=True,exist_ok=True)
 (ROOT/'tests/tmp/presets').mkdir(exist_ok=True)
 os.environ.setdefault('MCM_SOURCE_DIR',str(ROOT.parent/'DBF-MCM'))
-from tools.runtime_paths import lua_library
-dll=ctypes.CDLL(str(lua_library()))
-dll.luaL_newstate.restype=ctypes.c_void_p
-for n in ['luaL_openlibs','lua_close']:getattr(dll,n).argtypes=[ctypes.c_void_p]
-dll.luaL_loadfile.argtypes=[ctypes.c_void_p,ctypes.c_char_p];dll.lua_pcall.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_int,ctypes.c_int]
-dll.lua_tolstring.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_void_p];dll.lua_tolstring.restype=ctypes.c_char_p
-for file in [*ROOT.glob('src/*.lua'),*ROOT.glob('vendor/*.lua'),ROOT/'dist/armor_lut_editor/mod.lua',ROOT/'tests/contracts.lua',ROOT/'tests/float_lut.lua',ROOT/'tests/provider_menu.lua',ROOT/'tests/full_editor.lua',ROOT/'tests/native_ipc.lua',ROOT/'tests/frontend.lua',ROOT/'tests/startup_bridge.lua',ROOT/'tests/bindings.lua',ROOT/'tests/catalog_split_read.lua',ROOT/'tests/catalog_worker.lua',ROOT/'tests/startup_apply_gate.lua',ROOT/'tests/direct_editor.lua',ROOT/'tests/palette_editor.lua',ROOT/'tests/standalone_frontend.lua',ROOT/'tests/import_view.lua',ROOT/'tests/table_groups.lua',ROOT/'tests/original_luts.lua',ROOT/'tests/basic_view.lua',ROOT/'tests/update_check.lua',ROOT/'tests/editor_state.lua',ROOT/'tests/outfit_presets.lua',ROOT/'tests/armory_view.lua',ROOT/'tests/import_matches.lua',ROOT/'dist/Epic-LUT-BSL-startup.lua']:
-    L=dll.luaL_newstate();dll.luaL_openlibs(L)
-    code=dll.luaL_loadfile(L,str(file).encode())
-    if not code and file.name in ('contracts.lua','float_lut.lua','provider_menu.lua','full_editor.lua','native_ipc.lua','frontend.lua','startup_bridge.lua','bindings.lua','catalog_split_read.lua','catalog_worker.lua','startup_apply_gate.lua','direct_editor.lua','palette_editor.lua','standalone_frontend.lua','import_view.lua','table_groups.lua','original_luts.lua','basic_view.lua','update_check.lua','editor_state.lua','outfit_presets.lua','armory_view.lua','import_matches.lua'):code=dll.lua_pcall(L,0,0,0)
-    if code:raise RuntimeError(f'{file}: '+dll.lua_tolstring(L,-1,None).decode(errors='replace'))
-    dll.lua_close(L)
-print('PASS: all source and bundled LuaJIT syntax; meaningful session/palette contracts')
+from tools.lua_runner import LuaRunner
+
+TESTS = (
+    'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc',
+    'frontend', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
+    'startup_apply_gate', 'direct_editor', 'palette_editor', 'standalone_frontend',
+    'import_view', 'table_groups', 'original_luts', 'basic_view', 'update_check',
+    'editor_state', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files',
+)
+runner = LuaRunner()
+for path in sorted([*ROOT.glob('src/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):
+    runner.check(path)
+for path in (ROOT/'dist/armor_lut_editor/mod.lua', ROOT/'dist/Epic-LUT-BSL-startup.lua'):
+    runner.check(path)
+for name in TESTS:
+    runner.check(ROOT/'tests'/f'{name}.lua', execute=True)
+print('PASS: source and bundled LuaJIT syntax; isolated editor contracts')

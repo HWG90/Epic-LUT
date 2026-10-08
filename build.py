@@ -27,9 +27,10 @@ if Path(args.output).name != args.output or not args.output.endswith('.zip'):
 
 OUT = ROOT / 'dist/armor_lut_editor'
 OUT.mkdir(parents=True, exist_ok=True)
-VENDOR = ['bingus_runtime', 'bingus_memory', 'engine', 'avatar']
-MENU = ['core', 'store', 'menu', 'view', 'capture']
-OWN = ['dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor', 'direct_setup', 'import_view', 'table_groups', 'original_luts','basic_view','armory_view','outfit_presets','basic_state','resource_ids','import_matches','region_indicator','action_history','update_check']
+from tools.module_inventory import VENDOR, MENU, OWN as EDITOR_MODULES, PREVIEW
+OWN = list(EDITOR_MODULES)
+if args.player_preview:
+    OWN.extend(PREVIEW)
 NATIVE_NAME = 'mcm_input_9bc2033ffbb3.dll'
 NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
 native_path = Path(os.environ['EPIC_LUT_INPUT_LIBRARY']) if os.environ.get('EPIC_LUT_INPUT_LIBRARY') else ROOT.parent/'DBF-MCM/native/build'/NATIVE_NAME
@@ -55,14 +56,13 @@ for name in VENDOR:
 for name in OWN:
     parts.append(module(name, 'src/standalone_frontend.lua' if name=='frontend' else f'src/{name}.lua'))
 parts.append('m.native_import=m.windows\n')
-parts.append('return (function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
-model = ''.join(parts)
 if args.player_preview:
-    wrapped=['local editor=(function()\n',model,'\nend)()\nlocal m={}\nlocal PREVIEW_INSPECT_ONLY=false\n']
-    for name,folder in [('bingus_runtime','vendor'),('bingus_memory','vendor'),('avatar','vendor'),('engine','vendor'),('player_model','src'),('player_preview','src'),('player_preview_native','src'),('player_preview_submit','src'),('player_preview_controls','src')]:
-        wrapped.append(f'm.{name}=(function()\n'+source(f'{folder}/{name}.lua')+'\nend)()\n')
-    wrapped.append(source('src/player_preview_candidate.lua'))
-    model=''.join(wrapped)
+    parts.append('local editor=(function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
+    parts.append('local PREVIEW_INSPECT_ONLY=false\n')
+    parts.append(source('src/player_preview_candidate.lua'))
+else:
+    parts.append('return (function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
+model = ''.join(parts)
 
 (OUT/'mod.lua').write_text(model, encoding='utf-8')
 (OUT/'manifest.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','credits':'CowboyBingus native adapters'}, indent=2), encoding='utf-8')

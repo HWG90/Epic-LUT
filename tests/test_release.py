@@ -1,5 +1,5 @@
 from pathlib import Path
-import hashlib,json,struct,sys,zipfile,io
+import hashlib,json,struct,sys,zipfile,io,re
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from lua_archive import read,hash_name,LUA_TYPE
 
@@ -16,7 +16,7 @@ with zipfile.ZipFile(candidate)as z:
     assert body[8:].startswith(('-- HD2-Addon: '+entry+'\n').encode())
     library=z.read('armor_lut_editor/mcm_input_9bc2033ffbb3.dll')
     assert hashlib.sha256(library).hexdigest()=='7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
-    assert library.hex().encode()in body and b"author='Goose'"in z.read('armor_lut_editor/mod.lua')
+    assert library.hex().encode()in body and re.search(rb"author\s*=\s*[\"']Goose[\"']", z.read('armor_lut_editor/mod.lua'))
     assert not any(name.endswith(('.dds','.exr','.ini','.rar','.dbflut'))for name in z.namelist()if not name.startswith('armor_lut_editor/runtime/')) # Official runtime files are validated against its pinned manifest below.
     direct=b'direct_lut=true'in body
     if direct:

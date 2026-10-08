@@ -1,17 +1,45 @@
-local ffi=require('ffi');local dds=dofile('src/dds.lua')
-local store=dofile('src/outfit_presets.lua').new({dds=dds,windows=dofile('src/windows.lua')},'tests/tmp/presets')
-local a=ffi.new('float[736]');local h=ffi.new('float[736]');for i=0,735 do a[i]=i/7;h[i]=-i/13 end
-store.save('Roundtrip Outfit',{{kind='armor',key='0:1:0:0',document={data=a,width=23,height=8}},{kind='helmet',key='0:0:0:0',document={data=h,width=23,height=8}}})
-local p=store.load('Roundtrip Outfit')
-assert(#p.armor==1 and #p.helmet==1 and ffi.string(p.armor[1].data,2944)==ffi.string(a,2944)and ffi.string(p.helmet[1].data,2944)==ffi.string(h,2944),'Paired preset lost full-float data')
-store.save('Rename Source',p.entries)
-pcall(store.delete,'Rename Destination')
-store.rename('Rename Source','Rename Destination')
-assert(not pcall(store.load,'Rename Source')and #store.load('Rename Destination').entries==2,'Rename lost data or retained old active name')
+local ffi = require('ffi')
+local dds = dofile('src/dds.lua')
+local store = dofile('src/outfit_presets.lua').new(
+    { file_io = dofile('src/file_io.lua'), dds = dds, windows = dofile('src/windows.lua') },
+    'tests/tmp/presets'
+)
+local a = ffi.new('float[736]')
+local h = ffi.new('float[736]')
+for i = 0, 735 do
+    a[i] = i / 7
+    h[i] = -i / 13
+end
+store.save('Roundtrip Outfit', {
+    { kind = 'armor', key = '0:1:0:0', document = { data = a, width = 23, height = 8 } },
+    { kind = 'helmet', key = '0:0:0:0', document = { data = h, width = 23, height = 8 } },
+})
+local p = store.load('Roundtrip Outfit')
+assert(
+    #p.armor == 1
+        and #p.helmet == 1
+        and ffi.string(p.armor[1].data, 2944) == ffi.string(a, 2944)
+        and ffi.string(p.helmet[1].data, 2944) == ffi.string(h, 2944),
+    'Paired preset lost full-float data'
+)
+store.save('Rename Source', p.entries)
+pcall(store.delete, 'Rename Destination')
+store.rename('Rename Source', 'Rename Destination')
+assert(
+    not pcall(store.load, 'Rename Source') and #store.load('Rename Destination').entries == 2,
+    'Rename lost data or retained old active name'
+)
 store.delete('Rename Destination')
-assert(not pcall(store.load,'Rename Destination'),'Deleted preset remains active')
-assert(not pcall(store.load,'../outside'),'Preset path traversal accepted')
-local history=dofile('src/action_history.lua').new(function()end,function()error('foreign binding')end)
-history.record({signature='before',bytes=10},{signature='after',bytes=10})
-assert(not pcall(history.undo_action)and #history.undo==1 and #history.redo==0 and not history.busy,'Failed history restore destroyed the undo frame')
-print('PASS outfit presets: named full-float Armor/Helmet round trip, path rejection, failed history restoration retained')
+assert(not pcall(store.load, 'Rename Destination'), 'Deleted preset remains active')
+assert(not pcall(store.load, '../outside'), 'Preset path traversal accepted')
+local history = dofile('src/action_history.lua').new(function() end, function()
+    error('foreign binding')
+end)
+history.record({ signature = 'before', bytes = 10 }, { signature = 'after', bytes = 10 })
+assert(
+    not pcall(history.undo_action) and #history.undo == 1 and #history.redo == 0 and not history.busy,
+    'Failed history restore destroyed the undo frame'
+)
+print(
+    'PASS outfit presets: named full-float Armor/Helmet round trip, path rejection, failed history restoration retained'
+)
