@@ -413,3 +413,23 @@ f:close()
 print(
     'PASS palette editor: exact RGB/alpha isolation, float/camo edits, shared row navigation, undo/redo, row copy/paste, 184 selectable grid cells and source-derived layout preview'
 )
+
+-- Grid paste must retain shader/camo alpha even while the paint selector is RGB.
+assert(h.set('unlock', true))
+assert(h.set('grid_channel', 1))
+assert(h.set('edit_row', 1))
+assert(h.set('edit_column', 1))
+editor.selection = { r1 = 1, r2 = 1, c1 = 1, c2 = 23 }
+local copied = ffi.string(d.data, 23 * 16)
+editor.copy_selection()
+assert(h.set('edit_row', 2))
+editor.paste_selection()
+assert(ffi.string(d.data + 23 * 4, 23 * 16) == copied, 'RGB paint mode dropped clipboard alpha')
+
+local picker = api.mods.palette_test.controls.cell_color
+assert(picker.picker_commit({ 10, 20, 30 }, 4.25))
+local at = dofile('src/core/semantics.lua').index(h.get('edit_row'), h.get('edit_column'), 1, d.width, d.height)
+assert(math.abs(d.data[at] - 10 / 255) < 1e-6 and d.data[at + 3] == 4.25)
+assert(picker.picker_alpha() == 4.25)
+assert(h.activate('undo'))
+assert(d.data[at + 3] ~= 4.25, 'Picker RGBA was not one undoable edit')

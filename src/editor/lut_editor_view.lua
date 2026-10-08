@@ -475,16 +475,18 @@ function V.new(deps)
             )
             button(ui.x + 10, optionsy - step * 4, (optionw - 5) / 2, 'Undo', 'undo')
             button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 4, (optionw - 5) / 2, 'Redo', 'redo')
-            ui.rect(ui.x + 10, optionsy - step * 5, optionw, 26, { 24, 39, 52 })
+            button(ui.x + 10, optionsy - step * 5, (optionw - 5) / 2, 'Export DDS', 'save_dds')
+            local morex = ui.x + 15 + (optionw - 5) / 2
+            ui.rect(morex, optionsy - step * 5, (optionw - 5) / 2, 26, { 24, 39, 52 })
             ui.bounded(
-                ui.x + 16,
+                morex + 6,
                 optionsy - step * 5 + 5,
                 (self.more_options and 'v ' or '> ') .. 'More Options',
                 14,
                 white,
-                optionw - 12
+                (optionw - 5) / 2 - 12
             )
-            ui.hit(ui.x + 10, optionsy - step * 5, optionw, 26, function()
+            ui.hit(morex, optionsy - step * 5, (optionw - 5) / 2, 26, function()
                 self.more_options = not self.more_options
             end)
             if self.more_options then

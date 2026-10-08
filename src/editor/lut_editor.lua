@@ -128,6 +128,18 @@ function E.new(m, document, note, save, presets, live_document)
             end
         end
         local h = self.handle
+        mod.controls.cell_color.picker_alpha = function()
+            local at = m.semantics.index(h.get('edit_row'), h.get('edit_column'), 4, d.width, d.height)
+            return tonumber(d.data[at])
+        end
+        mod.controls.cell_color.picker_commit = function(rgb_value, alpha)
+            local target = remember()
+            local at = m.semantics.index(h.get('edit_row'), h.get('edit_column'), 1, target.width, target.height)
+            for ch = 1, 3 do target.data[at + ch - 1] = rgb_value[ch] / 255 end
+            target.data[at + 3] = alpha
+            self.sync()
+            return true
+        end
         local row = math.min(h.get('edit_row'), d.height)
         local column = h.get('edit_column')
         local rows = {}
@@ -302,7 +314,7 @@ function E.new(m, document, note, save, presets, live_document)
         local clip = assert(self.clip, 'Copy a selection first')
         local row, column = self.handle.get('edit_row'), self.handle.get('edit_column')
         assert(row + clip.height - 1 <= d.height and column + clip.width - 1 <= d.width, 'Clipboard does not fit here')
-        local selected = channels[self.handle.get('grid_channel')]
+        local selected = channels[2] -- Clipboard paste restores full RGBA, independent of paint channel.
         for c = column, column + clip.width - 1 do
             for _, ch in ipairs(selected) do
                 assert(editable(d, c, ch), 'Unlock advanced edits to paste non-color channels')

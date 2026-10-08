@@ -427,7 +427,14 @@ function M.new(api, measure)
             return true
         end
 
-        if e.color_channel == 'hex' then
+        if e.color_channel == 'alpha' then
+            local n = tonumber(e.text)
+            if not n or n ~= n or math.abs(n) > 1e10 then
+                self.notice = 'Alpha: enter a finite numeric value'
+                return false
+            end
+            self.color_picker.alpha = n
+        elseif e.color_channel == 'hex' then
             local ok, rgb = pcall(api.color_rgb, e.text)
 
             if not ok then
@@ -465,7 +472,12 @@ function M.new(api, measure)
             return
         end
 
-        local called, ok, err = pcall(p.mod.handle.edit or p.mod.handle.set, p.control.id, p.rgb)
+        local called, ok, err
+        if p.control.picker_commit then
+            called, ok, err = pcall(p.control.picker_commit, p.rgb, p.alpha or p.control.picker_alpha())
+        else
+            called, ok, err = pcall(p.mod.handle.edit or p.mod.handle.set, p.control.id, p.rgb)
+        end
 
         if called and ok then
             self.notice = p.control.page.require_confirmation and 'Pending confirmation' or 'Saved'
@@ -2595,6 +2607,10 @@ function M.new(api, measure)
                 { key = 'hex', label = 'HEX', value = api.color_hex(p.rgb) },
             }
 
+            if p.control.picker_alpha then
+                if p.alpha == nil then p.alpha = p.control.picker_alpha() end
+                fields[#fields + 1] = { key = 'alpha', label = 'A', value = p.alpha }
+            end
             for index, field in ipairs(fields) do
                 local fy = py + 343 - (index - 1) * 42
 
