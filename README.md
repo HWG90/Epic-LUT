@@ -15,6 +15,8 @@ Source and local test candidates may be newer than published releases.
 
 Import the complete ZIP through Arsenal/HD2MM. Enable its Bingus Shared Loader startup option alongside **BSL v15 or newer**, with only one Epic LUT entry. The included `armor_lut_editor` folder also supports a compatible API-2 loose loader.
 
+For **MDL / Live Lua Loader**, use the separate `Epic-LUT-R4-RC1-MDL-LLL.zip` asset. Extract the complete folder into your loader's mod directory; LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. See [MDL/LLL installation](docs/MDL-LLL.md). Activate only one Epic LUT entrypoint.
+
 - **No Python installation or embedded Python runtime.**
 - Windows PowerShell/.NET provides the native file picker and temporary background readers.
 - **RAR requires installed 7-Zip.** DDS and ZIP do not.

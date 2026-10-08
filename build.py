@@ -15,8 +15,11 @@ ROOT = Path(__file__).resolve().parent
 VERSION = (ROOT/'VERSION').read_text(encoding='utf-8').strip()
 DISPLAY_VERSION = VERSION.replace('-alpha',' Alpha').replace('-rc1',' RC1')
 parser = argparse.ArgumentParser()
-parser.add_argument('--output', default='Epic-LUT-'+VERSION.replace('-alpha','-Alpha').replace('-rc1','-RC1')+'.zip')
+parser.add_argument('--loader', choices=('bsl','loose'), default='bsl')
+parser.add_argument('--output')
 args = parser.parse_args()
+if args.output is None:
+    args.output='Epic-LUT-'+VERSION.replace('-alpha','-Alpha').replace('-rc1','-RC1')+('-MDL-LLL' if args.loader=='loose' else '')+'.zip'
 if Path(args.output).name != args.output or not args.output.endswith('.zip'):
     parser.error('--output must be a ZIP filename within dist')
 
@@ -72,13 +75,16 @@ manager = {'Version':1,'Guid':'2ef4f437-4a43-47ed-b1d0-15505f11c761','Author':'G
     'Description':'R4 RC1 - alpha release candidate. F10 opens the standalone armor/helmet LUT editor. DDS/ZIP/RAR import, live color editing, presets, floating Quick Scratch and original-game snapshots. Requires Bingus Shared Loader v15+; RAR requires 7-Zip. No Python or MCM setup. Live validation remains pending.',
     'Options':[{'Name':'Bingus Shared Loader startup','Include':['data']}]}
 with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as package:
-    package.writestr('manifest.json',json.dumps(manager,indent=2))
-    package.writestr('data/9ba626afa44a3aa3.patch_0',archive)
-    for suffix in ('stream','gpu_resources'):
-        package.writestr('data/9ba626afa44a3aa3.patch_0.'+suffix,b'')
+    if args.loader=='bsl':
+        package.writestr('manifest.json',json.dumps(manager,indent=2))
+        package.writestr('data/9ba626afa44a3aa3.patch_0',archive)
+        for suffix in ('stream','gpu_resources'):
+            package.writestr('data/9ba626afa44a3aa3.patch_0.'+suffix,b'')
+    else:
+        package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL-LLL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/MDL-LLL.md'):
         package.write(ROOT/name,name)
 (ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)
