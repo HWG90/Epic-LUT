@@ -7,7 +7,11 @@ function G.new(deps)
         assert(identity, why)
         local found, seen, kept, active = {}, {}, {}, {}
         for _, b in ipairs(owned) do
-            if deps.present(b) and deps.binding(b) == b.current then
+            if deps.present(b) and deps.is_cape and deps.is_cape(b) then
+                if deps.binding(b) == b.current and deps.restore_excluded then
+                    deps.restore_excluded(b)
+                end
+            elseif deps.present(b) and deps.binding(b) == b.current then
                 kept[deps.key(b)] = b
                 active[#active + 1] = b
             end
@@ -18,7 +22,7 @@ function G.new(deps)
                 local b = { unit = u.unit, mesh = v.mesh, material = v.material }
                 local existing = kept[deps.key(b)]
                 local object = existing and existing.original or deps.binding(b)
-                if object and object ~= 0 then
+                if object and object ~= 0 and not (deps.is_cape and deps.is_cape(b)) then
                     local key = v.material .. ':' .. v.mesh
                     if not seen[key] then
                         local group = found[object]

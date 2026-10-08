@@ -25,7 +25,7 @@ function M.rgb_hsv(rgb)
  return h,hi==0 and 0 or delta/hi,hi
 end
 local function normalize(c,v)
-    if c.type=='input' then assert(type(v)=='string' and #v<=48 and v:match('^[%w _-]+$'),'Use letters, numbers, spaces, underscores or hyphens');return v end
+    if c.type=='input' then assert(type(v)=='string' and #v<=48 and ((c.allow_empty and v=='') or v:match('^[%w _-]+$')),'Use letters, numbers, spaces, underscores or hyphens');return v end
     if c.type=='color' then return M.color_hex(v)end
     if c.type=='toggle' then assert(type(v)=='boolean','Expected boolean');return v end
     assert(type(v)=='number' and v==v and math.abs(v)<1e12,'Expected finite number')

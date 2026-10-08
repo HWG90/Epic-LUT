@@ -29,8 +29,9 @@ function B.new(info, select_row, help)
         end
         local guidance = help.basic or {}
         local function button(x, y, w, label, id, enabled)
-            ui.rect(x, y, w, 28, enabled == false and { 35, 39, 43 } or blue)
-            ui.bounded(x + 8, y + 8, label, 14, white, w - 16)
+            local featured = enabled ~= false and (id == 'save_dds' or id == 'save_setup')
+            ui.rect(x, y, w, 28, enabled == false and { 35, 39, 43 } or (featured and { 244, 202, 53 } or blue))
+            ui.bounded(x + 8, y + 8, label, 14, featured and { 25, 28, 31 } or white, w - 16)
             ui.hit(x, y, w, 28, function()
                 if enabled ~= false then
                     ui.activate(id)
@@ -155,7 +156,18 @@ function B.new(info, select_row, help)
                 width
             )
         else
-            text(right, top - 115, 'Color changes apply live. Region label: identify.')
+            local plan = state.raw and state.raw.matching
+            text(
+                right,
+                top - 115,
+                state.loaded
+                        and plan
+                        and ((plan.total or state.palette_count or 0) .. ' imported / ' .. plan.matched .. ' matched / ' .. math.max(
+                            0,
+                            (plan.total or state.palette_count or 0) - plan.matched
+                        ) .. ' for manual assignment')
+                    or 'Color changes apply live. Region label: identify.'
+            )
         end
         if (state.palette_count or 0) > 1 then
             local plan = state.raw and state.raw.matching
@@ -242,6 +254,26 @@ function B.new(info, select_row, help)
         else
             button(right, saved_top - 443, width, 'Restore Arrowhead LUT (Original)', 'restore')
         end
+        ui.rect(right, saved_top - 471, width, 1, { 65, 76, 85 })
+        text(right, saved_top - 495, 'DDS Export - current selected table')
+        button(right, saved_top - 533, width, 'Name: ' .. (state.export_name or 'Epic-LUT-edited'), 'save_name')
+        button(
+            right,
+            saved_top - 567,
+            (width - 12) / 3,
+            'Export DDS',
+            'save_dds',
+            state.editor ~= nil and not state.busy
+        )
+        button(
+            right + (width + 6) / 3,
+            saved_top - 567,
+            (width - 12) / 3,
+            'Export Patch ZIP',
+            'save_patch',
+            state.editor ~= nil and not state.busy
+        )
+        button(right + (width + 6) * 2 / 3, saved_top - 567, (width - 12) / 3, 'Open Export Location', 'open_export')
         if state.dirty then
             text(right, ui.y + 20, 'Modified - save or export to keep your colors.')
         end

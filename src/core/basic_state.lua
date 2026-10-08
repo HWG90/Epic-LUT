@@ -19,6 +19,7 @@ function B.copier()
         end
         local copy = B.clone(source, source.source)
         copy.revision = source.revision
+        copy.saved_pixels = source.saved_pixels
         copy.resource = source.resource
         copy.resource_object = source.resource_object
         local bytes = source.width * source.height * 16

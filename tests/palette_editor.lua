@@ -203,7 +203,7 @@ local rendered = menu.compose(1920, 1080)
 local grid = false
 local saved = false
 for _, c in ipairs(rendered) do
-    if c.text == 'Pixel Grid' then
+    if c.text and c.text:find('Pixel Grid', 1, true) == 1 then
         grid = true
         assert(c.x < menu.window_bounds.x + 50, 'Sidebar still consumes editor width')
     end
@@ -433,3 +433,52 @@ assert(math.abs(d.data[at] - 10 / 255) < 1e-6 and d.data[at + 3] == 4.25)
 assert(picker.picker_alpha() == 4.25)
 assert(h.activate('undo'))
 assert(d.data[at + 3] ~= 4.25, 'Picker RGBA was not one undoable edit')
+
+local target = (h.get('edit_row') - 1) * d.width * 4
+local next_row = ffi.string(d.data + target + d.width * 4, d.width * 16)
+d.data[target] = 9
+assert(editor.is_dirty())
+editor.reset_part(true)
+assert(ffi.string(d.data + target, d.width * 16) == ffi.string(d.original + target, d.width * 16))
+assert(ffi.string(d.data + target + d.width * 4, d.width * 16) == next_row, 'Row reset affected another row')
+assert(h.activate('undo'))
+assert(d.data[target] == 9)
+local cell = dofile('src/core/semantics.lua').index(h.get('edit_row'), h.get('edit_column'), 1, d.width, d.height)
+d.data[cell + 3] = 8
+editor.reset_part(false)
+assert(d.data[cell + 3] == d.original[cell + 3])
+
+assert(h.set('edit_column', 2))
+local raw_at = dofile('src/core/semantics.lua').index(h.get('edit_row'), 2, 1, d.width, d.height)
+d.data[raw_at] = 12.5
+editor.sync()
+local raw_picker = api.mods.palette_test.controls.cell_color
+local displayed = dofile('vendor/menu/core.lua').color_rgb(h.get('cell_color'))
+assert(raw_picker.picker_commit(displayed, 0.25))
+assert(d.data[raw_at] == 12.5 and d.data[raw_at + 3] == 0.25, 'Alpha edit quantized untouched raw channel')
+local scratch_picker = api.mods.palette_test.controls.scratch_color
+assert(scratch_picker.picker_commit({ 10, 20, 30 }, 0.4))
+assert(h.get('scratch_alpha') == 0.4 and scratch_picker.picker_alpha() == 0.4)
+
+-- Toolbar and Scratch readout remain clear of the preview and Paint button.
+local prior_preview = package.loaded['epic.player_preview.v1']
+local docked
+package.loaded['epic.player_preview.v1'] = {dock = function(bounds) docked = bounds end}
+commands, hits = {}, {}
+editor.layout(ui)
+local alpha_label, paint_label
+for _, c in ipairs(commands) do
+    if c.text and c.text:match('^A: ') then alpha_label = c end
+    if c.text == 'Paint selected RGB' then paint_label = c end
+end
+assert(alpha_label and paint_label and alpha_label.y > paint_label.y + 16, 'Scratch alpha readout overlaps Paint')
+assert(docked and docked.y + docked.h <= ui.y + ui.h - 140, 'Docked preview overlaps grid toolbar')
+package.loaded['epic.player_preview.v1'] = prior_preview
+
+local live_control = api.mods.palette_test.controls.cell_color
+local before_live = ffi.string(d.data,d.width*d.height*16)
+live_control.picker_begin()
+live_control.picker_preview({ 13, 37, 59 }, .42)
+assert(ffi.string(d.data,d.width*d.height*16)~=before_live,'Color picker preview did not update document')
+live_control.picker_end(false)
+assert(ffi.string(d.data,d.width*d.height*16)==before_live,'Cancel did not restore color picker starting values')

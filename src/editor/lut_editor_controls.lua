@@ -192,6 +192,13 @@ function C.new(deps)
                 require_confirmation = false,
                 controls = {
                     {
+                        id = 'show_alpha',
+                        type = 'toggle',
+                        label = 'Show Alpha',
+                        default = false,
+                        description = 'Display swatch alpha over a checkerboard. Display only: shader alpha can control behavior instead of transparency.',
+                    },
+                    {
                         id = 'scratch_color',
                         type = 'color',
                         label = 'Scratch color',
@@ -227,7 +234,13 @@ function C.new(deps)
                             local d = assert(document(), 'Import first')
                             self.row_clip =
                                 ffi.string(d.data + (self.handle.get('edit_row') - 1) * d.width * 4, d.width * 16)
-                            return note('Row copied')
+                            return note(
+                                'Copied row '
+                                    .. self.handle.get('edit_row')
+                                    .. ', all '
+                                    .. d.width
+                                    .. ' columns (full RGBA)'
+                            )
                         end,
                     },
                     {
@@ -243,7 +256,29 @@ function C.new(deps)
                                 #self.row_clip
                             )
                             self.sync()
-                            return note('Row pasted. Live preview updates automatically.')
+                            return note(
+                                'Pasted into row '
+                                    .. self.handle.get('edit_row')
+                                    .. ', all '
+                                    .. d.width
+                                    .. ' columns (full RGBA)'
+                            )
+                        end,
+                    },
+                    {
+                        id = 'reset_row',
+                        type = 'button',
+                        label = 'Reset selected row',
+                        on_activate = function()
+                            return self.reset_part(true)
+                        end,
+                    },
+                    {
+                        id = 'reset_cell',
+                        type = 'button',
+                        label = 'Reset selected cell',
+                        on_activate = function()
+                            return self.reset_part(false)
                         end,
                     },
                     { id = 'row_preset', type = 'input', label = 'Row preset name', default = 'my-row' },
@@ -304,17 +339,31 @@ function C.new(deps)
                     {
                         id = 'save_name',
                         type = 'input',
-                        label = 'Save DDS as (without extension)',
+                        label = 'Export name (without extension)',
                         default = 'Epic-LUT-edited',
                     },
-                    { id = 'open_export', type = 'button', label = 'Open Export Location',
-                        on_activate = function() return assert(deps.open_export, 'Export folder unavailable')() end },
+                    {
+                        id = 'open_export',
+                        type = 'button',
+                        label = 'Open Export Location',
+                        on_activate = function()
+                            return assert(deps.open_export, 'Export folder unavailable')()
+                        end,
+                    },
                     {
                         id = 'save_dds',
                         type = 'button',
                         label = 'Export DDS preset to share',
                         on_activate = function()
                             return save(self.handle.get('save_name'))
+                        end,
+                    },
+                    {
+                        id = 'save_patch',
+                        type = 'button',
+                        label = 'Export Patch ZIP for selected Live LUT',
+                        on_activate = function()
+                            return assert(deps.save_patch, 'Patch exporter unavailable')(self.handle.get('save_name'))
                         end,
                     },
                 },

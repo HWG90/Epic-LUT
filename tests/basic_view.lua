@@ -179,6 +179,20 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(matching, 'Basic matching-import action missing')
+local export_labels = {}
+for _, c in ipairs(menu.compose(1280, 720)) do
+    if c.full_text then
+        export_labels[c.full_text] = c
+    end
+end
+assert(
+    export_labels['DDS Export - current selected table']
+        and export_labels['Export DDS']
+        and export_labels['Open Export Location'],
+    'Basic export section missing'
+)
+
+menu.compose(1920, 1080)
 local x, y = row8.x + 85, row8.y + 2
 menu.tick({
     down = function(k)

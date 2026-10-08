@@ -17,6 +17,8 @@ end)
 local saved
 local menu
 local controls = {
+    { id = 'armory_search', type = 'input', allow_empty = true, label = 'Search', default = '' },
+    { id = 'armory_sort', type = 'choice', label = 'Sort', choices = { 'A-Z', 'Z-A' }, default = 1 },
     { id = 'basic_preset_name', type = 'input', label = 'Name', default = 'palette' },
     { id = 'basic_preset', type = 'choice', label = 'Palette', choices = { 'New preset' }, default = 1 },
     { id = 'outfit_preset', type = 'choice', label = 'Outfit', choices = { 'Choose outfit', 'Example' }, default = 1 },

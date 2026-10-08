@@ -68,3 +68,27 @@ assert(presets.Delta, 'Delete occurred before confirmation')
 menu.outfit_dialog.on_save()
 assert(not presets.Delta and not collection.selected)
 print('PASS Armory collection: type previews, empty selection, save/select, rename and confirmed deletion')
+
+collection.filter('br', 1)
+assert(#collection.names == 1 and collection.names[1] == 'Bravo')
+collection.filter('', 2)
+assert(collection.names[1] == 'Bravo' and collection.names[2] == 'Alpha')
+
+-- Empty search values must survive the real settings writer used in game.
+local disk = dofile('vendor/menu/store.lua').new('tests/tmp/presets')
+assert(disk.save('armory_search_test', { search = '', other = 'valid name' }))
+local settings = disk.load('armory_search_test')
+assert(settings.search == '' and settings.other == 'valid name', 'Empty search did not round trip')
+local core = dofile('vendor/menu/core.lua').new(disk)
+local test = core.register({ id = 'armory_search_test', name = 'Search test', pages = {
+    { id = 'search', name = 'Search', controls = {
+        { id = 'search', type = 'input', label = 'Search', allow_empty = true, default = '' },
+        { id = 'other', type = 'input', label = 'Name', default = 'valid name' },
+    } },
+} })
+assert(test.set('other', 'new name'))
+assert(test.set('search', 'filter'))
+assert(test.set('search', ''))
+assert(disk.load('armory_search_test').search == '')
+os.remove('tests/tmp/presets/armory_search_test.ini')
+os.remove('tests/tmp/presets/armory_search_test.ini.bak')

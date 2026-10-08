@@ -7,7 +7,7 @@ function M.new(folder)
         local values={};local f=io.open(path(id),'rb');if not f then return values end
         local data=f:read(65537);f:close();if #data>65536 then return values end
         for key,value in data:gmatch('([%w_-]+)=([^\r\n]+)')do
-            if value:match('^@[%w _-]+$') then values[key]=value:sub(2) elseif value=='true' then values[key]=true elseif value=='false' then values[key]=false
+            if value:match('^@[%w _-]*$') then values[key]=value:sub(2) elseif value=='true' then values[key]=true elseif value=='false' then values[key]=false
             elseif value:match('^#%x%x%x%x%x%x$') then values[key]=value:upper()
             else local n=tonumber(value);if n and n==n and math.abs(n)<1e12 then values[key]=n end end
         end
@@ -16,7 +16,7 @@ function M.new(folder)
     function self.save(id,values)
         local target=path(id);local temp,backup=target..'.tmp',target..'.bak';local rows={}
         for key,value in pairs(values)do
-            assert(key:match('^[%w_-]+$') and (type(value)=='boolean' or type(value)=='number' or (type(value)=='string' and (value:match('^#%x%x%x%x%x%x$') or (#value<=48 and value:match('^[%w _-]+$'))))),'Invalid persisted value')
+            assert(key:match('^[%w_-]+$') and (type(value)=='boolean' or type(value)=='number' or (type(value)=='string' and (value:match('^#%x%x%x%x%x%x$') or (#value<=48 and value:match('^[%w _-]*$'))))),'Invalid persisted value')
             rows[#rows+1]=key..'='..(type(value)=='string' and value:sub(1,1)~='#' and '@'..value or tostring(value))..'\n'
         end
         table.sort(rows);local f,err=io.open(temp,'wb');if not f then return false,err end

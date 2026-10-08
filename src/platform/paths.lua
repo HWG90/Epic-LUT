@@ -28,6 +28,21 @@ function P.new(m)
     end
     self.exports = self.files .. '/exports'
     mkdir(self.exports)
+    function self.directory_exists(path)
+        local attr = tonumber(kernel.epic_native_attributes(wide(path)))
+        return attr ~= 4294967295
+    end
+    function self.mkdir_new(path)
+        assert(kernel.epic_paths3_mkdir(wide(path), nil) ~= 0, 'Export folder exists or cannot be created: ' .. path)
+    end
+    if not pcall(function()
+        return kernel.epic_paths3_rmdir
+    end) then
+        ffi.cdef('int epic_paths3_rmdir(const uint16_t *) __asm__("RemoveDirectoryW");')
+    end
+    function self.rmdir(path)
+        return kernel.epic_paths3_rmdir(wide(path)) ~= 0
+    end
     self.storage = m.ui_store.new(self.settings)
     return self
 end

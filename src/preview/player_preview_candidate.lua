@@ -193,6 +193,26 @@ editor.on_enable = function(ctx)
         dock_request = { x = window.x + bounds.x * s, y = window.y + bounds.y * s, w = bounds.w * s, h = bounds.h * s }
         dock_age = 0
     end
+    public.meshes = function()
+        if controller.state ~= 'ready' or not controller.model then
+            return {}
+        end
+        return adapter.meshes(controller.model)
+    end
+    public.set_mesh = function(pi, mi, visible)
+        if controller.state ~= 'ready' or not controller.model then
+            return
+        end
+        adapter.set_mesh(controller.model, pi, mi, visible)
+        due = true
+    end
+    public.reset_meshes = function()
+        if controller.state ~= 'ready' or not controller.model then
+            return
+        end
+        adapter.reset_meshes(controller.model)
+        due = true
+    end
     package.loaded['epic.player_preview.v1'] = public
     write_state(PREVIEW_INSPECT_ONLY and 'inspection only' or 'ready to open')
     ctx.on_cleanup(close)

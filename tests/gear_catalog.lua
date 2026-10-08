@@ -39,3 +39,35 @@ object = 55
 found = catalog.refresh({ binding }, 10)
 assert(#found.owned == 0 and found.groups[1].object == 55, 'Foreign replacement retained stale ownership')
 print('PASS gear catalog: selected/shared scopes, gear-wide targets and original/foreign identity refresh')
+
+local cape_object, restored = 99, false
+local cape_catalog = G.new({
+    identity = function()
+        return {}
+    end,
+    units = function()
+        return { { unit = 1, slot = 1, type = 0 }, { unit = 2, slot = 2, type = 0 } }
+    end,
+    materials = function(unit)
+        return { { mesh = unit + 1, material = unit == 1 and 3 or 6, mesh_index = 0, material_index = 0 } }
+    end,
+    present = function()
+        return true
+    end,
+    binding = function(b)
+        return b.material == 3 and cape_object or 20
+    end,
+    key = function(b)
+        return b.material
+    end,
+    is_cape = function(b)
+        return b.material == 3
+    end,
+    restore_excluded = function(b)
+        cape_object = b.original
+        restored = true
+    end,
+})
+local result = cape_catalog.refresh({ { unit = 1, mesh = 2, material = 3, original = 10, current = 99 } }, nil)
+assert(restored and cape_object == 10 and #result.owned == 0, 'Prior owned cape binding was not restored')
+assert(#result.groups == 1 and result.groups[1].bindings[1].material == 6, 'Cape material included in Armor targets')

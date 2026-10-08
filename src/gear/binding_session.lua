@@ -23,6 +23,8 @@ function B.new(deps)
             retain.records[#retain.records + 1] = keep
             retain.bytes = retain.bytes + bytes
             texture = assert(deps.create_texture(document.width, document.height, data))
+            texture.data, texture.width, texture.height =
+                texture.data or data, texture.width or document.width, texture.height or document.height
             keep.texture = texture
             retain.cache[key] = texture
         end

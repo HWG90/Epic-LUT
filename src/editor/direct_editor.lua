@@ -4,6 +4,7 @@ local ctx, memory, native, game, frontend, preferences, handle, api, paths, pale
 local updates
 local groups = {}
 local bindings, gear_catalog
+local sharing, pattern_editor, armory_mirror
 local edit = {} -- Current document, imported source, target and revision baseline.
 local status = 'Load a DDS or ZIP, then refresh the live LUT list.'
 local pending, palettes = nil, {}
@@ -41,7 +42,7 @@ local function read(a, n, b)
     return memory.read_into(ffi.cast('const uint8_t *', a), n, b)
 end
 local function binding(b)
-    return m.engine.binding(read, b.material, m.engine.LUT_SLOT, small, big)
+    return m.engine.binding(read, b.material, b.slot or m.engine.LUT_SLOT, small, big)
 end
 local function present(b)
     if native.alive(b.unit) == 0 then
@@ -56,6 +57,12 @@ local function present(b)
 end
 local function material_key(b)
     return b.unit .. ':' .. b.mesh .. ':' .. b.material
+end
+local function applied_document(b)
+    if b.texture and b.current == b.texture.object and b.texture.data then
+        return b.texture
+    end
+    return b.document
 end
 local function restore()
     if stop_identification then
@@ -127,7 +134,18 @@ end
 local function load_dds(path)
     local bytes = m.file_io.read(path, m.dds.MAX_BYTES)
     local data, w, h = m.dds.decode(bytes)
-    assert(w == 23, 'This simple editor accepts 23-column material LUT DDS files')
+    if w == 3 and h == 1 and pattern_editor then
+        palettes = {}
+        palette_choices({ 'Import a material LUT...' })
+        edit.imported = nil
+        local result = pattern_editor.import({ data = data, width = w, height = h })
+        if api and handle then
+            api.focus_page(handle.id, 'colors')
+            pattern_editor.show()
+        end
+        return result
+    end
+    assert(w == 23, 'Expected a 23-column material LUT or 3x1 Pattern LUT DDS')
     edit.editor_target = nil
     editor_pending = nil
     local ok, changed = disable_matching()
@@ -276,6 +294,19 @@ local function initialize_editor_state()
         present = present,
         binding = binding,
         key = material_key,
+        is_cape = function(b)
+            if not m.engine.CAPE_LUT_SLOT then
+                return false
+            end
+            local object = m.engine.binding(read, b.material, m.engine.CAPE_LUT_SLOT, small, big)
+            return object ~= nil and object ~= 0
+        end,
+        restore_excluded = function(b)
+            m.engine.bind(native, b.material, m.engine.LUT_SLOT, b.original)
+            native.commit(b.mesh)
+            assert(binding(b) == b.original, 'Cape restoration pending')
+            b.current, b.texture, b.document = b.original, nil, nil
+        end,
     })
     bindings = m.binding_session.new({
         retain = retain,
@@ -301,7 +332,9 @@ local function initialize_editor_state()
             native.commit(b.mesh)
         end,
     })
-    stop_identification = region_indicator.stop
+    stop_identification = function()
+        return region_indicator.stop() and (not pattern_editor or pattern_editor.stop_flash())
+    end
 end
 local function identify_region()
     assert(stop_identification(), 'Previous highlight restoration pending')
@@ -711,14 +744,16 @@ local function import_state()
     }
     local dirty = edit.loaded
             and edit.loaded.original
-            and ffi.string(edit.loaded.data, edit.loaded.width * edit.loaded.height * 16) ~= ffi.string(
+            and ffi.string(edit.loaded.data, edit.loaded.width * edit.loaded.height * 16) ~= (edit.loaded.saved_pixels or ffi.string(
                 edit.loaded.original,
                 edit.loaded.width * edit.loaded.height * 16
-            )
+            ))
         or false
     return {
         editor = edit.loaded,
         dirty = dirty,
+        export_name = handle and handle.get('save_name'),
+        armory_query = handle and api.mods[handle.id].controls.armory_search and handle.get('armory_search'),
         raw = raw,
         palette_count = #palettes,
         palette_index = handle.get('palette'),
@@ -1242,7 +1277,11 @@ local function restore_action(snapshot, expected)
     return true
 end
 local function refresh_outfits()
-    armory_collection.refresh()
+    if handle and api.mods[handle.id].controls.armory_search then
+        armory_collection.filter(handle.get('armory_search'), handle.get('armory_sort'))
+    else
+        armory_collection.refresh()
+    end
 end
 local function keep_outfit(name, save_kind)
     assert(outfits, 'Outfit storage unavailable')
@@ -1253,14 +1292,21 @@ local function keep_outfit(name, save_kind)
             local kind = b.helmet and 'helmet' or 'armor'
             local key = kind .. ':' .. b.save_key
             if not seen[key] and (not save_kind or save_kind == 'both' or save_kind == kind) then
-                local source = b.document or (original_luts and original_luts.get(b.original))
+                local source = applied_document(b) or (original_luts and original_luts.get(b.original))
                 assert(source, 'Current ' .. kind .. ' LUT unavailable; load current gear before saving')
                 entries[#entries + 1] = { kind = kind, key = b.save_key, document = source }
                 seen[key] = true
             end
         end
     end
+    if api.mods[handle.id].controls.armory_search then
+        assert(handle.set('armory_search', ''))
+    end
     armory_collection.save(name, entries)
+    for _, entry in ipairs(entries) do
+        local d = entry.document
+        d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+    end
     if frontend.menu then
         frontend.menu.outfit_dialog = nil
         frontend.menu.text_edit = nil
@@ -1278,25 +1324,56 @@ local function apply_outfit(kind)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
     local exact = {}
-    local fallback
+    local has_saved = false
     for _, entry in ipairs(selected_outfit.entries) do
         if entry.kind == kind then
             exact[entry.key] = entry.document
-            fallback = fallback or entry.document
+            has_saved = true
         end
     end
-    assert(fallback, 'This preset has no ' .. kind .. ' palette')
-    local batches = {}
+    assert(has_saved, 'This preset has no ' .. kind .. ' palette')
+    local batches, skipped = {}, 0
     for _, group in ipairs(groups) do
         for _, b in ipairs(group.bindings) do
             if b[kind] then
                 assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear again')
-                local d = exact[b.save_key] or fallback
-                batches[d] = batches[d] or {}
-                table.insert(batches[d], b)
+                local d = exact[b.save_key]
+                if d then
+                    batches[d] = batches[d] or {}
+                    table.insert(batches[d], b)
+                    if ctx.log then
+                        ctx.log(
+                            'ARMORY_APPLY preset='
+                                .. selected_outfit.name
+                                .. ' kind='
+                                .. kind
+                                .. ' slot='
+                                .. b.save_key
+                                .. ' resource='
+                                .. resource_id(b.original)
+                        )
+                    end
+                else
+                    skipped = skipped + 1
+                    if ctx.log then
+                        ctx.log(
+                            'ARMORY_SKIP preset='
+                                .. selected_outfit.name
+                                .. ' kind='
+                                .. kind
+                                .. ' unmatched_slot='
+                                .. b.save_key
+                        )
+                    end
+                end
             end
         end
     end
+    assert(
+        next(batches),
+        'No saved LUT bindings match this gear; select a table and apply it manually to adapt the preset'
+    )
+    defaults[kind] = nil -- A multi-LUT preset never becomes a blanket override for unmatched pieces.
     resume_done = true
     resume_job = nil
     local count = 0
@@ -1309,7 +1386,17 @@ local function apply_outfit(kind)
     assert(count > 0, 'No worn gear bindings available for this preset')
     edit.remember_application = true
     save_setup()
-    return message('Applied ' .. selected_outfit.name .. ' ' .. kind .. ' palettes to ' .. count .. ' bindings.')
+    return message(
+        'Applied '
+            .. selected_outfit.name
+            .. ' '
+            .. kind
+            .. ' palettes to '
+            .. count
+            .. ' matched bindings; '
+            .. skipped
+            .. ' unmatched left unchanged.'
+    )
 end
 local function select_outfit(index)
     if armory_collection then
@@ -1319,6 +1406,9 @@ local function select_outfit(index)
     end
 end
 local function manage_outfit(mode)
+    if api.mods[handle.id].controls.armory_search then
+        assert(handle.set('armory_search', ''))
+    end
     return assert(armory_collection, 'Armory collection unavailable').manage(
         mode,
         assert(frontend.menu),
@@ -1868,19 +1958,112 @@ local function register(current)
             end,
         })
     end
+    -- Material controls remain registered for the LUT Editor's Value Editor, without a duplicate tab.
+    local colors_page
+    for _, page in ipairs(pages) do
+        if page.id == 'colors' then
+            colors_page = page
+        end
+    end
+    for i = #pages, 1, -1 do
+        if pages[i].id == 'advanced' and colors_page then
+            for _, control in ipairs(pages[i].controls) do
+                colors_page.controls[#colors_page.controls + 1] = control
+            end
+            table.remove(pages, i)
+        end
+    end
     if m.basic_view then
         table.insert(pages, 1, { id = 'basic', name = 'Basic', require_confirmation = false, controls = {} })
     end
     if m.armory_view then
-        table.insert(pages, #pages, { id = 'armory', name = 'The Armory', require_confirmation = false, controls = {} })
+        table.insert(pages, #pages, {
+            id = 'armory',
+            name = 'The Armory',
+            require_confirmation = false,
+            controls = {
+                {
+                    id = 'armory_search',
+                    type = 'input',
+                    allow_empty = true,
+                    label = 'Search Armory',
+                    default = '',
+                    on_change = function(value)
+                        armory_collection.filter(value, handle.get('armory_sort'))
+                    end,
+                },
+                {
+                    id = 'armory_sort',
+                    type = 'choice',
+                    label = 'Sort presets',
+                    choices = { 'Name A-Z', 'Name Z-A' },
+                    default = 1,
+                    on_change = function(value)
+                        armory_collection.filter(handle.get('armory_search'), value)
+                    end,
+                },
+            },
+        })
+    end
+    if pattern_editor then
+        for _, page in ipairs(pages) do
+            if page.id == 'colors' then
+                for _, control in ipairs(pattern_editor.controls()) do
+                    page.controls[#page.controls + 1] = control
+                end
+            end
+        end
+    end
+    if m.shared_appearance then
+        for _, page in ipairs(pages) do
+            if page.id == 'save' then
+                page.controls[#page.controls + 1] = {
+                    id = 'share_appearance',
+                    type = 'toggle',
+                    label = 'Share full LUT appearance with Epic LUT users',
+                    default = true,
+                    description = 'Shares equipped Armor and Helmet tables with compatible Epic LUT squadmates. Both players need this version. Oversized appearances remain local.',
+                }
+                page.controls[#page.controls + 1] =
+                    { id = 'sharing_status', type = 'text', label = 'Sharing: waiting for lobby' }
+            end
+        end
     end
     handle = api.register({ id = 'epic_direct_lut', name = 'Epic LUT', pages = pages })
+    for _, page in ipairs(api.mods[handle.id].pages) do
+        for _, control in ipairs(page.controls) do
+            if control.id == 'sharing_status' then
+                edit.sharing_status_control = control
+            end
+        end
+    end
+    if pattern_editor then
+        pattern_editor.attach(handle, api.mods[handle.id].controls)
+    end
     api.mods[handle.id].tabs_top = true
     api.mods[handle.id].minimum_width = 1420
     api.mods[handle.id].minimum_height = 960
     frontend.default_mod_id = handle.id
     if palette_editor then
+        palette_editor.pattern_editor = pattern_editor
         palette_editor.attach(api, handle)
+        local quick = api.mods[handle.id].controls.quick_color
+        local cell = api.mods[handle.id].controls.cell_color
+        if quick and cell then
+            quick.picker_begin = function()
+                local q = assert(edit.quick_selection, 'Select a region first')
+                palette_editor.focus_cell(q.row, q.column)
+                cell.picker_begin()
+            end
+            quick.picker_preview = function(color)
+                return cell.picker_preview(color, cell.picker_alpha())
+            end
+            quick.picker_end = cell.picker_end
+            quick.picker_commit = function(color)
+                quick.picker_preview(color)
+                return true
+            end
+        end
     end
     if m.armory_view then
         local armory = m.armory_view.new(import_state, palette_editor and palette_editor.preview)
@@ -1945,6 +2128,15 @@ local function register(current)
     groups = {}
 end
 local function close()
+    if armory_mirror and not armory_mirror.close() then
+        return false
+    end
+    if pattern_editor and not pattern_editor.close() then
+        return false
+    end
+    if sharing and not sharing.close() then
+        return false
+    end
     if stop_identification and not stop_identification() then
         return false
     end
@@ -1996,6 +2188,173 @@ return {
         game = memory.address(assert(memory.module('game.dll')))
         native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
         initialize_editor_state()
+        if m.armory_mirror then
+            local mirror_read = m.avatar.reader(memory)
+            armory_mirror = m.armory_mirror.new({
+                identity = function()
+                    return m.avatar.resolve(memory, game, mirror_read)
+                end,
+                locate = function(slot)
+                    return m.armory_watch.locate(mirror_read, game, slot)
+                end,
+                watch = function(where)
+                    return m.armory_watch.watch(memory, where)
+                end,
+                units = function(where)
+                    return m.avatar.units(memory, { units_at = where.units_at }, nil, 0, 9)
+                end,
+                materials = function(unit)
+                    return m.engine.unit_materials(native, unit)
+                end,
+                slot = function(pattern)
+                    return pattern and m.engine.PATTERN_SLOT or m.engine.LUT_SLOT
+                end,
+                binding = binding,
+                is_cape = function(material)
+                    local object = m.engine.binding(read, material.material, m.engine.CAPE_LUT_SLOT, small, big)
+                    return object and object ~= 0
+                end,
+                entries = function()
+                    local out = {}
+                    for _, b in ipairs(bindings.owned) do
+                        if b.texture and present(b) and binding(b) == b.current then
+                            out[b.save_key] = { document = b.texture, helmet = b.helmet }
+                        end
+                    end
+                    if operations.pattern_session then
+                        for _, b in ipairs(operations.pattern_session.owned) do
+                            if b.texture and present(b) and binding(b) == b.current then
+                                out['p:' .. b.save_key] = { document = b.texture, helmet = b.helmet }
+                            end
+                        end
+                    end
+                    return out
+                end,
+                session = function()
+                    return m.binding_session.new({
+                        retain = retain,
+                        present = present,
+                        binding = binding,
+                        key = function(b)
+                            return material_key(b) .. ':' .. b.slot
+                        end,
+                        create_texture = function(w, h, data)
+                            return m.engine.create_texture(native, w, h, data, read, small)
+                        end,
+                        bind = function(b, object)
+                            m.engine.bind(native, b.material, b.slot, object)
+                            native.commit(b.mesh)
+                        end,
+                    })
+                end,
+            })
+        end
+        if m.shared_appearance then
+            local ok, value = pcall(function()
+                local remote_read = m.avatar.reader(memory)
+                return m.shared_appearance.new({
+                    sync = m.lobby_sync,
+                    codec = m.shared_lut_codec.new(),
+                    memory = memory,
+                    game = game,
+                    note = function(text)
+                        if ctx.log then
+                            ctx.log(text)
+                        end
+                    end,
+                    identity = function()
+                        return m.avatar.resolve(memory, game, remote_read)
+                    end,
+                    highlighting = function()
+                        return (region_indicator and region_indicator.job ~= nil)
+                            or (pattern_editor and pattern_editor.flashing())
+                    end,
+                    entries = function()
+                        local out = {}
+                        for _, b in ipairs(bindings.owned) do
+                            if b.document and b.current ~= b.original and present(b) and binding(b) == b.current then
+                                out[#out + 1] = { key = b.save_key, document = applied_document(b) }
+                            end
+                        end
+                        if operations.pattern_session then
+                            for _, b in ipairs(operations.pattern_session.owned) do
+                                if
+                                    b.document
+                                    and b.current ~= b.original
+                                    and present(b)
+                                    and binding(b) == b.current
+                                then
+                                    out[#out + 1] = { key = 'p:' .. b.save_key, document = applied_document(b) }
+                                end
+                            end
+                        end
+                        return out
+                    end,
+                    players = function()
+                        return m.avatar.players(remote_read, game)
+                    end,
+                    resolve = function(player)
+                        return m.avatar.resolve_remote(remote_read, game, player)
+                    end,
+                    targets = function(identity, appearance)
+                        local targets, marks, seen = {}, {}, {}
+                        for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
+                            marks[#marks + 1] = unit.unit
+                            for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
+                                local key = (unit.type or 0)
+                                    .. ':'
+                                    .. unit.slot
+                                    .. ':'
+                                    .. (material.mesh_index or 0)
+                                    .. ':'
+                                    .. (material.material_index or i - 1)
+                                for _, pattern in ipairs({ false, true }) do
+                                    local entry = appearance.entries[(pattern and 'p:' or '') .. key]
+                                    local b = {
+                                        unit = unit.unit,
+                                        mesh = material.mesh,
+                                        material = material.material,
+                                        slot = pattern and m.engine.PATTERN_SLOT or m.engine.LUT_SLOT,
+                                    }
+                                    local bound = entry and binding(b)
+                                    local tag = material_key(b) .. ':' .. b.slot
+                                    if bound and bound ~= 0 and not seen[tag] then
+                                        seen[tag] = true
+                                        b.original, b.current = bound, bound
+                                        local document = entry.document
+                                        targets[document] = targets[document] or {}
+                                        targets[document][#targets[document] + 1] = b
+                                    end
+                                end
+                            end
+                        end
+                        return targets, table.concat(marks, ':')
+                    end,
+                    bindings = function()
+                        return m.binding_session.new({
+                            retain = retain,
+                            present = present,
+                            binding = binding,
+                            key = function(b)
+                                return material_key(b) .. ':' .. (b.slot or m.engine.LUT_SLOT)
+                            end,
+                            create_texture = function(w, h, data)
+                                return m.engine.create_texture(native, w, h, data, read, small)
+                            end,
+                            bind = function(b, object)
+                                m.engine.bind(native, b.material, b.slot or m.engine.LUT_SLOT, object)
+                                native.commit(b.mesh)
+                            end,
+                        })
+                    end,
+                })
+            end)
+            if ok then
+                sharing = value
+            else
+                ctx.log('Appearance sharing unavailable: ' .. tostring(value))
+            end
+        end
         import_jobs = m.import_job.new(m.import_protocol)
         table_index = m.table_index.new({ read = m.file_io.read, decode = m.dds.decode, max_bytes = m.dds.MAX_BYTES })
         operations.apply_matching = apply_matching
@@ -2039,9 +2398,114 @@ return {
                         end
                     end
                 end
+                for _, group in ipairs(groups) do
+                    for _, b in ipairs(group.bindings) do
+                        local object = m.engine.binding(read, b.material, m.engine.PATTERN_SLOT, small, big)
+                        if operations.pattern_session then
+                            for _, pattern in ipairs(operations.pattern_session.owned) do
+                                if pattern.material == b.material and pattern.current == object then
+                                    object = pattern.original
+                                    break
+                                end
+                            end
+                        end
+                        if object and object ~= 0 then
+                            objects[object] = true
+                        end
+                    end
+                end
                 return objects
             end)
             original_luts.start()
+        end
+        if m.pattern_luts then
+            local pattern_session = m.binding_session.new({
+                retain = retain,
+                present = present,
+                binding = binding,
+                key = function(b)
+                    return material_key(b) .. ':pattern'
+                end,
+                create_texture = function(w, h, data)
+                    return m.engine.create_texture(native, w, h, data, read, small)
+                end,
+                bind = function(b, object)
+                    m.engine.bind(native, b.material, m.engine.PATTERN_SLOT, object)
+                    native.commit(b.mesh)
+                end,
+            })
+            local pattern_indicator = m.region_indicator.new({
+                present = present,
+                binding = binding,
+                apply = pattern_session.apply,
+                bind = function(b, object)
+                    m.engine.bind(native, b.material, m.engine.PATTERN_SLOT, object)
+                    native.commit(b.mesh)
+                end,
+            })
+            pattern_editor = m.pattern_luts.new({
+                indicator = pattern_indicator,
+                session = pattern_session,
+                key = material_key,
+                binding = binding,
+                rgb = m.palette.rgb,
+                swatch = m.palette.swatch,
+                log = ctx.log,
+                current_gear = function()
+                    return palette_editor and palette_editor.gear or 'armor'
+                end,
+                note = message,
+                resource_id = resource_id,
+                original = function(object)
+                    return original_luts and original_luts.get(object)
+                end,
+                discover = function()
+                    local identity = assert(m.avatar.resolve_live(memory, game), 'Worn gear not ready')
+                    local out = {}
+                    for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
+                        for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
+                            local b = {
+                                unit = unit.unit,
+                                mesh = material.mesh,
+                                material = material.material,
+                                slot = m.engine.PATTERN_SLOT,
+                                helmet = unit.slot == 0,
+                                armor = unit.slot ~= 0,
+                                save_key = (unit.type or 0)
+                                    .. ':'
+                                    .. unit.slot
+                                    .. ':'
+                                    .. (material.mesh_index or 0)
+                                    .. ':'
+                                    .. (material.material_index or i - 1),
+                            }
+                            if binding(b) then
+                                out[#out + 1] = b
+                            end
+                        end
+                    end
+                    return out
+                end,
+                export = function(name, document)
+                    local function write()
+                        operations.export_files.save(name, document)
+                        return message('Exported 3x1 Pattern DDS to files/exports')
+                    end
+                    if operations.export_files.exists(name) and frontend.menu then
+                        frontend.menu.outfit_dialog = {
+                            phase = 'delete',
+                            title = 'Overwrite Pattern DDS?',
+                            preset_name = name .. '.dds',
+                            description = 'Replace the existing Pattern DDS?',
+                            action_label = 'Overwrite DDS',
+                            on_save = write,
+                        }
+                        return message('Confirm Pattern DDS overwrite')
+                    end
+                    return write()
+                end,
+            })
+            operations.pattern_session = pattern_session
         end
         if m.lut_editor then
             palette_editor = m.lut_editor.new(
@@ -2054,8 +2518,24 @@ return {
                     return action(function()
                         assert(edit.loaded, 'Import a palette first')
                         assert(name:match('^[%w _-]+$') and #name <= 48 and #name > 0, 'Invalid DDS filename')
-                        operations.export_files.save(name, edit.loaded)
-                        return message('Saved ' .. name .. '.dds in Epic LUT/files/exports')
+                        local d = edit.loaded
+                        local function write_export()
+                            operations.export_files.save(name, d)
+                            d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+                            return message('Saved ' .. name .. '.dds in Epic LUT/files/exports')
+                        end
+                        if operations.export_files.exists(name) and frontend.menu then
+                            frontend.menu.outfit_dialog = {
+                                phase = 'delete',
+                                title = 'Overwrite DDS?',
+                                preset_name = name .. '.dds',
+                                description = 'Replace the existing export with this LUT?',
+                                action_label = 'Overwrite DDS',
+                                on_save = write_export,
+                            }
+                            return message('Confirm overwrite or cancel to keep the existing DDS.')
+                        end
+                        return write_export()
                     end)
                 end,
                 paths.presets,
@@ -2078,10 +2558,53 @@ return {
                 end,
                 function()
                     assert(not paths.exports:find("'", 1, true), 'Invalid export path')
-                    local args = [=[-NoProfile -NonInteractive -Command "Invoke-Item -LiteralPath ']=] .. paths.exports .. [=['"]=]
+                    local args = [=[-NoProfile -NonInteractive -Command "Invoke-Item -LiteralPath ']=]
+                        .. paths.exports
+                        .. [=['"]=]
                     local worker = m.windows.launch_worker(args, paths.exports)
                     worker.close()
                     return message('Opened Epic LUT export folder')
+                end,
+                function(name)
+                    return action(function()
+                        assert(m.patch_export, 'Patch exporter unavailable')
+                        assert(edit.loaded, 'Load or edit a LUT first')
+                        refresh(true)
+                        local selected = basic_selected or edit.editor_target
+                        local group = groups[selected and selected.group or handle.get('lut')]
+                        assert(group, 'Select a Live LUT destination first')
+                        if selected and selected.object then
+                            assert(group.object == selected.object, 'Gear changed; select the destination LUT again')
+                        end
+                        if selected and selected.key then
+                            assert(
+                                selected.key == selected.kind .. ':' .. tostring(group.object),
+                                'Gear changed; select the destination LUT again'
+                            )
+                        end
+                        local original
+                        for _, b in ipairs(group.bindings) do
+                            if
+                                present(b)
+                                and binding(b) == b.current
+                                and (not selected or not selected.kind or b[selected.kind])
+                            then
+                                original = original_luts and original_luts.get(b.original)
+                                if original then
+                                    break
+                                end
+                            end
+                        end
+                        assert(original, 'Original destination LUT snapshot is not ready')
+                        local exporter = m.patch_export.new(paths.exports, {
+                            dds = m.dds,
+                            directory_exists = paths.directory_exists,
+                            mkdir_new = paths.mkdir_new,
+                            rmdir = paths.rmdir,
+                        })
+                        local output, resource, zip = exporter.save(name, edit.loaded, original)
+                        return message('Exported patch ZIP for ' .. resource .. ' to ' .. (zip or output))
+                    end)
                 end
             )
         end
@@ -2089,6 +2612,9 @@ return {
         message('Direct DDS editor ready; no archive discovery or Python')
     end,
     on_update = function(dt_context, dt)
+        local perf_started = os.clock()
+        edit.perf = edit.perf or { age = 0, frames = 0, total = 0, original = 0, frontend = 0, maximum = 0 }
+        local perf = edit.perf
         pcall(region_indicator.tick, dt, not frontend.menu or frontend.menu.visible)
         local myc = not not rawget(_G, 'MatchYourColorsInstalled')
         if frontend and frontend.menu then
@@ -2103,13 +2629,17 @@ return {
         if updates then
             pcall(updates.tick, dt)
         end
+        local perf_original = os.clock()
         if original_luts then
             local ok, why = pcall(original_luts.tick)
             if not ok then
                 message('Original snapshot error: ' .. tostring(why))
             end
         end
+        perf.original = perf.original + os.clock() - perf_original
+        local perf_frontend = os.clock()
         frontend.tick(dt)
+        perf.frontend = perf.frontend + os.clock() - perf_frontend
         local current = frontend.resolve()
         if current then
             register(current)
@@ -2119,7 +2649,7 @@ return {
             if updates and not updates.started and preferences.auto_updates and preferences.auto_updates() then
                 pcall(updates.check)
             end
-            if setup then
+            if setup and not resume_done then
                 action(resume_setup)
             end
             if refresh_needed then
@@ -2211,6 +2741,61 @@ return {
                     control.label = status
                 end
             end
+        end
+        if pattern_editor and handle then
+            local ok, why = pcall(pattern_editor.tick, dt)
+            if not ok then
+                pcall(pattern_editor.stop_flash)
+                if ctx.log then
+                    ctx.log('Pattern update stopped safely: ' .. tostring(why))
+                end
+            end
+        end
+        if armory_mirror and handle then
+            local ok, why = pcall(armory_mirror.tick, dt)
+            if not ok then
+                pcall(armory_mirror.close)
+                if ctx.log then
+                    ctx.log('Armory mirror paused: ' .. tostring(why))
+                end
+                armory_mirror = nil
+            end
+        end
+        if sharing and handle then
+            local control = api.mods[handle.id].controls.share_appearance
+            local ok, why = true, nil
+            if not sharing.paused then
+                ok, why = pcall(sharing.tick, dt, control and handle.get('share_appearance') or false)
+            end
+            if not ok then
+                pcall(sharing.close)
+                sharing.paused = true
+                sharing.status = 'Sharing paused: ' .. tostring(why)
+            end
+            local label = edit.sharing_status_control
+            if label then
+                label.label = sharing.status
+            end
+        end
+        local elapsed = os.clock() - perf_started
+        perf.age, perf.frames = perf.age + (dt or 0), perf.frames + 1
+        perf.total, perf.maximum = perf.total + elapsed, math.max(perf.maximum, elapsed)
+        if perf.age >= 5 then
+            if ctx.log then
+                ctx.log(
+                    string.format(
+                        'PERF update_avg=%.3fms max=%.3fms original_avg=%.3fms frontend_avg=%.3fms menu=%s resume_done=%s refresh_pending=%s',
+                        perf.total * 1000 / perf.frames,
+                        perf.maximum * 1000,
+                        perf.original * 1000 / perf.frames,
+                        perf.frontend * 1000 / perf.frames,
+                        tostring(frontend.menu and frontend.menu.visible),
+                        tostring(resume_done),
+                        tostring(refresh_needed)
+                    )
+                )
+            end
+            edit.perf = nil
         end
     end,
     on_disable = close,

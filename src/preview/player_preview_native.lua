@@ -72,6 +72,44 @@ function Native.new(E, m, host)
             end
             native.commit(dest.mesh)
         end
+        if
+            m.limb_caps
+            and (piece.slot == 6 or piece.slot == 7)
+            and type(E.Mesh.bounding_volume_components) == 'function'
+        then
+            local meshes = {}
+            for _, source in ipairs(sources) do
+                local index = source.mesh_index
+                if index then
+                    local candidate = meshes[index] or { eligible = true }
+                    candidate.eligible = candidate.eligible and m.limb_caps.material(bindings(source.material))
+                    meshes[index] = candidate
+                end
+            end
+            for index, candidate in pairs(meshes) do
+                if candidate.eligible then
+                    local lo, hi = E.Mesh.bounding_volume_components(U.mesh(piece.source, index + 1))
+                    local compact = m.limb_caps.compact(lo, hi)
+                    host.log(
+                        'preview: limb cap candidate slot='
+                            .. piece.slot
+                            .. ' mesh='
+                            .. index
+                            .. ' compact='
+                            .. tostring(compact)
+                            .. ' span='
+                            .. math.abs(hi.x - lo.x)
+                            .. ','
+                            .. math.abs(hi.y - lo.y)
+                            .. ','
+                            .. math.abs(hi.z - lo.z)
+                    )
+                    if compact then
+                        U.set_mesh_visibility(piece.unit, index + 1, false)
+                    end
+                end
+            end
+        end
     end
     local function sync_materials(piece)
         assert(U.alive(piece.source), 'Equipped source changed; rebuild preview')
@@ -93,6 +131,7 @@ function Native.new(E, m, host)
         end
     end
     local model = m.player_model.new(E, {
+        note = host.log,
         copy_materials = copy_materials,
         apply_palette = host.apply_palette or function(piece)
             sync_materials(piece)
@@ -166,7 +205,7 @@ function Native.new(E, m, host)
         end
         local name = E.IdString64.from_hex('15c7f9cccbb13826')
         assert(A.can_get('unit', name), 'Preview light resource unavailable')
-        for _, spec in ipairs({ { -2.5, 3, 3.2, 3 }, { 2.8, 3, 1.4, 2 } }) do
+        for _, spec in ipairs({ { -2.5, 3, 3.2, 6 }, { 2.8, 3, 1.4, 4 }, { 0, -3, 2.5, 3 } }) do
             local position = E.Vector3(spec[1], spec[2], spec[3])
             local aim = E.Vector3(0, 0, 1)
             local unit = assert(
@@ -194,26 +233,63 @@ function Native.new(E, m, host)
             host.log(ok and 'preview: initialized UI render world available' or 'preview: ' .. tostring(world))
         end
         local world = A.main_world()
+        local units = W.units(world)
+        local function contains_player(list)
+            for _, unit in ipairs(list) do
+                if token(unit) == identity.unit then
+                    return true
+                end
+            end
+            return false
+        end
+        if not contains_player(units) then
+            for _, candidate in ipairs(A.worlds() or {}) do
+                if candidate ~= world then
+                    local candidates = W.units(candidate)
+                    if contains_player(candidates) then
+                        world, units = candidate, candidates
+                        break
+                    end
+                end
+            end
+        end
         local wanted = {}
         local root
         for _, piece in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
-            wanted[piece.unit] = piece.slot == 0 and 'helmet' or 'armor'
+            wanted[piece.unit] = { kind = piece.slot == 0 and 'helmet' or 'armor', slot = piece.slot }
         end
         local pieces = {}
         source_materials = {}
-        for _, unit in ipairs(W.units(world)) do
+        for _, unit in ipairs(units) do
             local id = token(unit)
             if id == identity.unit then
                 root = unit
             end
             if wanted[id] then
-                pieces[#pieces + 1] = { unit = unit, kind = wanted[id] }
+                pieces[#pieces + 1] = { unit = unit, kind = wanted[id].kind, slot = wanted[id].slot }
                 for _, material in ipairs(m.engine.unit_materials(native, id)) do
                     source_materials[material.material] = true
                 end
             end
         end
-        assert(root, 'Local player root was not found in the main world')
+        if not root then
+            -- identity.unit is a gameplay entity key, not always a world Unit handle.
+            -- Any confirmed equipped garment supplies a common rigid transform origin.
+            -- All garment poses are captured relative to that same origin.
+            for _, piece in ipairs(pieces) do
+                if piece.kind == 'armor' and U.alive(piece.unit) then
+                    root = piece.unit
+                    break
+                end
+            end
+            if not root and pieces[1] and U.alive(pieces[1].unit) then
+                root = pieces[1].unit
+            end
+            if root then
+                host.log('preview: using confirmed equipped garment as transform origin')
+            end
+        end
+        assert(root, 'No equipped garment units were found in the live world')
         local gear = m.avatar.copy(identity)
         gear.plan = model.capture(world, root, pieces)
         local visible, nodes = 0, 0
@@ -299,6 +375,63 @@ function Native.new(E, m, host)
             error(why, 0)
         end
         return result
+    end
+    function adapter.meshes(value)
+        local rows = {}
+        for pi, piece in ipairs(value.pieces) do
+            assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
+            if not piece.mesh_choices then
+                piece.mesh_choices, piece.mesh_defaults = {}, {}
+                for mi = 1, U.num_meshes(piece.unit) do
+                    local visible = E.Mesh.visibility(U.mesh(piece.unit, mi))
+                    visible = visible == true or visible == 1
+                    piece.mesh_choices[mi], piece.mesh_defaults[mi] = visible, visible
+                end
+            end
+            local resource = tostring(U.resource_name(piece.unit))
+            resource = resource:match('#ID%[(%x+)%]') or resource
+            for mi, visible in ipairs(piece.mesh_choices) do
+                rows[#rows + 1] = {
+                    piece = pi,
+                    mesh = mi,
+                    visible = visible,
+                    label = string.format(
+                        '%s slot %s / %s / mesh %d',
+                        piece.kind or 'gear',
+                        tostring(piece.slot),
+                        resource,
+                        mi
+                    ),
+                }
+            end
+        end
+        return rows
+    end
+    function adapter.set_mesh(value, pi, mi, visible)
+        local piece = assert(value.pieces[pi], 'Preview piece unavailable')
+        assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
+        assert(piece.mesh_choices and piece.mesh_choices[mi] ~= nil, 'Preview mesh unavailable')
+        U.set_mesh_visibility(piece.unit, mi, visible == true)
+        piece.mesh_choices[mi] = visible == true
+        W.update_unit(value.world, piece.unit)
+        host.log(
+            string.format(
+                'preview: mesh toggle piece=%d slot=%s mesh=%d visible=%s resource=%s',
+                pi,
+                tostring(piece.slot),
+                mi,
+                tostring(visible),
+                tostring(U.resource_name(piece.unit))
+            )
+        )
+    end
+    function adapter.reset_meshes(value)
+        adapter.meshes(value)
+        for pi, piece in ipairs(value.pieces) do
+            for mi, visible in ipairs(piece.mesh_defaults) do
+                adapter.set_mesh(value, pi, mi, visible)
+            end
+        end
     end
     function adapter.destroy_model(value)
         host.log('preview: release copied pieces')

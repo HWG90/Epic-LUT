@@ -298,7 +298,7 @@ function M.new(api, measure)
         self.visible = false
         self.capture = false
         self.text_edit = nil
-        self.color_picker = nil
+        self.close_color(false)
         self.dropdown = nil
         self.mouse_held = false
 
@@ -462,6 +462,15 @@ function M.new(api, measure)
         return true
     end
 
+    function self.close_color(commit)
+        local p=self.color_picker
+        if p and p.preview_started and p.control.picker_end then
+            local ok,why=pcall(p.control.picker_end,commit)
+            if not ok then self.notice=tostring(why) end
+        end
+        self.color_picker=nil
+        self.text_edit=nil
+    end
     function self.commit_color()
         if not self.finish_color_field() then
             return
@@ -481,9 +490,10 @@ function M.new(api, measure)
 
         if called and ok then
             self.notice = p.control.page.require_confirmation and 'Pending confirmation' or 'Saved'
-            self.color_picker = nil
+            self.close_color(true)
         else
             self.notice = tostring(called and err or ok)
+            p.error = self.notice
         end
     end
 
@@ -521,7 +531,7 @@ function M.new(api, measure)
             window_resize = nil
             self.dropdown = nil
             self.text_edit = nil
-            self.color_picker = nil
+            self.close_color(false)
         end
 
         if code == (self.toggle_key or 121) then
@@ -637,7 +647,7 @@ function M.new(api, measure)
 
         if self.color_picker then
             if code == 27 then
-                self.color_picker = nil
+                self.close_color(false)
                 return
             end
 
@@ -1184,10 +1194,17 @@ function M.new(api, measure)
                     drag = nil
                 elseif input.down(1) then
                     if x then
-                        drag.move(x)
+                        drag.move(x, y)
+                        if drag.live and drag.value ~= drag.last_value and (not drag.last_commit or os.clock()-drag.last_commit>=.04) then
+                            local ok,err=(drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id,drag.value)
+                            drag.last_value,drag.last_commit=drag.value,os.clock()
+                            if not ok then self.notice='Could not apply: '..tostring(err) end
+                        end
                     end
                 else
-                    local ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
+                    local current = drag.mod.handle.get(drag.control.id)
+                    local ok,err=true,nil
+                    if not drag.live or math.abs(current-drag.value)>1e-9 then ok,err=(drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id,drag.value) end
 
                     self.notice = ok
                             and (drag.control.page and drag.control.page.require_confirmation and 'Pending confirmation' or 'Saved')
@@ -1215,6 +1232,12 @@ function M.new(api, measure)
         end
     end
 
+    function self.owns_pointer(x,y)
+        if drag or window_drag or window_resize or preview_drag or color_drag or palette_drag or split_drag then return true end
+        if self.color_picker or self.outfit_dialog or self.dropdown then return true end
+        local b = self.floating_bounds
+        return b and x and y and x>=b.x and x<=b.x+b.w and y>=b.y and y<=b.y+b.h or false
+    end
     function self.compose(w, h)
         if not self.visible then
             self.release_console()
@@ -1224,13 +1247,14 @@ function M.new(api, measure)
             window_resize = nil
             self.dropdown = nil
             self.text_edit = nil
-            self.color_picker = nil
+            self.close_color(false)
             return {}
         end
 
         local commands = {}
         hits = {}
-        local floating_request
+        self.floating_bounds = nil
+        local floating_request, floating_context
         local s = math.min(w / 1920, h / 1080) * (self.ui_scale or 1)
         local selected_mod, selected_page = active()
         local minimum_w = selected_page and selected_page.minimum_width
@@ -1372,7 +1396,7 @@ function M.new(api, measure)
         text(30, wh - 43, 'EPIC LUT', 28, accent)
         local mode_switch = self.basic_only and self.open_advanced or self.open_basic
         if mode_switch then
-            rect(ww - 224, wh - 58, 140, 30, { 35, 62, 90 })
+            rect(ww - 224, wh - 58, 140, 30, { 24, 132, 140 })
             bounded(ww - 214, wh - 49, self.basic_only and 'Advanced Mode' or 'Basic Mode', 14, white, 120)
             hit(ww - 224, wh - 58, 140, 30, mode_switch)
         end
@@ -1385,7 +1409,7 @@ function M.new(api, measure)
             self.capture = false
             self.dropdown = nil
             self.text_edit = nil
-            self.color_picker = nil
+            self.close_color(false)
         end)
 
         if self.warning then
@@ -1594,14 +1618,37 @@ function M.new(api, measure)
                     text = text,
                     hit = hit,
                     bounded = bounded,
+                    text_size = function(size)
+                        return self.compact_fonts and (self.font_size or 12) or size
+                    end,
+                    text_width = function(value, size)
+                        size = self.compact_fonts and (self.font_size or 12) or size
+                        return measure and measure(tostring(value), size * s) / s or #tostring(value) * size * 0.62
+                    end,
                     shift = function()
                         return self.shift
                     end,
                     activate = function(id, direction)
                         change(assert(mod.controls[id]), direction or 0)
                     end,
+                    vertical = function(id, x, y, width, height)
+                        local control = assert(mod.controls[id])
+                        local value = drag and drag.control == control and drag.value or mod.handle.get(id)
+                        hit(x, y, width, height, function(mx, my)
+                            local item = { mod = mod, control = control, value = value }
+                            function item.move(px, py)
+                                if not py then return end
+                                local ratio = math.max(0, math.min(1, (py - (oy + y * s)) / (height * s)))
+                                item.value = control.min + math.floor(ratio * (control.max - control.min) / control.step + 0.5) * control.step
+                            end
+                            drag = item
+                            item.move(mx, my)
+                        end, nil, nil, 'Scratch alpha: checkerboard is transparent; solid color is opaque.')
+                        return value
+                    end,
                     number = function(id, x, y, width, value, prepare, enabled, lo, hi, selected)
                         local control = assert(mod.controls[id])
+                        if drag and drag.control == control then value = drag.value end
                         local track = width - 92
                         value = tonumber(value) or tonumber(mod.handle.get(id)) or tonumber(control.default) or 0
                         lo = tonumber(lo) or control.min
@@ -1630,14 +1677,13 @@ function M.new(api, measure)
                                 return
                             end
                             prepare()
-                            local item = { mod = mod, control = control, value = value }
+                            local item = { mod = mod, control = control, value = value, live = true }
                             function item.move(px)
                                 local fraction = math.max(0, math.min(1, (px - (ox + x * s)) / (track * s)))
                                 item.value = math.min(
                                     hi,
                                     lo + math.floor(fraction * (hi - lo) / control.step + 0.5) * control.step
                                 )
-                                self.redraw_revision = (self.redraw_revision or 0) + 1
                             end
                             drag = item
                             item.move(mx)
@@ -1652,13 +1698,13 @@ function M.new(api, measure)
                             self.notice = 'Type value; Enter saves, Escape cancels'
                         end)
                     end,
-                    floating = function(id, draw, width, height, close)
+                    floating = function(id, draw, width, height, close, header_height)
                         self.floating_positions = self.floating_positions or {}
                         local position = self.floating_positions[id]
                             or { x = math.max(0, w - (width + 30) * s), y = math.max(0, (h - height * s) / 2) }
                         self.floating_positions[id] = position
                         floating_request =
-                            { position = position, draw = draw, width = width, height = height, close = close }
+                            { position = position, draw = draw, width = width, height = height, close = close, header_height = header_height or 28 }
                     end,
                     set = function(id, value)
                         local control = assert(mod.controls[id])
@@ -1721,6 +1767,11 @@ function M.new(api, measure)
                     end,
                     choice = function(id, x, y, width, prepare)
                         local control = assert(mod.controls[id], 'Editor control missing: ' .. id)
+                        local owner = floating_context
+                        if self.dropdown and self.dropdown.control == control and self.dropdown.mod == mod then
+                            self.dropdown.x, self.dropdown.top = x, y - 4
+                            self.dropdown.width, self.dropdown.owner = math.max(width, control.dropdown_width or 0), owner
+                        end
                         local value = mod.handle.get(id)
                         M.choice(primitives, control, value, x, y, width, function(direction)
                             if prepare then
@@ -1734,6 +1785,7 @@ function M.new(api, measure)
                             end
                             self.dropdown = {
                                 mod = mod,
+                                owner = owner,
                                 control = control,
                                 selected = value,
                                 scroll = math.max(0, math.min(math.max(0, #control.choices - 8), value - 4)),
@@ -2372,6 +2424,73 @@ function M.new(api, measure)
             rect(corner[2] + 4, corner[3] + 4, 6, 6, muted)
             commands[#commands].resize_handle = corner[1]
         end
+        local pv = self.preview_window
+        if pv and api.mods[pv.mod.id] ~= pv.mod then
+            self.preview_window = nil
+            pv = nil
+        end
+        if pv then
+            local vw, vh = pv.width or 420, pv.height or 450
+            local pw, ph = vw * s, vh * s
+            pv.x = math.max(0, math.min(w - pw, pv.x))
+            pv.y = math.max(0, math.min(h - ph, pv.y))
+            local px, py = pv.x, pv.y
+            local vx, vy = (px - ox) / s, (py - oy) / s
+            local first = #commands + 1
+            rect(vx, vy, vw, vh, { 20, 25, 30 }, 0.98)
+            rect(vx, vy + vh - 40, vw, 40, { 35, 42, 48 })
+            text(vx + 14, vy + vh - 27, pv.title or 'HUD PREVIEW', 18, accent)
+            text(vx + vw - 33, vy + vh - 28, 'X', 20, white)
+            hit(vx, vy, vw, vh, function() end)
+            hit(vx, vy + vh - 40, vw - 50, 40, function(mx, my)
+                preview_drag = { dx = mx - px, dy = my - py, max_x = math.max(0, w - pw), max_y = math.max(0, h - ph) }
+            end)
+            hit(vx + vw - 43, vy + vh - 40, 43, 40, function()
+                self.preview_window = nil
+                preview_drag = nil
+            end)
+            local ok, preview = pcall(
+                pv.page.render_preview,
+                { x = px + 20 * s, y = py + 35 * s, w = (vw - 40) * s, h = (vh - 105) * s, scale = s }
+            )
+            if ok and type(preview) == 'table' then
+                for _, command in ipairs(preview) do
+                    commands[#commands + 1] = command
+                end
+            else
+                text((px - ox) / s + 15, (py - oy) / s + 200, 'Preview unavailable', 18, muted)
+            end
+            text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted)
+            for i = first, #commands do
+                commands[i].hud_preview = true
+                commands[i].layer = 110 + (i - first) * 0.01
+            end
+        end
+
+        if floating_request then
+            local f = floating_request
+            local p = f.position
+            local fw, fh = f.width * s, f.height * s
+            p.x = math.max(0, math.min(w - fw, p.x))
+            p.y = math.max(0, math.min(h - fh, p.y))
+            self.floating_bounds = {x=p.x,y=p.y,w=fw,h=fh}
+            local fx, fy = (p.x - ox) / s, (p.y - oy) / s
+            local first = #commands + 1
+            hit(fx, fy, f.width, f.height, function() end)
+            floating_context = f
+            f.draw(fx, fy, f.width, f.height)
+            floating_context = nil
+            local header_height = f.header_height or 28
+            hit(fx, fy + f.height - header_height, f.width - 32, header_height, function(mx, my)
+                preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
+            end)
+            text(fx + f.width - 20, fy + f.height - 26, 'X', 14, white)
+            hit(fx + f.width - 32, fy + f.height - header_height, 32, header_height, function() self.dropdown=nil; f.close() end)
+            for i = first, #commands do
+                commands[i].popup = true
+                commands[i].layer = 210 + (i - first) * 0.001
+            end
+        end
         if self.dropdown then
             local overlay_start = #commands + 1
 
@@ -2382,11 +2501,21 @@ function M.new(api, measure)
             local top = math.max(height + 8, math.min(wh - 68, d.top))
             local dw = math.min(ww - 16, d.width or 250)
             local x = math.max(8, math.min(ww - dw - 8, d.x))
+            if d.owner then
+                top = math.max(-oy/s + height + 8, math.min((h-oy)/s - 8, d.top))
+                dw = math.min(w/s-16,d.width or 250)
+                x = math.max(-ox/s+8,math.min((w-ox)/s-dw-8,d.x))
+            end
 
             -- Overlay hit regions take priority and consume outside clicks.
 
-            hit(-ox / s, -oy / s, w / s, h / s, function()
-                self.dropdown = nil
+            hit(-ox / s, -oy / s, w / s, h / s, function(mx,my)
+                local owner = d.owner
+                local p = owner and owner.position
+                local header = owner and owner.header_height or 28
+                if p and mx >= p.x and mx < p.x+(owner.width-32)*s and my >= p.y+(owner.height-header)*s and my <= p.y+owner.height*s then
+                    preview_drag = {window=p,dx=mx-p.x,dy=my-p.y,max_x=math.max(0,w-owner.width*s),max_y=math.max(0,h-owner.height*s)}
+                else self.dropdown = nil end
             end)
 
             rect(x - 2, top - height - 2, dw + 4, height + 4, accent)
@@ -2452,7 +2581,7 @@ function M.new(api, measure)
 
             for index = overlay_start, #commands do
                 commands[index].popup = true
-                commands[index].layer = 200
+                commands[index].layer = 230
             end
 
             if #d.control.choices > count then
@@ -2464,76 +2593,26 @@ function M.new(api, measure)
             end
         end
 
-        local pv = self.preview_window
-        if pv and api.mods[pv.mod.id] ~= pv.mod then
-            self.preview_window = nil
-            pv = nil
-        end
-        if pv then
-            local vw, vh = pv.width or 420, pv.height or 450
-            local pw, ph = vw * s, vh * s
-            pv.x = math.max(0, math.min(w - pw, pv.x))
-            pv.y = math.max(0, math.min(h - ph, pv.y))
-            local px, py = pv.x, pv.y
-            local vx, vy = (px - ox) / s, (py - oy) / s
-            local first = #commands + 1
-            rect(vx, vy, vw, vh, { 20, 25, 30 }, 0.98)
-            rect(vx, vy + vh - 40, vw, 40, { 35, 42, 48 })
-            text(vx + 14, vy + vh - 27, pv.title or 'HUD PREVIEW', 18, accent)
-            text(vx + vw - 33, vy + vh - 28, 'X', 20, white)
-            hit(vx, vy, vw, vh, function() end)
-            hit(vx, vy + vh - 40, vw - 50, 40, function(mx, my)
-                preview_drag = { dx = mx - px, dy = my - py, max_x = math.max(0, w - pw), max_y = math.max(0, h - ph) }
-            end)
-            hit(vx + vw - 43, vy + vh - 40, 43, 40, function()
-                self.preview_window = nil
-                preview_drag = nil
-            end)
-            local ok, preview = pcall(
-                pv.page.render_preview,
-                { x = px + 20 * s, y = py + 35 * s, w = (vw - 40) * s, h = (vh - 105) * s, scale = s }
-            )
-            if ok and type(preview) == 'table' then
-                for _, command in ipairs(preview) do
-                    commands[#commands + 1] = command
-                end
-            else
-                text((px - ox) / s + 15, (py - oy) / s + 200, 'Preview unavailable', 18, muted)
-            end
-            text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted)
-            for i = first, #commands do
-                commands[i].hud_preview = true
-                commands[i].layer = 110 + (i - first) * 0.01
-            end
-        end
-
-        if floating_request then
-            local f = floating_request
-            local p = f.position
-            local fw, fh = f.width * s, f.height * s
-            p.x = math.max(0, math.min(w - fw, p.x))
-            p.y = math.max(0, math.min(h - fh, p.y))
-            local fx, fy = (p.x - ox) / s, (p.y - oy) / s
-            local first = #commands + 1
-            hit(fx, fy, f.width, f.height, function() end)
-            f.draw(fx, fy, f.width, f.height)
-            hit(fx, fy + f.height - 28, f.width - 30, 28, function(mx, my)
-                preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
-            end)
-            text(fx + f.width - 20, fy + f.height - 20, 'X', 14, white)
-            hit(fx + f.width - 28, fy + f.height - 28, 28, 28, f.close)
-            for i = first, #commands do
-                commands[i].popup = true
-                commands[i].layer = 210
-            end
-        end
         if self.color_picker then
             local p = self.color_picker
+            if p.control.picker_preview then
+                if not p.preview_started then
+                    local ok,why=pcall(p.control.picker_begin)
+                    if ok then p.preview_started=true else p.error=tostring(why) end
+                end
+                local alpha=p.alpha or (p.control.picker_alpha and p.control.picker_alpha()) or 1
+                local signature=table.concat(p.rgb,',')..':'..tostring(alpha)
+                if p.preview_started and signature~=p.preview_signature and (not p.next_preview or os.clock()>=p.next_preview) then
+                    local ok,why=pcall(p.control.picker_preview,p.rgb,alpha)
+                    if not ok then p.error=tostring(why) end
+                    p.preview_signature,p.next_preview=signature,os.clock()+.04
+                end
+            end
             local start = #commands + 1
             local px, py = math.max(0, math.min(ww - 704, p.x or 400)), math.max(0, math.min(wh - 434, p.y or 195))
 
             hit(-ox / s, -oy / s, w / s, h / s, function()
-                self.color_picker = nil
+                self.close_color(false)
                 self.text_edit = nil
             end)
 
@@ -2550,7 +2629,7 @@ function M.new(api, measure)
             text(px + 660, py + 396, 'X', 20, white)
 
             hit(px + 650, py + 389, 32, 30, function()
-                self.color_picker = nil
+                self.close_color(false)
                 self.text_edit = nil
             end)
 
@@ -2598,6 +2677,32 @@ function M.new(api, measure)
                 value_slider(mx, my)
             end)
 
+            if p.control.picker_alpha then
+                if p.alpha == nil then p.alpha = p.control.picker_alpha() end
+                local ax, ay, ah = px + 292, py + 160, 204
+                for row = 0, 19 do
+                    local opacity = row / 19
+                    for col = 0, 1 do
+                        local background = (row + col) % 2 == 0 and 220 or 125
+                        local color = {}
+                        for ch = 1, 3 do color[ch] = math.floor(background * (1 - opacity) + p.rgb[ch] * opacity + 0.5) end
+                        rect(ax + col * 8, ay + row * ah / 20, 8, ah / 20 + 1, color)
+                    end
+                end
+                local marker = ay + math.max(0, math.min(1, p.alpha)) * ah
+                rect(ax - 2, marker - 2, 20, 4, { 15, 15, 15 })
+                rect(ax - 2, marker - 1, 20, 2, white)
+                text(ax - 2, ay - 21, 'A', 16, white)
+                local function alpha_slider(mx, my)
+                    p.alpha = math.floor(math.max(0, math.min(1, ((my - oy) / s - ay) / ah)) * 1000 + 0.5) / 1000
+                end
+                hit(ax, ay, 16, ah, function(mx, my)
+                    if not self.finish_color_field() then return end
+                    palette_drag = alpha_slider
+                    alpha_slider(mx, my)
+                end, nil, nil, 'Alpha: checkerboard is transparent; solid color is opaque. Numeric A accepts raw values.')
+            end
+
             rect(px + 595, py + 287, 85, 65, p.rgb)
 
             local fields = {
@@ -2632,6 +2737,8 @@ function M.new(api, measure)
                         { color_channel = field.key, text = tostring(field.value):gsub('^#', ''), replace = true }
                 end)
             end
+
+            if p.error then bounded(px + 315, py + 153, p.error, 12, accent, 365) end
 
             text(px + 20, py + 126, 'CUSTOM SWATCHES', 17, muted)
 
@@ -2683,7 +2790,7 @@ function M.new(api, measure)
             text(px + 390, py + 29, 'CANCEL', 18, white)
 
             hit(px + 370, py + 20, 310, 32, function()
-                self.color_picker = nil
+                self.close_color(false)
                 self.text_edit = nil
             end)
 
@@ -2698,7 +2805,7 @@ function M.new(api, measure)
 
             for _, command in ipairs(commands) do
                 if command.popup then
-                    command.layer = 200
+                    command.layer = math.max(200,command.layer or 200)
                 end
             end
         end
@@ -2728,9 +2835,9 @@ function M.new(api, measure)
             end
             if dialog.phase == 'delete' then
                 bounded(px + 14, py + 116, dialog.preset_name or 'Selected preset', 14, white, 412)
-                bounded(px + 14, py + 90, 'Remove from Armory? Existing gear stays unchanged.', 12, white, 412)
+                bounded(px + 14, py + 90, dialog.description or 'Remove from Armory? Existing gear stays unchanged.', 12, white, 412)
                 rect(px + 14, py + 22, 198, 30, { 90, 45, 40 })
-                bounded(px + 22, py + 30, 'Delete Preset', 14, white, 180)
+                bounded(px + 22, py + 30, dialog.action_label or 'Delete Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     local ok, why = pcall(dialog.on_save)
                     self.notice = tostring(why)

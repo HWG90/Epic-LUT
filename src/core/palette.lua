@@ -23,4 +23,22 @@ function P.copy(original, width, height, overrides, allocate, copy)
     end
     return out
 end
+function P.swatch(ui, x, y, w, h, color, alpha, show_alpha)
+    alpha = math.max(0, math.min(1, tonumber(alpha) or 1))
+    if not show_alpha or alpha == 1 then
+        ui.rect(x, y, w, h, color)
+        return
+    end
+    local columns, rows = w > 80 and 8 or 2, h > 25 and 4 or 2
+    for row = 0, rows - 1 do
+        for col = 0, columns - 1 do
+            local background = (row + col) % 2 == 0 and 220 or 125
+            local blended = {}
+            for ch = 1, 3 do
+                blended[ch] = math.floor(color[ch] * alpha + background * (1 - alpha) + 0.5)
+            end
+            ui.rect(x + col * w / columns, y + row * h / rows, w / columns, h / rows, blended)
+        end
+    end
+end
 return P

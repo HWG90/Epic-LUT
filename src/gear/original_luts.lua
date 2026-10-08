@@ -16,6 +16,9 @@ function O.new(m, paths, native, targets)
     local function begin_scan()
         self.job = coroutine.create(function()
             local snapshots = {}
+            for object, document in pairs(self.snapshots or {}) do
+                snapshots[object] = document
+            end
             local stamp = exists(folder .. '/index-complete.txt') or exists(folder .. '/complete.txt')
             stamp = stamp and stamp:match('^([%x]+)')
             local snapshot_folder = m.original_snapshot_script and stamp and #stamp == 64 and folder .. '/' .. stamp
@@ -47,8 +50,18 @@ function O.new(m, paths, native, targets)
                             local bytes = f:read(m.dds.MAX_BYTES + 1)
                             f:close()
                             local data, w, h = m.dds.decode(bytes)
-                            assert(w == 23)
-                            return { data = data, width = w, height = h, resource = hash }
+                            assert(w == 23 or (w == 3 and h == 1))
+                            local source_file =
+                                io.open(snapshot_folder .. '/' .. name:gsub('%.dds$', '.patch-source'), 'rb')
+                            local patch_source
+                            if source_file then
+                                patch_source = source_file:read(358)
+                                source_file:close()
+                                if #patch_source ~= 357 then
+                                    patch_source = nil
+                                end
+                            end
+                            return { data = data, width = w, height = h, resource = hash, patch_source = patch_source }
                         end)
                         if ok then
                             snapshots[object] = document
@@ -84,6 +97,13 @@ function O.new(m, paths, native, targets)
         write('original_snapshots.cs', m.original_snapshot_reader)
         os.remove(folder .. '/error.txt')
         self.launch(true)
+        -- A replacement index worker may remove its marker before completing.
+        -- Previously captured DDS files remain valid and can be matched while
+        -- indexing recovers; begin_scan falls back to the capture marker.
+        local completed = exists(folder .. '/complete.txt')
+        if completed and completed:match('^[%x]+') and #completed:match('^[%x]+') == 64 then
+            begin_scan()
+        end
     end
     function self.start()
         local ok, why = pcall(start)

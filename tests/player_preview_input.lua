@@ -77,3 +77,12 @@ assert(input.mouse == foreign, 'Repeated release mutated foreign input')
 print(
     'PASS preview input bridge: single ownership, hit/zoom isolation, focus cancellation and foreign-wrapper preservation'
 )
+
+ready=true;focused=true
+input.mouse=mouse
+bridge.attach(front)
+front.menu.owns_pointer=function() return true end
+local px,py=input.mouse()
+assert(px==x and py==y,'Preview swallowed an existing editor drag')
+front.menu.owns_pointer=nil
+bridge.release()

@@ -114,7 +114,7 @@ function F.new(m,ctx,deps)
             if process_input then self.menu.tick(self.input)end
             if self.rendered_revision~=self.menu.redraw_revision then
                 if self.view.invalidate then self.view.invalidate()else self.view.clear()end
-                self.rendered_revision=self.menu.redraw_revision
+                self.rendered_revision=self.menu.redraw_revision;self.draw_elapsed=1
             end
             if not self.menu.visible and self.capture.active then
                 local portrait=package.loaded['epic.player_preview.v1']
@@ -128,7 +128,8 @@ function F.new(m,ctx,deps)
             if self.was_visible and not self.menu.visible and self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
             self.was_visible=self.menu.visible
             local key=self.menu.toggle_key;self.menu.menu_key_label=m.ui_menu.key_name(key)
-            self.menu.advance(dt);local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
+            self.menu.advance(dt)
+            local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
         end)
         if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end
     end

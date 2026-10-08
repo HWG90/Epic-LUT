@@ -1,6 +1,6 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E = {}
-function E.new(m, document, note, save, presets, live_document, open_export)
+function E.new(m, document, note, save, presets, live_document, open_export, save_patch)
     local ffi = require('ffi')
     local self = { undo = {}, redo = {}, busy = false, value_scroll = 0 }
     local preset_files = m.lut_files.new(
@@ -128,16 +128,76 @@ function E.new(m, document, note, save, presets, live_document, open_export)
             end
         end
         local h = self.handle
+        mod.controls.cell_color.picker_begin = function()
+            self.color_session =
+                { document = d, before = snapshot(d), row = h.get('edit_row'), column = h.get('edit_column') }
+        end
+        mod.controls.cell_color.picker_preview = function(color, alpha)
+            local session = assert(self.color_session)
+            assert(document() == session.document, 'Editor target changed; reopen the picker')
+            local current_pixels = snapshot(d)
+            local at = m.semantics.index(session.row, session.column, 1, d.width, d.height)
+            local original = ffi.new('float[?]', d.width * d.height * 4)
+            ffi.copy(original, session.before, #session.before)
+            local before = rgb(original, at)
+            for ch = 1, 3 do
+                d.data[at + ch - 1] = color[ch] == before[ch] and original[at + ch - 1] or color[ch] / 255
+            end
+            d.data[at + 3] = alpha
+            if snapshot(d) ~= current_pixels then
+                session.changed = true
+                d.revision = (d.revision or 0) + 1
+                self.sync()
+            end
+        end
+        mod.controls.cell_color.picker_end = function(commit)
+            local session = self.color_session
+            self.color_session = nil
+            if not session or document() ~= session.document then
+                return
+            end
+            if commit then
+                if snapshot(d) ~= session.before then
+                    self.undo[#self.undo + 1] = session.before
+                    self.redo = {}
+                end
+            elseif session.changed then
+                ffi.copy(d.data, session.before, #session.before)
+                d.revision = (d.revision or 0) + 1
+                self.sync()
+            end
+        end
         mod.controls.cell_color.picker_alpha = function()
             local at = m.semantics.index(h.get('edit_row'), h.get('edit_column'), 4, d.width, d.height)
             return tonumber(d.data[at])
         end
         mod.controls.cell_color.picker_commit = function(rgb_value, alpha)
+            if self.color_session then
+                mod.controls.cell_color.picker_preview(rgb_value, alpha)
+                return true
+            end
             local target = remember()
             local at = m.semantics.index(h.get('edit_row'), h.get('edit_column'), 1, target.width, target.height)
-            for ch = 1, 3 do target.data[at + ch - 1] = rgb_value[ch] / 255 end
+            local before = rgb(target.data, at)
+            for ch = 1, 3 do
+                if rgb_value[ch] ~= before[ch] then
+                    target.data[at + ch - 1] = rgb_value[ch] / 255
+                end
+            end
             target.data[at + 3] = alpha
             self.sync()
+            return true
+        end
+        mod.controls.scratch_color.picker_alpha = function()
+            return h.get('scratch_alpha')
+        end
+        mod.controls.scratch_color.picker_commit = function(color, alpha)
+            local ok, why = h.set_many({
+                scratch_color = string.format('#%02X%02X%02X', color[1], color[2], color[3]),
+                scratch_alpha = alpha,
+            })
+            assert(ok, why)
+            self.scratch = { color[1], color[2], color[3] }
             return true
         end
         local row = math.min(h.get('edit_row'), d.height)
@@ -148,7 +208,7 @@ function E.new(m, document, note, save, presets, live_document, open_export)
         end
         mod.controls.edit_row.choices = rows
         mod.controls.advanced_row.choices = rows
-        local color_column = color_columns[h.get('color_field')]
+        local color_column = h.get('edit_column')
         local i = m.semantics.index(row, color_column, 1, d.width, d.height)
         local values = { edit_row = row, advanced_row = row }
         local r = rgb(d.data, i)
@@ -251,6 +311,7 @@ function E.new(m, document, note, save, presets, live_document, open_export)
     function self.attach(api, handle)
         self.api = api
         self.handle = handle
+        assert(handle.set('scratch_alpha', 1)) -- New scratch starts fully opaque each session.
         self.sync()
         self.refresh_presets()
         for _, page in ipairs(api.mods[handle.id].pages) do
@@ -307,7 +368,7 @@ function E.new(m, document, note, save, presets, live_document, open_export)
             ffi.copy(data + r * w * 4, d.data + m.semantics.index(s.r1 + r, s.c1, 1, d.width, d.height), w * 16)
         end
         self.clip = { width = w, height = h, data = data }
-        return note('Copied ' .. w .. ' x ' .. h .. ' pixels')
+        return note('Copied rows ' .. s.r1 .. '-' .. s.r2 .. ', columns ' .. s.c1 .. '-' .. s.c2 .. ' (full RGBA)')
     end
     function self.paste_selection()
         local d = assert(document(), 'Import first')
@@ -330,7 +391,27 @@ function E.new(m, document, note, save, presets, live_document, open_export)
             end
         end
         self.sync()
-        return note('Selection pasted. Live preview updates automatically.')
+        return note('Pasted ' .. clip.width .. ' columns into row ' .. row .. ', column ' .. column .. ' (full RGBA)')
+    end
+    function self.reset_part(full_row)
+        local d = assert(document(), 'Load a LUT first')
+        local row, column = self.handle.get('edit_row'), self.handle.get('edit_column')
+        local width = full_row and d.width or 1
+        local at = m.semantics.index(row, full_row and 1 or column, 1, d.width, d.height)
+        assert(d.original, 'Original table unavailable')
+        d = remember()
+        ffi.copy(d.data + at, d.original + at, width * 16)
+        self.sync()
+        return note(
+            'Reset row ' .. row .. (full_row and ' (all columns)' or ', column ' .. column) .. ' to its loaded values'
+        )
+    end
+    function self.is_dirty()
+        local d = document()
+        if not d or not d.original then
+            return false
+        end
+        return snapshot(d) ~= (d.saved_pixels or ffi.string(d.original, d.width * d.height * 16))
     end
     function self.move_selection(row, column)
         local d = assert(document(), 'Import first')
@@ -438,6 +519,7 @@ function E.new(m, document, note, save, presets, live_document, open_export)
         note = note,
         paint = paint,
         rgb = rgb,
+        swatch = m.palette.swatch,
         editable = editable,
         color_columns = color_columns,
     })
@@ -450,6 +532,7 @@ function E.new(m, document, note, save, presets, live_document, open_export)
         note = note,
         save = save,
         open_export = open_export,
+        save_patch = save_patch,
         remember = remember,
         change = change,
         history = history,

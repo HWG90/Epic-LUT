@@ -30,6 +30,12 @@ function P.new(deps)
                 deps.controls.cancel()
                 return x, y
             end
+            local controls = deps.controls
+            local preview_dragging = controls.drag or controls.resize or controls.pan or controls.orbit
+            if not preview_dragging and front.menu.owns_pointer and front.menu.owns_pointer(x,y) then
+                controls.cancel()
+                return x,y
+            end
             local w, h = deps.resolution()
             local hit, event = deps.controls.pointer(x, y, input.down(1), w, h, input.down(2))
             local ok, why = pcall(deps.event, event)

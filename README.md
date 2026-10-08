@@ -1,21 +1,27 @@
-# Epic LUT R5.2
+# Epic LUT R5.3
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.2 brings live character preview, named gear presets and fast per-LUT editing into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.3 brings live character preview, named gear presets and fast per-LUT editing into one package.
 
-**Still extremely alpha and work in progress.** [Download R5.2](https://github.com/HWG90/Epic-LUT/releases/tag/R5.2) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+**Still extremely alpha and work in progress.** [Download R5.3](https://github.com/HWG90/Epic-LUT/releases/tag/R5.3) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.2-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.2-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.3-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.3-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.2: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.3: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
+
+## Sharing and Pattern LUT candidate
+
+This prerelease adds full Armor, Helmet and Pattern LUT sharing for compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. Multiplayer sharing still needs a two-player live test. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
+
+**LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo and DDS export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
 
 ## Start with Basic
 

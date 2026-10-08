@@ -475,7 +475,7 @@ function V.new(info, tables, select_color, core, help)
                     and (matching.total .. ' imported / ' .. matching.matched .. ' matched / ' .. (matching.unmatched + matching.unidentified + matching.ambiguous) .. ' unmatched or ambiguous')
                 or 'Resource IDs unavailable - target individual LUTs manually.'
             if matching and matching.matched == 0 then
-                summary = 'No matches to worn gear. Select an imported LUT below.'
+                summary = matching.total .. ' imported / 0 matched / ' .. matching.total .. ' for manual assignment'
             end
             ui.bounded(rx + 12, actions - 55, summary, 13, muted, rw - 24)
             ui.choice('palette', rx + 12, actions - 91, rw - 24)

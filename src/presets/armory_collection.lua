@@ -25,7 +25,18 @@ end
 function A.new(storage, control, handle)
     local self = { names = {}, selected = nil }
     function self.refresh()
-        self.names = storage.names()
+        self.names = {}
+        for _, name in ipairs(storage.names()) do
+            if name:lower():find((self.query or ''):lower(), 1, true) then
+                self.names[#self.names + 1] = name
+            end
+        end
+        table.sort(self.names, function(a, b)
+            if self.order == 2 then
+                return a:lower() > b:lower()
+            end
+            return a:lower() < b:lower()
+        end)
         local choices, previews, details = { 'Choose saved outfit...' }, {}, {}
         for _, name in ipairs(self.names) do
             choices[#choices + 1] = name
@@ -37,6 +48,18 @@ function A.new(storage, control, handle)
         end
         local selector = control()
         selector.choices, selector.choice_previews, selector.choice_details = choices, previews, details
+    end
+    function self.filter(query, order)
+        local previous = self.selected and self.selected.name
+        self.query, self.order = query or '', order or 1
+        self.refresh()
+        local index = 1
+        for i, name in ipairs(self.names) do
+            if name == previous then
+                index = i + 1
+            end
+        end
+        assert(handle().set('outfit_preset', index))
     end
     function self.select(index)
         if index == 1 then
@@ -57,6 +80,7 @@ function A.new(storage, control, handle)
     function self.save(name, entries)
         storage.save(name, entries)
         self.selected = storage.load(name)
+        self.query = ''
         self.refresh()
         self.select_name(name)
     end

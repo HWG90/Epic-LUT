@@ -6,6 +6,14 @@ function L.new(folder, deps)
         assert(folder and type(name) == 'string' and #name > 0 and name:match('^[%w _-]+$'), 'Invalid DDS preset name')
         return folder .. '/' .. (prefix or '') .. name .. '.dds'
     end
+    function self.exists(name)
+        local f = io.open(path(name), 'rb')
+        if not f then
+            return false
+        end
+        f:close()
+        return true
+    end
     function self.save(name, document, prefix)
         return deps.dds.write(path(name, prefix), document.data, document.width, document.height)
     end

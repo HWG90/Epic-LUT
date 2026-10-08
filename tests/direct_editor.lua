@@ -83,6 +83,7 @@ local m = {
         new = function()
             return {
                 files = test_root .. '/tests/tmp/files',
+                exports = test_root .. '/tests/tmp/files',
                 cache = test_root .. '/tests/tmp/cache',
                 settings = test_root .. '/tests/tmp/direct-state',
                 presets = test_root .. '/tests/tmp/presets',
@@ -196,6 +197,18 @@ m.original_luts = {
     end,
 }
 local stock_editor = assert(loadstring('local m=...\n' .. source))(m)
+local patch_saved
+m.patch_export = {
+    new = function(folder, deps)
+        assert(folder == test_root .. '/tests/tmp/files' and deps.dds == m.dds)
+        return {
+            save = function(name, document, original)
+                patch_saved = { name = name, document = document, original = original }
+                return folder .. '/' .. name, original.resource
+            end,
+        }
+    end,
+}
 stock_editor.on_enable(ctx)
 stock_editor.on_update(ctx, 0)
 handle = api.mods.epic_direct_lut.handle
@@ -215,7 +228,29 @@ assert(
     handle.get('cell_r') == 0.25 and bound[3] == 100,
     'Editor Populate failed to load worn Armor before any custom application'
 )
+assert(handle.set('save_name', 'native-patch'))
+assert(activate('save_patch'):find('Exported patch ZIP for ffffffffffffffff', 1, true))
+assert(
+    patch_saved
+        and patch_saved.name == 'native-patch'
+        and patch_saved.document.data[0] == 0.25
+        and patch_saved.original.resource == 'ffffffffffffffff'
+        and bound[3] == 100,
+    'Patch export changed bindings or used an imported identity'
+)
+patch_saved = nil
+bound[3], bound[4] = 777, 777
+assert(
+    activate('save_patch'):find('Gear changed', 1, true) and not patch_saved,
+    'Changed gear exported against a stale destination'
+)
+bound[3], bound[4] = 100, 100
+activate('editor_load_armor')
 assert(handle.set('outfit_name', 'Stock Outfit'))
+test_frontend.menu = {}
+assert(handle.activate('save_setup'))
+assert(test_frontend.menu.outfit_dialog.on_save('Stock Outfit', 'both'))
+test_frontend.menu = nil
 local outfit_choices = api.mods[handle.id].controls.outfit_preset.choices
 local found_outfit = false
 for _, label in ipairs(outfit_choices) do
@@ -231,6 +266,35 @@ for index, label in ipairs(outfit_choices) do
     end
 end
 assert(handle.activate('outfit_apply_armor'))
+local preset = quick_info().raw.outfit
+local bad_entry
+for _, entry in ipairs(preset.entries) do
+    if entry.kind == 'armor' and entry.key == '0:1:0:0' then
+        bad_entry = entry
+        break
+    end
+end
+assert(bad_entry)
+local original_key, original_value = bad_entry.key, bad_entry.document.data[0]
+bad_entry.key = '2:9:63:63'
+bad_entry.document.data[0] = 0.77 -- A wrong fallback would visibly repaint the unmatched first material.
+local untouched_object = bound[3]
+assert(handle.activate('outfit_apply_armor'))
+assert(bound[3] == untouched_object, 'Preset fallback repainted an unmatched binding')
+bad_entry.key = original_key
+-- This CPU document is still different from its already-applied GPU data.
+assert(handle.set('outfit_name', 'Applied Snapshot Test'))
+test_frontend.menu = {}
+assert(handle.activate('save_setup'))
+assert(test_frontend.menu.outfit_dialog.on_save('Applied Snapshot Test', 'both'))
+test_frontend.menu = nil
+local saved_snapshot = quick_info().raw.outfit
+for _, entry in ipairs(saved_snapshot.entries) do
+    if entry.kind == 'armor' and entry.key == original_key then
+        assert(entry.document.data[0] == original_value, 'Preset saved mutable editor values instead of applied pixels')
+    end
+end
+bad_entry.document.data[0] = original_value
 local remembered = m.direct_setup.new(m, m.paths.new()).read()
 assert(next(remembered), 'Applying an Armory preset did not persist the active setup')
 assert(handle.activate('outfit_apply_helmet'))
@@ -499,11 +563,41 @@ activate('undo')
 activate('apply_editor')
 assert(bound[8] == helmet_object)
 assert(handle.set('save_name', 'shared-palette'))
+os.remove('tests/tmp/files/shared-palette.dds')
 activate('save_dds')
 local shared = m.dds.read('tests/tmp/files/shared-palette.dds')
 assert(shared[0] == 0.25, 'Shared preset did not retain full LUT data')
+local existing_bytes = assert(io.open('tests/tmp/files/shared-palette.dds', 'rb'))
+local existing = existing_bytes:read('*a')
+existing_bytes:close()
+test_frontend.menu = {}
+activate('save_dds')
+assert(test_frontend.menu.outfit_dialog and test_frontend.menu.outfit_dialog.action_label == 'Overwrite DDS')
+local unchanged = assert(io.open('tests/tmp/files/shared-palette.dds', 'rb'))
+assert(unchanged:read('*a') == existing, 'Export overwrote before confirmation')
+unchanged:close()
+test_frontend.menu.outfit_dialog = nil -- cancel preserves the file
+activate('save_dds')
+assert(test_frontend.menu.outfit_dialog.on_save())
+test_frontend.menu = nil
+
 activate('refresh')
 assert(bound[3] == armor_object and bound[8] == helmet_object, 'Refresh removed applied LUTs')
+-- Completed startup restoration must not clone every LUT/history frame while idle.
+editor.on_update(ctx, 0.01)
+editor.on_update(ctx, 0.01)
+local actual_copier = m.basic_state.copier
+local idle_copies = 0
+m.basic_state.copier = function()
+    idle_copies = idle_copies + 1
+    return actual_copier()
+end
+for i = 1, 10 do
+    editor.on_update(ctx, 0.01)
+end
+m.basic_state.copier = actual_copier
+assert(idle_copies == 0, 'Completed setup restoration still captures full snapshots every idle frame')
+
 assert(handle.set('scope', 1))
 assert(handle.set('lut', 2))
 activate('apply')
@@ -625,3 +719,42 @@ print(
 print(
     'PASS direct DDS: real registry, local binding groups, immutable reuse, foreign ownership, partial failure, stale membership and cleanup'
 )
+
+-- Exercise the real registry path for the new sharing controls, with native networking substituted.
+m.avatar.reader = function()
+    return function() end
+end
+m.shared_lut_codec = {
+    new = function()
+        return {}
+    end,
+}
+m.lobby_sync = {}
+local sharing_ticked = false
+m.shared_appearance = {
+    new = function()
+        return {
+            status = 'ready',
+            tick = function(dt, enabled)
+                assert(enabled == true)
+                sharing_ticked = true
+            end,
+            close = function()
+                return true
+            end,
+        }
+    end,
+}
+local sharing_editor = assert(loadstring('local m=...\n' .. source))(m)
+sharing_editor.on_enable(ctx)
+sharing_editor.on_update(ctx, 0.1)
+assert(api.mods.epic_direct_lut.controls.share_appearance)
+for _, page in ipairs(api.mods.epic_direct_lut.pages) do
+    assert(page.id ~= 'advanced', 'Duplicate Material / camo tab remains')
+end
+assert(
+    api.mods.epic_direct_lut.controls.shader_mode and api.mods.epic_direct_lut.controls.camo_pattern,
+    'Material controls removed from registry'
+)
+assert(sharing_ticked, 'Sharing was not enabled through Configuration')
+assert(sharing_editor.on_disable(ctx))

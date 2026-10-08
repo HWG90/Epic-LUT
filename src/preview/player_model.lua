@@ -26,9 +26,19 @@ function Model.new(E, host)
                 assert(U.alive(unit), 'Equipped piece disappeared')
                 local resource = U.resource_name(unit)
                 assert(A.can_get('unit', resource), 'Equipped resource is not loaded')
-                local visible = {}
+                local visible, visibility_counts = {}, {}
                 for i = 1, U.num_meshes(unit) do
-                    visible[i] = E.Mesh.visibility(U.mesh(unit, i))
+                    local value = E.Mesh.visibility(U.mesh(unit, i))
+                    local key = type(value) .. ':' .. tostring(value)
+                    visibility_counts[key] = (visibility_counts[key] or 0) + 1
+                    assert(type(value)=='boolean' or value==0 or value==1, 'Unrecognized preview mesh visibility value')
+                    visible[i] = value == true or value == 1
+                end
+                if host.note then
+                    local summary={}
+                    for key,count in pairs(visibility_counts) do summary[#summary+1]=key..'='..count end
+                    table.sort(summary)
+                    host.note('preview: mesh visibility resource=' .. tostring(resource) .. ' ' .. table.concat(summary,','))
                 end
                 local count = U.num_scene_graph_items(unit)
                 assert(count >= 1 and count <= 512, 'Equipped skeleton size is invalid')
@@ -41,6 +51,7 @@ function Model.new(E, host)
                     source = unit,
                     resource = resource,
                     kind = piece.kind,
+                    slot = piece.slot,
                     pose = E.Matrix4x4Box(X.multiply(U.world_pose(unit, 1), inverse)),
                     visible = visible,
                     nodes = nodes,
@@ -58,7 +69,7 @@ function Model.new(E, host)
                 assert(U.alive(spec.source), 'Source changed during preview setup')
                 local unit = assert(W.spawn_unit(world, spec.resource, spec.pose:unbox()))
                 -- Record ownership before any subsequent setup can fail.
-                local piece = { unit = unit, source = spec.source, kind = spec.kind }
+                local piece = { unit = unit, source = spec.source, kind = spec.kind, slot = spec.slot }
                 model.pieces[#model.pieces + 1] = piece
                 assert(unit ~= spec.source, 'Preview reused the source unit')
                 U.disable_physics(unit)
@@ -75,8 +86,20 @@ function Model.new(E, host)
                 end
                 assert(U.num_meshes(unit) == #spec.visible, 'Preview mesh layout differs')
                 for i, visible in ipairs(spec.visible) do
-                    U.set_mesh_visibility(unit, i, visible)
+                    -- Mesh.visibility describes the current render context. A true result is not
+                    -- permission to override resource-default hidden damage/cap meshes.
+                    if visible == false then U.set_mesh_visibility(unit, i, false) end
                 end
+                local hidden_groups = {}
+                if type(U.has_visibility_group) == 'function' and type(U.set_visibility) == 'function' then
+                    for _, name in ipairs({'gore','gibs','gib','gore_left_leg','gore_right_leg','gore_left_knee','gore_right_knee','gore_l','gore_r'}) do
+                        if U.has_visibility_group(unit,name) then
+                            U.set_visibility(unit,name,false)
+                            hidden_groups[#hidden_groups+1]=name
+                        end
+                    end
+                end
+                if host.note then host.note('preview: gore groups hidden=' .. #hidden_groups .. ' groups=' .. table.concat(hidden_groups,',')) end
                 W.update_unit(world, unit)
                 -- Host copies material bindings only after proving source and
                 -- destination materials are distinct instances.

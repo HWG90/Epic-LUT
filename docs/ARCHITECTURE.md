@@ -29,7 +29,7 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 
 Use module-local state for a service instance. Keep dependency injection at construction boundaries. Avoid runtime filesystem module loading and new globals. `package.loaded` entries are reserved for deliberate cross-addon services and retained native-resource lifetime.
 
-Native writes must validate liveness and ownership first. Roll back only writes owned by the operation. Never free queued texture buffers or borrowed worlds to reduce memory usage. Treat callback failures as actionable errors; keep retry state when cleanup cannot safely finish.
+Native writes must validate liveness and ownership first. Roll back only writes owned by the operation. Never free queued texture buffers or borrowed worlds to reduce memory usage. Treat callback failures as actionable errors; keep retry state when cleanup cannot safely fiDo nish.
 
 UI draws should be read-only apart from view-local layout state. Reuse immutable labels and descriptions. Preserve stable IDs, stored settings and native resource identity during refactors. Avoid introducing aliases that become a second authority for the same preference.
 

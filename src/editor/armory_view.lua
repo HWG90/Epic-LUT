@@ -18,8 +18,9 @@ function A.new(info, preview)
         local x = ui.x + left + 20
         local width = ui.w - left - 20
         local function button(y, label, id, enabled)
-            ui.rect(ui.x + 12, y, left - 24, 28, enabled == false and { 35, 39, 43 } or blue)
-            ui.bounded(ui.x + 20, y + 7, label, 14, white, left - 40)
+            local featured = enabled ~= false and id == 'save_setup'
+            ui.rect(ui.x + 12, y, left - 24, 28, enabled == false and {35,39,43} or (featured and {244,202,53} or blue))
+            ui.bounded(ui.x + 20, y + 7, label, 14, featured and {25,28,31} or white, left - 40)
             ui.hit(ui.x + 12, y, left - 24, 28, function()
                 if enabled ~= false then
                     ui.activate(id)
@@ -27,6 +28,9 @@ function A.new(info, preview)
             end)
         end
         ui.bounded(ui.x + 12, top - 22, 'The Armory - saved palettes', 18, white, left - 24)
+        button(top - 58, 'Search: ' .. (state.armory_query or 'all presets'), 'armory_search')
+        ui.choice('armory_sort', ui.x + 12, top - 95, left - 24)
+        top = top - 75
         ui.choice('outfit_preset', ui.x + 12, top - 65, left - 24)
         ui.bounded(ui.x + 12, top - 91, 'Saved outfit swatches: Armor | Helmet', 12, muted, left - 24)
         button(top - 132, 'Save Current Gear Preset', 'save_setup')
