@@ -26,6 +26,8 @@ function P.new(m)
         self[name] = root .. '/' .. name
         mkdir(self[name])
     end
+    self.exports = self.files .. '/exports'
+    mkdir(self.exports)
     self.storage = m.ui_store.new(self.settings)
     return self
 end

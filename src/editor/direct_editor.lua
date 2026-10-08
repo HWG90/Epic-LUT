@@ -1985,7 +1985,7 @@ return {
         ctx = context
         paths = m.paths.new(m)
         operations.preset_files = m.lut_files.new(paths.presets, { dds = m.dds, read = m.file_io.read })
-        operations.export_files = m.lut_files.new(paths.files, { dds = m.dds, read = m.file_io.read })
+        operations.export_files = m.lut_files.new(paths.exports, { dds = m.dds, read = m.file_io.read })
         ctx.settings_dir = paths.settings
         memory = m.bingus_memory.new(m.bingus_runtime)
         local ok, why = memory.verify_build({
@@ -2055,7 +2055,7 @@ return {
                         assert(edit.loaded, 'Import a palette first')
                         assert(name:match('^[%w _-]+$') and #name <= 48 and #name > 0, 'Invalid DDS filename')
                         operations.export_files.save(name, edit.loaded)
-                        return message('Saved ' .. name .. '.dds in Epic LUT/files')
+                        return message('Saved ' .. name .. '.dds in Epic LUT/files/exports')
                     end)
                 end,
                 paths.presets,
@@ -2077,9 +2077,9 @@ return {
                     end
                 end,
                 function()
-                    assert(not paths.files:find("'", 1, true), 'Invalid export path')
-                    local args = [=[-NoProfile -NonInteractive -Command "Invoke-Item -LiteralPath ']=] .. paths.files .. [=['"]=]
-                    local worker = m.windows.launch_worker(args, paths.files)
+                    assert(not paths.exports:find("'", 1, true), 'Invalid export path')
+                    local args = [=[-NoProfile -NonInteractive -Command "Invoke-Item -LiteralPath ']=] .. paths.exports .. [=['"]=]
+                    local worker = m.windows.launch_worker(args, paths.exports)
                     worker.close()
                     return message('Opened Epic LUT export folder')
                 end
