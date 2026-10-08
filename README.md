@@ -1,4 +1,5 @@
-![Epic LUT banner](https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791319443-154441029.png)
+<img width="1672" height="941" alt="exec-3dcb130a-9516-4897-a50b-865c034d3e20" src="https://github.com/user-attachments/assets/a09c0db9-e4d2-4543-9837-7603ddb908a5" />
+
 
 # Epic LUT R4 RC1
 
