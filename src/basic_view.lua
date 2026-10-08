@@ -10,9 +10,13 @@ function B.new(info,select_row)
         local state=info();local d=state.editor;local top=ui.y+ui.h
         local left=ui.w*.54;local right=ui.x+left+18;local width=ui.w-left-18
         local white,muted,blue={225,230,235},{155,166,175},{35,62,90}
+        local divider={65,76,85}
+        ui.rect(ui.x+left/2,ui.y+48,1,math.max(0,ui.h-148),divider)
+        ui.rect(right-9,ui.y,1,ui.h,divider)
+        for _,offset in ipairs({204,348,393})do ui.rect(right,top-offset,width,1,divider)end
         local function text(x,y,t)ui.bounded(x,y,t,14,white,ui.w-(x-ui.x)-10)end
-        local function button(x,y,w,label,id)
-            ui.rect(x,y,w,28,blue);ui.bounded(x+8,y+8,label,14,white,w-16);ui.hit(x,y,w,28,function()ui.activate(id)end)
+        local function button(x,y,w,label,id,enabled)
+            ui.rect(x,y,w,28,enabled==false and {35,39,43}or blue);ui.bounded(x+8,y+8,label,14,white,w-16);ui.hit(x,y,w,28,function()if enabled~=false then ui.activate(id)end end)
         end
         text(ui.x+10,top-20,'Basic - primary colors only')
         text(ui.x+10,top-44,'Click a color region to edit. Importing a file is optional.')
@@ -27,6 +31,7 @@ function B.new(info,select_row)
             local x=ui.x+10+(n-1)*(half+6);local panel=state.raw and state.raw.basic and state.raw.basic[kind]
             local document=panel and panel.document
             ui.bounded(x,top-110,kind=='armor'and 'Armor'or 'Helmet',14,white,half)
+            if panel and panel.resource then ui.bounded(x+65,top-110,'ID: '..panel.resource,12,muted,half-65)end
             ui.choice('basic_'..kind..'_lut',x,top-142,half)
             local cursor=top-153+self.scroll
             if document then
@@ -55,17 +60,22 @@ function B.new(info,select_row)
         end
         y=cliptop+self.scroll-rows*34-11
         self.maximum=math.max(0,cliptop+self.scroll-y-(cliptop-clipbottom));self.scroll=math.min(self.scroll,self.maximum)
-        ui.bounded(right,top-160,state.status or '',13,muted,width)
+        ui.bounded(right,top-195,state.status or '',13,muted,width)
         text(right,top-48,'Import a palette (optional)')
         button(right,top-85,width,'Import DDS / ZIP / RAR...','browse')
         text(right,top-115,'Color changes apply live. Region label: identify.')
+        if (state.palette_count or 0)>1 then
+            local plan=state.raw and state.raw.matching
+            button(right,top-150,width,'Apply Matching LUTs','apply_matching',plan and plan.matched>0 and not state.busy)
+            ui.bounded(right,top-176,plan and (plan.matched..' matched / '..(plan.unmatched+plan.unidentified+plan.ambiguous)..' unmatched or ambiguous')or 'No matching resource IDs',12,muted,width)
+        end
         button(right+width-150,ui.y-24,150,'Stop Highlight','stop_identify')
         text(right,top-224,'Saved palettes')
-        ui.preset('basic_preset_name','basic_preset',right,top-261,width)
-        button(right,top-300,width,'Save preset','basic_save')
-        button(right,top-337,width,'Export DDS','basic_export')
+        ui.choice('outfit_preset',right,top-261,width)
+        button(right,top-300,(width-6)/2,'Apply Preset Armor','outfit_apply_armor',state.raw and state.raw.outfit and #state.raw.outfit.armor>0);button(right+(width+6)/2,top-300,(width-6)/2,'Apply Preset Helmet','outfit_apply_helmet',state.raw and state.raw.outfit and #state.raw.outfit.helmet>0)
+        button(right,top-337,width,'Save to Armory','save_setup')
         button(right,top-374,(width-6)/2,'Undo','undo');button(right+(width+6)/2,top-374,(width-6)/2,'Redo','redo')
-        button(right,top-412,(width-6)/2,'Restore Imported','restore_imported');button(right+(width+6)/2,top-412,(width-6)/2,'Restore Original','restore')
+        button(right,top-412,(width-6)/2,'Restore Imported','restore_imported');button(right+(width+6)/2,top-412,(width-6)/2,'Restore Arrowhead LUT (Original)','restore')
         if state.dirty then text(right,ui.y+20,'Modified - save or export to keep your colors.')end
     end
     return self

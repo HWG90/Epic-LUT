@@ -58,7 +58,8 @@ function E.new(m,document,note,save,presets,live_document)
         local r=rgb(d.data,i);values.cell_color=string.format('#%02X%02X%02X',r[1],r[2],r[3])
         for ch,name in ipairs({'r','g','b','a'})do
             local index=m.semantics.index(row,column,ch,d.width,d.height);local value=tonumber(d.data[index]);local control=mod.controls['cell_'..name]
-            control.min,control.max,control.step=m.semantics.range(column,ch,value)
+            control.drag_min,control.drag_max,control.step=m.semantics.range(column,ch,value)
+            control.min,control.max=-1e10,1e10 -- Typed floats are independent of the useful drag range.
             control.description=(m.semantics.hints[column]or 'Unconfirmed shader meaning.')..' Imported value: '..string.format('%.8g',d.original[index])
             values['cell_'..name]=value
         end
@@ -173,22 +174,53 @@ function E.new(m,document,note,save,presets,live_document)
         panel(ui.x,ui.y,left*.40-6,bottomh,'Options')
         panel(ui.x+left*.40,ui.y,left*.30-6,bottomh,'Row Presets')
         panel(ui.x+left*.70,ui.y,left*.30,bottomh,'Scratch Pixel')
+        local gear_controls=self.api and self.api.mods[self.handle.id].controls.editor_load_armor
+        if gear_controls then
+            self.gear=self.gear or 'armor'
+            for n,kind in ipairs({'helmet','armor'})do
+                local x=ui.x+10+(n-1)*142;local target=kind
+                ui.rect(x,top-58,136,26,self.gear==kind and {49,82,115}or {24,39,52})
+                ui.bounded(x+8,top-53,kind=='helmet'and 'Helmet LUT'or 'Armor LUT',14,white,120)
+                ui.hit(x,top-58,136,26,function()self.gear=target;ui.activate('editor_load_'..target)end)
+            end
+            local selector_width=math.max(120,math.min(180,left-312))
+            ui.choice('basic_'..self.gear..'_lut',ui.x+300,top-58,selector_width)
+            local control=self.api.mods[self.handle.id].controls['basic_'..self.gear..'_lut']
+            local resource=control.choice_details and control.choice_details[h.get('basic_'..self.gear..'_lut')]
+            if resource then ui.bounded(ui.x+312+selector_width,top-50,resource,12,{244,202,53},math.max(0,left-selector_width-324))end
+        end
         if not d then
+            local gear=self.api and self.api.mods[self.handle.id].controls.editor_load_armor
+            if gear then
+                ui.text(ui.x+12,top-90,'Select a gear tab to load its currently worn colors.',18,white)
+                button(ui.x+12,top-140,left-24,'Load Current '..(self.gear=='armor'and 'Armor'or 'Helmet'),'editor_load_'..self.gear)
+                button(ui.x+12,top-180,180,'Choose file...','browse')
+                ui.text(ui.x+12,top-206,'Uses currently worn LUT values; a file import is optional.',14,muted)
+                return
+            end
             ui.text(ui.x+12,top-58,'Choose a DDS or ZIP to begin.',18,white)
             button(ui.x+12,top-102,180,'Choose file...', 'browse')
             button(ui.x+198,top-102,math.min(360,left-210),'Populate editor with current applied palette','populate_applied')
             if ui.choice then ui.choice('lut',ui.x+12,top-145,math.min(360,left-24))end
             ui.text(ui.x+12,top-169,'Uses the applied values from the selected Live LUT.',14,muted);return
         end
-        ui.text(ui.x+10,top-49,d.height..' rows x '..d.width..' columns. Display clamps RGB; file values stay intact.',14,muted)
+        if gear_controls then top=top-34 end
+        local resource=d.resource_object and m.format_resource_id and m.format_resource_id(d.resource_object)or d.resource
+        ui.text(ui.x+10,top-49,resource and ((d.source or 'Live LUT')..' / ID: '..resource)or (d.height..' rows x '..d.width..' columns. Display clamps RGB; file values stay intact.'),14,muted)
         if ui.choice then ui.choice('grid_tool',ui.x+10,top-82,170);ui.choice('grid_channel',ui.x+190,top-82,150)end
-        button(ui.x+350,top-82,70,'Copy','copy_selection');button(ui.x+425,top-82,70,'Paste','paste_selection');button(ui.x+500,top-82,115,'Clear selection','clear_selection')
-        local cell=math.min((left-22)/d.width,(ui.h-bottomh-116)/d.height)
+        button(ui.x+350,top-82,70,'Copy','copy_selection');button(ui.x+425,top-82,70,'Paste','paste_selection')
+        local cell=math.min((left-98)/d.width,(ui.h-bottomh-140-(gear_controls and 34 or 0))/d.height)
+        for c=1,d.width do ui.bounded(ui.x+82+(c-1)*cell,top-110,d.width==23 and m.semantics.short_columns[c]or tostring(c),12,muted,cell-2)end
+        for r=1,d.height do
+            local y=top-120-r*cell;local selected_row=r
+            ui.bounded(ui.x+10,y+cell*.35,'Row '..r,12,{244,202,53},68)
+            if self.api and self.api.mods[self.handle.id].controls.identify_region then ui.hit(ui.x+8,y,70,cell,function()assert(h.set('edit_row',selected_row));self.sync();ui.activate('identify_region')end)end
+        end
         local row=h.get('edit_row');local column=h.get('edit_column')
         for r=1,d.height do for c=1,d.width do
             local selected_row,selected_col=r,c
             local index=m.semantics.index(r,c,1,d.width,d.height)
-            local x=ui.x+10+(c-1)*cell;local y=top-96-r*cell
+            local x=ui.x+82+(c-1)*cell;local y=top-120-r*cell
             local s=self.selection;local selected=s and r>=s.r1 and r<=s.r2 and c>=s.c1 and c<=s.c2
             local color=rgb(d.data,index);local channel=h.get('grid_channel')
             if channel==2 then local alpha=math.max(0,math.min(1,d.data[index+3]));local background=(r+c)%2==0 and 80 or 130;for ch=1,3 do color[ch]=math.floor(color[ch]*alpha+background*(1-alpha)+.5)end end
@@ -235,11 +267,15 @@ function E.new(m,document,note,save,presets,live_document)
                 local pulse=.5+.5*math.sin(os.clock()*3)
                 ui.text(right+13,cursor+6,(self.open_row==r and 'v 'or '> ')..'Row '..r,14,can_identify and {math.floor(175+69*pulse),math.floor(180+22*pulse),math.floor(140-87*pulse)}or white)
                 ui.hit(right+8,cursor,can_identify and 24 or rightw-20,23,function()
-                    self.open_row=self.open_row==selected_row and nil or selected_row
+                    local expanded=self.open_row~=selected_row
                     assert(h.set('edit_row',selected_row));self.value_scroll=0;self.sync()
+                    self.open_row=expanded and selected_row or nil
                 end)
                 if can_identify then ui.hit(right+32,cursor,rightw-44,23,function()
-                    assert(h.set('edit_row',selected_row));self.sync();ui.activate('identify_region')
+                    local expanded=self.open_row~=selected_row
+                    assert(h.set('edit_row',selected_row));self.value_scroll=0;self.sync()
+                    self.open_row=expanded and selected_row or nil
+                    if expanded then ui.activate('identify_region')end
                 end)end
             end
             if self.open_row==r then
@@ -291,7 +327,28 @@ function E.new(m,document,note,save,presets,live_document)
         end
         local optionsy=ui.y+bottomh-55
         local step=math.min(32,(bottomh-65)/7);local optionw=left*.4-20
-        button(ui.x+10,optionsy,(optionw-5)/2,'Import file','browse');button(ui.x+15+(optionw-5)/2,optionsy,(optionw-5)/2,'Save LUT to Palette','save_palette')
+        local gear=self.api and self.api.mods[self.handle.id].controls.editor_load_armor
+        if gear then
+            step=math.min(30,(bottomh-65)/(self.more_options and 7 or 4))
+            ui.rect(ui.x+10,optionsy-step*1.5,optionw,1,{65,76,85})
+            ui.rect(ui.x+10,optionsy-step*3.5,optionw,1,{65,76,85})
+            button(ui.x+10,optionsy,(optionw-5)/2,'Import file','browse');button(ui.x+15+(optionw-5)/2,optionsy,(optionw-5)/2,'Send to LUT Editor','save_palette')
+            ui.choice('palette',ui.x+10,optionsy-step,optionw*.6)
+            ui.rect(ui.x+14+optionw*.6,optionsy-step,optionw*.4-4,26,blue)
+            ui.bounded(ui.x+18+optionw*.6,optionsy-step+5,'Preview Palette',14,white,optionw*.4-12)
+            ui.hit(ui.x+14+optionw*.6,optionsy-step,optionw*.4-4,26,function()if ui.preview then ui.preview(self.preview)end end)
+            button(ui.x+10,optionsy-step*2,optionw,'Apply to '..(self.gear=='armor'and 'Armor'or 'Helmet')..' LUT '..h.get('basic_'..self.gear..'_lut'),'editor_apply_'..self.gear)
+            button(ui.x+10,optionsy-step*3,(optionw-5)/2,'Undo','undo');button(ui.x+15+(optionw-5)/2,optionsy-step*3,(optionw-5)/2,'Redo','redo')
+            ui.rect(ui.x+10,optionsy-step*4,optionw,26,{24,39,52})
+            ui.bounded(ui.x+16,optionsy-step*4+5,(self.more_options and 'v 'or '> ')..'More Options',14,white,optionw-12)
+            ui.hit(ui.x+10,optionsy-step*4,optionw,26,function()self.more_options=not self.more_options end)
+            if self.more_options then
+                button(ui.x+10,optionsy-step*5,(optionw-5)/2,'All Armor LUTs','editor_all_armor');button(ui.x+15+(optionw-5)/2,optionsy-step*5,(optionw-5)/2,'All Helmet LUTs','editor_all_helmet')
+                button(ui.x+10,optionsy-step*6,optionw,'Restore Arrowhead LUT (Original)','restore')
+                button(ui.x+10,optionsy-step*7,optionw,'Save applied setup','save_setup')
+            end
+        else
+        button(ui.x+10,optionsy,(optionw-5)/2,'Import file','browse');button(ui.x+15+(optionw-5)/2,optionsy,(optionw-5)/2,'Send to LUT Editor','save_palette')
         if ui.choice then
             ui.choice('palette',ui.x+10,optionsy-step,optionw*.60-3)
             local px=ui.x+10+optionw*.60+2
@@ -308,6 +365,7 @@ function E.new(m,document,note,save,presets,live_document)
         button(ui.x+10,optionsy-step*6,optionw,'Apply edited palette to checked targets','apply_editor')
         button(ui.x+10,optionsy-step*7,(optionw-5)/2,'[ '..(h.get('target_helmet')and 'x'or ' ')..' ] Helmet','target_helmet')
         button(ui.x+15+(optionw-5)/2,optionsy-step*7,(optionw-5)/2,'[ '..(h.get('target_armor')and 'x'or ' ')..' ] Armor','target_armor')
+        end
         local presetx=ui.x+left*.40+10;local panelw=left*.30-20
         ui.text(presetx,optionsy,'Selected row: '..row,15,white)
         if ui.preset then ui.preset('row_preset','row_preset_select',presetx,optionsy-38,panelw)
@@ -363,7 +421,6 @@ function E.new(m,document,note,save,presets,live_document)
                 {id='group_rows',type='toggle',label='Group by rows',default=true},
                 {id='copy_selection',type='button',label='Copy pixels',on_activate=self.copy_selection},
                 {id='paste_selection',type='button',label='Paste pixels',on_activate=self.paste_selection},
-                {id='clear_selection',type='button',label='Clear selection',on_activate=function()self.selection=nil;return note('Selection cleared')end},
                 {id='edit_row',type='choice',presentation='combined',label='Palette row',choices={'Import first'},default=1,on_change=function(value)if not self.busy then self.open_row=value;self.value_scroll=0;self.sync()end end},
                 {id='color_field',type='choice',label='Color field',choices=color_labels,default=1,on_change=function()self.sync()end},
                 {id='cell_color',type='color',label='Selected color',default='#FFFFFF',on_change=function(hex)
@@ -377,7 +434,7 @@ function E.new(m,document,note,save,presets,live_document)
                     for ch=0,2 do d.data[i+ch]=d.original[i+ch]end;self.sync();return note('Selected RGB restored; alpha unchanged.')
                 end}}},
             {id='advanced',name='3. Material / camo',require_confirmation=false,controls=advanced},
-            {id='save',name='4. Save / history',require_confirmation=false,controls={
+            {id='save',name='Configuration',require_confirmation=false,controls={
                 {id='scratch_color',type='color',label='Scratch color',default='#FFFFFF',on_change=function(hex)local r,g,b=m.palette.rgb(hex);self.scratch={r*255,g*255,b*255}end},
                 {id='scratch_alpha',type='slider',label='Scratch alpha',min=0,max=1,step=.001,default=1},
                 {id='paint_scratch',type='button',label='Paint selected RGB',on_activate=function()assert(m.semantics.is_color(23,self.handle.get('edit_column')),'Select a color column');return self.handle.set('cell_color',self.handle.get('scratch_color'))end},

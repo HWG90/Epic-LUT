@@ -9,8 +9,9 @@ local native={alive=function()return alive and 1 or 0 end,commit=function()end}
 local memory={verify_build=function()return true end,address=function()return 1 end,module=function()return 1 end,read_into=function()return true end}
 local test_root=assert(os.getenv('EPIC_LUT_TEST_ROOT'))
 os.remove(test_root..'/tests/tmp/direct-state/direct-applied.tsv')
-local quick_select
-local m={windows=dofile('src/windows.lua'),ui_core=core,import_view={new=function(info,tables,select)quick_select=select;return {draw=function()end}end},dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
+local quick_select,quick_info
+local test_frontend
+local m={resource_ids=dofile('src/resource_ids.lua'),action_history=dofile('src/action_history.lua'),basic_state=dofile('src/basic_state.lua'),region_indicator=dofile('src/region_indicator.lua'),windows=dofile('src/windows.lua'),ui_core=core,import_view={new=function(info,tables,select)quick_info=info;quick_select=select;return {draw=function()end}end},dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
     direct_setup=dofile('src/direct_setup.lua'),native_import=dofile('src/windows.lua'),
     palette=dofile('src/palette.lua'),semantics=dofile('src/semantics.lua'),lut_editor=dofile('src/lut_editor.lua'),
     paths={new=function()return {files=test_root..'/tests/tmp/files',cache=test_root..'/tests/tmp/cache',settings=test_root..'/tests/tmp/direct-state',presets=test_root..'/tests/tmp/presets',storage=store}end},
@@ -26,7 +27,7 @@ local m={windows=dofile('src/windows.lua'),ui_core=core,import_view={new=functio
         create_texture=function(_,w,h,data)assert(w==23 and h==8);creates=creates+1;gpu_data=data;gpu_object=199+creates;return {object=gpu_object,data=data,width=w,height=h}end,
         bind=function(_,material,slot,object)bound[material]=object;if fail then fail=false;error('failure after native mutation')end end},
     preferences={new=function()return {close=function()end}end},
-    frontend={new=function()return {resolve=function()return api end,tick=function()end,close=function()return true end}end}}
+    frontend={new=function()test_frontend={resolve=function()return api end,tick=function()end,close=function()return true end};return test_frontend end}}
 local f=assert(io.open('src/direct_editor.lua','rb'));local source=f:read('*a');f:close()
 local editor=assert(loadstring('local m=...\n'..source))(m)
 local ctx={log=function()end,on_cleanup=function()end}
@@ -36,13 +37,28 @@ local function activate(key)local ok,value=handle.activate(key);assert(ok,value)
 -- Stock equipped colors work before any import, without writing bindings.
 editor.on_disable(ctx)
 local stock=ffi.new('float[?]',23*8*4);stock[0]=.25
-m.original_luts={new=function()return {loaded=true,status='Ready',start=function()end,tick=function()end,close=function()end,get=function()return {data=stock,width=23,height=8}end}end}
+local basic_select
+m.basic_view={new=function(_,select)basic_select=select;return {draw=function()end,wheel=function()end}end}
+m.outfit_presets=dofile('src/outfit_presets.lua')
+m.original_luts={new=function()return {loaded=true,status='Ready',start=function()end,tick=function()end,close=function()end,get=function()return {data=stock,width=23,height=8,resource='ffffffffffffffff'}end}end}
 local stock_editor=assert(loadstring('local m=...\n'..source))(m);stock_editor.on_enable(ctx);stock_editor.on_update(ctx,0)
 handle=api.mods.epic_direct_lut.handle
 local armor_before,helmet_before=handle.get('target_armor'),handle.get('target_helmet')
 activate('populate_worn');assert(handle.get('target_armor')==armor_before and handle.get('target_helmet')==helmet_before,'Loading worn colors changed target choices')
 assert(bound[3]==100,'Population wrote game bindings')
 assert(handle.get('cell_r')==.25,'Stock game pixels did not populate editor')
+activate('editor_load_armor');assert(handle.get('cell_r')==.25 and bound[3]==100,'Editor Populate failed to load worn Armor before any custom application')
+assert(handle.set('outfit_name','Stock Outfit'))
+local outfit_choices=api.mods[handle.id].controls.outfit_preset.choices;local found_outfit=false
+for _,label in ipairs(outfit_choices)do if label=='Stock Outfit'then found_outfit=true end end
+assert(found_outfit,'Saving original gear without a custom application failed to refresh Armory')
+local stock_preview=quick_info()
+assert(stock_preview.raw.basic.armor.resource=='[0xffffffffffffffff]','Hex resource ID missing')
+assert(stock_preview.armor[1].resource=='[0xffffffffffffffff]','Grouped display dropped the resource ID')
+assert(handle.set('resource_format',2));assert(quick_info().raw.basic.armor.resource=='[18446744073709551615]','Decimal resource ID lost 64-bit precision')
+assert(api.mods[handle.id].controls.basic_armor_lut.choices[1]=='LUT 1','Selector should remain separate from the resource ID');assert(handle.set('resource_format',1))
+assert(api.mods[handle.id].controls.basic_armor_lut.choice_details[1]=='[0xffffffffffffffff]','Dropdown resource details missing')
+assert(#stock_preview.raw.armor==2 and #stock_preview.raw.helmet==1,'Show All omitted stock snapshots before any palette was applied')
 local old_object=bound[3]
 activate('identify_region');assert(bound[3]~=old_object and gpu_data[0]==1 and gpu_data[1]==0 and gpu_data[2]==1,'Region highlight did not apply magenta')
 assert(stock[0]==.25 and handle.get('cell_r')==.25,'Highlight modified editor/source pixels')
@@ -50,14 +66,33 @@ local highlight_object=bound[3];local highlighted_creates=creates
 stock_editor.on_update(ctx,.26);assert(bound[3]==old_object,'Flash off phase did not restore appearance')
 stock_editor.on_update(ctx,.26);assert(bound[3]==highlight_object and creates==highlighted_creates,'Flash allocated another texture or failed to alternate')
 stock_editor.on_update(ctx,4.1);assert(bound[3]==old_object,'Timed highlight failed to restore exact original binding')
+test_frontend.basic_mode=true;basic_select(1,'helmet')
+-- Basic uses its own scoped target; hidden F10 checkboxes must not override it.
+assert(handle.set('cell_color','#FF0000'))
+stock_editor.on_update(ctx,.1)
+assert(bound[8]~=400 and bound[3]==old_object,'Basic color edit did not auto-apply only to Helmet')
+local edited_helmet=bound[8]
+activate('basic_copy_helmet_all')
+assert(bound[3]~=old_object and bound[6]~=300 and bound[8]==edited_helmet,'Copy Helmet to All changed Helmet or skipped Armor')
+assert(gpu_data[0]==1 and gpu_data[1]==0 and stock[0]==.25,'Copy-to-all failed to use edited Helmet or mutated originals')
+activate('restore');assert(bound[3]==100 and bound[6]==300 and bound[8]==400,'Restore Original failed after copy-to-all')
+assert(handle.get('cell_r')==.25,'Restore Original left edited pixels in editor')
 stock_editor.on_disable(ctx);m.original_luts=nil
+m.basic_view=nil
+m.outfit_presets=nil
 creates=0;package.loaded['epic.direct_lut.retained.v1']=nil
 editor=assert(loadstring('local m=...\n'..source))(m);editor.on_enable(ctx);editor.on_update(ctx,0);handle=api.mods.epic_direct_lut.handle
 assert(activate('apply'):find('Load a DDS first',1,true))
 local data=ffi.new('float[?]',23*8*4);for i=0,23*8*4-1 do data[i]=(i-100)/9 end
 m.dds.write('tests/tmp/files/palette.dds',data,23,8)
-activate('load');activate('apply_checked')
+activate('load')
+assert(quick_info().loaded,'Import did not establish a palette')
+activate('global_undo');assert(not quick_info().loaded and bound[3]==100,'Global undo failed to remove import or changed gear')
+activate('global_redo');assert(quick_info().loaded,'Global redo failed to restore import')
+activate('apply_checked')
 assert(bound[3]==200 and bound[4]==200 and bound[6]==200 and bound[8]==200,'File LUT did not apply immediately without saving it to the editor')
+activate('global_undo');assert(bound[3]==100 and bound[6]==300 and bound[8]==400,'Undo Apply did not restore exact prior bindings')
+activate('global_redo');assert(bound[3]==200 and bound[6]==200 and bound[8]==200,'Redo Apply did not restore retained textures')
 local before_populate=creates
 activate('populate_applied')
 assert(creates==before_populate and bound[3]==200,'Populate editor wrote to game bindings')
@@ -88,8 +123,8 @@ assert(handle.set('edit_row',2));assert(handle.set('cell_color','#FF0080'))
 -- Saving the same source again must overwrite previous edits, without live writes.
 local before_save=creates
 activate('save_palette')
-assert(creates==before_save and bound[3]==100,'Save LUT to Palette applied to gear')
-assert(math.abs(handle.get('cell_r')-tonumber(data[23*4]))<.0001,'Save LUT to Palette reused stale edits instead of imported values')
+assert(creates==before_save and bound[3]==100,'Send to LUT Editor applied to gear')
+assert(math.abs(handle.get('cell_r')-tonumber(data[23*4]))<.0001,'Send to LUT Editor reused stale edits instead of imported values')
 assert(handle.set('cell_color','#FF0080'))
 local edited_index=23*4
 assert(api.mods.epic_direct_lut.controls.cell_a.disabled,'Shader alpha was writable without unlocking')
@@ -179,7 +214,7 @@ local recovery=assert(loadstring('local m=...\n'..source))(m);recovery.on_enable
 local rh=api.mods.epic_direct_lut.handle
 assert(rh.activate('browse'));workers[1].alive=false;recovery.on_update(ctx,.1);assert(workers[1].closed,'Dead worker handle leaked')
 assert(rh.activate('browse'));local w=workers[2]
-local progress=assert(io.open(w.base..'.progress','wb'));progress:write('99999\tpicker\t',tostring(os.time()));progress:close()
+local progress=assert(io.open(w.base..'.txt.progress','wb'));progress:write('99999\tpicker\t',tostring(os.time()));progress:close()
 recovery.on_update(ctx,.1);assert(w.closed and not w.alive,'Invalid picker state did not release the queue')
 assert(rh.activate('browse'));w=workers[3];assert(rh.activate('cancel_import'));w.alive=false;recovery.on_update(ctx,.1);assert(w.closed)
 assert(rh.activate('browse'));assert(#workers==4,'Picker could not reopen after recovery')

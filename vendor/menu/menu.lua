@@ -4,7 +4,8 @@ local M={}
 
 -- Same dropdown + stepper combo for normal settings and custom editor workspaces.
 function M.choice(ui,control,value,x,y,width,change,open)
-    ui.rect(x,y,width,26,{35,62,90})
+    ui.rect(x,y,width,26,{24,39,52})
+    ui.rect(x,y,2,26,{100,137,160})
     ui.text(x+width-43,y+5,'<',16,{224,230,234});ui.text(x+width-17,y+5,'>',16,{224,230,234});ui.text(x+width-70,y+5,'v',16,{224,230,234})
     ui.bounded(x+8,y+5,tostring(control.choices[value]),15,{224,230,234},width-88)
     ui.hit(x+width-50,y,24,26,function()if not control.disabled then change(-1)end end)
@@ -278,6 +279,12 @@ function M.new(api,measure)
     end
 
     function self.key(code,ctrl)
+        if code==13 and self.outfit_dialog and self.outfit_dialog.phase=='name'and self.outfit_dialog.on_save and self.text_edit then
+            local dialog=self.outfit_dialog;local ok,why=pcall(dialog.on_save,self.text_edit.text,dialog.save_kind)
+            self.notice=ok and tostring(why or 'Preset saved')or tostring(why)
+            if ok then self.outfit_dialog=nil;self.text_edit=nil end
+            return
+        end
 
         if code==(self.toggle_key or 121) then drag=nil;window_drag=nil;window_resize=nil;self.dropdown=nil;self.text_edit=nil;self.color_picker=nil end
 
@@ -796,6 +803,12 @@ function M.new(api,measure)
         wheel_bounds={x=ox,y=oy+196*s,w=ww*s,h=(wh-316)*s,split=ox+rail*s}
 
         text(30,wh-43,'EPIC LUT',28,accent)
+        local mode_switch=self.basic_only and self.open_advanced or self.open_basic
+        if mode_switch then
+            rect(ww-224,wh-58,140,30,{35,62,90})
+            bounded(ww-214,wh-49,self.basic_only and 'Advanced Mode'or 'Basic Mode',14,white,120)
+            hit(ww-224,wh-58,140,30,mode_switch)
+        end
 
         rect(ww-55,wh-45,38,30,{65,73,80});text(ww-43,wh-38,'X',20,white)
 
@@ -953,7 +966,7 @@ function M.new(api,measure)
                             local item={mod=mod,control=control,value=value}
                             function item.move(px)
                                 local fraction=math.max(0,math.min(1,(px-(ox+x*s))/(track*s)))
-                                item.value=math.min(control.max,control.min+math.floor(fraction*(control.max-control.min)/control.step+.5)*control.step)
+                                item.value=math.min(hi,lo+math.floor(fraction*(hi-lo)/control.step+.5)*control.step)
                                 self.redraw_revision=(self.redraw_revision or 0)+1
                             end
                             drag=item;item.move(mx)
@@ -981,7 +994,7 @@ function M.new(api,measure)
                         local input=assert(mod.controls[input_id]);local choice=assert(mod.controls[choice_id]);local value=mod.handle.get(choice_id)
                         local editing=self.text_edit and self.text_edit.mod==mod and self.text_edit.control==input
                         choice.input_control=input
-                        rect(x,y,width,26,{35,62,90});bounded(x+8,y+5,editing and self.text_edit.text..'|'or mod.handle.get(input_id),14,white,width-90)
+                        rect(x,y,width,26,{24,39,52});rect(x,y,2,26,{100,137,160});bounded(x+8,y+5,editing and self.text_edit.text..'|'or mod.handle.get(input_id),14,white,width-90)
                         text(x+width-70,y+5,'v',16,white);text(x+width-43,y+5,'<',16,white);text(x+width-17,y+5,'>',16,white)
                         hit(x,y,width-82,26,function()change(input,0)end)
                         hit(x+width-82,y,28,26,function()self.dropdown={mod=mod,control=choice,selected=value,scroll=math.max(0,value-4),x=x,top=y-4,width=width}end)
@@ -991,7 +1004,7 @@ function M.new(api,measure)
                         local control=assert(mod.controls[id],'Editor control missing: '..id);local value=mod.handle.get(id)
                         M.choice(primitives,control,value,x,y,width,function(direction)if prepare then prepare()end;change(control,direction)end,function()
                             if prepare then prepare();value=mod.handle.get(id)end
-                            self.dropdown={mod=mod,control=control,selected=value,scroll=math.max(0,math.min(math.max(0,#control.choices-8),value-4)),x=x,top=y-4,width=width}
+                            self.dropdown={mod=mod,control=control,selected=value,scroll=math.max(0,math.min(math.max(0,#control.choices-8),value-4)),x=x,top=y-4,width=math.max(width,control.dropdown_width or 0)}
                         end)
                     end})
                 if not ok then text(rail+35,wh-200,tostring(why),18,muted)end
@@ -1340,7 +1353,19 @@ function M.new(api,measure)
 
                 if index==d.selected then rect(x+3,y-4,dw-16,30,accent)end
 
-                bounded(x+8,y,tostring(d.control.choices[index]),18,index==d.selected and selection_text or white,math.max(0,dw-24))
+                local preview=d.control.choice_previews and d.control.choice_previews[index]
+                local detail=d.control.choice_details and d.control.choice_details[index]
+                bounded(x+8,y+(detail and 12 or 0),tostring(d.control.choices[index]),detail and 13 or 18,index==d.selected and selection_text or white,math.max(0,dw-(preview and 138 or 24)))
+                if detail then bounded(x+8,y-1,detail,10,index==d.selected and selection_text or accent,math.max(0,dw-24))end
+                if preview then
+                    for n,kind in ipairs({'armor','helmet'})do
+                        local colors=preview[kind]or {};local sx=x+dw-122+(n-1)*54
+                        if #colors==0 then rect(sx,y,48,12,{65,76,85})else
+                            for i,color in ipairs(colors)do rect(sx+(i-1)*48/#colors,y,48/#colors-1,12,color)end
+                        end
+                    end
+                    rect(x+dw-70,y-2,1,16,{145,156,165})
+                end
 
                 hit(x+3,y-4,dw-16,30,function()
 
@@ -1519,6 +1544,40 @@ function M.new(api,measure)
 
         end
 
+        if self.outfit_dialog then
+            local dialog=self.outfit_dialog;local px,py=(ww-440)/2,(wh-190)/2
+            hits={} -- This confirmation owns mouse input until saved or canceled.
+            local first=#commands+1
+            rect(px,py,440,190,{20,25,30},.99);rect(px,py+154,440,36,{35,62,90})
+            text(px+14,py+164,dialog.phase=='scope'and 'Save to Armory'or dialog.phase=='confirm'and 'Keep This Preset?'or 'Name This Preset',18,accent)
+            local function cancel()self.outfit_dialog=nil;self.text_edit=nil end
+            if dialog.phase=='scope'then
+                bounded(px+14,py+116,'What do you want to save?',14,white,412)
+                for i,option in ipairs({{'armor','Armor Only'},{'both','Both'},{'helmet','Helmet Only'}})do
+                    local bx=px+14+(i-1)*140;local kind,label=option[1],option[2]
+                    rect(bx,py+70,132,32,{35,62,90});bounded(bx+6,py+80,label,14,white,120)
+                    hit(bx,py+70,132,32,function()
+                        dialog.save_kind=kind;dialog.phase='name'
+                        self.text_edit={mod=dialog.mod,control=dialog.control,text='',replace=true}
+                    end)
+                end
+            elseif dialog.phase=='confirm'then
+                bounded(px+14,py+116,'Save the current gear as a named preset.',14,white,412)
+                rect(px+14,py+22,198,30,{35,62,90});bounded(px+22,py+30,'Yes',14,white,180)
+                hit(px+14,py+22,198,30,function()dialog.phase='name';dialog.save_kind='both';self.text_edit={mod=dialog.mod,control=dialog.control,text='',replace=true}end)
+            else
+                bounded(px+14,py+130,'Saving: '..(dialog.save_kind=='armor'and 'Armor Only'or dialog.save_kind=='helmet'and 'Helmet Only'or 'Armor + Helmet'),14,accent,412)
+                local editing=self.text_edit and self.text_edit.control==dialog.control
+                rect(px+14,py+89,412,30,{24,39,52})
+                bounded(px+22,py+98,editing and self.text_edit.text..'|'or 'Click to enter a preset name',14,white,396)
+                hit(px+14,py+89,412,30,function()self.text_edit={mod=dialog.mod,control=dialog.control,text='',replace=true}end)
+                rect(px+14,py+22,198,30,{35,62,90});bounded(px+22,py+30,'Save Preset',14,white,180)
+                hit(px+14,py+22,198,30,function()if self.text_edit then self.key(13)end end)
+            end
+            rect(px+228,py+22,198,30,{35,62,90});bounded(px+236,py+30,dialog.phase=='confirm'and 'No'or 'Cancel',14,white,180)
+            hit(px+228,py+22,198,30,cancel)
+            for i=first,#commands do commands[i].popup=true;commands[i].layer=400 end
+        end
         text_age=visible_text_age
         if console then for _,command in ipairs(console.compose(w,h,self.window_bounds,true))do commands[#commands+1]=command end end
 

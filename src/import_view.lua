@@ -3,6 +3,8 @@ local V={}
 function V.new(info,tables,select_color,core)
     local self={scroll=0,advanced=false,show_all=false,scratch={255,255,255},hue=0,swatches={}}
     function self.wheel(x,y,delta)
+        local imported=self.import_bounds
+        if imported and x>=imported.x and x<=imported.x+imported.w and y>=imported.y and y<=imported.y+imported.h then self.import_scroll=math.max(0,math.min(self.import_max or 0,(self.import_scroll or 0)-delta/120*22));return true end
         local b=self.bounds
         if b and x>=b.x and x<=b.x+b.w and y>=b.y and y<=b.y+b.h then self.scroll=math.max(0,math.min(self.maximum or 0,self.scroll-delta/120*60));return true end
     end
@@ -10,34 +12,39 @@ function V.new(info,tables,select_color,core)
         ui.rect(ui.x+ui.w-150,ui.y-24,150,28,{35,62,90})
         ui.bounded(ui.x+ui.w-142,ui.y-16,'Stop Highlight',14,{225,230,235},134)
         ui.hit(ui.x+ui.w-150,ui.y-24,150,28,function()ui.activate('stop_identify')end)
-        local state=info();if self.show_all and state.raw then state.tables=state.raw.tables;state.armor=state.raw.armor;state.helmet=state.raw.helmet end;local top=ui.y+ui.h;local gap=18;local lw=math.floor(ui.w*.55);local rx=ui.x+lw+gap;local rw=ui.w-lw-gap
+        local state=info();local top=ui.y+ui.h;local gap=18;local lw=math.floor(ui.w*.55);local rx=ui.x+lw+gap;local rw=ui.w-lw-gap
         local white,muted,blue={225,230,235},{155,166,175},{35,62,90}
         local function text(x,y,value)ui.text(x,y,value,14,white)end
-        local function button(x,y,w,label,id)
+        local function button(x,y,w,label,id,enabled)
             w=math.max(0,math.min(w,ui.x+ui.w-x-6));if w<20 then return end
-            ui.rect(x,y,w,28,blue);ui.bounded(x+9,y+8,label,15,white,w-18);ui.hit(x,y,w,28,function()ui.activate(id)end)
+            ui.rect(x,y,w,28,enabled==false and {35,39,43}or blue);ui.bounded(x+9,y+8,label,15,enabled==false and muted or white,w-18);ui.hit(x,y,w,28,function()if enabled~=false then ui.activate(id)end end)
         end
         ui.rect(ui.x,ui.y,lw,ui.h,{20,24,28});ui.rect(rx,ui.y,rw,ui.h,{20,24,28})
+        local divider={65,76,85}
+        ui.rect(ui.x+lw/2,ui.y+14,1,math.max(0,ui.h-130),divider)
+        ui.rect(rx-9,ui.y,1,ui.h,divider)
+        for _,offset in ipairs({184})do
+            ui.rect(rx+12,top-offset,rw-24,1,divider)
+        end
         ui.rect(ui.x,top-30,lw,30,blue);ui.rect(rx,top-30,rw,30,blue)
         text(ui.x+12,top-20,'LUTs and colors');text(rx+12,top-20,'Import and apply')
         button(ui.x+12,top-77,lw-24,'Load Current Armor & Helmet','populate_worn')
         local offset=75
         if (state.palette_count or 0)>1 then
-            text(ui.x+12,top-83,'Imported LUT - choose a table from this file')
-            ui.choice('palette',ui.x+12,top-119,lw-24);offset=135
-        elseif state.loaded then
-            ui.bounded(ui.x+12,top-83,state.loaded.source or 'One imported LUT',14,muted,lw-24);offset=105
+            text(ui.x+12,top-101,'Imported LUT')
+            local selector_width=math.min(280,lw*.4)
+            ui.choice('palette',ui.x+12,top-139,selector_width);offset=155
+            if state.loaded then
+                local document=state.loaded;local sx=ui.x+selector_width+24
+                local size=math.min(34,(lw-selector_width-40)/document.height)
+                for row=1,document.height do
+                    local at=(row-1)*document.width*4;local rgb={}
+                    for ch=0,2 do rgb[#rgb+1]=math.floor(math.max(0,math.min(1,document.data[at+ch]))*255+.5)end
+                    ui.rect(sx+(row-1)*size,top-139,size-2,26,rgb)
+                end
+            end
         end
-        local ay=top-offset-28
-        ui.rect(ui.x+12,ay,lw-24,26,blue)
-        text(ui.x+20,ay+6,(self.advanced and 'v'or '>')..' Advanced - individual live LUTs')
-        ui.hit(ui.x+12,ay,lw-24,26,function()self.advanced=not self.advanced;self.scroll=0 end)
-        if self.advanced then
-            text(ui.x+12,ay-24,'Live LUT #: a table used by your currently worn gear.')
-            button(ui.x+12,ay-61,lw-24,'Refresh live LUTs','refresh')
-            ui.bounded(ui.x+12,ay-123,'Armor / Helmet checkboxes apply to all their LUTs, regardless of this selection.',13,muted,lw-24)
-        end
-        local cliptop,clipbottom=ay-(self.advanced and 145 or 20),ui.y+14;local cursor=cliptop+self.scroll
+        local cliptop,clipbottom=top-offset-20,ui.y+14;local cursor=cliptop+self.scroll
         self.bounds={x=ui.x,y=ui.y,w=lw,h=ui.h}
         local function visible(y,h)return y>=clipbottom and y+h<=cliptop end
         local function paint()
@@ -92,21 +99,31 @@ function V.new(info,tables,select_color,core)
         if self.scratch_open and ui.floating then ui.floating('quick_scratch',draw_scratch,260,330,function()self.scratch_open=false end)end
         if self.selected then ui.bounded(ui.x+12,cliptop+9,'Editing: '..(self.selected.label or '')..' / Row '..self.selected.row..' / '..(self.selected.field or self.selected.column),13,muted,lw-175)end
         local cols={1,3,6,7,13,15,17,18,19,20}
-        local function colors(title,entries)
+        local function colors(title,entries,offset)
+            local ui=setmetatable({x=ui.x+(offset or 0)},{__index=ui})
             cursor=cursor-27
             if visible(cursor,23)then ui.rect(ui.x+10,cursor,338,23,blue);text(ui.x+17,cursor+6,title)end
-            if #entries==0 then cursor=cursor-21;if visible(cursor,18)then ui.text(ui.x+17,cursor+4,'No palette applied to this target.',13,muted)end end
+            if title~='Imported tables'and state.loaded and visible(cursor,23)then
+                ui.rect(ui.x+155,cursor,193,23,{24,39,52})
+                ui.bounded(ui.x+163,cursor+5,'Apply to '..title..' '..(entries[1]and entries[1].name:match('LUT %d+')or 'LUT'),14,white,177)
+                ui.hit(ui.x+155,cursor,193,23,function()ui.activate('apply_import_'..title:lower())end)
+            end
+            if #entries==0 then cursor=cursor-21;if visible(cursor,18)then ui.text(ui.x+17,cursor+4,'Current colors unavailable or still loading.',13,muted)end end
             for number,entry in ipairs(entries)do
                 local selection_key=title..'/'..tostring(entry.index or entry.ids and entry.ids[1]or entry.source or entry.name)
                 cursor=cursor-22;if visible(cursor,18)then
                     text(ui.x+17,cursor+4,entry.name)
-                    if number==1 and title~='Imported tables' then ui.choice('basic_'..title:lower()..'_lut',ui.x+210,cursor-2,138)end
                     ui.hit(ui.x+12,cursor,190,18,function()
                         local row=math.min(entry.height,self.selected and self.selected.row or 1)
                         local column=self.selected and self.selected.column or 1
                         if select_color then select_color(entry,row,column)end
                         self.selected={key=selection_key,data=entry.data,row=row,column=column,label=title..' / '..entry.name}
                     end)
+                end
+                cursor=cursor-30
+                if visible(cursor,26)then
+                    if entry.resource then ui.bounded(ui.x+17,cursor+6,entry.resource,12,{244,202,53},196)end
+                    if number==1 and title~='Imported tables'then ui.choice('basic_'..title:lower()..'_lut',ui.x+220,cursor,128)end
                 end
                 cursor=cursor-18
                 if visible(cursor,15)then for i,label in ipairs({'Base','D1','In','Out','Curv','Tint','C1','C2','C3','C4'})do ui.text(ui.x+90+(i-1)*26,cursor+3,label,12,muted)end end
@@ -138,16 +155,16 @@ function V.new(info,tables,select_color,core)
                 end
             end
         end
-        if state.tables and #state.tables>0 then colors('Imported tables',state.tables)end
-        colors('Armor',state.armor);colors('Helmet',state.helmet)
-        cursor=cursor-38
-        if visible(cursor,28)then
-            ui.rect(ui.x+12,cursor,336,28,blue);text(ui.x+20,cursor+8,self.show_all and 'Hide identical LUTs'or 'Show All LUTs')
-            ui.hit(ui.x+12,cursor,336,28,function()self.show_all=not self.show_all;self.scroll=0 end)
-        end
+        local start=cursor;colors('Armor',state.armor,0);local armor_end=cursor
+        cursor=start;colors('Helmet',state.helmet,lw/2);cursor=math.min(cursor,armor_end)
         local content=cliptop+self.scroll-cursor;local viewport=cliptop-clipbottom;self.maximum=math.max(0,content-viewport);self.scroll=math.min(self.scroll,self.maximum)
         if self.maximum>0 then local thumb=math.max(18,viewport*viewport/content);ui.rect(ui.x+lw-6,clipbottom,4,viewport,{50,60,70});ui.rect(ui.x+lw-7,cliptop-thumb-(viewport-thumb)*self.scroll/self.maximum,6,thumb,{120,135,150})end
         button(rx+12,top-77,rw-24,'Choose file - DDS / ZIP / RAR...','browse')
+        if state.loaded then
+            local path=(state.loaded.source or 'Imported LUT'):gsub('\\','/')
+            local relative=path:match('/Epic LUT/(.*)')or path:match('[^/]+$')or path
+            ui.bounded(rx+12,top-98,'Imported: '..relative,12,muted,rw-24)
+        end
         local y=top-117
         if state.busy then
             local spin=math.floor(state.time*8)%8
@@ -155,24 +172,49 @@ function V.new(info,tables,select_color,core)
             ui.text(rx+55,y+5,state.phase..'  ('..state.elapsed..'s)',14,white)
         else ui.bounded(rx+12,y+5,state.status,14,muted,rw-24)end
         if state.busy then button(rx+12,top-161,(rw-29)/2,'Cancel import','cancel_import');button(rx+17+(rw-29)/2,top-161,(rw-29)/2,'Retry file picker','retry_import')end
-        button(rx+12,top-203,rw-24,'Save LUT to Palette','save_palette')
-        if state.dirty then ui.bounded(rx+12,top-288,'Editor modified - export DDS to keep/share edits.',13,{244,202,53},rw-24)end
+        button(rx+12,top-203,rw-24,'Send to LUT Editor','save_palette')
         ui.bounded(rx+12,top-224,'Overwrites the editor table; does not apply to gear.',13,muted,rw-24)
-        button(rx+12,top-348,(rw-29)/2,'[ '..(state.helmet_checked and 'x'or ' ')..' ] Helmet','target_helmet')
-        button(rx+17+(rw-29)/2,top-348,(rw-29)/2,'[ '..(state.armor_checked and 'x'or ' ')..' ] Armor','target_armor')
-        text(rx+12,top-309,'Apply LUT to...')
-        button(rx+12,top-391,rw-24,'Apply LUT','apply_checked')
-        button(rx+12,top-429,rw-24,'[ '..(state.preserve_emissives and 'x'or ' ')..' ] Preserve Original Emissives','preserve_emissives')
-        if state.loaded then
-            text(rx+12,top-238,'Imported colors - ready for editor or Apply')
-            local size=math.min(26,(rw-24)/state.loaded.height)
-            for row=1,state.loaded.height do local at=(row-1)*state.loaded.width*4;local rgb={};for ch=0,2 do rgb[#rgb+1]=math.floor(math.max(0,math.min(1,state.loaded.data[at+ch]))*255+.5)end;ui.rect(rx+12+(row-1)*size,top-270,size-3,24,rgb)end
+        local preview_height=math.max(44,math.min(200,ui.h-570))
+        local preview_top=top-246;local preview_bottom=preview_top-preview_height
+        self.import_bounds={x=rx+12,y=preview_bottom,w=rw-24,h=preview_height}
+        local imported=state.raw and state.raw.tables or state.tables or {}
+        if #imported==0 and state.loaded then imported={{index=1,width=state.loaded.width,height=state.loaded.height,data=state.loaded.data}}end
+        text(rx+12,top-238,'Imported file: '..#imported..' LUT'..(#imported==1 and ''or 's')..' / Column 1')
+        self.import_max=math.max(0,#imported*22-preview_height);self.import_scroll=math.min(self.import_scroll or 0,self.import_max)
+        for i,entry in ipairs(imported)do
+            local y=preview_top-i*22+self.import_scroll
+            if y>=preview_bottom and y+20<=preview_top then
+                ui.bounded(rx+16,y+5,'LUT '..(entry.index or i),12,white,58)
+                local size=math.min(24,(rw-94)/entry.height)
+                for row=1,entry.height do local at=(row-1)*entry.width*4;local rgb={}
+                    for ch=0,2 do rgb[#rgb+1]=math.floor(math.max(0,math.min(1,entry.data[at+ch]))*255+.5)end
+                    ui.rect(rx+82+(row-1)*size,y,size-2,18,rgb)
+                end
+                local index=entry.index or i
+                ui.hit(rx+12,y,rw-24,20,function()if ui.set then ui.set('palette',index)end end)
+            end
         end
-        button(rx+12,top-473,rw-24,'Restore Original LUT','restore')
-        button(rx+12,top-512,rw-24,'Restore Imported LUT (editor)','restore_imported')
-        button(rx+12,top-556,(rw-29)/2,'Undo quick edit','undo');button(rx+17+(rw-29)/2,top-556,(rw-29)/2,'Redo quick edit','redo')
-        button(rx+12,top-600,rw-24,'Save applied setup','save_setup')
-        ui.text(rx+12,top-630,'Save applied setup keeps Armor / Helmet assignments for next launch.',13,muted)
+        if self.import_max>0 then ui.bounded(rx+12,preview_bottom-12,'Scroll for more imported LUTs',10,muted,rw-24)end
+        ui.rect(rx+12,preview_bottom-18,rw-24,1,divider)
+        local actions=preview_bottom-30
+        text(rx+12,actions,'Apply Imported Palette')
+        local apply_width=(rw-30)/2
+        local matching=state.raw and state.raw.matching
+        if (state.palette_count or 0)>1 then
+            button(rx+12,actions-36,rw-24,'Apply Matching LUTs','apply_matching',matching and matching.matched>0 and not state.busy)
+            local summary=matching and (matching.total..' imported / '..matching.matched..' matched / '..(matching.unmatched+matching.unidentified+matching.ambiguous)..' unmatched or ambiguous')or 'Resource IDs unavailable - target individual LUTs manually.'
+            ui.bounded(rx+12,actions-55,summary,13,muted,rw-24)
+        else
+            button(rx+12,actions-36,apply_width,'Apply to All Armor LUTs','apply_file_armor')
+            button(rx+18+apply_width,actions-36,apply_width,'Apply to All Helmet LUTs','apply_file_helmet')
+            ui.bounded(rx+12,actions-55,'Applies to every LUT on that gear.',13,muted,rw-24)
+        end
+        button(rx+12,actions-95,rw-24,'[ '..(state.preserve_emissives and 'x'or ' ')..' ] Preserve Original Emissives','preserve_emissives')
+        ui.rect(rx+12,actions-109,rw-24,1,divider)
+        button(rx+12,actions-145,rw-24,'Restore Arrowhead LUT (Original)','restore')
+        button(rx+12,actions-183,rw-24,'Restore Imported LUT (editor)','restore_imported')
+        button(rx+12,actions-221,(rw-29)/2,'Undo Last Action','global_undo');button(rx+17+(rw-29)/2,actions-221,(rw-29)/2,'Redo Last Action','global_redo')
+        button(rx+12,actions-259,rw-24,'Save applied setup','save_setup')
         ui.text(rx+12,ui.y+14,'RAR requires installed 7-Zip. Match Your Colors should be Off.',13,muted)
     end
     return self

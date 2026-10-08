@@ -39,7 +39,8 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert result.read_text().splitlines()==['ok','lut000.dds']
     data=(folder/'out/lut000.dds').read_bytes()
     assert struct.unpack_from('<I',data,28)[0]==1 and data[148:]==PIXELS
-    assert len(list((folder/'out').iterdir()))==1
+    assert (folder/'out/resources.tsv').read_text()=='lut000.dds\t0000000000000001'
+    assert len(list((folder/'out').iterdir()))==2
 
     for index, unsafe in enumerate(('../escape.dds','/absolute.dds','file:stream.dds')):
         with zipfile.ZipFile(package,'w')as archive:archive.writestr(unsafe,data)
@@ -73,6 +74,7 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     result=folder/'many.txt';completed=run(package,folder/'many',result)
     assert completed.returncode==0,(completed.stderr,result.read_text())
     assert len(list((folder/'many').glob('*.dds')))==40
+    assert not (folder/'many/resources.tsv').read_text().strip(), 'Plain DDS files must not acquire guessed IDs'
 
     # Resource records follow 72 + 32 * type_count, not a fixed 104-byte header.
     types=3;start=72+32*types;main_at=start+80*3

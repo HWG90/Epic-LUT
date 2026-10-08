@@ -27,7 +27,7 @@ OUT = ROOT / 'dist/armor_lut_editor'
 OUT.mkdir(parents=True, exist_ok=True)
 VENDOR = ['bingus_runtime', 'bingus_memory', 'engine', 'avatar']
 MENU = ['core', 'store', 'menu', 'view', 'capture']
-OWN = ['dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor', 'direct_setup', 'import_view', 'table_groups', 'original_luts','basic_view','update_check']
+OWN = ['dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor', 'direct_setup', 'import_view', 'table_groups', 'original_luts','basic_view','armory_view','outfit_presets','basic_state','resource_ids','import_matches','region_indicator','action_history','update_check']
 NATIVE_NAME = 'mcm_input_9bc2033ffbb3.dll'
 NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
 native_path = Path(os.environ['EPIC_LUT_INPUT_LIBRARY']) if os.environ.get('EPIC_LUT_INPUT_LIBRARY') else ROOT.parent/'DBF-MCM/native/build'/NATIVE_NAME

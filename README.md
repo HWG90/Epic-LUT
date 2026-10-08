@@ -98,6 +98,8 @@ The input DLL is pinned from sibling DBF-MCM or `EPIC_LUT_INPUT_LIBRARY`. Snapsh
 
 ## Credits
 
+Patch imports retain each LUT's texture resource ID. For imports containing multiple LUTs, **Apply Matching LUTs** shows a match count and applies only IDs found on currently worn gear. Unmatched, unidentified, and duplicate-ID entries remain untouched. Ordinary DDS imports without resource metadata use manual targeting.
+
 Native adapters and foundational LUT research: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license.
 
 [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor) inspired the semantic controls and layout. Epic LUT's editor implementation is independently authored.

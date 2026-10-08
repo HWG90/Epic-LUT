@@ -15,15 +15,19 @@ local live_select_suppressed=false
 local basic_imported,basic_names
 local populate_request
 local populate_next=0
-local basic_documents,basic_groups={}, {armor={},helmet={}}
+local basic_state,basic_documents
 local basic_selected
 local basic_missing_reported={}
 local myc_warned=false
-local identification,stop_identification
+local region_indicator,stop_identification
 local identify_kind
+local editor_target,editor_pending
+local history
+local outfits,outfit_names,selected_outfit
 local quick_selection
 local import_view
 local source_tables,editor_tables={},{}
+local import_ids={}
 local index_job
 local refresh_needed,next_refresh=false,0
 local import_counter=package.loaded['epic.import.counter.v1']or {value=0};package.loaded['epic.import.counter.v1']=import_counter
@@ -65,8 +69,10 @@ local function palette_choices(labels)
     select_suppressed=true;local ok,why=handle.set('palette',1);select_suppressed=false;assert(ok,why)
 end
 local function action(fn,recover)
+    local before=history and not history.busy and not region_indicator.job and history.capture()
     local ok,why=pcall(fn)
     if not ok then if recover then restore()end;return message(tostring(why))end
+    if before and not region_indicator.job then history.record(before,history.capture())end
     return why
 end
 local function refresh(silent)
@@ -111,12 +117,13 @@ local function load_dds(path)
     local bytes=f:read(m.dds.MAX_BYTES+1);f:close()
     local data,w,h=m.dds.decode(bytes)
     assert(w==23,'This simple editor accepts 23-column material LUT DDS files')
+    editor_target=nil;editor_pending=nil
     local ok,changed=disable_matching();assert(ok,changed)
     if changed then groups={}end
-    imported={data=data,width=w,height=h,source=path}
+    imported={data=data,width=w,height=h,source=path,resource=import_ids[path]}
     source_tables[path]=imported
     refresh_needed=not pcall(refresh)
-    return message('DDS imported ('..w..' x '..h..'). Save LUT to Palette to edit; Apply LUT sends it to gear.')
+    return message('DDS imported ('..w..' x '..h..'). Send to LUT Editor to edit; Apply LUT sends it to gear.')
 end
 local function load(pick)
     assert(not pending,'ZIP import is still pending')
@@ -138,14 +145,14 @@ local function load(pick)
     local pid=tonumber(kernel.epic_native_pid());local base=paths.cache..'/zip-'..pid..'-'..os.time()..'-'..import_counter.value
     local extension=handle.get('format')==3 and '.rar'or '.zip'
     local input=pick and ' -Pick' or ' -Package "'..paths.files..'/'..name..extension..'"'
-    local args='-NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "'..script..'"'..input..' -Output "'..base..'" -Result "'..base..'.txt" -OwnerPID '..pid
+    local args='-NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "'..script..'"'..input..' -Navigate -Output "'..base..'" -Result "'..base..'.txt" -OwnerPID '..pid
     local worker=m.native_import.launch_worker(args,paths.cache)
-    pending={base=base,started=os.time(),pick=pick,worker=worker,phase='starting',last_beat=os.time()}
+    pending={base=base,started=os.time(),pick=pick,worker=worker,phase='starting',last_beat=os.time(),menu_visible=frontend.menu and frontend.menu.visible,menu_page=frontend.menu and frontend.menu.page}
     return message(pick and 'Choose a DDS or ZIP in the Windows file picker.' or 'Extracting ZIP palettes. No Python is used.')
 end
 local function cancel_import(retry)
     if not pending then if retry then return load(true)end;return message('No import is running.')end
-    local f=assert(io.open(pending.base..'.cancel','wb'));f:write('cancel');f:close()
+    local f=assert(io.open(pending.base..'.txt.cancel','wb'));f:write('cancel');f:close()
     pending.canceling=os.time();pending.retry=retry
     return message(retry and 'Closing the previous picker before retrying...'or 'Canceling import; current palettes stay active.')
 end
@@ -156,7 +163,7 @@ end
 local function poll_job()
     local job=pending;if not job then return end
     local now=os.time()
-    local progress=io.open(job.base..'.progress','rb')
+    local progress=io.open(job.base..'.txt.progress','rb')
     if progress then
         local text=progress:read(513)or '';progress:close()
         local pid,phase,beat=text:match('^(%d+)\t([a-z]+)\t(%d+)$')
@@ -183,12 +190,23 @@ local function poll_job()
             assert(#lines>=2 and #lines<=257,'Invalid extracted palette count')
             local imported,labels={},{}
             for i=2,#lines do assert(lines[i]:match('^lut%d%d%d%.dds$'),'Invalid extracted palette filename');imported[#imported+1]=job.base..'/'..lines[i];labels[#labels+1]=lines[i]end
+            local metadata=io.open(job.base..'/resources.tsv','rb')
+            if metadata and m.import_matches then
+                local text=metadata:read(16385)or '';metadata:close()
+                local names={};for i=2,#lines do names[#names+1]=lines[i]end
+                for file,hash in pairs(m.import_matches.metadata(text,names))do import_ids[job.base..'/'..file]=hash end
+            elseif metadata then metadata:close()end
             -- Validate the first file before replacing the current import selection.
             load_dds(imported[1]);palettes=imported;palette_choices(labels)
+            if job.menu_visible and frontend.menu then
+                frontend.menu.visible=true;frontend.menu.page=job.menu_page;frontend.menu.suspended=true
+                frontend.menu.redraw_revision=(frontend.menu.redraw_revision or 0)+1
+                ctx.log('Import completed; restored editor menu after file picker')
+            end
             index_job=coroutine.create(function()
                 for _,path in ipairs(palettes)do if not source_tables[path]then
                     local f=assert(io.open(path,'rb'));local bytes=f:read(m.dds.MAX_BYTES+1);f:close()
-                    local data,w,h=m.dds.decode(bytes);if w==23 then source_tables[path]={data=data,width=w,height=h,source=path}end
+                    local data,w,h=m.dds.decode(bytes);if w==23 then source_tables[path]={data=data,width=w,height=h,source=path,resource=import_ids[path]}end
                     coroutine.yield()
                 end end
             end)
@@ -244,18 +262,11 @@ local function apply_bindings(document,targets)
     for _,b in ipairs(targets)do b.texture=texture;b.document=document end
     return #targets,texture
 end
-stop_identification=function()
-    local job=identification;if not job then return true end
-    local remaining={}
-    for _,item in ipairs(job.items)do
-        local b=item.binding
-        if present(b)and (binding(b)==item.highlight or binding(b)==item.object)then
-            local ok=pcall(function()m.engine.bind(native,b.material,m.engine.LUT_SLOT,item.object);native.commit(b.mesh);assert(binding(b)==item.object)end)
-            if not ok then remaining[#remaining+1]=item else b.current=item.object;b.texture=item.texture;b.document=item.document end
-        end
-    end
-    job.items=remaining;identification=#remaining>0 and job or nil
-    return identification==nil
+local function initialize_editor_state()
+    basic_state=m.basic_state.new();basic_documents=basic_state.documents
+    region_indicator=m.region_indicator.new({present=present,binding=binding,apply=apply_bindings,
+        bind=function(b,object)m.engine.bind(native,b.material,m.engine.LUT_SLOT,object);native.commit(b.mesh)end})
+    stop_identification=region_indicator.stop
 end
 local function identify_region()
     assert(stop_identification(),'Previous highlight restoration pending')
@@ -268,17 +279,11 @@ local function identify_region()
         assert(row>=1 and row<=source.height,'Selected region does not exist on this target')
         items[#items+1]={binding=b,object=b.current,texture=b.texture,document=b.document,source=source}
     end end
-    assert(#items>0,'No live target for this region')
-    identification={items=items,remaining=4,elapsed=0,on=true}
-    local ok,why=pcall(function()for _,item in ipairs(items)do
-        local source=item.source;local data=ffi.new('float[?]',source.width*source.height*4);ffi.copy(data,source.data,source.width*source.height*16)
-        local at=(row-1)*source.width*4;data[at]=1;data[at+1]=0;data[at+2]=1
-        local _,texture=apply_bindings({data=data,width=source.width,height=source.height},{item.binding});item.highlight=texture.object
-    end end)
-    if not ok then stop_identification();error(why,0)end
+    region_indicator.start(items,row)
     return message('Flashing region '..row..' in magenta for 4 seconds; prior bindings restore automatically.')
 end
-local function apply(document)
+local function apply(document,selected_kind)
+    selected_kind=(selected_kind=='armor'or selected_kind=='helmet')and selected_kind or nil
     assert(stop_identification(),'Highlight restoration pending')
     document=document or loaded or imported
     assert(document,'Load a DDS first');resume_done=true;resume_job=nil
@@ -287,11 +292,18 @@ local function apply(document)
     for index,group in ipairs(groups)do
         if scope==4 or (scope==2 and group.armor)or(scope==3 and group.helmet)or(scope==1 and index==handle.get('lut'))then
             for _,b in ipairs(group.bindings)do if scope==1 or scope==4 or(scope==2 and b.armor)or(scope==3 and b.helmet)then
-                if not (scope==1 and basic_selected and frontend.basic_mode)or b[basic_selected.kind]then targets[#targets+1]=b end
+                if (not selected_kind or b[selected_kind])and (not (scope==1 and basic_selected and frontend.basic_mode)or b[basic_selected.kind])then targets[#targets+1]=b end
             end end
         end
     end
     local count,texture
+    local function refresh_applied_palettes()
+        for _,b in ipairs(targets)do if b.document then
+            local kind=b.helmet and 'helmet'or 'armor'
+            basic_documents[kind..':'..tostring(b.original)]=b.document
+        end end
+        if frontend.menu then frontend.menu.redraw_revision=(frontend.menu.redraw_revision or 0)+1 end
+    end
     if handle.get('preserve_emissives')then
         assert(original_luts,'Original game LUT reader unavailable');original_luts.scan()
         assert(original_luts.loaded,'Original game snapshots are not ready: '..original_luts.status)
@@ -303,10 +315,12 @@ local function apply(document)
             variant.targets[#variant.targets+1]=b
         end
         count=0;for _,variant in pairs(variants)do count=count+apply_bindings(variant.document,variant.targets)end
+        refresh_applied_palettes()
         if scope==2 or scope==4 then defaults.armor=nil end;if scope==3 or scope==4 then defaults.helmet=nil end
         return message('Palette applied to '..count..' bindings with game-original emissives, including zero values.')
     end
     count,texture=apply_bindings(document,targets)
+    refresh_applied_palettes()
     if scope==2 or scope==4 then defaults.armor=texture end
     if scope==3 or scope==4 then defaults.helmet=texture end
     return message('Palette applied to '..count..' bindings. Other applied LUTs stay active.')
@@ -319,6 +333,7 @@ local function save_setup()
     return message('Saved '..assert(setup,'Setup storage unavailable').save(active,defaults)..' applied palettes. Armor and helmet will resume on later launches.')
 end
 local function save_palette()
+    editor_target=nil;editor_pending=nil
     local source=assert(imported,'Import a LUT first');local data=ffi.new('float[?]',source.width*source.height*4)
     ffi.copy(data,source.data,source.width*source.height*16)
     loaded={data=data,width=source.width,height=source.height,source=source.source}
@@ -329,7 +344,7 @@ local function save_palette()
     return message('Editor table overwritten with the selected imported LUT. Apply LUT sends the file LUT to checked targets.')
 end
 local function apply_checked(document)
-    if basic_selected and frontend.basic_mode and loaded==basic_documents[basic_selected.key]then
+    if basic_selected and frontend.basic_mode then
         assert(handle.set('lut',basic_selected.group));assert(handle.set('scope',1));return apply(document or loaded)
     end
     local armor,helmet=handle.get('target_armor'),handle.get('target_helmet')
@@ -366,6 +381,35 @@ local function populate_worn()
     populate_request=nil;message('Loaded worn Armor and Helmet colors. Click either panel to edit that target.')
     return true
 end
+local function resource_id(object)
+    local original=original_luts and original_luts.get(object);local hash=original and original.resource
+    return m.resource_ids.format(hash,handle.get('resource_format')==2)
+end
+local function matching_plan()
+    if not m.import_matches then return nil end
+    local documents={};for _,path in ipairs(palettes)do if source_tables[path]then documents[#documents+1]=source_tables[path]end end
+    return m.import_matches.plan(documents,groups,function(hash)return m.engine.texture_object(native,hash)end)
+end
+local function apply_matching()
+    assert(not index_job,'Import is still being indexed; wait for the LUT list')
+    assert(stop_identification(),'Highlight restoration pending');refresh(true)
+    local plan=assert(matching_plan(),'Matching unavailable');assert(plan.matched>0,'No imported resource IDs match the currently worn gear')
+    local batches={}
+    for _,p in ipairs(plan.plans)do
+        local document=p.document
+        if handle.get('preserve_emissives')then
+            assert(original_luts,'Original snapshot reader unavailable')
+            document=m.original_luts.preserve(document,original_luts.get(p.targets[1].original))
+        end
+        for _,b in ipairs(p.targets)do assert(present(b)and binding(b)==b.current,'Gear bindings changed; load current gear again')end
+        batches[#batches+1]={document=document,targets=p.targets}
+    end
+    resume_done=true;resume_job=nil;local bindings=0
+    for _,p in ipairs(batches)do bindings=bindings+apply_bindings(p.document,p.targets)
+        for _,b in ipairs(p.targets)do basic_documents[(b.helmet and 'helmet'or 'armor')..':'..tostring(b.original)]=m.basic_state.clone(p.document,p.document.source)end
+    end
+    return message('Applied '..plan.matched..' matching LUTs to '..bindings..' bindings; unmatched and ambiguous LUTs left untouched.')
+end
 local function import_state()
     local previews={armor={},helmet={}}
     for index,group in ipairs(groups)do
@@ -375,7 +419,7 @@ local function import_state()
             if texture and b.current==texture.object and not seen[kind][texture]then
                 seen[kind][texture]=true
                 local document=b.document or texture
-                previews[kind][#previews[kind]+1]={name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..index,index=index,width=document.width,height=document.height,data=document.data,revision=document.revision,edited=(document.revision or 0)>0}
+                previews[kind][#previews[kind]+1]={name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..(#previews[kind]+1),index=index,width=document.width,height=document.height,data=document.data,revision=document.revision,edited=(document.revision or 0)>0}
             end
         end
     end
@@ -383,37 +427,35 @@ local function import_state()
     for i,path in ipairs(palettes)do local document=editor_tables[path]or source_tables[path];if document then
         tables[#tables+1]={name='Table '..i,index=i,source=path,width=document.width,height=document.height,data=document.data,revision=document.revision,edited=(document.revision or 0)>0}
     end end
-    local raw={tables=tables,armor=previews.armor,helmet=previews.helmet,basic={}}
+    local raw={tables=tables,armor=previews.armor,helmet=previews.helmet,basic={},outfit=selected_outfit,matching=matching_plan()}
     if m.basic_view then for _,kind in ipairs({'armor','helmet'})do
-        local choices,indices={},{};for index,group in ipairs(groups)do for _,b in ipairs(group.bindings)do if b[kind]then choices[#choices+1]='LUT '..(#choices+1);indices[#indices+1]=index;break end end end
-        basic_groups[kind]=indices
-        local control=api.mods[handle.id].controls['basic_'..kind..'_lut'];if control then control.choices=#choices>0 and choices or {'Waiting for gear...'}end
+        local choices,indices,details={},{},{};for index,group in ipairs(groups)do for _,b in ipairs(group.bindings)do if b[kind]then choices[#choices+1]='LUT '..(#choices+1);details[#choices]=resource_id(group.object);indices[#indices+1]=index;break end end end
+        local control=api.mods[handle.id].controls['basic_'..kind..'_lut'];if control then control.choices=#choices>0 and choices or {'Waiting for gear...'};control.choice_details=details;control.dropdown_width=280 end
         local index=indices[handle.get('basic_'..kind..'_lut')];local group=index and groups[index];local doc,key
         if group then for _,b in ipairs(group.bindings)do if b[kind]then
             key=kind..':'..tostring(b.original);doc=basic_documents[key]
             if not doc then
                 local source=b.document or (original_luts and original_luts.get(b.original))
-                if source then local data=ffi.new('float[?]',source.width*source.height*4);ffi.copy(data,source.data,source.width*source.height*16);doc={data=data,width=source.width,height=source.height,source='Worn '..kind};basic_documents[key]=doc end
+                doc=basic_state.get(key,source,'Worn '..kind)
             end
             break
         end end end
-        raw.basic[kind]={document=doc,key=key,group=index,unavailable=not doc and original_luts and original_luts.loaded and key~=nil}
-        if doc then previews[kind]={ {name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..tostring(index),index=index,width=doc.width,height=doc.height,data=doc.data,revision=doc.revision} }end
+        raw.basic[kind]={document=doc,key=key,group=index,resource=group and resource_id(group.object)or 'unavailable',unavailable=not doc and original_luts and original_luts.loaded and key~=nil}
+        if doc then previews[kind]={ {name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..tostring(handle.get('basic_'..kind..'_lut')),resource=resource_id(group.object),index=index,width=doc.width,height=doc.height,data=doc.data,revision=doc.revision} }end
         if raw.basic[kind].unavailable and not basic_missing_reported[key]then
             basic_missing_reported[key]=true
             if ctx.log then ctx.log('BASIC_SNAPSHOT_MISSING target='..kind..' group='..tostring(index)..' original_object='..tostring(group.object)..' reader='..tostring(original_luts.status))end
         end
     end end
     if m.table_groups then tables=m.table_groups.collapse(tables);previews.armor=m.table_groups.collapse(previews.armor);previews.helmet=m.table_groups.collapse(previews.helmet)end
-    if import_view and import_view.advanced then
-        local index=handle.get('lut');local group=groups[index]
-        if group then for _,kind in ipairs({'armor','helmet'})do if group[kind]then
-            previews[kind]={}
-            for _,b in ipairs(group.bindings)do if b[kind]then
-                local doc=basic_documents[kind..':'..tostring(b.original)]or b.document or (original_luts and original_luts.get(b.original))
-                if doc then previews[kind][1]={name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..index,index=index,width=doc.width,height=doc.height,data=doc.data,revision=doc.revision};break end
-            end end
+    -- Show All must include game snapshots, not just palettes already applied by Epic LUT.
+    for _,kind in ipairs({'armor','helmet'})do
+        local entries={}
+        for index,group in ipairs(groups)do for _,b in ipairs(group.bindings)do if b[kind]then
+            local doc=basic_documents[kind..':'..tostring(b.original)]or b.document or (original_luts and original_luts.get(b.original))
+            if doc then entries[#entries+1]={name=(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..(#entries+1),index=index,width=doc.width,height=doc.height,data=doc.data,revision=doc.revision};break end
         end end end
+        raw[kind]=entries
     end
     local phase=pending and pending.phase or ''
     local labels={starting='Opening file picker...',picker='Waiting for file selection...',reading='Reading archive...',extracting='Extracting LUTs...'}
@@ -422,6 +464,42 @@ local function import_state()
         time=memory.time and memory.time()or os.clock(),elapsed=pending and(os.time()-pending.started)or 0,
         armor_checked=handle.get('target_armor'),helmet_checked=handle.get('target_helmet'),palette_name=handle.get('palette_name'),preserve_emissives=handle.get('preserve_emissives')}
 end
+local function load_editor_target(kind)
+    refresh(true)
+    local panel=import_state().raw.basic[kind];local source
+    local group=panel and panel.group and groups[panel.group]
+    if group then for _,b in ipairs(group.bindings)do if b[kind]then
+        source=b.document or (original_luts and original_luts.get(b.original));if source then break end
+    end end end
+    if not source then return false end
+    loaded=m.basic_state.clone(source,(kind=='armor'and 'Armor'or 'Helmet')..' LUT '..handle.get('basic_'..kind..'_lut')..' (worn)')
+    loaded.resource=resource_id(group.object)
+    loaded.resource_object=group.object
+    editor_target={kind=kind,group=panel.group,object=group.object};identify_kind=kind;basic_selected=nil;basic_imported=imported;quick_selection=nil
+    live_select_suppressed=true;local ok,why=handle.set('lut',panel.group);live_select_suppressed=false;assert(ok,why)
+    preview_document=loaded;preview_revision=0;editor_pending=nil
+    if palette_editor then palette_editor.sync()end
+    return message('Editor populated from '..loaded.source..'. Edits affect this LUT only.')
+end
+local function apply_editor_target(kind,all)
+    assert(loaded,'Load current colors or send an imported LUT to the editor first')
+    if all then assert(handle.set('scope',kind=='armor'and 2 or kind=='helmet'and 3 or 4));return apply(loaded,kind)end
+    local p=import_state().raw.basic[kind];assert(p and p.group,'Selected LUT unavailable')
+    live_select_suppressed=true;local ok,why=handle.set('lut',p.group);live_select_suppressed=false;assert(ok,why);assert(handle.set('scope',1))
+    editor_target={kind=kind,group=p.group,object=groups[p.group].object};return apply(loaded,kind)
+end
+local function apply_import_to(kind)
+    local panel=import_state().raw.basic[kind]
+    assert(panel and panel.group,'Select a '..kind..' LUT first');assert(imported,'Import a LUT file first')
+    local group=groups[panel.group]
+    live_select_suppressed=true;local ok,why=handle.set('lut',panel.group);live_select_suppressed=false;assert(ok,why);assert(handle.set('scope',1))
+    local result=apply(imported,kind)
+    for _,b in ipairs(group.bindings)do if b[kind]and b.document then
+        basic_documents[kind..':'..tostring(b.original)]=m.basic_state.clone(b.document,'Applied '..kind..' LUT')
+    end end
+    if import_view then import_view.selected=nil end
+    return result
+end
 local function copy_basic_palette(destination,source_kind)
     assert(stop_identification(),'Highlight restoration pending')
     local panels=import_state().raw.basic;local target,source=panels[destination],panels[source_kind]
@@ -429,8 +507,7 @@ local function copy_basic_palette(destination,source_kind)
     local d,s=target.document,source.document;assert(d.width==s.width,'Palette columns differ')
     loaded=d;basic_selected={kind=destination,key=target.key,group=target.group};basic_imported=imported
     if palette_editor then palette_editor.sync()end
-    local rows=math.min(d.height,s.height)
-    ffi.copy(d.data,s.data,rows*d.width*16);d.revision=(d.revision or 0)+1
+    local rows=m.basic_state.copy(d,s)
     preview_document=d;preview_revision=d.revision-1
     if palette_editor then palette_editor.sync()end
     return message('Copied '..rows..' rows from '..source_kind..' to '..destination..'. Live colors update automatically.')
@@ -519,6 +596,127 @@ local function resume_setup()
     if not ok then resume_done=true;resume_job=nil;message('Saved setup could not resume: '..tostring(why))
     elseif coroutine.status(resume_job)=='dead'then resume_done=true;resume_job=nil end
 end
+local function capture_action()
+    if not handle then return nil end
+    local snapshot={bytes=0,owned={},basic={},editor_tables={},defaults={},palettes={},selected=basic_selected,editor_target=editor_target,imported=imported,scope=handle.get('scope'),palette_index=handle.get('palette')}
+    local copies={}
+    local function document(d)
+        if not d then return nil end;if copies[d]then return copies[d]end
+        local copy=m.basic_state.clone(d,d.source);copy.revision=d.revision;copy.resource=d.resource;copy.resource_object=d.resource_object
+        if d.original then copy.original=ffi.new('float[?]',d.width*d.height*4);ffi.copy(copy.original,d.original,d.width*d.height*16)end
+        copies[d]=copy;snapshot.bytes=snapshot.bytes+d.width*d.height*16;return copy
+    end
+    snapshot.loaded=document(loaded)
+    for key,d in pairs(basic_documents)do snapshot.basic[key]=document(d)end
+    for key,d in pairs(editor_tables)do snapshot.editor_tables[key]=document(d)end
+    local signature={tostring(imported),loaded and ffi.string(loaded.data,loaded.width*loaded.height*16)or '',loaded and loaded.source or ''}
+    for _,b in ipairs(owned)do
+        snapshot.owned[#snapshot.owned+1]={binding=b,key=material_key(b),current=b.current,texture=b.texture,document=document(b.document)}
+        signature[#signature+1]=material_key(b)..':'..tostring(b.current)
+    end
+    for k,v in pairs(defaults)do snapshot.defaults[k]=v end
+    for i,v in ipairs(palettes)do snapshot.palettes[i]=v end
+    snapshot.signature=table.concat(signature,'|');return snapshot
+end
+local function restore_action(snapshot,expected)
+    -- History frames stay immutable when their documents return to the editor.
+    local saved=snapshot;snapshot={};for k,v in pairs(saved)do snapshot[k]=v end
+    local copies={};local function clone(d)
+        if not d then return nil end;if copies[d]then return copies[d]end
+        local copy=m.basic_state.clone(d,d.source);copy.revision=d.revision;copy.resource=d.resource;copy.resource_object=d.resource_object
+        if d.original then copy.original=ffi.new('float[?]',d.width*d.height*4);ffi.copy(copy.original,d.original,d.width*d.height*16)end
+        copies[d]=copy;return copy
+    end
+    snapshot.loaded=clone(saved.loaded);snapshot.basic={};snapshot.editor_tables={};snapshot.defaults={};snapshot.palettes={};snapshot.owned={}
+    for k,d in pairs(saved.basic)do snapshot.basic[k]=clone(d)end
+    for k,d in pairs(saved.editor_tables)do snapshot.editor_tables[k]=clone(d)end
+    for k,v in pairs(saved.defaults)do snapshot.defaults[k]=v end
+    for k,v in pairs(saved.palettes)do snapshot.palettes[k]=v end
+    for i,e in ipairs(saved.owned)do local copy={};for k,v in pairs(e)do copy[k]=v end;copy.document=clone(e.document);snapshot.owned[i]=copy end
+    assert(stop_identification(),'Highlight restoration pending')
+    local desired,expected_bindings={},{}
+    for _,entry in ipairs(snapshot.owned)do desired[entry.key]=entry end
+    for _,entry in ipairs(expected.owned)do expected_bindings[entry.key]=entry end
+    local plans={}
+    for _,b in ipairs(owned)do
+        local key=material_key(b);local e=expected_bindings[key]
+        assert(e and present(b)and binding(b)==e.current,'Gear bindings changed; cannot safely undo this action')
+        local d=desired[key];plans[#plans+1]={binding=b,old=b.current,object=d and d.current or b.original,desired=d}
+    end
+    for key,d in pairs(desired)do if not expected_bindings[key]then
+        local b=d.binding;assert(present(b)and binding(b)==b.original,'Gear changed; cannot safely redo this action')
+        plans[#plans+1]={binding=b,old=b.original,object=d.current,desired=d}
+    end end
+    local changed={};local ok,why=pcall(function()for _,plan in ipairs(plans)do
+        changed[#changed+1]=plan;m.engine.bind(native,plan.binding.material,m.engine.LUT_SLOT,plan.object);native.commit(plan.binding.mesh);assert(binding(plan.binding)==plan.object)
+    end end)
+    if not ok then for i=#changed,1,-1 do local p=changed[i];if present(p.binding)and binding(p.binding)==p.object then pcall(function()m.engine.bind(native,p.binding.material,m.engine.LUT_SLOT,p.old);native.commit(p.binding.mesh)end)end end;error(why,0)end
+    owned={};for _,plan in ipairs(plans)do local b,d=plan.binding,plan.desired;b.current=plan.object;b.previous=nil;b.texture=d and d.texture or nil;b.document=d and d.document or nil;if d then owned[#owned+1]=b end end
+    imported=snapshot.imported;loaded=snapshot.loaded;defaults=snapshot.defaults;palettes=snapshot.palettes;editor_tables=snapshot.editor_tables
+    index_job=nil;editor_pending=nil;populate_request=nil
+    basic_state.clear();for key,d in pairs(snapshot.basic)do basic_documents[key]=d end
+    basic_selected=snapshot.selected;editor_target=snapshot.editor_target;basic_imported=imported;preview_document=loaded;preview_revision=loaded and loaded.revision or 0;quick_selection=nil
+    local labels={};for i,path in ipairs(palettes)do labels[i]=path:match('[^/\\]+$')or path end;palette_choices(#labels>0 and labels or {'Import first'})
+    select_suppressed=true;handle.set('palette',snapshot.palette_index);select_suppressed=false;handle.set('scope',snapshot.scope)
+    if palette_editor then palette_editor.undo={};palette_editor.redo={};palette_editor.sync()end
+    if import_view then import_view.selected=nil end
+    refresh(true);return true
+end
+local function refresh_outfits()
+    outfit_names=outfits.names();local choices={'Choose saved outfit...'}
+    local previews={}
+    for _,name in ipairs(outfit_names)do
+        choices[#choices+1]=name
+        local ok,preset=pcall(outfits.load,name)
+        if ok then local strips={armor={},helmet={}}
+            for _,kind in ipairs({'armor','helmet'})do local d=preset[kind][1]
+                if d then for row=1,d.height do local rgb={};local at=(row-1)*d.width*4
+                    for ch=0,2 do rgb[#rgb+1]=math.floor(math.max(0,math.min(1,d.data[at+ch]))*255+.5)end
+                    strips[kind][#strips[kind]+1]=rgb
+                end end
+            end
+            previews[#choices]=strips
+        end
+    end
+    api.mods[handle.id].controls.outfit_preset.choices=choices
+    api.mods[handle.id].controls.outfit_preset.choice_previews=previews
+end
+local function keep_outfit(name,save_kind)
+    assert(outfits,'Outfit storage unavailable');refresh(true)
+    local entries,seen={},{}
+    for _,group in ipairs(groups)do for _,b in ipairs(group.bindings)do
+        local kind=b.helmet and 'helmet'or 'armor';local key=kind..':'..b.save_key
+        if not seen[key]and (not save_kind or save_kind=='both'or save_kind==kind)then
+            local source=b.document or (original_luts and original_luts.get(b.original))
+            assert(source,'Current '..kind..' LUT unavailable; load current gear before saving')
+            entries[#entries+1]={kind=kind,key=b.save_key,document=source};seen[key]=true
+        end
+    end end
+    outfits.save(name,entries);selected_outfit=outfits.load(name);refresh_outfits()
+    for index,label in ipairs(outfit_names)do if label==name then assert(handle.set('outfit_preset',index+1));break end end
+    if frontend.menu then frontend.menu.outfit_dialog=nil;frontend.menu.text_edit=nil end
+    return message('Saved '..name..' with '..(save_kind=='armor'and 'Armor only'or save_kind=='helmet'and 'Helmet only'or 'Armor and Helmet')..' LUTs in The Armory.')
+end
+local function apply_outfit(kind)
+    assert(selected_outfit,'Choose an outfit preset first');assert(stop_identification(),'Highlight restoration pending');refresh(true)
+    local exact={};local fallback
+    for _,entry in ipairs(selected_outfit.entries)do if entry.kind==kind then exact[entry.key]=entry.document;fallback=fallback or entry.document end end
+    assert(fallback,'This preset has no '..kind..' palette')
+    local batches={}
+    for _,group in ipairs(groups)do for _,b in ipairs(group.bindings)do if b[kind]then
+        assert(present(b)and binding(b)==b.current,'Gear changed; load current gear again')
+        local d=exact[b.save_key]or fallback;batches[d]=batches[d]or {};table.insert(batches[d],b)
+    end end end
+    resume_done=true;resume_job=nil
+    local count=0;for d,targets in pairs(batches)do count=count+apply_bindings(d,targets)
+        for _,b in ipairs(targets)do basic_documents[kind..':'..tostring(b.original)]=m.basic_state.clone(d,d.source)end
+    end
+    return message('Applied '..selected_outfit.name..' '..kind..' palettes to '..count..' bindings.')
+end
+local function select_outfit(index)
+    if index==1 then selected_outfit=nil;return end
+    selected_outfit=outfits.load(assert(outfit_names[index-1]))
+end
 local function register(current)
     if api==current and handle then return end
     if handle then handle.unregister()end
@@ -541,30 +739,46 @@ local function register(current)
             end
         end},
         {id='basic_preset_name',type='input',label='Preset name',default='my-palette'},
-        {id='basic_target',type='choice',label='Worn gear',choices={'Armor','Helmet'},default=1},
-        {id='basic_armor_lut',type='choice',label='Armor LUT #',choices={'LUT 1'},default=1},
-        {id='basic_helmet_lut',type='choice',label='Helmet LUT #',choices={'LUT 1'},default=1},
+        {id='apply_matching',type='button',label='Apply Matching LUTs',on_activate=function()return action(function()return m.apply_matching()end)end},
+        {id='basic_advanced',type='button',label='Advanced Mode',on_activate=function()return frontend.open_advanced()end},
+        {id='open_editor',type='button',label='Open LUT Editor',on_activate=function()return api.focus_page(handle.id,'colors')end},
+        {id='outfit_name',type='input',label='Preset name',default='my-outfit'},
+        {id='outfit_preset',type='choice',label='Saved outfit',choices={'Choose saved outfit...'},default=1,on_change=select_outfit},
+        {id='outfit_apply_armor',type='button',label='Apply Outfit Armor',on_activate=function()return action(function()return apply_outfit('armor')end)end},
+        {id='outfit_apply_helmet',type='button',label='Apply Outfit Helmet',on_activate=function()return action(function()return apply_outfit('helmet')end)end},
+        {id='global_undo',type='button',label='Undo Last Action',on_activate=function()assert(history,'Action history unavailable');history.undo_action();return message('Last action undone; palettes and gear refreshed.')end},
+        {id='global_redo',type='button',label='Redo Last Action',on_activate=function()assert(history,'Action history unavailable');history.redo_action();return message('Last action redone; palettes and gear refreshed.')end},
+        {id='basic_armor_lut',type='choice',label='Armor LUT #',choices={'LUT 1'},default=1,on_change=function()
+            if frontend.menu and api.mods[handle.id].pages[frontend.menu.page].id=='colors'then editor_pending={kind='armor',began=os.time()};action(function()return load_editor_target('armor')end)end
+        end},
+        {id='basic_helmet_lut',type='choice',label='Helmet LUT #',choices={'LUT 1'},default=1,on_change=function()
+            if frontend.menu and api.mods[handle.id].pages[frontend.menu.page].id=='colors'then editor_pending={kind='helmet',began=os.time()};action(function()return load_editor_target('helmet')end)end
+        end},
+        {id='editor_load_armor',type='button',label='Populate from Current Armor',on_activate=function()return action(function()editor_pending={kind='armor',began=os.time()};return load_editor_target('armor')end)end},
+        {id='editor_load_helmet',type='button',label='Populate from Current Helmet',on_activate=function()return action(function()editor_pending={kind='helmet',began=os.time()};return load_editor_target('helmet')end)end},
+        {id='editor_apply_armor',type='button',label='Apply to Selected Armor LUT',on_activate=function()return action(function()return apply_editor_target('armor')end)end},
+        {id='editor_apply_helmet',type='button',label='Apply to Selected Helmet LUT',on_activate=function()return action(function()return apply_editor_target('helmet')end)end},
+        {id='editor_all_armor',type='button',label='Apply to All Armor LUTs',on_activate=function()return action(function()return apply_editor_target('armor',true)end)end},
+        {id='editor_all_both',type='button',label='Apply to All Armor & Helmet LUTs',on_activate=function()return action(function()return apply_editor_target(nil,true)end)end},
+        {id='editor_all_helmet',type='button',label='Apply to All Helmet LUTs',on_activate=function()return action(function()return apply_editor_target('helmet',true)end)end},
+        {id='apply_import_armor',type='button',label='Apply Imported LUT to Selected Armor LUT',on_activate=function()return action(function()
+            return apply_import_to('armor')
+        end)end},
+        {id='apply_import_helmet',type='button',label='Apply Imported LUT to Selected Helmet LUT',on_activate=function()return action(function()
+            return apply_import_to('helmet')
+        end)end},
         {id='basic_copy_helmet',type='button',label='Copy Helmet',on_activate=function()return action(function()return copy_basic_palette('armor','helmet')end)end},
         {id='basic_copy_helmet_all',type='button',label='Copy Helmet to All',on_activate=function()return action(copy_helmet_all)end},
         {id='basic_copy_armor',type='button',label='Copy Armor',on_activate=function()return action(function()return copy_basic_palette('helmet','armor')end)end},
         {id='identify_region',type='button',label='Identify Region',on_activate=function()return action(identify_region)end},
         {id='stop_identify',type='button',label='Stop Highlight',on_activate=function()return action(function()assert(stop_identification(),'Highlight restoration pending');return message('Highlight stopped; previous bindings restored.')end)end},
-        {id='basic_apply_armor',type='button',label='Apply Armor',on_activate=function()return action(function()
-            local p=import_state().raw.basic.armor;assert(p and p.document,'Armor colors are not ready')
-            basic_selected={kind='armor',key=p.key,group=p.group};loaded=p.document
-            return apply_checked(loaded)
-        end)end},
-        {id='basic_apply_helmet',type='button',label='Apply Helmet',on_activate=function()return action(function()
-            local p=import_state().raw.basic.helmet;assert(p and p.document,'Helmet colors are not ready')
-            basic_selected={kind='helmet',key=p.key,group=p.group};loaded=p.document
-            return apply_checked(loaded)
-        end)end},
         {id='populate_worn',type='button',label='Load Current Colors',on_activate=function()return action(function()
             if original_luts and original_luts.retry then original_luts.retry()end
             populate_request=os.time();if not populate_worn()then return message('Reading worn gear colors; editor will populate when ready.')end
             return true
         end)end},
         {id='basic_preset',type='choice',label='Saved palettes',choices={'New preset...'},default=1,on_change=function(index)
+            select_outfit(1)
             if index==1 then assert(handle.set('basic_preset_name',''));return end
             action(function()
                 local name=assert(basic_names[index-1]);local f=assert(io.open(paths.presets..'/palette-'..name..'.dds','rb'));local bytes=f:read(m.dds.MAX_BYTES+1);f:close()
@@ -596,8 +810,11 @@ local function register(current)
             if palette_editor then palette_editor.sync()end
             return message('Editor populated from the selected applied Live LUT; game bindings unchanged.')
         end)end},
-        {id='save_palette',type='button',label='Save LUT to Palette',on_activate=function()return action(save_palette)end},
-        {id='apply_checked',type='button',label='Apply LUT',on_activate=function()return action(apply_checked)end},
+        {id='save_palette',type='button',label='Send to LUT Editor',on_activate=function()return action(save_palette)end},
+        {id='apply_checked',type='button',label='Apply to All Checked Targets',on_activate=function()return action(apply_checked)end},
+        {id='apply_file_armor',type='button',label='Apply to Armor',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',2));return apply(imported,'armor')end)end},
+        {id='apply_file_helmet',type='button',label='Apply to Helmet',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',3));return apply(imported,'helmet')end)end},
+        {id='apply_file_both',type='button',label='Apply to Both',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',4));return apply(imported)end)end},
         {id='apply_editor',type='button',label='Apply edited palette',on_activate=function()return action(function()return apply_checked(assert(loaded,'Save a LUT to Palette first'))end)end},
         {id='preserve_emissives',type='toggle',label='Preserve Original Emissives',default=false,description='Off by default. Uses matching game-original resource snapshots, preserving zero emissive values. Missing snapshots are not treated as zero.'},
         {id='palette',type='choice',presentation='combined',label='Imported palette',choices={'Import first'},default=1,on_change=function(index)
@@ -626,10 +843,15 @@ local function register(current)
         {id='apply_armor',type='button',label='Apply Armor',on_activate=function()return action(function()assert(handle.set('scope',2));return apply()end)end},
         {id='apply_helmet',type='button',label='Apply Helmet',on_activate=function()return action(function()assert(handle.set('scope',3));return apply()end)end},
         {id='remove_lut',type='button',label='Remove LUT',on_activate=function()return action(function()remove_lut();loaded=nil;imported=nil;palettes={};if palette_editor then palette_editor.sync()end;return message('LUT removed; original bindings restored.')end)end},
-        {id='save_setup',type='button',label='Save applied setup',on_activate=function()return action(save_setup)end},
-        {id='restore',type='button',label='Restore Original',on_activate=function()return action(function()
+        {id='save_setup',type='button',label='Save applied setup',on_activate=function()
+            if not frontend.menu or not outfits then return action(save_setup)end
+            assert(stop_identification(),'Highlight restoration pending')
+            frontend.menu.outfit_dialog={phase='scope',mod=api.mods[handle.id],control=api.mods[handle.id].controls.outfit_name,on_save=keep_outfit}
+            return message('Keep this Armor and Helmet setup as a named preset?')
+        end},
+        {id='restore',type='button',label='Restore Arrowhead LUT (Original)',on_activate=function()return action(function()
             local selected=basic_selected
-            remove_lut();basic_documents={};basic_missing_reported={};quick_selection=nil;loaded=nil
+            remove_lut();basic_state.clear();basic_missing_reported={};quick_selection=nil;loaded=nil
             refresh(true)
             local panels=import_state().raw.basic
             if frontend.basic_mode and selected and panels[selected.kind]then
@@ -659,11 +881,31 @@ local function register(current)
     if palette_editor then
         local manual=table.remove(pages)
         for _,page in ipairs(palette_editor.pages())do
+            if page.id=='save'then
+                -- Keep editor actions registered for the custom LUT Editor layout.
+                for _,control in ipairs(page.controls)do pages[1].controls[#pages[1].controls+1]=control end
+                page.name='Configuration';page.controls={}
+                if preferences and preferences.mount then
+                    preferences.mount(current)
+                    local owner=current.mods.epic_lut_preferences
+                    if owner then
+                        for _,id in ipairs({'basic_key','menu_key','ui_scale','font_size','font_bold','window_width','window_height','reset_key'})do
+                            local original=owner.controls[id]
+                            if original then local linked={};for k,v in pairs(original)do linked[k]=v end
+                                linked.id='configuration_'..id;linked.source_mod_id=owner.id;linked.source_control_id=id
+                                page.controls[#page.controls+1]=linked
+                            end
+                        end
+                    end
+                end
+            end
+            if page.id=='save'then page.controls[#page.controls+1]={id='resource_format',type='choice',label='LUT resource IDs',choices={'Hexadecimal','Decimal'},default=1,description='Display exact resource IDs when matched to game snapshots.',on_change=function()if handle then import_state();if frontend.menu then frontend.menu.redraw_revision=(frontend.menu.redraw_revision or 0)+1 end end end}end
             if page.id=='save'then page.controls[#page.controls+1]={type='section',id='manual_fallback',label='Manual file fallback',collapsible=true,collapsed=true,children=manual.controls}end
             pages[#pages+1]=page
         end
     end
     if m.basic_view then table.insert(pages,1,{id='basic',name='Basic',require_confirmation=false,controls={}})end
+    if m.armory_view then table.insert(pages,#pages,{id='armory',name='The Armory',require_confirmation=false,controls={}})end
     if updates then for _,page in ipairs(pages)do if page.id=='save'then
         page.controls[#page.controls+1]={type='text',id='update_status',label=updates.status}
         page.controls[#page.controls+1]={type='button',id='check_updates',label='Check for Updates',on_activate=function()return action(function()return message(updates.check())end)end}
@@ -675,6 +917,11 @@ local function register(current)
     api.mods[handle.id].minimum_width=1420;api.mods[handle.id].minimum_height=960
     frontend.default_mod_id=handle.id
     if palette_editor then palette_editor.attach(api,handle)end
+    if m.armory_view then
+        local armory=m.armory_view.new(import_state,palette_editor and palette_editor.preview)
+        for _,page in ipairs(api.mods[handle.id].pages)do if page.id=='armory'then page.render_layout=armory.draw;page.on_wheel=armory.wheel end end
+    end
+    if m.outfit_presets then refresh_outfits()end
     local direct_page
     for _,page in ipairs(api.mods[handle.id].pages)do if page.id=='direct'then direct_page=page end end
     if m.basic_view then
@@ -736,6 +983,11 @@ return {name='Epic LUT',author='Goose',on_enable=function(context)
     local ok,why=memory.verify_build({exe_sha256='F5FEE03DCFDB2E553A4752C283590950AC13316B376D8196AA556FF0400D5F06',game_sha256='2E2C3B7C2500646DADD5F2B4C6E0504DBB7E7896139F64CDDC0D1813C718F51E'});assert(ok,why)
     game=memory.address(assert(memory.module('game.dll')))
     native=assert(m.engine.open(memory,game,memory.address(assert(memory.module()))))
+    initialize_editor_state()
+    m.apply_matching=apply_matching
+    if m.outfit_presets then outfits=m.outfit_presets.new(m,paths.presets)end
+    m.format_resource_id=resource_id
+    if m.action_history then history=m.action_history.new(capture_action,restore_action)end
     preferences=m.preferences.new(paths.storage);frontend=m.frontend.new(m,ctx);frontend.preferences=preferences
     if m.update_check then updates=m.update_check.new(m.windows,paths.cache,m.version or 'R4-rc1')end
     if m.direct_setup then setup=m.direct_setup.new(m,paths)end
@@ -761,24 +1013,7 @@ return {name='Epic LUT',author='Goose',on_enable=function(context)
     end)end
     ctx.on_cleanup(close);message('Direct DDS editor ready; no archive discovery or Python')
 end,on_update=function(dt_context,dt)
-    if identification then
-        local job=identification;local delta=math.max(0,tonumber(dt)or 0)
-        job.remaining=job.remaining-delta;job.elapsed=job.elapsed+delta
-        if job.remaining<=0 or (frontend.menu and not frontend.menu.visible)then pcall(stop_identification)
-        else
-            local on=math.floor(job.elapsed*4)%2==0
-            if on~=job.on then
-                local ok=pcall(function()for _,item in ipairs(job.items)do
-                    local b=item.binding;local expected=job.on and item.highlight or item.object
-                    if present(b)and binding(b)==expected then
-                        local object=on and item.highlight or item.object
-                        m.engine.bind(native,b.material,m.engine.LUT_SLOT,object);native.commit(b.mesh);assert(binding(b)==object);b.current=object
-                    end
-                end end)
-                job.on=on;if not ok then pcall(stop_identification)end
-            end
-        end
-    end
+    pcall(region_indicator.tick,dt,not frontend.menu or frontend.menu.visible)
     local myc=not not rawget(_G,'MatchYourColorsInstalled')
     if frontend and frontend.menu then frontend.menu.warning=myc and 'Match Your Colors detected: turn matching Off before loading or editing gear LUTs. It can prevent original colors resolving.'or nil end
     if myc and not myc_warned then myc_warned=true;message('Warning: Match Your Colors detected. Turn matching Off before loading or editing gear LUTs.')end
@@ -794,7 +1029,16 @@ end,on_update=function(dt_context,dt)
             local now=memory.time and memory.time()or os.clock()
             if now>=next_refresh then next_refresh=now+.25;refresh_needed=not pcall(refresh,true)end
         end
-        poll_job()
+        local import_ok,import_error=pcall(poll_job)
+        if not import_ok then
+            if pending then pcall(pending.worker.stop);pcall(pending.worker.close);pending=nil end
+            message('Import stopped safely; editor remains available: '..tostring(import_error))
+        end
+        if editor_pending and os.time()>=(editor_pending.next or 0)then
+            local job=editor_pending;job.next=os.time()+1
+            local ok,why=pcall(load_editor_target,job.kind)
+            if not ok or (editor_pending and os.time()-job.began>130)then editor_pending=nil;message('Current '..job.kind..' colors unavailable: '..tostring(why or 'snapshot timeout'))end
+        end
         if populate_request and os.time()>=populate_next then
             populate_next=os.time()+1
             local ok,why=pcall(populate_worn)
@@ -809,7 +1053,11 @@ end,on_update=function(dt_context,dt)
             preview_document=loaded;preview_revision=loaded and (loaded.revision or 0)
         elseif loaded and (loaded.revision or 0)~=preview_revision then
             preview_revision=loaded.revision or 0
-            if (frontend.basic_mode and basic_selected)or(not frontend.basic_mode and (handle.get('target_armor')or handle.get('target_helmet')))then action(function()return apply_checked(loaded)end)end
+            if not frontend.basic_mode and editor_target then action(function()
+                assert(groups[editor_target.group]and groups[editor_target.group].object==editor_target.object,'Worn gear changed; populate the editor again before editing')
+                live_select_suppressed=true;local ok,why=handle.set('lut',editor_target.group);live_select_suppressed=false;assert(ok,why);assert(handle.set('scope',1));return apply(loaded,editor_target.kind)
+            end)
+            elseif (frontend.basic_mode and basic_selected)or(not frontend.basic_mode and (handle.get('target_armor')or handle.get('target_helmet')))then action(function()return apply_checked(loaded)end)end
         end
         if index_job then
             local ok,why=coroutine.resume(index_job)

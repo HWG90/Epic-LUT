@@ -12,32 +12,32 @@ for _,id in ipairs({'target_armor','target_helmet'})do controls[#controls+1]={id
 controls[#controls+1]={id='ui_scale',type='slider',label='UI scale (%)',min=70,max=130,step=5,default=100}
 controls[#controls+1]={id='quick_color',type='color',label='Quick Scratch',default='#FFFFFF'}
 controls[#controls+1]={id='preserve_emissives',type='toggle',label='Preserve Original Emissives',default=false}
-for _,id in ipairs({'refresh','browse','cancel_import','retry_import','save_palette','apply_checked','restore','restore_imported','save_setup','undo','redo'})do controls[#controls+1]={id=id,type='button',label=id,on_activate=function()return true end}end
+for _,id in ipairs({'apply_matching','global_undo','global_redo','apply_file_armor','apply_file_helmet','apply_file_both','apply_import_armor','apply_import_helmet','refresh','browse','cancel_import','retry_import','save_palette','apply_checked','restore','restore_imported','save_setup','undo','redo'})do controls[#controls+1]={id=id,type='button',label=id,on_activate=function()return true end}end
 api.register({id='import_test',name='Epic LUT',pages={{id='direct',name='Import / Apply',require_confirmation=false,controls=controls}}})
 api.mods.import_test.tabs_top=true;local page=api.mods.import_test.pages[1];page.render_layout=view.draw;page.on_wheel=view.wheel
 local menu=menu_factory.new(api,function(t,size)return #t*size*.5 end);menu.visible=true;menu.window_width=1800;menu.window_height=1000;menu.compact_fonts=true
 local first=menu.compose(1920,1080);local texts={}
 for _,c in ipairs(first)do if c.text then texts[c.full_text or c.text]=c end end
 assert(texts['Quick Scratch'] and texts['Quick Scratch'].x>texts['Armor LUT 1'].x,'Quick Scratch is not beside palette tables')
-assert(texts['Save LUT to Palette']and texts['Apply LUT']and texts['Restore Imported LUT (editor)'],'Import layout did not complete')
+assert(texts['Send to LUT Editor']and texts['Apply Matching LUTs']and not texts['Apply to All Armor & Helmet LUTs']and texts['Restore Imported LUT (editor)'],'Import layout did not complete')
 assert(texts.Armor and texts.Helmet and texts['Armor LUT 1']and texts['Helmet LUT 2'],'Target color previews were not grouped')
 assert(texts['LUT 1'].x<texts['Choose file - DDS / ZIP / RAR...'].x,'LUT selectors are not on the left')
 assert(not texts['Refresh live LUTs'],'Advanced refresh visible by default')
 view.advanced=true
 local advanced=false
 for _,c in ipairs(menu.compose(1920,1080))do if c.full_text=='Refresh live LUTs'then advanced=true end end
-assert(advanced,'Expanded Advanced section missing refresh')
+assert(not advanced,'Obsolete manual refresh section remains visible')
 local advanced_complete=false
 for _,c in ipairs(menu.compose(1920,1080))do
     if c.text then assert(not c.text:find('nil value',1,true),'Advanced layout errored')end
-    if c.full_text=='Save LUT to Palette'then advanced_complete=true end
+    if c.full_text=='Send to LUT Editor'then advanced_complete=true end
 end
 assert(advanced_complete,'Advanced expansion stopped rendering the panel')
 view.advanced=false
 state.palette_count=1
 local single=menu.compose(1920,1080)
 local selectors=0;for _,c in ipairs(single)do if c.full_text=='LUT 1'then selectors=selectors+1 end end
-assert(selectors==2,'Single imported LUT should show only Armor and Helmet selectors')
+assert(selectors==3,'Single imported LUT should show two gear selectors and one imported color strip')
 state.palette_count=2
 -- Floating scratch opens independently, displays ten empty slots and closes cleanly.
 view.scratch_open=true
@@ -60,7 +60,7 @@ for _,c in ipairs(dedup)do
     if c.text=='Row 1'then primary_rows=primary_rows+1 end
     if c.full_text and c.full_text:find('shared preview',1,true)then linked=true end
 end
-assert(primary_rows==3 and not linked,'Armor/Helmet preview suppressed when identical to import')
+assert(primary_rows==2 and not linked,'Armor/Helmet previews should remain visible without the imported grid')
 -- Real swatch click routes exact RGB cell to the simple color picker.
 local swatch
 for _,c in ipairs(dedup)do if c.type=='rect'and c.w==22*menu.window_bounds.scale and c.h==16*menu.window_bounds.scale then swatch=c;break end end

@@ -40,6 +40,25 @@ function F.new(m,ctx,deps)
     self.menu=m.ui_menu.new(self.api,self.view.measure)
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
     self.menu.compact_fonts=true
+    function self.open_advanced()
+        self.basic_mode=false;self.menu.basic_only=false;self.menu.visible=true;self.opened_once=true
+        if self.full_size then self.menu.window_width,self.menu.window_height=unpack(self.full_size)end
+        if self.default_mod_id then
+            if not self.api.focus_page(self.default_mod_id,'colors')then self.api.focus_page(self.default_mod_id,'direct')end
+        end
+        self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1
+        return true
+    end
+    function self.open_basic()
+        if not self.basic_mode then self.full_size={self.menu.window_width,self.menu.window_height}end
+        self.basic_mode=true;self.menu.basic_only=true;self.menu.visible=true;self.opened_once=true
+        self.menu.window_width=1100;self.menu.window_height=780
+        self.api.focus_page(self.default_mod_id,'basic')
+        self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1
+        return true
+    end
+    self.menu.open_basic=self.open_basic
+    self.menu.open_advanced=self.open_advanced
     self.menu.font_size=12;self.menu.font_bold=true
     self.api.focus_page=function(id,page_id)
         for index,mod in ipairs(self.api.list())do if mod.id==id then

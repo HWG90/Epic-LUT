@@ -8,7 +8,7 @@ local pages=editor.pages()
 table.insert(pages,1,{id='import',name='Import / Apply',require_confirmation=false,controls={
     {id='target_helmet',type='toggle',label='Helmet',default=true},
     {id='target_armor',type='toggle',label='Armor',default=true},
-    {id='save_palette',type='button',label='Save LUT to Palette',on_activate=function()end},
+    {id='save_palette',type='button',label='Send to LUT Editor',on_activate=function()end},
     {id='apply_checked',type='button',label='Apply LUT',on_activate=function()end},
     {id='apply_editor',type='button',label='Apply edited palette',on_activate=function()end},
     {id='browse',type='button',label='Choose file',on_activate=function()end},
@@ -108,6 +108,9 @@ for _,c in ipairs(rendered)do if c.full_text=='0.5'and c.x>menu.window_bounds.x+
 assert(numeric,'Typed float box was not rendered');tap(numeric.x+10,numeric.y+2)
 assert(menu.text_edit and menu.text_edit.control.type=='slider','Float value did not open typed editing')
 local typed_row,typed_column=h.get('edit_row'),h.get('edit_column')
+menu.text_edit.text='300';menu.key(13)
+assert(d.data[((typed_row-1)*23+typed_column-1)*4]==300,'Typed shader value was limited by slider bounds')
+assert(h.activate('undo'));tap(numeric.x+10,numeric.y+2)
 menu.text_edit.text='0.125';menu.key(13)
 assert(d.data[((typed_row-1)*23+typed_column-1)*4]==.125,'Typed float affected the wrong cell');assert(h.activate('undo'))
 local slider_x,slider_y=numeric.x-180,numeric.y+2

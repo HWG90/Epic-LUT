@@ -6,6 +6,7 @@ S.columns={
  'Roughness / rim','Unknown 12','Curvature gradient','Emissive strength','Lighting tint override','Unknown 16',
  'Camo color 1','Camo color 2','Camo color 3','Camo color 4','Mask 5 inversion','Camo controls','Bump scaling / matte-gloss'}
 S.color_columns={[1]=true,[3]=true,[6]=true,[7]=true,[13]=true,[15]=true,[17]=true,[18]=true,[19]=true,[20]=true}
+S.short_columns={'Base','Bump','D1','M1','M2','In','Out','Metal','?9','Gloss','Rim','?12','Curv','Glow','Tint','?16','C1','C2','C3','C4','Inv','Camo','Scale'}
 function S.columns_for(width)
     if width==23 then return S.columns end
     if width==3 then return {'Pattern color','Pattern material / opacity','Unconfirmed pattern effects'}end
@@ -66,6 +67,7 @@ function S.range(column,channel,value)
     if column==11 and channel==1 then lo,hi,step=0,10,.001 end
     if column==14 and channel==1 then lo,hi,step=0,.06,.0001 end
     if column==22 and channel==4 then lo,hi,step=-1,5,1 end
+    if column==22 and channel==1 then lo,hi,step=0,512,.01 end
     lo=math.max(-1e10,math.min(lo,value));hi=math.min(1e10,math.max(hi,value))
     if hi<=lo then hi=lo+1 end
     return lo,hi,step
