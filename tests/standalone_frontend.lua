@@ -45,6 +45,16 @@ assert(f.menu.visible and f.menu.page==1 and not f.basic_mode,'F10 did not switc
 assert(not f.menu.basic_only,'Full menu retained Basic navigation')
 for _,c in ipairs(f.menu.compose(1920,1080))do assert(c.full_text~='Basic','Basic tab leaked into F10 menu')end
 keys[121]=false;f.tick(.1)
+local ready=false;local released=0;local prior_release=capture.release
+package.loaded['epic.player_preview.v1']={before_editor_close=function()return ready end}
+capture.release=function()assert(ready,'Game input restored before preview cleanup');released=released+1;return prior_release()end
+keys[121]=true;f.tick(.1)
+assert(f.menu.visible and capture.active and released==0 and f.preview_close_pending,'Pending preview cleanup did not hold game input')
+keys[121]=false;f.tick(.1);assert(released==0)
+ready=true;f.tick(.1)
+assert(not f.menu.visible and not capture.active and released==1 and not f.preview_close_pending)
+capture.release=prior_release;package.loaded['epic.player_preview.v1']=nil
+assert(f.preferences.preview_key()==117);assert(f.preferences.handle.set('preview_key',45));assert(f.preferences.preview_key()==45)
 pending=true;assert(not f.close(),'Cleanup discarded a pending cursor restoration')
 pending=false;assert(f.close());assert(package.loaded['dbf.epic_lut.frontend.v1']==nil)
 _G.DBFMCM=prior

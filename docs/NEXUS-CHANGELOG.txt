@@ -1,0 +1,19 @@
+# Epic LUT R5 - Stylish Freedom
+
+Your armor. Your helmet. Your colors.
+
+- Live Player Preview with dock/pop-out, pan, rotation and zoom.
+- Separate Basic and Advanced modes with current worn Armor/Helmet colors.
+- Single-table imports with explicit source, destination LUT and texture ID.
+- ZIP/RAR variant folders, numbered DDS tables and resource-ID matching.
+- Named Armory presets: Armor Only, Helmet Only or Both. Preview all LUTs, mix halves, rename and delete.
+- Scoped swatch painting, action undo/redo, double-click color editing and middle-click copy.
+- Hover guidance and Configuration shortcuts with readable key names.
+
+## Install
+
+Choose **Epic-LUT-R5-BSL.zip** for Arsenal/HD2MM + BSL v15+, or **Epic-LUT-R5-LLL.zip** for Live Lua Loader / compatible MDL. Enable one Epic LUT entrypoint. Disable the older epic_player_preview test addon: R5 includes it.
+
+F9 opens Basic; F10 opens Advanced; F6 toggles Player Preview. Rebind in Configuration. Turn Match Your Colors matching Off before editing gear. No Python or MCM installation required; RAR needs 7-Zip.
+
+**Extremely alpha / work in progress.** Player Preview is experimental; close it before switching game screens. Report bugs on [GitHub](https://github.com/HWG90/Epic-LUT/issues).

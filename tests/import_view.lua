@@ -20,6 +20,7 @@ local first=menu.compose(1920,1080);local texts={}
 for _,c in ipairs(first)do if c.text then texts[c.full_text or c.text]=c end end
 assert(texts['Quick Scratch'] and texts['Quick Scratch'].x>texts['Armor LUT 1'].x,'Quick Scratch is not beside palette tables')
 assert(texts['Send to LUT Editor']and texts['Apply Matching LUTs']and not texts['Apply to All Armor & Helmet LUTs']and texts['Restore Imported LUT (editor)'],'Import layout did not complete')
+assert(texts['Apply LUT 1 to All Armor LUTs']and texts['Apply LUT 1 to All Helmet LUTs'],'Multi-LUT selected-source broadcast controls missing')
 assert(texts.Armor and texts.Helmet and texts['Armor LUT 1']and texts['Helmet LUT 2'],'Target color previews were not grouped')
 assert(texts['LUT 1'].x<texts['Choose file - DDS / ZIP / RAR...'].x,'LUT selectors are not on the left')
 assert(not texts['Refresh live LUTs'],'Advanced refresh visible by default')
@@ -78,6 +79,8 @@ view.scratch={12,34,56};state.time=state.time+.5
 menu.tick({down=function(k)return k==1 end,mouse=function()return swatch.x+2,swatch.y+2 end,wheel=function()return 0 end})
 menu.tick({down=function()return false end,mouse=function()return swatch.x+2,swatch.y+2 end,wheel=function()return 0 end})
 assert(view.scratch[1]==12,'Palette selection replaced scratch color')
+assert(menu.color_picker and menu.color_picker.control.id=='quick_color','Double-click did not open the swatch color picker')
+menu.color_picker=nil;menu.compose(1920,1080)
 menu.tick({down=function(k)return k==2 end,mouse=function()return swatch.x+2,swatch.y+2 end,wheel=function()return 0 end})
 menu.tick({down=function()return false end,mouse=function()return swatch.x+2,swatch.y+2 end,wheel=function()return 0 end})
 assert(api.mods.import_test.handle.get('quick_color')=='#0C2238','Right click did not paint scratch color')
@@ -94,3 +97,5 @@ for _,c in ipairs(second)do local color=string.format('#%02X%02X%02X',c.c[1],c.c
 end
 f:write('</svg>');f:close()
 print('PASS friendly import view: complete two-column UI, explained left LUT selectors, independent Armor/Helmet row previews, separated editor/apply controls and animated throbber')
+
+assert(menu_factory.key_name(45)=='Insert'and menu_factory.key_name(120)=='F9'and menu_factory.key_name(32)=='Space'and menu_factory.key_name(162)=='Left Ctrl','Readable shortcut names missing')

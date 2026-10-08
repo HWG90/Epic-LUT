@@ -69,10 +69,16 @@ local function palette_choices(labels)
     select_suppressed=true;local ok,why=handle.set('palette',1);select_suppressed=false;assert(ok,why)
 end
 local function action(fn,recover)
-    local before=history and not history.busy and not region_indicator.job and history.capture()
+    local before
+    if history and not history.busy and not region_indicator.job then
+        local ok,value=pcall(history.capture);if ok then before=value else ctx.log('Action snapshot skipped: '..tostring(value))end
+    end
     local ok,why=pcall(fn)
     if not ok then if recover then restore()end;return message(tostring(why))end
-    if before and not region_indicator.job then history.record(before,history.capture())end
+    if before and not region_indicator.job then
+        local ok,err=pcall(function()history.record(before,history.capture())end)
+        if not ok then ctx.log('Action history recording failed: '..tostring(err))end
+    end
     return why
 end
 local function refresh(silent)
@@ -166,11 +172,13 @@ local function poll_job()
     local progress=io.open(job.base..'.txt.progress','rb')
     if progress then
         local text=progress:read(513)or '';progress:close()
-        local pid,phase,beat=text:match('^(%d+)\t([a-z]+)\t(%d+)$')
+        local pid,phase,beat,percent,detail=text:match('^(%d+)\t([a-z]+)\t(%d+)\t(%d+)\t([^\r\n]*)$')
+        if not pid then pid,phase,beat,percent=text:match('^(%d+)\t([a-z]+)\t(%d+)\t(%d+)$')end
+        if not pid then pid,phase,beat=text:match('^(%d+)\t([a-z]+)\t(%d+)$')end
         if #text>512 or tonumber(pid)~=job.worker.pid or not ({starting=true,picker=true,reading=true,extracting=true})[phase]or tonumber(beat)>now+2 then
             job.worker.stop();finish_job(job);return message('Invalid picker state. Retry file picker to recover.')
         end
-        job.phase=phase;job.last_beat=tonumber(beat);job.reported=true
+        job.detail=detail;job.phase=phase;job.percent=math.max(0,math.min(100,tonumber(percent)or 0));job.last_beat=tonumber(beat);job.reported=true
     end
     if job.canceling then
         if not job.worker.running()or now-job.canceling>=5 then
@@ -198,6 +206,7 @@ local function poll_job()
             elseif metadata then metadata:close()end
             -- Validate the first file before replacing the current import selection.
             load_dds(imported[1]);palettes=imported;palette_choices(labels)
+            local info=io.open(job.base..'/import-info.txt','rb');if info then local label=info:read(1024);info:close();m.import_description=label end
             if job.menu_visible and frontend.menu then
                 frontend.menu.visible=true;frontend.menu.page=job.menu_page;frontend.menu.suspended=true
                 frontend.menu.redraw_revision=(frontend.menu.redraw_revision or 0)+1
@@ -460,8 +469,8 @@ local function import_state()
     local phase=pending and pending.phase or ''
     local labels={starting='Opening file picker...',picker='Waiting for file selection...',reading='Reading archive...',extracting='Extracting LUTs...'}
     local dirty=loaded and loaded.original and ffi.string(loaded.data,loaded.width*loaded.height*16)~=ffi.string(loaded.original,loaded.width*loaded.height*16)or false
-    return {editor=loaded,dirty=dirty,raw=raw,palette_count=#palettes,tables=tables,armor=previews.armor,helmet=previews.helmet,loaded=imported,status=populate_request and ('Loading worn colors: '..(original_luts and original_luts.status or 'snapshot unavailable'))or original_luts and not original_luts.loaded and original_luts.status or status,busy=pending~=nil or index_job~=nil,phase=index_job and 'Comparing imported tables...'or pending and pending.canceling and 'Canceling...'or labels[phase]or phase,
-        time=memory.time and memory.time()or os.clock(),elapsed=pending and(os.time()-pending.started)or 0,
+    return {editor=loaded,dirty=dirty,raw=raw,palette_count=#palettes,palette_index=handle.get('palette'),armor_lut=handle.get('basic_armor_lut'),helmet_lut=handle.get('basic_helmet_lut'),tables=tables,armor=previews.armor,helmet=previews.helmet,loaded=imported,import_description=m.import_description,import_detail=pending and pending.detail,status=populate_request and ('Loading worn colors: '..(original_luts and original_luts.status or 'snapshot unavailable'))or original_luts and not original_luts.loaded and original_luts.status or status,busy=pending~=nil or index_job~=nil,phase=index_job and 'Comparing imported tables...'or pending and pending.canceling and 'Canceling...'or labels[phase]or phase,
+        progress=pending and pending.percent or 0,waiting=pending and (pending.phase=='picker'or pending.phase=='starting'),time=memory.time and memory.time()or os.clock(),elapsed=pending and(os.time()-pending.started)or 0,
         armor_checked=handle.get('target_armor'),helmet_checked=handle.get('target_helmet'),palette_name=handle.get('palette_name'),preserve_emissives=handle.get('preserve_emissives')}
 end
 local function load_editor_target(kind)
@@ -489,10 +498,12 @@ local function apply_editor_target(kind,all)
     editor_target={kind=kind,group=p.group,object=groups[p.group].object};return apply(loaded,kind)
 end
 local function apply_import_to(kind)
+    assert(stop_identification(),'Highlight restoration pending');refresh(true)
     local panel=import_state().raw.basic[kind]
     assert(panel and panel.group,'Select a '..kind..' LUT first');assert(imported,'Import a LUT file first')
     local group=groups[panel.group]
     live_select_suppressed=true;local ok,why=handle.set('lut',panel.group);live_select_suppressed=false;assert(ok,why);assert(handle.set('scope',1))
+    basic_selected=nil
     local result=apply(imported,kind)
     for _,b in ipairs(group.bindings)do if b[kind]and b.document then
         basic_documents[kind..':'..tostring(b.original)]=m.basic_state.clone(b.document,'Applied '..kind..' LUT')
@@ -665,6 +676,7 @@ end
 local function refresh_outfits()
     outfit_names=outfits.names();local choices={'Choose saved outfit...'}
     local previews={}
+    api.mods[handle.id].controls.outfit_preset.choice_details={}
     for _,name in ipairs(outfit_names)do
         choices[#choices+1]=name
         local ok,preset=pcall(outfits.load,name)
@@ -676,6 +688,8 @@ local function refresh_outfits()
                 end end
             end
             previews[#choices]=strips
+            api.mods[handle.id].controls.outfit_preset.choice_details=api.mods[handle.id].controls.outfit_preset.choice_details or {}
+            api.mods[handle.id].controls.outfit_preset.choice_details[#choices]=#preset.armor>0 and (#preset.helmet>0 and 'Armor + Helmet'or 'Armor Only')or 'Helmet Only'
         end
     end
     api.mods[handle.id].controls.outfit_preset.choices=choices
@@ -717,6 +731,59 @@ local function select_outfit(index)
     if index==1 then selected_outfit=nil;return end
     selected_outfit=outfits.load(assert(outfit_names[index-1]))
 end
+local function manage_outfit(mode)
+    local preset=assert(selected_outfit,'Choose an Armory preset first');local old=preset.name
+    local menu=assert(frontend.menu)
+    local function finish(new)
+        if mode=='rename'then outfits.rename(old,new)else outfits.delete(old)end
+        selected_outfit=nil;refresh_outfits();assert(handle.set('outfit_preset',1))
+        if mode=='rename'then for index,name in ipairs(outfit_names)do if name==new then assert(handle.set('outfit_preset',index+1));break end end end
+        menu.redraw_revision=(menu.redraw_revision or 0)+1
+        return message(mode=='rename'and ('Renamed preset to '..new)or ('Removed '..old..' from The Armory.'))
+    end
+    menu.outfit_dialog={phase=mode=='rename'and 'name'or 'delete',title=mode=='rename'and 'Rename Preset'or 'Delete Preset?',preset_name=old,mod=api.mods[handle.id],control=api.mods[handle.id].controls.outfit_name,on_save=finish}
+    if mode=='rename'then menu.text_edit={mod=api.mods[handle.id],control=api.mods[handle.id].controls.outfit_name,text=old,replace=true}end
+    return true
+end
+local function paint_quick(q,hex)
+            return action(function()
+                if palette_editor then palette_editor.paint_rgb(q.row,q.column,hex)
+                else
+                    local r,g,b=m.palette.rgb(hex);local at=((q.row-1)*loaded.width+q.column-1)*4
+                    loaded.data[at],loaded.data[at+1],loaded.data[at+2]=r,g,b;loaded.revision=(loaded.revision or 0)+1
+                end
+                if editor_target then
+                    assert(handle.set('lut',editor_target.group));assert(handle.set('scope',1));apply(loaded,editor_target.kind)
+                    preview_document=loaded;preview_revision=loaded.revision or 0
+                end
+                return true
+            end)
+end
+local function select_import_cell(entry,row,column,identify,kind)
+            if entry.index then
+                basic_selected=nil
+                editor_target={kind=kind,group=entry.index,object=groups[entry.index]and groups[entry.index].object}
+            end
+            if identify or entry.index then
+                identify_kind=(kind=='armor'or kind=='helmet')and kind or nil
+                if entry.index then live_select_suppressed=true;local ok,why=handle.set('lut',entry.index);live_select_suppressed=false;assert(ok,why)end
+            end
+            if not loaded or (loaded.data~=entry.data and m.quick_source~=entry.data)then
+                local data=ffi.new('float[?]',entry.width*entry.height*4);ffi.copy(data,entry.data,entry.width*entry.height*16)
+                loaded={data=data,width=entry.width,height=entry.height,source=entry.source or entry.name}
+            end
+            m.quick_source=entry.data
+            local data=loaded.data
+            if entry.source then editor_tables[entry.source]=loaded end
+            quick_selection={row=row,column=column};preview_document=loaded;preview_revision=loaded.revision or 0
+            if palette_editor then palette_editor.focus_cell(row,column)end
+            local at=((row-1)*entry.width+column-1)*4
+            -- Setting the picker seed must not edit the selected table.
+            quick_selection=nil
+            assert(handle.set('quick_color',string.format('#%02X%02X%02X',math.floor(math.max(0,math.min(1,data[at]))*255+.5),math.floor(math.max(0,math.min(1,data[at+1]))*255+.5),math.floor(math.max(0,math.min(1,data[at+2]))*255+.5))))
+            quick_selection={row=row,column=column}
+
+end
 local function register(current)
     if api==current and handle then return end
     if handle then handle.unregister()end
@@ -732,16 +799,14 @@ local function register(current)
         {id='quick_color',type='color',label='Quick Scratch',default='#FFFFFF',on_change=function(hex)
             if not quick_selection then return end
             local q=quick_selection
-            if palette_editor then palette_editor.paint_rgb(q.row,q.column,hex)
-            else
-                local r,g,b=m.palette.rgb(hex);local at=((q.row-1)*loaded.width+q.column-1)*4
-                loaded.data[at],loaded.data[at+1],loaded.data[at+2]=r,g,b;loaded.revision=(loaded.revision or 0)+1
-            end
+            return m.paint_quick(q,hex)
         end},
         {id='basic_preset_name',type='input',label='Preset name',default='my-palette'},
         {id='apply_matching',type='button',label='Apply Matching LUTs',on_activate=function()return action(function()return m.apply_matching()end)end},
         {id='basic_advanced',type='button',label='Advanced Mode',on_activate=function()return frontend.open_advanced()end},
         {id='open_editor',type='button',label='Open LUT Editor',on_activate=function()return api.focus_page(handle.id,'colors')end},
+        {id='outfit_rename',type='button',label='Rename Preset',on_activate=function()return m.manage_outfit('rename')end},
+        {id='outfit_delete',type='button',label='Delete Preset',on_activate=function()return m.manage_outfit('delete')end},
         {id='outfit_name',type='input',label='Preset name',default='my-outfit'},
         {id='outfit_preset',type='choice',label='Saved outfit',choices={'Choose saved outfit...'},default=1,on_change=select_outfit},
         {id='outfit_apply_armor',type='button',label='Apply Outfit Armor',on_activate=function()return action(function()return apply_outfit('armor')end)end},
@@ -812,8 +877,8 @@ local function register(current)
         end)end},
         {id='save_palette',type='button',label='Send to LUT Editor',on_activate=function()return action(save_palette)end},
         {id='apply_checked',type='button',label='Apply to All Checked Targets',on_activate=function()return action(apply_checked)end},
-        {id='apply_file_armor',type='button',label='Apply to Armor',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',2));return apply(imported,'armor')end)end},
-        {id='apply_file_helmet',type='button',label='Apply to Helmet',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',3));return apply(imported,'helmet')end)end},
+        {id='apply_file_armor',type='button',label='Apply to Armor',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(stop_identification(),'Highlight restoration pending');refresh(true);assert(handle.set('scope',2));return apply(imported,'armor')end)end},
+        {id='apply_file_helmet',type='button',label='Apply to Helmet',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(stop_identification(),'Highlight restoration pending');refresh(true);assert(handle.set('scope',3));return apply(imported,'helmet')end)end},
         {id='apply_file_both',type='button',label='Apply to Both',on_activate=function()return action(function()assert(imported,'Import a palette first');assert(handle.set('scope',4));return apply(imported)end)end},
         {id='apply_editor',type='button',label='Apply edited palette',on_activate=function()return action(function()return apply_checked(assert(loaded,'Save a LUT to Palette first'))end)end},
         {id='preserve_emissives',type='toggle',label='Preserve Original Emissives',default=false,description='Off by default. Uses matching game-original resource snapshots, preserving zero emissive values. Missing snapshots are not treated as zero.'},
@@ -889,10 +954,11 @@ local function register(current)
                     preferences.mount(current)
                     local owner=current.mods.epic_lut_preferences
                     if owner then
-                        for _,id in ipairs({'basic_key','menu_key','ui_scale','font_size','font_bold','window_width','window_height','reset_key'})do
+                        for _,id in ipairs({'basic_key','menu_key','preview_key','ui_scale','font_size','font_bold','window_width','window_height','reset_key'})do
                             local original=owner.controls[id]
                             if original then local linked={};for k,v in pairs(original)do linked[k]=v end
                                 linked.id='configuration_'..id;linked.source_mod_id=owner.id;linked.source_control_id=id
+                                if original.type~='button'then local key=id;linked.default=owner.handle.get(key);linked.on_change=function(value)return owner.handle.set(key,value)end end
                                 page.controls[#page.controls+1]=linked
                             end
                         end
@@ -940,25 +1006,7 @@ local function register(current)
         api.mods[handle.id].controls.basic_preset.choices=choices
     end
     if m.import_view then
-        import_view=m.import_view.new(import_state,m.table_groups,function(entry,row,column,identify,kind)
-            if identify then
-                identify_kind=(kind=='armor'or kind=='helmet')and kind or nil
-                if entry.index then live_select_suppressed=true;local ok,why=handle.set('lut',entry.index);live_select_suppressed=false;assert(ok,why)end
-            end
-            if not loaded or loaded.data~=entry.data then
-                local data=ffi.new('float[?]',entry.width*entry.height*4);ffi.copy(data,entry.data,entry.width*entry.height*16)
-                loaded={data=data,width=entry.width,height=entry.height,source=entry.source or entry.name}
-            end
-            local data=loaded.data
-            if entry.source then editor_tables[entry.source]=loaded end
-            quick_selection={row=row,column=column};preview_document=loaded;preview_revision=loaded.revision or 0
-            if palette_editor then palette_editor.focus_cell(row,column)end
-            local at=((row-1)*entry.width+column-1)*4
-            -- Setting the picker seed must not edit the selected table.
-            quick_selection=nil
-            assert(handle.set('quick_color',string.format('#%02X%02X%02X',math.floor(math.max(0,math.min(1,data[at]))*255+.5),math.floor(math.max(0,math.min(1,data[at+1]))*255+.5),math.floor(math.max(0,math.min(1,data[at+2]))*255+.5))))
-            quick_selection={row=row,column=column}
-        end,m.ui_core)
+        import_view=m.import_view.new(import_state,m.table_groups,m.select_import_cell,m.ui_core)
         direct_page.render_layout=import_view.draw;direct_page.on_wheel=import_view.wheel
     end
     groups={}
@@ -984,7 +1032,7 @@ return {name='Epic LUT',author='Goose',on_enable=function(context)
     game=memory.address(assert(memory.module('game.dll')))
     native=assert(m.engine.open(memory,game,memory.address(assert(memory.module()))))
     initialize_editor_state()
-    m.apply_matching=apply_matching
+    m.apply_matching=apply_matching; m.manage_outfit=manage_outfit;m.paint_quick=paint_quick;m.select_import_cell=select_import_cell
     if m.outfit_presets then outfits=m.outfit_presets.new(m,paths.presets)end
     m.format_resource_id=resource_id
     if m.action_history then history=m.action_history.new(capture_action,restore_action)end
@@ -1046,7 +1094,7 @@ end,on_update=function(dt_context,dt)
         end
         local page=frontend.menu and api.mods[handle.id].pages[frontend.menu.page]
         if page and page.id=='basic'and imported and imported~=basic_imported then
-            basic_imported=imported;save_palette();api.focus_page(handle.id,'basic');preview_document=loaded;preview_revision=0
+            basic_imported=imported;local ok,why=pcall(save_palette);if not ok then message('Import editor refresh failed; addon remains available: '..tostring(why))end;api.focus_page(handle.id,'basic');preview_document=loaded;preview_revision=0
         end
         -- Selection/import establishes a baseline; only actual editor revisions apply.
         if loaded~=preview_document then

@@ -1,72 +1,61 @@
-[size=6]
-[img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791319443-154441029.png[/img][/size]
-[center][b][size=5]EXTREMELY ALPHA AND WORK IN PROGRESS[/size][/b][/center]
-[center][/center]
-[center][b][size=5]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/size][/b][/center]
+[center][size=6][b]EPIC LUT R5[/b][/size]
+[size=5][b]STYLISH FREEDOM[/b][/size]
+[i]Defend Freedom in Style.[/i][/center]
 
+Super Earth gave you the armor. [b]Give it some personality.[/b]
 
-[center][url=https://github.com/HWG90/Epic-LUT/issues][b][size=5]USE MY GIT[/size][/b][/url][/center]
+Tactical pink. Pastel menace. A helmet that finally matches. Your next great palette loot is the look you make yourself.
 
-[center][size=6][b][color=#F4D44C]EPIC LUT[/color][/b]
-[size=4][b]Legendary looks.[/b][/size]
-[i]Defend Freedom in Style. [/i][/size][/center]
-[size=6]
-[b]Epic [color=#F4D44C]LUT R4 Alpha[/color] [/b]lets you edit equipped armor and helmet colors live in Helldivers 2 through the Epic LUT menu, or compatible MCM when available. Pick a color, see it on your gear, and restore the originals when you want a fresh start.
+[b]R5 brings a bigger field kit:[/b] a compact Basic editor, matching palette imports, saved Armory looks, and more ways to paint, copy, and keep your colors.
 
-LUT means [b]lookup table[/b]: the color and material data your gear uses. We're requisitioning a new paint job, not new equipment.
+[center][size=6][b][color=#F4D44C]BASIC MODE[/color][/b][/size]
+[size=4][b]LESS FIDDLING. MORE FASHION.[/b][/size][/center]
 
-[b]Built on CowboyBingus's original LUT discovery and Match Your Colors foundation.[/b] Thank you, CowboyBingus, for finding the path and sharing the tools that made this possible.
+Pick your armor or helmet. Pick a region. Pick a color. [b]Make freedom look good.[/b]
 
-[size=4][b][color=#F4D44C]WHAT'S IN THE FIELD KIT[/color][/b][/size][/size]
+[size=4][b]DRESS FOR MANAGED DEMOCRACY[/b][/size]
 [list]
-[*][size=6]Choose a DDS, ZIP or RAR with the Windows file picker. ZIP/RAR archives can contain supported DDS palettes or standard patch files with their sidecars. Imported patches are not installed.[/size][/*]
-[*][size=6]Import / Apply comes first. Choose an imported LUT with the left dropdown. Save LUT to Palette puts it in the editor. Check Helmet and/or Armor, then Apply LUT. Assigned palettes stay active when you choose another source. Per-LUT assignments also accumulate. Save applied setup resumes active palettes on later launches.[/size][/*]
-[*][size=6]The standalone LUT Editor uses a clickable pixel grid, row-based value editor, scratch color, Undo/Redo, row copy/paste, saved row presets and portable full-float DDS preset export. RAR needs installed 7-Zip. RGB editing preserves alpha. Advanced material/camo values require unlocking.[/size][/*]
-[*][size=6]No armor-name lookup, kit catalogues or installed game-archive scanning. Only local live LUT bindings are used.[/size][/*]
+[*][b]Quick color. Full control.[/b] Basic editing for armor and helmet, or the full LUT grid when you want to get into the details.
+[*][b]Find your region.[/b] Flash a selected region magenta instead of guessing where it lands on your gear. Thank you, Shikami, for the idea.
+[*][b]Bring your palette loot.[/b] DDS, ZIP and RAR imports. Apply Matching LUTs targets resource IDs found on your currently worn gear.
+[*][b]Build your Armory.[/b] Save named looks and bring your palettes back for another fashion offensive.
+[*][b]Paint outside the regulation palette.[/b] Quick Scratch, swatches, color-picker shortcuts, copy/paste and Undo/Redo.
+[*][b]Make the field kit fit.[/b] Configurable shortcuts, UI scale and font settings. Check for public updates without automatic installation.
+[*][b]Back to regulation.[/b] Restore original bindings when the fashion offensive is over. Restore before changing equipment.
 [/list]
-[size=4][b][color=#F4D44C]REQUIREMENTS & INSTALLATION[/color][/b][/size]
-[list=1]
-[*][size=6]Helldivers 2 on Windows and Bingus Shared Loader v15+. Native adapters currently target Steam build 25480438.[/size][/*]
-[*][size=6]Close the game, import the complete ZIP through Arsenal/HD2MM, enable its BSL startup option and deploy. Keep only one Epic LUT entry enabled.[/size][/*]
-[*][size=6]Launch and press F10. Use Choose DDS or ZIP..., choose a palette, refresh live LUTs, select the target and Apply. Restore before changing gear.[/size][/*]
-[/list]
-[size=6][b]NO PYTHON REQUIRED. NO PYTHON BUNDLED. NO SETUP SCRIPT.[/b]
-Windows supplies the file picker and ZIP extraction. The short-lived worker exits after import; an open picker exits when its launching game ends. No browser is required.
 
-This is a standalone editor. MCM integration is not included in this lean build. Top tabs replace the left navigation rail; the value pane scrolls independently and uses 10-size body/value text. Expand a row for all 23 semantic columns, sliders, typed boxes and dropdown/stepper combos.
+[b]Standalone. No MCM. No Python setup.[/b]
+F10 opens the full editor; Basic has a configurable shortcut, default F9. Watch for a loader shortcut conflict.
 
-[size=4][b][color=#F4D44C]YOUR LUT AT WORK[/color][/b][/size]
-Click a grid cell to select its row and field, then edit its RGB color or explicitly unlock advanced RGBA values. Display colors clamp to 0–1; the actual finite float values are retained. Apply sends the edited palette to your selected live LUT. Saved DDS files and row presets live under %LOCALAPPDATA%\Epic LUT.
-
-If Match Your Colors is enabled, turn its matching Off before applying. This standalone build does not change other mods’ settings. Restore Original returns the game bindings and clears saved automatic application while retaining imported work. Remove LUT also unloads the document. Reset Custom LUT resets edits to the imported palette. Saved assignments use local slots, not process pointers or guessed gear identities.
-
-[size=4][b][color=#F4D44C]KNOWN LIMITATIONS[/color][/b][/size]
+[size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*]23-column material LUTs only: bounded 2D RGBA16F/RGBA32F DDS, including valid MULTI-MIP files. The full-resolution level is applied. Cube, volume, array and compressed textures remain unsupported.
-[*]ZIP imports support standard patches and their GPU/stream sidecars. EXR, bulk conversion and pattern/cape layouts are outside this simplified version.
-[*]Surface meanings and original live dimensions are unknown. Armor/Helmet labels describe local slots, not identified equipment. Use a suitable palette for the selected LUT.
-[*]The user confirmed direct ZIP importing works. The redesigned file picker and grid UI pass offline checks but still need live visual/interaction confirmation. Multiplayer visibility, mission transitions and long sessions are not comprehensively validated.
-[*]Immutable replacement textures stay retained until exit, with a bounded session budget. Restoration checks ownership and does not overwrite another writer.
+[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] use Epic-LUT-R5-BSL.zip. Import the complete ZIP and enable its BSL startup option.
+[*][b]MDL / Live Lua Loader:[/b] use Epic-LUT-R5-LLL.zip. Install the complete armor_lut_editor folder in your compatible API-2 loader's Mods directory. LLL R18+ supports this lifecycle.
+[*]Enable only one Epic LUT entrypoint. Turn Match Your Colors matching Off before editing the same gear. RAR needs installed 7-Zip.
 [/list]
-[/size]
 
-[size=4][size=4][b][color=#F4D44C]CREDITS & THANKS[/color][/b][/size][/size]
-[b][size=6]CowboyBingus[/size][/b][size=6] — original float-LUT discovery and the [/size][url=https://github.com/CowboyBingus/MatchYourColors][size=6]Match Your Colors[/size][/url][size=6] foundation, including reused discovery, resource-binding, native adapter, and file-decoding work. Epic LUT does not claim that original discovery. Reused modules retain CowboyBingus's Zero-Clause BSD license and attribution.[/size]
+[center][color=#FF655A][size=4][b]EXTREMELY ALPHA AND WORK IN PROGRESS[/b][/size][/color]
+[b]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/b]
+[url=https://github.com/HWG90/Epic-LUT/issues][b]USE MY GIT[/b][/url][/center]
 
-[b]Paydex LUT Editor[/b] — semantic research reference. Epic LUT’s editor and mapping code are independently authored.
+R5 is a new version, not a promise that alpha is over. Direct palette importing and application have been confirmed during development. Recent UI additions, restart persistence, original-emissive matching, and extended loader/game transitions still need live acceptance. Multiplayer color sharing is not promised.
 
-[b]Goose🪿 (honk dat's me honk)[/b] — Epic LUT's editor, MCM integration, preset/file workflow, vibing, years of being unappreciated as a programmer, bad choices, and additions.
+Supports bounded 23-column float material LUTs. Weapons, equipped capes, EXR and pattern layouts are outside this version. Gear surfaces vary; material edits can change more than color. Native compatibility currently targets Steam build 25480438.
 
+[b]Player Preview[/b] is included in R5. Dock it beside the LUT Editor or pop it out; pan, rotate and zoom while editing. Disable the older separate preview test addon before enabling R5. Close the preview before switching game screens. This feature remains experimental.
 
+[size=4][b]THE PEOPLE BEHIND THE PALETTE[/b][/size]
+[b]CowboyBingus[/b] found the path. Epic LUT builds on his original LUT discovery and [url=https://github.com/CowboyBingus/MatchYourColors]Match Your Colors[/url] foundation. Reused native adapters retain his Zero-Clause BSD license. Thank you, Bingus, for the work and generosity that made this possible.
 
-[b][size=6]Thank you to the Helldivers modding Discord community, Kaiser & Amiba[/size][/b][size=6] for the shared knowledge, idea, experimentation, and encouragement that keep this scene moving.
+[b]Goose🪿 (honk dat's me honk)[/b] — editor, workflow, vibing, and questionable fashion decisions.
 
-And a personal thank you to [/size][b][size=6][url=https://github.com/CowboyBingus]CowboyBingus[/url] himself[/size][/b][size=6] for the work and generosity behind this foundation.[/size]
+Thank you to the [b]Helldivers modding Discord community, Kaiser & Amiba[/b] for the shared knowledge, idea, experimentation and encouragement.
 
-[size=6]Thank you to [b]Shikami[/b] for the [b]Region Indicator[/b] idea.[/size]
+Thank you to [b]Shikami[/b] for the [b]Region Indicator[/b] idea, and [b]content/audio/wep_ar_risk[/b] for the stylish, human-made thumbnail.
 
-[url=https://github.com/HWG90/Epic-LUT][size=6]Source code, technical documentation, and issue reports[/size][/url]
-[i]
-I vibe-coded tf out of this. No shame. If I can never write another line of code again, that day [b]can't come soon enough[/b]. But I also know what I'm doing. And so does Bingus. Vibe-coded =/= Slop. No hubris here. Just decade+ experience programming in C#, Python, and my ass.[/i]
+[url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] inspired semantic controls and layout; Epic LUT's editor is independently authored.
 
-[i][size=1][font=Courier New]Epic LUT is community-made and is not affiliated with or endorsed by Arrowhead, Sony, or Nexus Mods. Promotional rainbow-helmet artwork is an illustration, not an in-game screenshot or proof of a particular preset's appearance. No third-party palette packs or game assets are bundled with these release materials.[/font][/size][/i]
+[url=https://github.com/HWG90/Epic-LUT]Source, installation details and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/issues]Report bugs on GitHub[/url]
+
+[center][b]Freedom deserves a better color palette.[/b][/center]
+[size=1][i]Community-made; not affiliated with or endorsed by Arrowhead, Sony or Nexus Mods. Promotional artwork is not gameplay proof or proof of multiplayer color sharing. No third-party palettes or game textures are packaged.[/i][/size]

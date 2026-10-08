@@ -1,7 +1,7 @@
 -- Standalone editor frontend. No MCM detection, compatibility registry or binding adapter.
 local F={}
 function F.new(m,ctx,deps)
-    deps=deps or {};local self={}
+    deps=deps or {};local self={preview_cleanup_guard=true}
     local prior=package.loaded['dbf.epic_lut.frontend.v1'];assert(not prior or prior.closed,'Another Epic LUT frontend is active')
     package.loaded['dbf.epic_lut.frontend.v1']=self
     if deps.input then
@@ -83,7 +83,7 @@ function F.new(m,ctx,deps)
             local process_input=self.menu.input_focus(focused,self.input)
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
             local basic_down=self.input.down(basic_key)
-            if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit then
+            if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit and not self.menu.capture then
                 if self.basic_mode and self.menu.visible then self.menu.visible=false
                 elseif self.default_mod_id and self.api.focus_page(self.default_mod_id,'basic')then
                     if not self.basic_mode then self.full_size={self.menu.window_width,self.menu.window_height}end;self.menu.window_width=1100;self.menu.window_height=780
@@ -92,7 +92,7 @@ function F.new(m,ctx,deps)
             end
             self.basic_held=basic_down
             local full_down=self.input.down(self.menu.toggle_key)
-            if focused and process_input and full_down and not self.full_held and self.basic_mode then
+            if focused and process_input and full_down and not self.full_held and self.basic_mode and not self.menu.capture then
                 self.basic_mode=false;self.menu.basic_only=false
                 if self.full_size then self.menu.window_width,self.menu.window_height=unpack(self.full_size)end
                 self.api.focus_page(self.default_mod_id,'direct')
@@ -110,18 +110,24 @@ function F.new(m,ctx,deps)
                 if text:find('Cannot acquire input capture',1,true)or text:find('Input capture lost',1,true)or text:find('Window capture unavailable',1,true)then self.view.release();return end
                 error(text,0)
             end
+            if self.preview_close_pending then self.menu.visible=false end
             if process_input then self.menu.tick(self.input)end
             if self.rendered_revision~=self.menu.redraw_revision then
                 if self.view.invalidate then self.view.invalidate()else self.view.clear()end
                 self.rendered_revision=self.menu.redraw_revision
             end
-            if not self.menu.visible and self.capture.active then assert(self.capture.release())end
+            if not self.menu.visible and self.capture.active then
+                local portrait=package.loaded['epic.player_preview.v1']
+                local ready=not portrait or not portrait.before_editor_close or portrait.before_editor_close()
+                if ready then self.preview_close_pending=nil;assert(self.capture.release())
+                else self.preview_close_pending=true;self.menu.visible=true end
+            end
             if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
                 self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
             end
             if self.was_visible and not self.menu.visible and self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
             self.was_visible=self.menu.visible
-            local key=self.menu.toggle_key;self.menu.menu_key_label=key>=112 and key<=135 and ('F'..(key-111))or ('VK '..key)
+            local key=self.menu.toggle_key;self.menu.menu_key_label=m.ui_menu.key_name(key)
             self.menu.advance(dt);local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
         end)
         if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end

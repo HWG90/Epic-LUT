@@ -189,6 +189,12 @@ function E.new(m,document,note,save,presets,live_document)
             local resource=control.choice_details and control.choice_details[h.get('basic_'..self.gear..'_lut')]
             if resource then ui.bounded(ui.x+312+selector_width,top-50,resource,12,{244,202,53},math.max(0,left-selector_width-324))end
         end
+        local portrait=package.loaded['epic.player_preview.v1'];local portrait_width
+        if portrait and portrait.dock then
+            portrait_width=math.min(200,left*.30)
+            local ph=math.max(80,top-(gear_controls and 34 or 0)-116-gridbottom)
+            portrait.dock({x=ui.x+left-portrait_width-8,y=gridbottom+32,w=portrait_width,h=ph-12})
+        end
         if not d then
             local gear=self.api and self.api.mods[self.handle.id].controls.editor_load_armor
             if gear then
@@ -210,6 +216,7 @@ function E.new(m,document,note,save,presets,live_document)
         if ui.choice then ui.choice('grid_tool',ui.x+10,top-82,170);ui.choice('grid_channel',ui.x+190,top-82,150)end
         button(ui.x+350,top-82,70,'Copy','copy_selection');button(ui.x+425,top-82,70,'Paste','paste_selection')
         local cell=math.min((left-98)/d.width,(ui.h-bottomh-140-(gear_controls and 34 or 0))/d.height)
+        if portrait_width then cell=math.min(cell,(left-portrait_width-112)/d.width)end
         for c=1,d.width do ui.bounded(ui.x+82+(c-1)*cell,top-110,d.width==23 and m.semantics.short_columns[c]or tostring(c),12,muted,cell-2)end
         for r=1,d.height do
             local y=top-120-r*cell;local selected_row=r
@@ -241,6 +248,17 @@ function E.new(m,document,note,save,presets,live_document)
                     self.sync()
                 end)
                 if not ok then note(tostring(why))end
+            end,nil,function()
+                local at=m.semantics.index(selected_row,selected_col,1,d.width,d.height)
+                local data=ffi.new('float[4]');ffi.copy(data,d.data+at,16)
+                self.clip={data=data,width=1,height=1}
+                local color=rgb(d.data,at);self.scratch={color[1],color[2],color[3]}
+                assert(h.set('scratch_color',string.format('#%02X%02X%02X',color[1],color[2],color[3])))
+                assert(h.set('scratch_alpha',math.max(0,math.min(1,tonumber(d.data[at+3])))))
+                note('Swatch copied to scratch and pixel clipboard.')
+            end,'Double-click a color swatch to edit its RGB. Middle-click copies it.',function()
+                if m.semantics.is_color(d.width,selected_col)then self.focus_cell(selected_row,selected_col);ui.activate('cell_color')
+                else note('Select a color column to open the RGB picker. Use the value controls for this column.')end
             end)
         end end
         local can_identify=self.api and self.handle and self.api.mods[self.handle.id].controls.identify_region

@@ -1,8 +1,15 @@
 param([string]$Package='',[switch]$Pick,[switch]$Navigate,[switch]$ListVariants,[string]$VariantFolder='',[Parameter(Mandatory=$true)][string]$Output,[Parameter(Mandatory=$true)][string]$Result,[int]$OwnerPID=0,[string]$SevenZip='')
 $ErrorActionPreference='Stop'
 # Data only: ZIP members are never installed or executed. All work is outside the game.
-function Check-Owner { if(Test-Path -LiteralPath ($Result+'.cancel')) {throw 'Import canceled'};if($OwnerPID -and -not (Get-Process -Id $OwnerPID -ErrorAction SilentlyContinue)) {throw 'Game exited'} }
-$script:phase='starting';$script:lastPulse=0
+$script:lastOwnerCheck=[DateTime]::MinValue
+function Check-Owner {
+    $now=[DateTime]::UtcNow
+    if(($now-$script:lastOwnerCheck).TotalMilliseconds -lt 250){return}
+    $script:lastOwnerCheck=$now
+    if([IO.File]::Exists($Result+'.cancel')){throw 'Import canceled'}
+    if($OwnerPID -and -not (Get-Process -Id $OwnerPID -ErrorAction SilentlyContinue)){throw 'Game exited'}
+}
+$script:phase='starting';$script:lastPulse=0;$script:percent=0;$script:detail=''
 function Initialize-RarJob {
     # The OS closes this handle on worker exit, including forced recovery, stopping only its 7-Zip children.
     Add-Type -TypeDefinition @'
@@ -33,7 +40,7 @@ function Pulse($Phase='') {
     $now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     if($now -ne $script:lastPulse) {
         $script:lastPulse=$now
-        $text="$PID`t$script:phase`t$now"
+        $text="$PID`t$script:phase`t$now`t$script:percent`t$script:detail"
         try {
             [IO.File]::WriteAllText($Result+'.progress.tmp',$text,(New-Object Text.UTF8Encoding($false)))
             if([IO.File]::Exists($Result+'.progress')) {[IO.File]::Replace($Result+'.progress.tmp',$Result+'.progress',$Result+'.progress.bak');[IO.File]::Delete($Result+'.progress.bak')}
@@ -96,8 +103,8 @@ try {
     if([IO.Path]::GetExtension($Package) -ieq '.dds') {
         if((Get-Item -LiteralPath $Package).Length -gt 1MB) {throw 'DDS size budget exceeded'}
         New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
-        [IO.File]::Copy($Package,(Join-Path $Output 'lut000.dds'))
-        Publish "ok`nlut000.dds";return
+        [IO.File]::Copy($Package,(Join-Path $Output 'lut001.dds'))
+        Publish "ok`nlut001.dds";return
     }
     Pulse 'reading'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -155,9 +162,19 @@ try {
         try {
             $buffer=New-Object byte[] 65536;$written=0
             while($true) {
-                $task=$source.ReadAsync($buffer,0,$buffer.Length)
-                while(-not $task.Wait(200)) {Pulse 'extracting'}
-                $n=$task.GetAwaiter().GetResult();if($n -eq 0) {break}
+                if($entry.Zip) {
+                    # Local DeflateStream reads avoid async waits that can hang under Windows PowerShell.
+                    $n=$source.Read($buffer,0,$buffer.Length)
+                } else {
+                    $task=$source.ReadAsync($buffer,0,$buffer.Length)
+                    $readStarted=[DateTime]::UtcNow
+                    while(-not $task.Wait(200)) {
+                        Pulse 'extracting'
+                        if(([DateTime]::UtcNow-$readStarted).TotalSeconds -gt 30){throw ('Archive read stalled: '+$Name)}
+                    }
+                    $n=$task.GetAwaiter().GetResult()
+                }
+                if($n -eq 0) {break}
                 Pulse 'extracting';$written+=$n
                 if($written -gt $entry.Length) {throw 'Archive member size mismatch'}
                 $destination.Write($buffer,0,$n)
@@ -179,7 +196,9 @@ try {
     }
     if($Navigate -or $ListVariants -or $VariantFolder) {
         $folders=@{}
+        $scanIndex=0;$scanTotal=[Math]::Max(1,$members.Count)
         foreach($member in ($members.Keys | Sort-Object)) {
+            $script:percent=[int](50*$scanIndex/$scanTotal);$scanIndex++
             if($member -notmatch '(?i)(\.dds$|\.patch_\d+$)') {continue}
             Pulse 'reading'
             $slash=$member.LastIndexOf('/');$folder=if($slash -lt 0){''}else{$member.Substring(0,$slash)}
@@ -249,16 +268,20 @@ public static class EpicVariantWindow {
         }
     }
     New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
+    [IO.File]::WriteAllText((Join-Path $Output 'import-info.txt'),([IO.Path]::GetFileName($Package)+' / '+$selection).Replace("`t",' ').Replace("`n",' ').Replace("`r",' '))
     $files=New-Object 'System.Collections.Generic.List[string]'
     $resourceRows=New-Object 'System.Collections.Generic.List[string]'
     function Save-Lut($Bytes,$Resource='') {
         Check-Owner
         if($files.Count -ge 256) {throw 'ZIP contains too many LUTs'}
-        $name='lut'+$files.Count.ToString('D3')+'.dds'
-        [IO.File]::WriteAllBytes((Join-Path $Output $name),$Bytes);$files.Add($name)
+        $name='lut'+($files.Count+1).ToString('D3')+'.dds'
+        [IO.File]::WriteAllBytes((Join-Path $Output $name),$Bytes);$files.Add($name);$script:detail=$variantLabel+' / '+$files.Count+' LUTs extracted'
         if($Resource) {$resourceRows.Add($name+"`t"+$Resource)}
     }
+    $variantLabel=if($selection){$selection}else{'Archive'}
+    $extractIndex=0;$extractTotal=[Math]::Max(1,$members.Count)
     foreach($name in ($members.Keys | Sort-Object)) {
+        $script:percent=50+[int](49*$extractIndex/$extractTotal);$extractIndex++;$script:detail=$variantLabel+' / '+$files.Count+' LUTs extracted'
         if($name -match '(?i)\.dds$') {
             # Inspect only the header of ordinary large textures; copy actual LUTs only.
             $entry=$members[$name];if($entry.Length -lt 148) {continue}
@@ -302,6 +325,7 @@ public static class EpicVariantWindow {
     }
     if($files.Count -eq 0) {throw 'ZIP contains no supported 23-column DDS LUTs'}
     [IO.File]::WriteAllText((Join-Path $Output 'resources.tsv'),($resourceRows -join "`n"),(New-Object Text.UTF8Encoding($false)))
+    $script:percent=100;Pulse 'extracting'
     Publish ("ok`n"+($files -join "`n"))
 } catch {if($_.Exception.Message -eq 'Import canceled') {Publish 'cancel';return};Publish ("error`n"+$_.Exception.Message.Replace("`n",' ').Replace("`r",' '));exit 1}
 finally {

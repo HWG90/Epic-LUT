@@ -8,7 +8,7 @@ local controls={{id='basic_preset_name',type='input',label='Name',default='palet
  {id='basic_preset',type='choice',label='Palette',choices={'New preset'},default=1},
  {id='outfit_preset',type='choice',label='Outfit',choices={'Choose outfit','Example'},default=1},
  {id='outfit_name',type='input',label='Outfit name',default='my-outfit',on_change=function(name)saved=name;menu.outfit_dialog=nil end}}
-for _,id in ipairs({'save_setup','outfit_apply_armor','outfit_apply_helmet','basic_save','basic_export','open_editor'})do controls[#controls+1]={id=id,type='button',label=id,on_activate=function()return true end}end
+for _,id in ipairs({'outfit_rename','outfit_delete','save_setup','outfit_apply_armor','outfit_apply_helmet','basic_save','basic_export','open_editor'})do controls[#controls+1]={id=id,type='button',label=id,on_activate=function()return true end}end
 local h=api.register({id='armory_test',name='Epic LUT',pages={{id='armory',name='The Armory',controls=controls,require_confirmation=false}}})
 api.mods[h.id].pages[1].render_layout=view.draw;api.mods[h.id].tabs_top=true
 menu=dofile('vendor/menu/menu.lua').new(api,function(t,size)return #t*size*.5 end);menu.visible=true

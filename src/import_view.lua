@@ -12,12 +12,19 @@ function V.new(info,tables,select_color,core)
         ui.rect(ui.x+ui.w-150,ui.y-24,150,28,{35,62,90})
         ui.bounded(ui.x+ui.w-142,ui.y-16,'Stop Highlight',14,{225,230,235},134)
         ui.hit(ui.x+ui.w-150,ui.y-24,150,28,function()ui.activate('stop_identify')end)
+        local portrait=package.loaded['epic.player_preview.v1']
+        if portrait and portrait.toggle then
+            ui.rect(ui.x+ui.w-308,ui.y-24,150,28,{35,62,90})
+            ui.bounded(ui.x+ui.w-300,ui.y-16,'Player Preview',14,{225,230,235},134)
+            ui.hit(ui.x+ui.w-308,ui.y-24,150,28,portrait.toggle)
+        end
         local state=info();local top=ui.y+ui.h;local gap=18;local lw=math.floor(ui.w*.55);local rx=ui.x+lw+gap;local rw=ui.w-lw-gap
         local white,muted,blue={225,230,235},{155,166,175},{35,62,90}
         local function text(x,y,value)ui.text(x,y,value,14,white)end
+        local guidance={browse='Import a DDS or select one variant from an archive. This does not apply colors to gear.',apply_matching='Match imported resource IDs to worn gear and apply only matching LUTs.',apply_file_armor='Apply the selected imported LUT to all worn Armor LUTs.',apply_file_helmet='Apply the selected imported LUT to all worn Helmet LUTs.',save_palette='Copy the selected imported LUT into the LUT Editor. Gear stays unchanged.',restore='Restore Arrowhead original gear LUTs and refresh the palettes.',restore_imported='Reset editor values to the imported file.',global_undo='Undo the last action, including imports and gear applications.',global_redo='Redo the last undone action.',save_setup='Choose Armor, Helmet, or Both and save a named Armory preset.',preserve_emissives='Keep original game emissive values and shader modes when applying imported colors.'}
         local function button(x,y,w,label,id,enabled)
             w=math.max(0,math.min(w,ui.x+ui.w-x-6));if w<20 then return end
-            ui.rect(x,y,w,28,enabled==false and {35,39,43}or blue);ui.bounded(x+9,y+8,label,15,enabled==false and muted or white,w-18);ui.hit(x,y,w,28,function()if enabled~=false then ui.activate(id)end end)
+            ui.rect(x,y,w,28,enabled==false and {35,39,43}or blue);ui.bounded(x+9,y+8,label,15,enabled==false and muted or white,w-18);ui.hit(x,y,w,28,function()if enabled~=false then ui.activate(id)end end,nil,nil,guidance[id])
         end
         ui.rect(ui.x,ui.y,lw,ui.h,{20,24,28});ui.rect(rx,ui.y,rw,ui.h,{20,24,28})
         local divider={65,76,85}
@@ -147,9 +154,13 @@ function V.new(info,tables,select_color,core)
                             local function select()
                                 self.selected={key=selection_key,data=selected_entry.data,row=selected_row,column=selected_col,label=title..' / '..entry.name,field=({'Base','Detail','Inner','Outer','Curvature','Tint','Camo 1','Camo 2','Camo 3','Camo 4'})[i]}
                                 -- Selecting another table cell keeps the chosen scratch color.
-                                if select_color then select_color(selected_entry,selected_row,selected_col)end
+                                if select_color then select_color(selected_entry,selected_row,selected_col,false,title:lower())end
                             end
-                            ui.hit(sx,cursor,22,16,select,function()select();paint()end)
+                            ui.hit(sx,cursor,22,16,select,function()select();paint()end,function()
+                                self.scratch={rgb[1],rgb[2],rgb[3]}
+                                if core then self.hue=core.rgb_hsv(self.scratch)end
+                                if ui.set then ui.set('scratch_color',string.format('#%02X%02X%02X',rgb[1],rgb[2],rgb[3]))end
+                            end,'Left-click selects. Double-click edits color. Right-click paints Scratch. Middle-click copies.',function()select();ui.activate('quick_color')end)
                         end
                     end
                 end
@@ -163,18 +174,18 @@ function V.new(info,tables,select_color,core)
         if state.loaded then
             local path=(state.loaded.source or 'Imported LUT'):gsub('\\','/')
             local relative=path:match('/Epic LUT/(.*)')or path:match('[^/]+$')or path
-            ui.bounded(rx+12,top-98,'Imported: '..relative,12,muted,rw-24)
+            ui.bounded(rx+12,top-98,'Imported: '..(state.import_description or relative),12,muted,rw-24)
         end
         local y=top-117
         if state.busy then
             local spin=math.floor(state.time*8)%8
             for i=0,7 do local angle=i*math.pi/4;ui.rect(rx+29+math.cos(angle)*11,y+8+math.sin(angle)*11,4,4,i==spin and {244,202,53}or {75,88,100})end
-            ui.text(rx+55,y+5,state.phase..'  ('..state.elapsed..'s)',14,white)
+            ui.text(rx+55,y+5,(state.import_detail and state.import_detail~=''and state.import_detail or state.phase)..(state.waiting and ''or '  '..(state.progress or 0)..'% completed'),14,white)
         else ui.bounded(rx+12,y+5,state.status,14,muted,rw-24)end
         if state.busy then button(rx+12,top-161,(rw-29)/2,'Cancel import','cancel_import');button(rx+17+(rw-29)/2,top-161,(rw-29)/2,'Retry file picker','retry_import')end
         button(rx+12,top-203,rw-24,'Send to LUT Editor','save_palette')
         ui.bounded(rx+12,top-224,'Overwrites the editor table; does not apply to gear.',13,muted,rw-24)
-        local preview_height=math.max(44,math.min(200,ui.h-570))
+        local preview_height=math.max(44,math.min(200,ui.h-((state.palette_count or 0)>1 and 670 or 570)))
         local preview_top=top-246;local preview_bottom=preview_top-preview_height
         self.import_bounds={x=rx+12,y=preview_bottom,w=rw-24,h=preview_height}
         local imported=state.raw and state.raw.tables or state.tables or {}
@@ -197,13 +208,19 @@ function V.new(info,tables,select_color,core)
         if self.import_max>0 then ui.bounded(rx+12,preview_bottom-12,'Scroll for more imported LUTs',10,muted,rw-24)end
         ui.rect(rx+12,preview_bottom-18,rw-24,1,divider)
         local actions=preview_bottom-30
-        text(rx+12,actions,'Apply Imported Palette')
+        text(rx+12,actions,'Apply Imported LUT '..(state.palette_index or 1))
         local apply_width=(rw-30)/2
         local matching=state.raw and state.raw.matching
         if (state.palette_count or 0)>1 then
             button(rx+12,actions-36,rw-24,'Apply Matching LUTs','apply_matching',matching and matching.matched>0 and not state.busy)
             local summary=matching and (matching.total..' imported / '..matching.matched..' matched / '..(matching.unmatched+matching.unidentified+matching.ambiguous)..' unmatched or ambiguous')or 'Resource IDs unavailable - target individual LUTs manually.'
+            if matching and matching.matched==0 then summary='No matches to worn gear. Select an imported LUT below.'end
             ui.bounded(rx+12,actions-55,summary,13,muted,rw-24)
+            ui.choice('palette',rx+12,actions-91,rw-24)
+            button(rx+12,actions-125,apply_width,'Apply LUT '..(state.palette_index or 1)..' to All Armor LUTs','apply_file_armor',state.loaded~=nil and not state.busy)
+            button(rx+18+apply_width,actions-125,apply_width,'Apply LUT '..(state.palette_index or 1)..' to All Helmet LUTs','apply_file_helmet',state.loaded~=nil and not state.busy)
+            actions=actions-70
+
         else
             button(rx+12,actions-36,apply_width,'Apply to All Armor LUTs','apply_file_armor')
             button(rx+18+apply_width,actions-36,apply_width,'Apply to All Helmet LUTs','apply_file_helmet')
@@ -211,10 +228,10 @@ function V.new(info,tables,select_color,core)
         end
         button(rx+12,actions-95,rw-24,'[ '..(state.preserve_emissives and 'x'or ' ')..' ] Preserve Original Emissives','preserve_emissives')
         ui.rect(rx+12,actions-109,rw-24,1,divider)
-        button(rx+12,actions-145,rw-24,'Restore Arrowhead LUT (Original)','restore')
-        button(rx+12,actions-183,rw-24,'Restore Imported LUT (editor)','restore_imported')
-        button(rx+12,actions-221,(rw-29)/2,'Undo Last Action','global_undo');button(rx+17+(rw-29)/2,actions-221,(rw-29)/2,'Redo Last Action','global_redo')
-        button(rx+12,actions-259,rw-24,'Save applied setup','save_setup')
+        button(rx+12,actions-145,(rw-30)/2,'Restore Arrowhead LUT (Original)','restore')
+        button(rx+18+(rw-30)/2,actions-145,(rw-30)/2,'Restore Imported LUT (editor)','restore_imported')
+        button(rx+12,actions-183,(rw-29)/2,'Undo Last Action','global_undo');button(rx+17+(rw-29)/2,actions-183,(rw-29)/2,'Redo Last Action','global_redo')
+        button(rx+12,actions-221,rw-24,'Save applied setup','save_setup')
         ui.text(rx+12,ui.y+14,'RAR requires installed 7-Zip. Match Your Colors should be Off.',13,muted)
     end
     return self

@@ -5,8 +5,9 @@ function P.new(storage)
         if self.api==api and self.handle and api.mods.epic_lut_preferences then return self.handle end
         if self.handle then self.handle.unregister()end
         self.api=api;self.handle=api.register({id='epic_lut_preferences',name='Epic LUT preferences',parent_name='Epic LUT',storage=storage,pages={{id='menu',name='Menu controls',require_confirmation=false,controls={
-            {id='basic_key',type='keybind',label='Basic editor key',default=120,description='F9 opens Basic.'},
-            {id='menu_key',type='keybind',label='Epic LUT menu key',default=121,description='Keyboard shortcut for the standalone Epic LUT editor. F10 is the default.'},
+            {id='basic_key',type='keybind',label='Open Basic Mode',default=120,description='F9 opens Basic.'},
+            {id='menu_key',type='keybind',label='Open Advanced Mode',default=121,description='Keyboard shortcut for the standalone Epic LUT editor. F10 is the default.'},
+            {id='preview_key',type='keybind',label='Toggle Player Preview',default=117,description='F6 by default. Toggles the docked preview in LUT Editor and the pop-out on other pages.'},
             {id='ui_scale',type='slider',label='UI scale (%)',min=70,max=130,step=5,default=100},
             {id='font_size',type='slider',label='Font size',min=10,max=20,step=1,default=12},
             {id='font_bold',type='toggle',label='Bold text',default=true},
@@ -20,6 +21,7 @@ function P.new(storage)
     end
     function self.key()return self.handle and self.handle.get('menu_key')or 121 end
     function self.basic_key()return self.handle and self.handle.get('basic_key')or 120 end
+    function self.preview_key()return self.handle and self.handle.get('preview_key')or 117 end
     function self.scale()return self.handle and self.handle.get('ui_scale')or 100 end
     function self.font_size()return self.handle and self.handle.get('font_size')or 12 end
     function self.font_bold()return not self.handle or self.handle.get('font_bold')~=false end

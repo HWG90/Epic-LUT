@@ -1,6 +1,15 @@
 -- MCM layout/controller. Drawing is isolated from registry and settings storage.
 
 local M={}
+function M.key_name(key)
+    if key==0 then return 'Unassigned'end
+    if key>=112 and key<=135 then return 'F'..(key-111)end
+    if key>=48 and key<=90 then return string.char(key)end
+    if key>=96 and key<=105 then return 'Numpad '..(key-96)end
+    local names={[1]='Left Mouse',[2]='Right Mouse',[4]='Middle Mouse',[5]='Mouse 4',[6]='Mouse 5',[8]='Backspace',[9]='Tab',[13]='Enter',[16]='Shift',[17]='Ctrl',[18]='Alt',[19]='Pause',[20]='Caps Lock',[27]='Escape',[32]='Space',[33]='Page Up',[34]='Page Down',[35]='End',[36]='Home',[37]='Left Arrow',[38]='Up Arrow',[39]='Right Arrow',[40]='Down Arrow',[44]='Print Screen',[45]='Insert',[46]='Delete',[91]='Left Windows',[92]='Right Windows',[93]='Menu',[106]='Numpad *',[107]='Numpad +',[109]='Numpad -',[110]='Numpad .',[111]='Numpad /',[144]='Num Lock',[145]='Scroll Lock',[160]='Left Shift',[161]='Right Shift',[162]='Left Ctrl',[163]='Right Ctrl',[164]='Left Alt',[165]='Right Alt',[186]=';',[187]='=',[188]=',',[189]='-',[190]='.',[191]='/',[192]='`',[219]='[',[220]='\\',[221]=']',[222]="'"}
+    return names[key]or 'Unknown Key'
+end
+
 
 -- Same dropdown + stepper combo for normal settings and custom editor workspaces.
 function M.choice(ui,control,value,x,y,width,change,open)
@@ -10,7 +19,7 @@ function M.choice(ui,control,value,x,y,width,change,open)
     ui.bounded(x+8,y+5,tostring(control.choices[value]),15,{224,230,234},width-88)
     ui.hit(x+width-50,y,24,26,function()if not control.disabled then change(-1)end end)
     ui.hit(x+width-24,y,24,26,function()if not control.disabled then change(1)end end)
-    ui.hit(x,y,width-52,26,function()if not control.disabled then open()end end)
+    ui.hit(x,y,width-52,26,function()if not control.disabled then open()end end,nil,nil,control.description or 'Choose an option. Use the arrows to step through the list.')
 end
 
 -- Whole-glyph viewport: never split UTF-8 or draw outside the allotted width.
@@ -279,6 +288,11 @@ function M.new(api,measure)
     end
 
     function self.key(code,ctrl)
+        if self.visible and self.capture then
+            local mod=active();local c=self.capture;self.capture=false
+            if code~=27 and mod then local ok,err=(mod.handle.edit or mod.handle.set)(c.id,code);self.notice=ok and 'Binding saved'or tostring(err)end
+            return
+        end
         if code==13 and self.outfit_dialog and self.outfit_dialog.phase=='name'and self.outfit_dialog.on_save and self.text_edit then
             local dialog=self.outfit_dialog;local ok,why=pcall(dialog.on_save,self.text_edit.text,dialog.save_kind)
             self.notice=ok and tostring(why or 'Preset saved')or tostring(why)
@@ -599,7 +613,7 @@ function M.new(api,measure)
 
         if self.visible and input.mouse then
 
-            local x,y=input.mouse();if x and y and input.down(1) and not self.mouse_held then
+            local x,y=input.mouse();self.pointer_x,self.pointer_y=x,y;if x and y and input.down(1) and not self.mouse_held then
 
                 local valid=self.finish_color_field()
 
@@ -613,7 +627,11 @@ function M.new(api,measure)
 
                 if valid then self.text_edit=nil end
 
-                for i=#hits,1,-1 do local h=hits[i];if x>=h.x and x<=h.x+h.w and y>=h.y and y<=h.y+h.h then if valid then h.click(x,y);self.redraw_revision=(self.redraw_revision or 0)+1 end;break end end
+                for i=#hits,1,-1 do local h=hits[i];if x>=h.x and x<=h.x+h.w and y>=h.y and y<=h.y+h.h then if valid then local now=os.clock();local key=h.x..':'..h.y..':'..h.w..':'..h.h
+                        local twice=h.double_click and self.last_click_key==key and now-(self.last_click_time or -1)<=.35
+                        h.click(x,y)
+                        if twice then self.last_click_key=nil;h.double_click(x,y)else self.last_click_key=key;self.last_click_time=now end
+                        self.redraw_revision=(self.redraw_revision or 0)+1 end;break end end
 
             end
 
@@ -626,6 +644,16 @@ function M.new(api,measure)
                 end
             end
             self.right_mouse_held=input.down(2)
+            if x and y and input.down(4)and not self.middle_mouse_held and not self.color_picker and not self.dropdown and not self.preview_window then
+                for i=#hits,1,-1 do local target=hits[i]
+                    if x>=target.x and x<=target.x+target.w and y>=target.y and y<=target.y+target.h then
+                        if target.middle_click then target.middle_click(x,y);self.redraw_revision=(self.redraw_revision or 0)+1 end
+                        break
+                    end
+                end
+            end
+            self.middle_mouse_held=input.down(4)
+
             if palette_drag then
 
                 if not self.color_picker or not input.down(1)then palette_drag=nil
@@ -770,7 +798,7 @@ function M.new(api,measure)
 
         end
 
-        local function hit(x,y,rw,rh,fn,right)hits[#hits+1]={x=ox+x*s,y=oy+y*s,w=rw*s,h=rh*s,click=fn,right_click=right}end
+        local function hit(x,y,rw,rh,fn,right,middle,tooltip,double)hits[#hits+1]={x=ox+x*s,y=oy+y*s,w=rw*s,h=rh*s,click=fn,right_click=right,middle_click=middle,tooltip=tooltip,double_click=double}end
 
         local function scrollbar(role,x,y,height,total,visible,offset)
 
@@ -1223,7 +1251,7 @@ function M.new(api,measure)
 
                         else
                             local valid_key=c.type=='keybind' and type(value)=='number' and value==value and value%1==0 and value>=0 and value<=255
-                            local label=c.type=='button' and (c.button_label or c.label or 'Activate') or (valid_key and (value==0 and 'BIND KEY' or 'VK '..tostring(value)) or 'UNAVAILABLE')
+                            local label=c.type=='button' and (c.button_label or c.label or 'Activate') or (valid_key and (M.key_name(value)) or 'UNAVAILABLE')
                             local bw=value_width or 175;local bx=vx+525-bw
                             hit(bx,y-5,bw,29,function()select();change(control,0)end)
                             if c==selected and not c.disabled then rect(bx-1,y-6,bw+2,31,accent)end
@@ -1292,6 +1320,11 @@ function M.new(api,measure)
         rect(0,55,ww,1,{110,88,35})
         bounded(25,32,(self.menu_key_label or 'F10')..' / Esc Close   Tab Focus   Arrows Navigate / Change   Enter Select   Home Default   PgUp / PgDn Sections',14,muted,ww-380)
         bounded(ww-320,36,'Epic LUT / Goose',16,{255,225,120},295)
+        local portrait=package.loaded['epic.player_preview.v1']
+        if portrait then
+            local label=portrait.key_label or 'F6';local key=tonumber(label:match('^VK (%d+)$'));if key then label=M.key_name(key)end
+            bounded(25,12,label..' Player Preview  |  Left-drag pan  /  Right-drag rotate  /  Wheel zoom',12,muted,ww-380)
+        end
         if mod and mod.controls.ui_scale then
             local control=mod.controls.ui_scale;local value=mod.handle.get('ui_scale')or 100
             bounded(ww-320,12,'UI Scale: '..value..'%',14,muted,210)
@@ -1549,9 +1582,14 @@ function M.new(api,measure)
             hits={} -- This confirmation owns mouse input until saved or canceled.
             local first=#commands+1
             rect(px,py,440,190,{20,25,30},.99);rect(px,py+154,440,36,{35,62,90})
-            text(px+14,py+164,dialog.phase=='scope'and 'Save to Armory'or dialog.phase=='confirm'and 'Keep This Preset?'or 'Name This Preset',18,accent)
+            text(px+14,py+164,dialog.title or (dialog.phase=='scope'and 'Save to Armory'or dialog.phase=='confirm'and 'Keep This Preset?'or 'Name This Preset'),18,accent)
             local function cancel()self.outfit_dialog=nil;self.text_edit=nil end
-            if dialog.phase=='scope'then
+            if dialog.phase=='delete'then
+                bounded(px+14,py+116,dialog.preset_name or 'Selected preset',14,white,412)
+                bounded(px+14,py+90,'Remove from Armory? Existing gear stays unchanged.',12,white,412)
+                rect(px+14,py+22,198,30,{90,45,40});bounded(px+22,py+30,'Delete Preset',14,white,180)
+                hit(px+14,py+22,198,30,function()local ok,why=pcall(dialog.on_save);self.notice=tostring(why);if ok then cancel()end end)
+            elseif dialog.phase=='scope'then
                 bounded(px+14,py+116,'What do you want to save?',14,white,412)
                 for i,option in ipairs({{'armor','Armor Only'},{'both','Both'},{'helmet','Helmet Only'}})do
                     local bx=px+14+(i-1)*140;local kind,label=option[1],option[2]
@@ -1566,7 +1604,7 @@ function M.new(api,measure)
                 rect(px+14,py+22,198,30,{35,62,90});bounded(px+22,py+30,'Yes',14,white,180)
                 hit(px+14,py+22,198,30,function()dialog.phase='name';dialog.save_kind='both';self.text_edit={mod=dialog.mod,control=dialog.control,text='',replace=true}end)
             else
-                bounded(px+14,py+130,'Saving: '..(dialog.save_kind=='armor'and 'Armor Only'or dialog.save_kind=='helmet'and 'Helmet Only'or 'Armor + Helmet'),14,accent,412)
+                if not dialog.title then bounded(px+14,py+130,'Saving: '..(dialog.save_kind=='armor'and 'Armor Only'or dialog.save_kind=='helmet'and 'Helmet Only'or 'Armor + Helmet'),14,accent,412)end
                 local editing=self.text_edit and self.text_edit.control==dialog.control
                 rect(px+14,py+89,412,30,{24,39,52})
                 bounded(px+22,py+98,editing and self.text_edit.text..'|'or 'Click to enter a preset name',14,white,396)
@@ -1578,6 +1616,27 @@ function M.new(api,measure)
             hit(px+228,py+22,198,30,cancel)
             for i=first,#commands do commands[i].popup=true;commands[i].layer=400 end
         end
+        if self.pointer_x and self.pointer_y and not self.dropdown and not self.color_picker and not self.text_edit and not self.outfit_dialog then
+            local target
+            for i=#hits,1,-1 do local h=hits[i]
+                if self.pointer_x>=h.x and self.pointer_x<=h.x+h.w and self.pointer_y>=h.y and self.pointer_y<=h.y+h.h then target=h;break end
+            end
+            local key=target and target.tooltip and (target.x..':'..target.y..':'..target.tooltip)
+            if key~=self.tooltip_key then self.tooltip_key=key;self.tooltip_started=elapsed end
+            if key and elapsed-(self.tooltip_started or elapsed)>=.45 then
+                local lines={};local line='';local limit=48
+                for word in target.tooltip:gmatch('%S+')do
+                    if #line+#word+1>limit then lines[#lines+1]=line;line=word else line=line==''and word or line..' '..word end
+                end
+                if line~=''then lines[#lines+1]=line end
+                local width=math.min(360,ww-24);local height=16+#lines*17
+                local x=math.max(12,math.min(ww-width-12,(self.pointer_x-ox)/s+16))
+                local y=math.max(12,math.min(wh-height-12,(self.pointer_y-oy)/s-height-12))
+                local first=#commands+1;rect(x,y,width,height,{16,22,28},.98);rect(x,y+height-2,width,2,accent)
+                for i,line in ipairs(lines)do bounded(x+10,y+height-10-i*17,line,12,white,width-20)end
+                for i=first,#commands do commands[i].popup=true;commands[i].layer=450 end
+            end
+        else self.tooltip_key=nil end
         text_age=visible_text_age
         if console then for _,command in ipairs(console.compose(w,h,self.window_bounds,true))do commands[#commands+1]=command end end
 

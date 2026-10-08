@@ -23,6 +23,10 @@ function A.new(info,preview)
         local outfit=state.raw and state.raw.outfit
         button(top-178,'Apply Preset Armor LUTs','outfit_apply_armor',outfit~=nil and #outfit.armor>0)
         button(top-218,'Apply Preset Helmet LUTs','outfit_apply_helmet',outfit~=nil and #outfit.helmet>0)
+        ui.rect(ui.x+12,top-241,left-24,1,{65,76,85})
+        button(top-278,'Rename Preset','outfit_rename',outfit~=nil)
+        button(top-318,'Delete Preset','outfit_delete',outfit~=nil)
+        if outfit then ui.bounded(ui.x+12,top-348,(#outfit.armor>0 and (#outfit.helmet>0 and 'Armor + Helmet'or 'Armor Only')or 'Helmet Only')..' / '..(#outfit.armor+#outfit.helmet)..' LUTs',12,muted,left-24)end
         ui.bounded(ui.x+12,ui.y+20,state.status or '',12,muted,left-24)
         ui.rect(x-10,ui.y,1,ui.h,{65,76,85})
         ui.bounded(x,top-22,'Palette Preview',18,white,width)

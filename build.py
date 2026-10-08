@@ -13,13 +13,15 @@ from tools.runtime_guard import require_physical_runtime
 require_physical_runtime()
 ROOT = Path(__file__).resolve().parent
 VERSION = (ROOT/'VERSION').read_text(encoding='utf-8').strip()
-DISPLAY_VERSION = VERSION.replace('-alpha',' Alpha').replace('-rc1',' RC1')
+DISPLAY_VERSION = VERSION.replace('-alpha',' Alpha').replace('-rc',' RC')
 parser = argparse.ArgumentParser()
 parser.add_argument('--loader', choices=('bsl','loose'), default='bsl')
 parser.add_argument('--output')
+parser.add_argument('--player-preview',action='store_true',default=True,help='Include Player Preview (R5 default)')
+parser.add_argument('--no-player-preview',dest='player_preview',action='store_false',help='Build an editor-only diagnostic package')
 args = parser.parse_args()
 if args.output is None:
-    args.output='Epic-LUT-'+VERSION.replace('-alpha','-Alpha').replace('-rc1','-RC1')+('-MDL-LLL' if args.loader=='loose' else '')+'.zip'
+    args.output='Epic-LUT-'+VERSION.replace('-alpha','-Alpha').replace('-rc','-RC')+('-LLL' if args.loader=='loose' else '-BSL')+'.zip'
 if Path(args.output).name != args.output or not args.output.endswith('.zip'):
     parser.error('--output must be a ZIP filename within dist')
 
@@ -55,6 +57,13 @@ for name in OWN:
 parts.append('m.native_import=m.windows\n')
 parts.append('return (function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
 model = ''.join(parts)
+if args.player_preview:
+    wrapped=['local editor=(function()\n',model,'\nend)()\nlocal m={}\nlocal PREVIEW_INSPECT_ONLY=false\n']
+    for name,folder in [('bingus_runtime','vendor'),('bingus_memory','vendor'),('avatar','vendor'),('engine','vendor'),('player_model','src'),('player_preview','src'),('player_preview_native','src'),('player_preview_submit','src'),('player_preview_controls','src')]:
+        wrapped.append(f'm.{name}=(function()\n'+source(f'{folder}/{name}.lua')+'\nend)()\n')
+    wrapped.append(source('src/player_preview_candidate.lua'))
+    model=''.join(wrapped)
+
 (OUT/'mod.lua').write_text(model, encoding='utf-8')
 (OUT/'manifest.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','credits':'CowboyBingus native adapters'}, indent=2), encoding='utf-8')
 (OUT/NATIVE_NAME).write_bytes(native)
@@ -73,7 +82,7 @@ envelope = struct.pack('<II',len(startup.encode()),2) + startup.encode()
 archive = write({hash_name(entry):envelope})
 assert read(archive)[hash_name(entry)][1] == envelope
 manager = {'Version':1,'Guid':'2ef4f437-4a43-47ed-b1d0-15505f11c761','Author':'Goose','Name':'Epic LUT '+DISPLAY_VERSION,
-    'Description':'R4 RC1 - alpha release candidate. F10 opens the standalone armor/helmet LUT editor. DDS/ZIP/RAR import, live color editing, presets, floating Quick Scratch and original-game snapshots. Requires Bingus Shared Loader v15+; RAR requires 7-Zip. No Python or MCM setup. Live validation remains pending.',
+    'Description':DISPLAY_VERSION+' - alpha release candidate. F10 opens the standalone armor/helmet LUT editor. DDS/ZIP/RAR import, live color editing, presets, floating Quick Scratch and original-game snapshots. Requires Bingus Shared Loader v15+; RAR requires 7-Zip. No Python or MCM setup. Live validation remains pending.',
     'Options':[{'Name':'Bingus Shared Loader startup','Include':['data']}]}
 with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as package:
     if args.loader=='bsl':
@@ -85,7 +94,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL-LLL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/MDL-LLL.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/MDL-LLL.md'):
         package.write(ROOT/name,name)
-(ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'modules':VENDOR+OWN},indent=2))
+(ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'player_preview':args.player_preview,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)

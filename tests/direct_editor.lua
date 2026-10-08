@@ -183,6 +183,17 @@ assert(bound[3]==armor_object and bound[6]==armor_object and bound[8]==helmet_ob
 activate('save_setup')
 local setup=m.direct_setup.new(m,m.paths.new());local saved=setup.read()
 assert(saved['armor-all']and saved['helmet-all']and saved['0:1:0:0']and saved['0:2:0:0']and saved['0:0:0:0'])
+activate('refresh')
+local selected_entry=assert(quick_info().armor[1]);local original_pixels=ffi.string(selected_entry.data,selected_entry.width*selected_entry.height*16)
+local old_helmet=bound[8]
+quick_select(selected_entry,1,1,false,'armor')
+assert(handle.set('quick_color','#234567'))
+assert(bound[8]==old_helmet,'Right-click paint spilled into Helmet')
+local painted=quick_info().armor[1]
+assert(ffi.string(painted.data+selected_entry.width*4,(selected_entry.height-1)*selected_entry.width*16)==original_pixels:sub(selected_entry.width*16+1),'Right-click paint changed other rows')
+activate('global_undo')
+local undone=quick_info().armor[1]
+assert(ffi.string(undone.data,undone.width*undone.height*16)==original_pixels,'Right-click paint could not be undone')
 assert(editor.on_disable(ctx))
 assert(bound[3]==100 and bound[6]==300 and bound[8]==400)
 -- Simulate another mod instance/launch: only stable local slots and persisted DDS data are used.

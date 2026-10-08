@@ -33,6 +33,21 @@ function O.new(m,folder)
         end
         return result
     end
+    function self.rename(old,new)
+        name(old);name(new);assert(old:lower()~=new:lower(),'Enter a different preset name')
+        self.load(old)
+        local destination=folder..'/outfit-'..new..'.tsv'
+        local existing=io.open(destination,'rb');if existing then existing:close();error('A preset with that name already exists')end
+        assert(os.rename(folder..'/outfit-'..old..'.tsv',destination));return true
+    end
+    function self.delete(label)
+        name(label);self.load(label)
+        -- Keep the DDS payloads and a recoverable manifest; remove only from the active library.
+        local target=folder..'/outfit-'..label..'.tsv'
+        local backup=target..'.deleted';local i=0
+        while true do local f=io.open(backup,'rb');if not f then break end;f:close();i=i+1;backup=target..'.deleted-'..i end
+        assert(os.rename(target,backup));return true
+    end
     return self
 end
 return O

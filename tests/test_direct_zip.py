@@ -36,11 +36,11 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     result=folder/'result.txt'
     completed=run(package,folder/'out',result)
     assert completed.returncode==0,(completed.stdout,completed.stderr,result.read_text())
-    assert result.read_text().splitlines()==['ok','lut000.dds']
-    data=(folder/'out/lut000.dds').read_bytes()
+    assert result.read_text().splitlines()==['ok','lut001.dds']
+    data=(folder/'out/lut001.dds').read_bytes()
     assert struct.unpack_from('<I',data,28)[0]==1 and data[148:]==PIXELS
-    assert (folder/'out/resources.tsv').read_text()=='lut000.dds\t0000000000000001'
-    assert len(list((folder/'out').iterdir()))==2
+    assert (folder/'out/resources.tsv').read_text()=='lut001.dds\t0000000000000001'
+    assert len(list((folder/'out').iterdir()))==3
 
     for index, unsafe in enumerate(('../escape.dds','/absolute.dds','file:stream.dds')):
         with zipfile.ZipFile(package,'w')as archive:archive.writestr(unsafe,data)
@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     with zipfile.ZipFile(package,'w')as archive:archive.writestr('palette.dds',data)
     completed=run(package,folder/'dds',folder/'dds.txt')
     assert completed.returncode==0,completed.stderr
-    assert (folder/'dds/lut000.dds').read_bytes()==data
+    assert (folder/'dds/lut001.dds').read_bytes()==data
 
     # A large texture collection must not consume the LUT extraction budget.
     large_patch=bytearray(PATCH);offset=65*1024*1024
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
             for _ in range(270):member.write(block)
     result=folder/'large.txt';completed=run(package,folder/'large',result)
     assert completed.returncode==0,(completed.stderr,result.read_text())
-    assert (folder/'large/lut000.dds').read_bytes()[148:]==PIXELS
+    assert (folder/'large/lut001.dds').read_bytes()[148:]==PIXELS
 
     # Palette collections are no longer stopped at the previous 32-LUT cap.
     with zipfile.ZipFile(package,'w')as archive:
@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
         archive.writestr('0123456789abcdef.patch_0.gpu_resources',PIXELS)
     result=folder/'mixed.txt';completed=run(package,folder/'mixed',result)
     assert completed.returncode==0,(completed.stderr,result.read_text())
-    assert (folder/'mixed/lut000.dds').read_bytes()[148:]==PIXELS
+    assert (folder/'mixed/lut001.dds').read_bytes()[148:]==PIXELS
     struct.pack_into('<Q',mixed,start+160+16,len(mixed)+100)
     with zipfile.ZipFile(package,'w')as archive:archive.writestr('0123456789abcdef.patch_0',mixed)
     result=folder/'invalid-offset.txt';completed=run(package,folder/'invalid-offset',result)
@@ -102,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
         with zipfile.ZipFile(rar,'w')as archive:archive.writestr('palette.dds',data)
         result=folder/'rar.txt';completed=run(rar,folder/'rar',result)
         assert completed.returncode==0,(completed.stderr,result.read_text())
-        assert (folder/'rar/lut000.dds').read_bytes()==data
+        assert (folder/'rar/lut001.dds').read_bytes()==data
     result=folder/'cancel.txt';Path(str(result)+'.cancel').write_text('cancel')
     completed=run(package,folder/'cancel',result)
     assert result.read_text()=='cancel','Cancellation was not acknowledged'
