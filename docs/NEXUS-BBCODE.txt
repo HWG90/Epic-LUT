@@ -63,6 +63,8 @@ If Match Your Colors is enabled, turn its matching Off before applying. This sta
 
 And a personal thank you to [/size][b][size=6][url=https://github.com/CowboyBingus]CowboyBingus[/url] himself[/size][/b][size=6] for the work and generosity behind this foundation.[/size]
 
+[size=6]Thank you to [b]Shikami[/b] for the [b]Region Indicator[/b] idea.[/size]
+
 [url=https://github.com/HWG90/Epic-LUT][size=6]Source code, technical documentation, and issue reports[/size][/url]
 [i]
 I vibe-coded tf out of this. No shame. If I can never write another line of code again, that day [b]can't come soon enough[/b]. But I also know what I'm doing. And so does Bingus. Vibe-coded =/= Slop. No hubris here. Just decade+ experience programming in C#, Python, and my ass.[/i]

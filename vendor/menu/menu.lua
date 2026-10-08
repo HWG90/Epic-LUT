@@ -64,7 +64,7 @@ function M.rich(value,width,size,measure)
 
         local heading,body=paragraph:match('^(#+)%s+(.+)$');local font=heading and size+3 or size
 
-        body=body or paragraph;body=body:gsub('^%s*[-*]%s+','• ')
+        body=body or paragraph;body=body:gsub('^%s*[-*]%s+','â€¢ ')
 
         local spans,line,used={}, {},0;local strong,emphasis=false,false
 
@@ -417,7 +417,11 @@ function M.new(api,measure)
 
         if code==33 or code==34 then
 
-            self.page=(self.page-1+(code==33 and -1 or 1))%#mod.pages+1;self.row=1;self.scroll=0;return
+            for _=1,#mod.pages do
+                self.page=(self.page-1+(code==33 and -1 or 1))%#mod.pages+1
+                if (mod.pages[self.page].id=='basic')==not not self.basic_only then break end
+            end
+            self.row=1;self.scroll=0;return
 
         end
 
@@ -709,8 +713,8 @@ function M.new(api,measure)
         if not self.visible then self.release_console();hits={};drag=nil;window_drag=nil;window_resize=nil;self.dropdown=nil;self.text_edit=nil;self.color_picker=nil;return {}end
 
         local commands={};hits={};local floating_request;local s=math.min(w/1920,h/1080)*(self.ui_scale or 1)
-        local selected_mod=active()
-        local minimum_w=selected_mod and selected_mod.minimum_width or 1100;local minimum_h=selected_mod and selected_mod.minimum_height or 600
+        local selected_mod,selected_page=active()
+        local minimum_w=selected_page and selected_page.minimum_width or selected_mod and selected_mod.minimum_width or 1100;local minimum_h=selected_page and selected_page.minimum_height or selected_mod and selected_mod.minimum_height or 600
         s=math.min(s,w/minimum_w,h/minimum_h)
         local ww=math.max(minimum_w,math.min(w/s,self.window_width or 1500));local wh=math.max(minimum_h,math.min(h/s,self.window_height or 820))
         local ox,oy=math.max(0,math.min(w-ww*s,self.window_x or (w-ww*s)/2)),math.max(0,math.min(h-wh*s,self.window_y or (h-wh*s)/2))
@@ -732,16 +736,16 @@ function M.new(api,measure)
 
         local function rect(x,y,rw,rh,color,a)commands[#commands+1]={type='rect',x=ox+x*s,y=oy+y*s,w=rw*s,h=rh*s,c=color,a=a or 1}end
 
-        local function text(x,y,value,size,color)
+        local function text(x,y,value,size,color,fitted)
 
             size=size or 20
-            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or math.min(size,10) end
-            commands[#commands+1]={type='text',x=ox+x*s,y=oy+y*s,text=tostring(value),size=size*s,c=color or white,a=1}
+            if self.compact_fonts and not fitted then size=self.font_size or 12 end
+            commands[#commands+1]={type='text',x=ox+x*s,y=oy+y*s,text=tostring(value),size=size*s,c=color or white,a=1,bold=self.font_bold}
 
         end
 
         local function bounded(x,y,value,size,color,width)
-            if self.compact_fonts then size=size>=24 and 14 or size>=18 and 11 or math.min(size,10) end
+            if self.compact_fonts then size=self.font_size or 12 end
 
             local key=tostring(value)..'|'..x..'|'..y..'|'..width
 
@@ -755,7 +759,7 @@ function M.new(api,measure)
             if total>width*s then size=math.max(8, size*width*s/total)end
             local result=M.flow(value,width*s,size*s,elapsed-text_age[key],measure)
 
-            text(x,y,result,size,color);commands[#commands].full_text=tostring(value);commands[#commands].text_width=width*s
+            text(x,y,result,size,color,true);commands[#commands].full_text=tostring(value);commands[#commands].text_width=width*s
 
         end
 
@@ -797,14 +801,18 @@ function M.new(api,measure)
 
         hit(ww-55,wh-45,38,30,function()self.visible=false;self.capture=false;self.dropdown=nil;self.text_edit=nil;self.color_picker=nil end)
 
+        if self.warning then bounded(25,wh-155,self.warning,14,accent,ww-50)end
         if tabbed then
-            local width=(ww-50)/#mod.pages
+            local count=0;for _,entry in ipairs(mod.pages)do if (entry.id=='basic')==not not self.basic_only then count=count+1 end end
+            local width=(ww-50)/math.max(1,count);local position=0
             for index,entry in ipairs(mod.pages)do
+                if (entry.id=='basic')==not not self.basic_only then
                 local target_page=index
-                local selected=index==self.page;local x=25+(index-1)*width
+                local selected=index==self.page;local x=25+position*width;position=position+1
                 rect(x,wh-120,width-6,38,selected and {49,82,115}or {35,62,90})
                 bounded(x+10,wh-108,entry.name:gsub('^%d+%.%s*',''),18,white,width-25)
                 hit(x,wh-120,width-6,38,function()self.page=target_page;self.row=1;self.scroll=0;self.dropdown=nil;self.focus='settings';manual_scroll=false end)
+                end
             end
         else
         text(25,wh-105,'MODS',18,muted)

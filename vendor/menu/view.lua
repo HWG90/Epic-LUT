@@ -23,6 +23,7 @@ function M.new(sr,preview_only,diagnostic_log)
         return width
     end
     local function destroy_item(item)
+        if item.bold_id then pcall(G.destroy_text,item.gui or gui,item.bold_id)end
         pcall(G['destroy_'..item.type],item.gui or gui,item.id);if item.extra_id then pcall(G.destroy_triangle,item.gui or gui,item.extra_id)end
     end
     function self.clear()
@@ -60,7 +61,7 @@ function M.new(sr,preview_only,diagnostic_log)
         for index,c in ipairs(commands)do
             -- Sidebar command counts must not change unrelated content depth.
             local z=(c.layer or 100)+(c.type=='text' and 1 or 0)
-            signatures[index]=table.concat({c.type,c.text or '',c.x,c.y,c.w or 0,c.h or 0,c.size or 0,c.a,c.c[1],c.c[2],c.c[3],z,c.font_resource or '',c.font_material or '',c.preview_material or '',c.preview_uv and table.concat(c.preview_uv,',') or '',c.preview_role or ''},'|')
+            signatures[index]=table.concat({c.type,c.text or '',c.x,c.y,c.w or 0,c.h or 0,c.size or 0,c.a,c.c[1],c.c[2],c.c[3],z,c.font_resource or '',c.font_material or '',c.preview_material or '',c.preview_uv and table.concat(c.preview_uv,',') or '',c.preview_role or '',tostring(c.bold)},'|')
         end
         -- Destroy all stale IDs before allocations: engines may reuse IDs immediately.
         for index,old in ipairs(old_ids)do
@@ -94,7 +95,7 @@ function M.new(sr,preview_only,diagnostic_log)
             if old and old.signature==signature then
                 ids[#ids+1]=old
             else
-            local color=sr.Color(math.floor(c.a*255+.5),c.c[1],c.c[2],c.c[3]);local value;local primitive_type=c.type;local extra_id
+            local color=sr.Color(math.floor(c.a*255+.5),c.c[1],c.c[2],c.c[3]);local value;local primitive_type=c.type;local extra_id;local bold_id
             if c.type=='rect' and c.preview_material and type(G.triangle)=='function' and sr.Application.can_get('material',c.preview_material) then
                 local handle=assert(G.material(target_gui,c.preview_material),'Preview material unavailable')
                 sr.Material.set_scalar(handle,'scissor_mode',0);sr.Material.set_scalar(handle,'threshold_fade',0)
@@ -111,9 +112,10 @@ function M.new(sr,preview_only,diagnostic_log)
                 local font,material='core/performance_hud/debug','core/performance_hud/debug'
                 if c.font_resource then font,material=c.font_resource,c.font_material end
                 value=G.text(gui,c.text,font,c.size,material,sr.Vector3(c.x,c.y,z),color)
+                if c.bold then bold_id=G.text(gui,c.text,font,c.size,material,sr.Vector3(c.x+.65,c.y,z),color)end
             end
             if report_now and c.type=='text' and not c.diagnostic_console then report[#report]=report[#report]..' allocation='..tostring(value)end
-            if value then ids[#ids+1]={type=primitive_type,id=value,extra_id=extra_id,signature=signature,gui=target_gui}else ids[#ids+1]={type=c.type,id=nil,signature=nil}end
+            if value then ids[#ids+1]={type=primitive_type,id=value,extra_id=extra_id,bold_id=bold_id,signature=signature,gui=target_gui}else ids[#ids+1]={type=c.type,id=nil,signature=nil}end
             end
         end
         if report_now then

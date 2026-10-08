@@ -7,7 +7,7 @@ local state={loaded={width=23,height=8,data=a},armor={{name='Armor LUT 1',width=
 local picked
 local view=dofile('src/import_view.lua').new(function()return state end,dofile('src/table_groups.lua'),function(entry,row,col)picked={entry=entry,row=row,col=col}end,core)
 local controls={}
-for _,id in ipairs({'palette','lut'})do controls[#controls+1]={id=id,type='choice',label=id,choices={'LUT 1','LUT 2'},default=1}end
+for _,id in ipairs({'palette','lut','basic_armor_lut','basic_helmet_lut'})do controls[#controls+1]={id=id,type='choice',label=id,choices={'LUT 1','LUT 2'},default=1}end
 for _,id in ipairs({'target_armor','target_helmet'})do controls[#controls+1]={id=id,type='toggle',label=id,default=true}end
 controls[#controls+1]={id='ui_scale',type='slider',label='UI scale (%)',min=70,max=130,step=5,default=100}
 controls[#controls+1]={id='quick_color',type='color',label='Quick Scratch',default='#FFFFFF'}
@@ -36,7 +36,8 @@ assert(advanced_complete,'Advanced expansion stopped rendering the panel')
 view.advanced=false
 state.palette_count=1
 local single=menu.compose(1920,1080)
-for _,c in ipairs(single)do assert(c.full_text~='LUT 1','Single imported LUT still shows redundant selector')end
+local selectors=0;for _,c in ipairs(single)do if c.full_text=='LUT 1'then selectors=selectors+1 end end
+assert(selectors==2,'Single imported LUT should show only Armor and Helmet selectors')
 state.palette_count=2
 -- Floating scratch opens independently, displays ten empty slots and closes cleanly.
 view.scratch_open=true

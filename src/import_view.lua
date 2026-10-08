@@ -7,6 +7,9 @@ function V.new(info,tables,select_color,core)
         if b and x>=b.x and x<=b.x+b.w and y>=b.y and y<=b.y+b.h then self.scroll=math.max(0,math.min(self.maximum or 0,self.scroll-delta/120*60));return true end
     end
     function self.draw(ui)
+        ui.rect(ui.x+ui.w-150,ui.y-24,150,28,{35,62,90})
+        ui.bounded(ui.x+ui.w-142,ui.y-16,'Stop Highlight',14,{225,230,235},134)
+        ui.hit(ui.x+ui.w-150,ui.y-24,150,28,function()ui.activate('stop_identify')end)
         local state=info();if self.show_all and state.raw then state.tables=state.raw.tables;state.armor=state.raw.armor;state.helmet=state.raw.helmet end;local top=ui.y+ui.h;local gap=18;local lw=math.floor(ui.w*.55);local rx=ui.x+lw+gap;local rw=ui.w-lw-gap
         local white,muted,blue={225,230,235},{155,166,175},{35,62,90}
         local function text(x,y,value)ui.text(x,y,value,14,white)end
@@ -17,7 +20,7 @@ function V.new(info,tables,select_color,core)
         ui.rect(ui.x,ui.y,lw,ui.h,{20,24,28});ui.rect(rx,ui.y,rw,ui.h,{20,24,28})
         ui.rect(ui.x,top-30,lw,30,blue);ui.rect(rx,top-30,rw,30,blue)
         text(ui.x+12,top-20,'LUTs and colors');text(rx+12,top-20,'Import and apply')
-        text(ui.x+12,top-57,'Source: the LUT from your chosen file.')
+        button(ui.x+12,top-77,lw-24,'Load Current Armor & Helmet','populate_worn')
         local offset=75
         if (state.palette_count or 0)>1 then
             text(ui.x+12,top-83,'Imported LUT - choose a table from this file')
@@ -31,8 +34,7 @@ function V.new(info,tables,select_color,core)
         ui.hit(ui.x+12,ay,lw-24,26,function()self.advanced=not self.advanced;self.scroll=0 end)
         if self.advanced then
             text(ui.x+12,ay-24,'Live LUT #: a table used by your currently worn gear.')
-            ui.choice('lut',ui.x+12,ay-61,lw-24)
-            button(ui.x+12,ay-99,lw-24,'Refresh live LUTs','refresh')
+            button(ui.x+12,ay-61,lw-24,'Refresh live LUTs','refresh')
             ui.bounded(ui.x+12,ay-123,'Armor / Helmet checkboxes apply to all their LUTs, regardless of this selection.',13,muted,lw-24)
         end
         local cliptop,clipbottom=ay-(self.advanced and 145 or 20),ui.y+14;local cursor=cliptop+self.scroll
@@ -94,11 +96,12 @@ function V.new(info,tables,select_color,core)
             cursor=cursor-27
             if visible(cursor,23)then ui.rect(ui.x+10,cursor,338,23,blue);text(ui.x+17,cursor+6,title)end
             if #entries==0 then cursor=cursor-21;if visible(cursor,18)then ui.text(ui.x+17,cursor+4,'No palette applied to this target.',13,muted)end end
-            for _,entry in ipairs(entries)do
+            for number,entry in ipairs(entries)do
                 local selection_key=title..'/'..tostring(entry.index or entry.ids and entry.ids[1]or entry.source or entry.name)
                 cursor=cursor-22;if visible(cursor,18)then
                     text(ui.x+17,cursor+4,entry.name)
-                    ui.hit(ui.x+12,cursor,336,18,function()
+                    if number==1 and title~='Imported tables' then ui.choice('basic_'..title:lower()..'_lut',ui.x+210,cursor-2,138)end
+                    ui.hit(ui.x+12,cursor,190,18,function()
                         local row=math.min(entry.height,self.selected and self.selected.row or 1)
                         local column=self.selected and self.selected.column or 1
                         if select_color then select_color(entry,row,column)end
@@ -110,7 +113,13 @@ function V.new(info,tables,select_color,core)
                 for row=1,entry.height do
                     cursor=cursor-18
                     if visible(cursor,17)then
-                        ui.text(ui.x+23,cursor+5,'Row '..row,13,muted)
+                        local pulse=.5+.5*math.sin((state.time or 0)*3)
+                        ui.text(ui.x+23,cursor+5,'Row '..row,13,{math.floor(175+69*pulse),math.floor(180+22*pulse),math.floor(140-87*pulse)})
+                        local selected_row=row;local selected_entry=entry
+                        ui.hit(ui.x+12,cursor,72,17,function()
+                            if select_color then select_color(selected_entry,selected_row,1,true,title:lower())end
+                            ui.activate('identify_region')
+                        end)
                         for i,col in ipairs(cols)do
                             local at=((row-1)*entry.width+col-1)*4;local rgb={}
                             for ch=0,2 do rgb[#rgb+1]=math.floor(math.max(0,math.min(1,entry.data[at+ch]))*255+.5)end

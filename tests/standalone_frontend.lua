@@ -32,6 +32,19 @@ f.menu.page=2;focused=false;keys[121]=true;f.tick(.1);assert(f.menu.visible and 
 focused=true;f.tick(.1);assert(f.menu.visible,'Focus return replayed F10 and closed the menu')
 keys[121]=false;f.tick(.1);keys[121]=true;f.tick(.1);assert(not f.menu.visible and not capture.active)
 keys[121]=false;f.tick(.1);keys[121]=true;f.tick(.1);assert(f.menu.visible and f.menu.page==2,'Reopening forgot the last tab')
+f.default_mod_id='test_editor'
+local basic_page={id='basic',name='Basic',controls={},actions={},pending={},require_confirmation=false,render_layout=function()end}
+api.mods.test_editor.pages[#api.mods.test_editor.pages+1]=basic_page
+keys[121]=false;f.tick(.1);keys[120]=true;f.tick(.1)
+assert(f.menu.visible and f.menu.page==3 and f.basic_mode,'F9 did not open Basic')
+assert(f.menu.basic_only,'Basic navigation was not isolated')
+f.menu.key(34,false);assert(f.menu.page==3,'Basic reached full editor through page navigation')
+f.tick(.1);assert(f.menu.visible,'Held F9 closed Basic')
+keys[120]=false;f.tick(.1);keys[121]=true;f.tick(.1)
+assert(f.menu.visible and f.menu.page==1 and not f.basic_mode,'F10 did not switch back to full editor')
+assert(not f.menu.basic_only,'Full menu retained Basic navigation')
+for _,c in ipairs(f.menu.compose(1920,1080))do assert(c.full_text~='Basic','Basic tab leaked into F10 menu')end
+keys[121]=false;f.tick(.1)
 pending=true;assert(not f.close(),'Cleanup discarded a pending cursor restoration')
 pending=false;assert(f.close());assert(package.loaded['dbf.epic_lut.frontend.v1']==nil)
 _G.DBFMCM=prior

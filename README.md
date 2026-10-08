@@ -23,6 +23,10 @@ For **MDL / Live Lua Loader**, use the separate `Epic-LUT-R4-RC1-MDL-LLL.zip` as
 - **F10** opens the standalone editor. No MCM integration or separate binding adapter is required.
 - Turn Match Your Colors matching **Off** before editing the same gear.
 
+## Basic editor (test candidate)
+
+F9 opens a compact Basic tab; F10 opens the full editor. Basic imports DDS/ZIP/RAR, edits only first-column RGB through a standard picker, saves/loads full palette presets, and exports DDS. Armor/Helmet checkboxes control live updates; alpha and other columns remain unchanged by color edits. Rows are labeled Region 1, Region 2, etc., because their anatomical meaning varies by equipment. Use the matching F8-manager LLL candidate to avoid a shortcut conflict. This addition has offline coverage but has not been deployed or live-verified.
+
 ## Import, edit, apply
 
 1. **Choose file** on Import / Apply. Open DDS, ZIP or RAR; import refreshes live LUTs automatically.
@@ -99,3 +103,12 @@ Native adapters and foundational LUT research: [CowboyBingus / Match Your Colors
 [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor) inspired the semantic controls and layout. Epic LUT's editor implementation is independently authored.
 
 Made by **Goose**. Thank you to everyone testing this extremely alpha paint job.
+
+Thank you to **Shikami** for the **Region Indicator** idea.
+# Font configuration
+
+In Save / history, **Check for Updates** checks the latest public GitHub release. **Open Download Page** opens it in your browser. Automatic checks are opt-in (`auto_updates=true` in `epic_lut_preferences.ini`), once per launch. The request sends no game data or settings; it uses GitHub's public API without an account or token. Checks run outside the game thread, time out, and never install anything.
+
+Text defaults to 12pt bold. In `%LOCALAPPDATA%/Epic LUT/settings/epic_lut_preferences.ini`, set `font_size=12` (10–20) and `font_bold=true` or `false`. Edit while the game is closed, then restart. UI scale multiplies the configured size; long button labels still fit or scroll.
+
+Basic (F9) is separate from the full editor (F10). Armor and Helmet have independent LUT selectors and color regions. Basic color edits apply live; Copy Helmet, Copy Armor and Copy Helmet to All transfer palettes. Click a region or row label to flash it magenta for four seconds; Stop Highlight restores it immediately. Restore Original also refreshes displayed colors. Match Your Colors detection displays a compatibility warning. These additions pass offline checks; current candidates still require live validation.

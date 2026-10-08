@@ -211,7 +211,9 @@ function E.new(m,document,note,save,presets,live_document)
                 if not ok then note(tostring(why))end
             end)
         end end
+        local can_identify=self.api and self.handle and self.api.mods[self.handle.id].controls.identify_region
         if ui.choice then ui.choice('edit_row',right+8,top-57,rightw-16)end
+        if can_identify then button(ui.x+ui.w-150,ui.y-24,150,'Stop Highlight','stop_identify')end
         button(right+8,top-86,(rightw-21)/2,h.get('group_rows')and 'Group by rows: ON'or 'Selected row only','group_rows')
         button(right+13+(rightw-21)/2,top-86,(rightw-21)/2,h.get('unlock')and 'Advanced: ON'or 'Unlock advanced edits','unlock')
         local clip_top,clip_bottom=top-96,ui.y+12
@@ -230,11 +232,15 @@ function E.new(m,document,note,save,presets,live_document)
             local selected_row=r;cursor=cursor-25
             if visible(cursor,23)then
                 ui.rect(right+8,cursor,rightw-20,23,r==row and {49,82,115}or blue)
-                ui.text(right+13,cursor+6,(self.open_row==r and 'v 'or '> ')..'Row '..r,14,white)
-                ui.hit(right+8,cursor,rightw-20,23,function()
+                local pulse=.5+.5*math.sin(os.clock()*3)
+                ui.text(right+13,cursor+6,(self.open_row==r and 'v 'or '> ')..'Row '..r,14,can_identify and {math.floor(175+69*pulse),math.floor(180+22*pulse),math.floor(140-87*pulse)}or white)
+                ui.hit(right+8,cursor,can_identify and 24 or rightw-20,23,function()
                     self.open_row=self.open_row==selected_row and nil or selected_row
                     assert(h.set('edit_row',selected_row));self.value_scroll=0;self.sync()
                 end)
+                if can_identify then ui.hit(right+32,cursor,rightw-44,23,function()
+                    assert(h.set('edit_row',selected_row));self.sync();ui.activate('identify_region')
+                end)end
             end
             if self.open_row==r then
                 for c=1,d.width do

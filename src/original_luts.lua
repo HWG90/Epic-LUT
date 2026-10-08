@@ -2,7 +2,7 @@
 -- No identity guesses, zero-value guesses, GPU probing or archive decoding on the game thread.
 local O={}
 function O.new(m,paths,native,targets)
-    local self={snapshots={},loaded=false,status='Original LUT snapshots not requested'}
+    local self={snapshots={},loaded=false,status='Original LUT snapshots not requested',attempted={}}
     local folder=paths.originals or paths.files
     local function exists(path)local f=io.open(path,'rb');if not f then return nil end;local s=f:read(4096);f:close();return s end
     local function begin_scan()
@@ -29,6 +29,7 @@ function O.new(m,paths,native,targets)
                 coroutine.yield()
             end
             self.snapshots=snapshots;self.loaded=true;self.status='Original game LUT snapshots ready: 100%'
+            if targets then for object in pairs(targets()or {})do self.attempted[object]=true end end
         end)
     end
     local function start()
@@ -115,9 +116,10 @@ function O.new(m,paths,native,targets)
     end
     function self.get(object)
         if not self.loaded then self.scan()
-        elseif not self.snapshots[object] and m.original_snapshot_script and not self.job and not self.worker and os.time()>=(self.next_scan or 0)then self.next_scan=os.time()+5;self.waiting_match=true end
+        elseif not self.snapshots[object] and not self.attempted[object] and m.original_snapshot_script and not self.job and not self.worker then self.attempted[object]=true;self.waiting_match=true end
         return self.snapshots[object]
     end
+    function self.retry()self.attempted={};if not self.worker and not self.job then self.waiting_match=true end end
     function self.close()cancel_worker()end
     return self
 end

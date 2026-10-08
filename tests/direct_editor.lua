@@ -10,7 +10,7 @@ local memory={verify_build=function()return true end,address=function()return 1 
 local test_root=assert(os.getenv('EPIC_LUT_TEST_ROOT'))
 os.remove(test_root..'/tests/tmp/direct-state/direct-applied.tsv')
 local quick_select
-local m={ui_core=core,import_view={new=function(info,tables,select)quick_select=select;return {draw=function()end}end},dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
+local m={windows=dofile('src/windows.lua'),ui_core=core,import_view={new=function(info,tables,select)quick_select=select;return {draw=function()end}end},dds=dofile('src/dds.lua'),provider_menu={disable_matching=function()return true,false end},
     direct_setup=dofile('src/direct_setup.lua'),native_import=dofile('src/windows.lua'),
     palette=dofile('src/palette.lua'),semantics=dofile('src/semantics.lua'),lut_editor=dofile('src/lut_editor.lua'),
     paths={new=function()return {files=test_root..'/tests/tmp/files',cache=test_root..'/tests/tmp/cache',settings=test_root..'/tests/tmp/direct-state',presets=test_root..'/tests/tmp/presets',storage=store}end},
@@ -33,6 +33,26 @@ local ctx={log=function()end,on_cleanup=function()end}
 editor.on_enable(ctx);editor.on_update(ctx,0)
 local handle=api.mods.epic_direct_lut.handle
 local function activate(key)local ok,value=handle.activate(key);assert(ok,value);return value end
+-- Stock equipped colors work before any import, without writing bindings.
+editor.on_disable(ctx)
+local stock=ffi.new('float[?]',23*8*4);stock[0]=.25
+m.original_luts={new=function()return {loaded=true,status='Ready',start=function()end,tick=function()end,close=function()end,get=function()return {data=stock,width=23,height=8}end}end}
+local stock_editor=assert(loadstring('local m=...\n'..source))(m);stock_editor.on_enable(ctx);stock_editor.on_update(ctx,0)
+handle=api.mods.epic_direct_lut.handle
+local armor_before,helmet_before=handle.get('target_armor'),handle.get('target_helmet')
+activate('populate_worn');assert(handle.get('target_armor')==armor_before and handle.get('target_helmet')==helmet_before,'Loading worn colors changed target choices')
+assert(bound[3]==100,'Population wrote game bindings')
+assert(handle.get('cell_r')==.25,'Stock game pixels did not populate editor')
+local old_object=bound[3]
+activate('identify_region');assert(bound[3]~=old_object and gpu_data[0]==1 and gpu_data[1]==0 and gpu_data[2]==1,'Region highlight did not apply magenta')
+assert(stock[0]==.25 and handle.get('cell_r')==.25,'Highlight modified editor/source pixels')
+local highlight_object=bound[3];local highlighted_creates=creates
+stock_editor.on_update(ctx,.26);assert(bound[3]==old_object,'Flash off phase did not restore appearance')
+stock_editor.on_update(ctx,.26);assert(bound[3]==highlight_object and creates==highlighted_creates,'Flash allocated another texture or failed to alternate')
+stock_editor.on_update(ctx,4.1);assert(bound[3]==old_object,'Timed highlight failed to restore exact original binding')
+stock_editor.on_disable(ctx);m.original_luts=nil
+creates=0;package.loaded['epic.direct_lut.retained.v1']=nil
+editor=assert(loadstring('local m=...\n'..source))(m);editor.on_enable(ctx);editor.on_update(ctx,0);handle=api.mods.epic_direct_lut.handle
 assert(activate('apply'):find('Load a DDS first',1,true))
 local data=ffi.new('float[?]',23*8*4);for i=0,23*8*4-1 do data[i]=(i-100)/9 end
 m.dds.write('tests/tmp/files/palette.dds',data,23,8)
@@ -44,6 +64,14 @@ assert(creates==before_populate and bound[3]==200,'Populate editor wrote to game
 assert(#api.mods.epic_direct_lut.controls.edit_row.choices==8,'Applied LUT did not populate editor rows')
 activate('restore');activate('save_palette');activate('refresh')
 assert(bound[3]==100 and bound[8]==400,'Saving an import to the editor applied it to gear')
+assert(handle.set('basic_preset_name','basic-roundtrip'));activate('basic_save')
+local preset_index
+for index,name in ipairs(api.mods.epic_direct_lut.controls.basic_preset.choices)do if name=='basic-roundtrip'then preset_index=index end end
+assert(preset_index,'Basic palette preset did not appear')
+assert(handle.set('cell_color','#FF0000'));assert(handle.set('basic_preset',preset_index))
+assert(handle.get('edit_row')==1,'Basic preset changed editor row unexpectedly')
+assert(handle.set('edit_column',1));assert(handle.set('color_field',1));activate('save_palette')
+
 local quick_path=test_root..'/tests/tmp/files/palette.dds'
 quick_select({width=23,height=8,data=data,source=quick_path,name='Table 1'},3,6)
 local before_quick=creates;assert(handle.set('target_armor',false));assert(handle.set('target_helmet',false))
@@ -116,7 +144,7 @@ assert(handle.set('save_name','shared-palette'));activate('save_dds')
 local shared=m.dds.read('tests/tmp/files/shared-palette.dds');assert(shared[0]==.25,'Shared preset did not retain full LUT data')
 activate('refresh');assert(bound[3]==armor_object and bound[8]==helmet_object,'Refresh removed applied LUTs')
 assert(handle.set('scope',1));assert(handle.set('lut',2));activate('apply')
-assert(bound[3]==armor_object and bound[6]==helmet_object and bound[8]==helmet_object,'Selecting another LUT removed the first')
+assert(bound[3]==armor_object and bound[6]==armor_object and bound[8]==helmet_object,'Switching selected Armor LUT failed to load its palette or changed unrelated targets')
 activate('save_setup')
 local setup=m.direct_setup.new(m,m.paths.new());local saved=setup.read()
 assert(saved['armor-all']and saved['helmet-all']and saved['0:1:0:0']and saved['0:2:0:0']and saved['0:0:0:0'])
@@ -125,7 +153,7 @@ assert(bound[3]==100 and bound[6]==300 and bound[8]==400)
 -- Simulate another mod instance/launch: only stable local slots and persisted DDS data are used.
 local restarted=assert(loadstring('local m=...\n'..source))(m);restarted.on_enable(ctx)
 for i=1,20 do restarted.on_update(ctx,.1)end
-assert(bound[3]==armor_object and bound[6]==helmet_object and bound[8]==helmet_object,'Saved multi-target setup did not resume')
+assert(bound[3]==armor_object and bound[6]==armor_object and bound[8]==helmet_object,'Saved multi-target setup did not resume')
 local restart_handle=api.mods.epic_direct_lut.handle
 assert(restart_handle.activate('restore'));assert(bound[3]==100 and bound[6]==300 and bound[8]==400)
 assert(not next(setup.read()),'Restore Original left automatic saved application enabled')
