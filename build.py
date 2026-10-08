@@ -94,7 +94,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL-LLL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/MDL-LLL.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/MDL-LLL.md'):
         package.write(ROOT/name,name)
 (ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'player_preview':args.player_preview,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)

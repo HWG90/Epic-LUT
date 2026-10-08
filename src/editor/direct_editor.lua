@@ -788,7 +788,7 @@ local function load_editor_target(kind)
     if palette_editor then
         palette_editor.sync()
     end
-    return message('Editor populated from ' .. loaded.source .. '. Edits affect this LUT only.')
+    return message('Editor populated from ' .. edit.loaded.source .. '. Edits affect this LUT only.')
 end
 local function apply_editor_target(kind, all)
     assert(edit.loaded, 'Load current colors or send an imported LUT to the editor first')

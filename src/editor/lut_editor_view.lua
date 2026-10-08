@@ -21,6 +21,9 @@ function V.new(deps)
         local rightw = ui.w - left - 12
         local top = ui.y + ui.h
         local bottomh = math.floor(ui.h * 0.43)
+        if self.more_options then
+            bottomh = math.max(bottomh, math.min(305, math.floor(ui.h * 0.65)))
+        end
         local gridbottom = ui.y + bottomh + 12
         local function panel(x, y, w, height, title)
             ui.rect(x, y, w, height, dark)
@@ -440,9 +443,9 @@ function V.new(deps)
         local optionw = left * 0.4 - 20
         local gear = self.api and self.api.mods[self.handle.id].controls.editor_load_armor
         if gear then
-            step = math.min(30, (bottomh - 65) / (self.more_options and 7 or 4))
+            step = math.min(30, (bottomh - 65) / (self.more_options and 8 or 5))
             ui.rect(ui.x + 10, optionsy - step * 1.5, optionw, 1, { 65, 76, 85 })
-            ui.rect(ui.x + 10, optionsy - step * 3.5, optionw, 1, { 65, 76, 85 })
+            ui.rect(ui.x + 10, optionsy - step * 4.5, optionw, 1, { 65, 76, 85 })
             button(ui.x + 10, optionsy, (optionw - 5) / 2, 'Import file', 'browse')
             button(ui.x + 15 + (optionw - 5) / 2, optionsy, (optionw - 5) / 2, 'Send to LUT Editor', 'save_palette')
             ui.choice('palette', ui.x + 10, optionsy - step, optionw * 0.6)
@@ -463,31 +466,38 @@ function V.new(deps)
                     .. h.get('basic_' .. self.gear .. '_lut'),
                 'editor_apply_' .. self.gear
             )
-            button(ui.x + 10, optionsy - step * 3, (optionw - 5) / 2, 'Undo', 'undo')
-            button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 3, (optionw - 5) / 2, 'Redo', 'redo')
-            ui.rect(ui.x + 10, optionsy - step * 4, optionw, 26, { 24, 39, 52 })
+            button(
+                ui.x + 10,
+                optionsy - step * 3,
+                optionw,
+                '[ ' .. (h.get('preserve_emissives') and 'x' or ' ') .. ' ] Preserve Original Emissives',
+                'preserve_emissives'
+            )
+            button(ui.x + 10, optionsy - step * 4, (optionw - 5) / 2, 'Undo', 'undo')
+            button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 4, (optionw - 5) / 2, 'Redo', 'redo')
+            ui.rect(ui.x + 10, optionsy - step * 5, optionw, 26, { 24, 39, 52 })
             ui.bounded(
                 ui.x + 16,
-                optionsy - step * 4 + 5,
+                optionsy - step * 5 + 5,
                 (self.more_options and 'v ' or '> ') .. 'More Options',
                 14,
                 white,
                 optionw - 12
             )
-            ui.hit(ui.x + 10, optionsy - step * 4, optionw, 26, function()
+            ui.hit(ui.x + 10, optionsy - step * 5, optionw, 26, function()
                 self.more_options = not self.more_options
             end)
             if self.more_options then
-                button(ui.x + 10, optionsy - step * 5, (optionw - 5) / 2, 'All Armor LUTs', 'editor_all_armor')
+                button(ui.x + 10, optionsy - step * 6, (optionw - 5) / 2, 'All Armor LUTs', 'editor_all_armor')
                 button(
                     ui.x + 15 + (optionw - 5) / 2,
-                    optionsy - step * 5,
+                    optionsy - step * 6,
                     (optionw - 5) / 2,
                     'All Helmet LUTs',
                     'editor_all_helmet'
                 )
-                button(ui.x + 10, optionsy - step * 6, optionw, 'Restore Arrowhead LUT (Original)', 'restore')
-                button(ui.x + 10, optionsy - step * 7, optionw, 'Save applied setup', 'save_setup')
+                button(ui.x + 10, optionsy - step * 7, optionw, 'Restore Arrowhead LUT (Original)', 'restore')
+                button(ui.x + 10, optionsy - step * 8, optionw, 'Save applied setup', 'save_setup')
             end
         else
             button(ui.x + 10, optionsy, (optionw - 5) / 2, 'Import file', 'browse')

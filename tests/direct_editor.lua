@@ -207,7 +207,10 @@ assert(
 )
 assert(bound[3] == 100, 'Population wrote game bindings')
 assert(handle.get('cell_r') == 0.25, 'Stock game pixels did not populate editor')
-activate('editor_load_armor')
+assert(
+    activate('editor_load_armor'):find('Editor populated from Armor LUT', 1, true),
+    'Worn LUT load returned an error after populating'
+)
 assert(
     handle.get('cell_r') == 0.25 and bound[3] == 100,
     'Editor Populate failed to load worn Armor before any custom application'

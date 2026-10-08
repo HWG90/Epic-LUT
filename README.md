@@ -1,19 +1,19 @@
-# Epic LUT R5
+# Epic LUT R5.1
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5 brings live character preview, named gear presets and fast per-LUT editing into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.1 brings live character preview, named gear presets and fast per-LUT editing into one package.
 
-**Still extremely alpha and work in progress.** [Download R5](https://github.com/HWG90/Epic-LUT/releases/tag/R5) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+**Still extremely alpha and work in progress.** [Download R5.1](https://github.com/HWG90/Epic-LUT/releases/tag/R5.1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.1-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.1: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
