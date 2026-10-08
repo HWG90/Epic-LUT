@@ -307,6 +307,8 @@ function C.new(deps)
                         label = 'Save DDS as (without extension)',
                         default = 'Epic-LUT-edited',
                     },
+                    { id = 'open_export', type = 'button', label = 'Open Export Location',
+                        on_activate = function() return assert(deps.open_export, 'Export folder unavailable')() end },
                     {
                         id = 'save_dds',
                         type = 'button',

@@ -1,6 +1,6 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E = {}
-function E.new(m, document, note, save, presets, live_document)
+function E.new(m, document, note, save, presets, live_document, open_export)
     local ffi = require('ffi')
     local self = { undo = {}, redo = {}, busy = false, value_scroll = 0 }
     local preset_files = m.lut_files.new(
@@ -449,6 +449,7 @@ function E.new(m, document, note, save, presets, live_document)
         document = document,
         note = note,
         save = save,
+        open_export = open_export,
         remember = remember,
         change = change,
         history = history,

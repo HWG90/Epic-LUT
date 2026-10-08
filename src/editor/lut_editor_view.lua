@@ -20,9 +20,9 @@ function V.new(deps)
         local right = ui.x + left + 12
         local rightw = ui.w - left - 12
         local top = ui.y + ui.h
-        local bottomh = math.floor(ui.h * 0.43)
+        local bottomh = math.max(math.floor(ui.h * 0.43), math.min(290, math.floor(ui.h * 0.70)))
         if self.more_options then
-            bottomh = math.max(bottomh, math.min(305, math.floor(ui.h * 0.65)))
+            bottomh = math.max(bottomh, math.min(395, math.floor(ui.h * 0.70)))
         end
         local gridbottom = ui.y + bottomh + 12
         local function panel(x, y, w, height, title)
@@ -443,7 +443,7 @@ function V.new(deps)
         local optionw = left * 0.4 - 20
         local gear = self.api and self.api.mods[self.handle.id].controls.editor_load_armor
         if gear then
-            step = math.min(30, (bottomh - 65) / (self.more_options and 8 or 5))
+            step = math.min(30, (bottomh - 65) / (self.more_options and 10 or 7))
             ui.rect(ui.x + 10, optionsy - step * 1.5, optionw, 1, { 65, 76, 85 })
             ui.rect(ui.x + 10, optionsy - step * 4.5, optionw, 1, { 65, 76, 85 })
             button(ui.x + 10, optionsy, (optionw - 5) / 2, 'Import file', 'browse')
@@ -475,27 +475,21 @@ function V.new(deps)
             )
             button(ui.x + 10, optionsy - step * 4, (optionw - 5) / 2, 'Undo', 'undo')
             button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 4, (optionw - 5) / 2, 'Redo', 'redo')
-            local exportw = (optionw - 10) / 3
-            button(ui.x + 10, optionsy - step * 5, exportw, 'Name: ' .. h.get('save_name'), 'save_name')
-            button(ui.x + 15 + exportw, optionsy - step * 5, exportw, 'Export DDS', 'save_dds')
-            local morex = ui.x + 20 + exportw * 2
-            ui.rect(morex, optionsy - step * 5, exportw, 26, { 24, 39, 52 })
-            ui.bounded(morex + 6, optionsy - step * 5 + 5,
-                (self.more_options and 'v ' or '> ') .. 'More Options', 14, white, exportw - 12)
-            ui.hit(morex, optionsy - step * 5, exportw, 26, function()
+            ui.rect(ui.x + 10, optionsy - step * 4 - 7, optionw, 1, { 90, 103, 110 })
+            button(ui.x + 10, optionsy - step * 5 - 5, optionw, 'DDS Name: ' .. h.get('save_name'), 'save_name')
+            button(ui.x + 10, optionsy - step * 6 - 5, (optionw - 5) / 2, 'Export DDS', 'save_dds')
+            button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 6 - 5, (optionw - 5) / 2, 'Open Export Location', 'open_export')
+            ui.rect(ui.x + 10, optionsy - step * 7 - 5, optionw, 26, { 24, 39, 52 })
+            ui.bounded(ui.x + 16, optionsy - step * 7,
+                (self.more_options and 'v ' or '> ') .. 'More Options', 14, white, optionw - 12)
+            ui.hit(ui.x + 10, optionsy - step * 7 - 5, optionw, 26, function()
                 self.more_options = not self.more_options
             end)
             if self.more_options then
-                button(ui.x + 10, optionsy - step * 6, (optionw - 5) / 2, 'All Armor LUTs', 'editor_all_armor')
-                button(
-                    ui.x + 15 + (optionw - 5) / 2,
-                    optionsy - step * 6,
-                    (optionw - 5) / 2,
-                    'All Helmet LUTs',
-                    'editor_all_helmet'
-                )
-                button(ui.x + 10, optionsy - step * 7, optionw, 'Restore Arrowhead LUT (Original)', 'restore')
-                button(ui.x + 10, optionsy - step * 8, optionw, 'Save applied setup', 'save_setup')
+                button(ui.x + 10, optionsy - step * 8 - 5, (optionw - 5) / 2, 'All Armor LUTs', 'editor_all_armor')
+                button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 8 - 5, (optionw - 5) / 2, 'All Helmet LUTs', 'editor_all_helmet')
+                button(ui.x + 10, optionsy - step * 9 - 5, optionw, 'Restore Arrowhead LUT (Original)', 'restore')
+                button(ui.x + 10, optionsy - step * 10 - 5, optionw, 'Save applied setup', 'save_setup')
             end
         else
             button(ui.x + 10, optionsy, (optionw - 5) / 2, 'Import file', 'browse')

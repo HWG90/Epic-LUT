@@ -2075,6 +2075,13 @@ return {
                             end
                         end
                     end
+                end,
+                function()
+                    assert(not paths.files:find("'", 1, true), 'Invalid export path')
+                    local args = [=[-NoProfile -NonInteractive -Command "Invoke-Item -LiteralPath ']=] .. paths.files .. [=['"]=]
+                    local worker = m.windows.launch_worker(args, paths.files)
+                    worker.close()
+                    return message('Opened Epic LUT export folder')
                 end
             )
         end
