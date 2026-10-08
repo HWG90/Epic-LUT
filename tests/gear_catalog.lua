@@ -1,4 +1,4 @@
-local G = dofile('src/gear_catalog.lua')
+local G = dofile('src/gear/gear_catalog.lua')
 local armor = { armor = true, helmet = false }
 local helmet = { armor = false, helmet = true }
 local shared = { object = 10, armor = true, helmet = true, bindings = { armor, helmet } }

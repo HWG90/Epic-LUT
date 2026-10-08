@@ -1,6 +1,6 @@
 local ffi = require('ffi')
-local B = dofile('src/basic_state.lua')
-local R = dofile('src/region_indicator.lua')
+local B = dofile('src/core/basic_state.lua')
+local R = dofile('src/gear/region_indicator.lua')
 local source = { width = 23, height = 1, data = ffi.new('float[92]') }
 source.data[0] = 0.25
 local state = B.new()

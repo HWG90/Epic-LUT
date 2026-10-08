@@ -10,7 +10,7 @@ local function json(value,depth)
     error('Unsupported discovery metadata',0)
 end
 function N.configure(model,cache,options)N.model=model;N.cache=cache;N.options=options or {};N.port=N.options.port or 8765;assert(type(N.port)=='number'and N.port%1==0 and N.port>0 and N.port<65536)end
-N.verify_interface=(m and m.windows or dofile('src/windows.lua')).verify_interface
+N.verify_interface=(m and m.windows or dofile('src/platform/windows.lua')).verify_interface
 function N.new(folder,kind)
     local self={folder=folder,choices={},labels={'Import a file first'},session=nil,last=nil,sequence=0}
     local ffi=require('ffi')

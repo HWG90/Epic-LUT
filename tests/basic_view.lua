@@ -21,7 +21,7 @@ local state = {
 }
 state.raw = { basic = { armor = { document = state.editor }, helmet = { document = state.editor } } }
 local selected
-local view = dofile('src/basic_view.lua').new(function()
+local view = dofile('src/editor/basic_view.lua').new(function()
     return state
 end, function(row)
     selected = row

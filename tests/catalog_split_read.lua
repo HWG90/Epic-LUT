@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local C = dofile('src/catalog.lua')
+local C = dofile('src/legacy/catalog.lua')
 local width, height = 23, 8
 local size = width * height * 16
 local values = ffi.new('float[?]', width * height * 4)

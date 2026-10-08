@@ -1,4 +1,4 @@
-local p = dofile('src/import_protocol.lua')
+local p = dofile('src/imports/import_protocol.lua')
 assert(
     p.paths('job').progress == 'job.txt.progress' and p.paths('job').cancel == 'job.txt.cancel',
     'Worker paths disagree'

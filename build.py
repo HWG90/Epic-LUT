@@ -27,7 +27,7 @@ if Path(args.output).name != args.output or not args.output.endswith('.zip'):
 
 OUT = ROOT / 'dist/armor_lut_editor'
 OUT.mkdir(parents=True, exist_ok=True)
-from tools.module_inventory import VENDOR, MENU, OWN as EDITOR_MODULES, PREVIEW
+from tools.module_inventory import VENDOR, MENU, OWN as EDITOR_MODULES, PREVIEW, source_path
 OWN = list(EDITOR_MODULES)
 if args.player_preview:
     OWN.extend(PREVIEW)
@@ -54,14 +54,14 @@ for name in MENU:
 for name in VENDOR:
     parts.append(module(name, f'vendor/{name}.lua'))
 for name in OWN:
-    parts.append(module(name, 'src/standalone_frontend.lua' if name=='frontend' else f'src/{name}.lua'))
+    parts.append(module(name, source_path(name)))
 parts.append('m.native_import=m.windows\n')
 if args.player_preview:
-    parts.append('local editor=(function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
+    parts.append('local editor=(function()\n' + source('src/editor/direct_editor.lua') + '\nend)()\n')
     parts.append('local PREVIEW_INSPECT_ONLY=false\n')
-    parts.append(source('src/player_preview_candidate.lua'))
+    parts.append(source('src/preview/player_preview_candidate.lua'))
 else:
-    parts.append('return (function()\n' + source('src/direct_editor.lua') + '\nend)()\n')
+    parts.append('return (function()\n' + source('src/editor/direct_editor.lua') + '\nend)()\n')
 model = ''.join(parts)
 
 (OUT/'mod.lua').write_text(model, encoding='utf-8')
@@ -76,7 +76,7 @@ for old_runtime in ('runtime.zip', 'runtime-manifest.json'):
     (OUT/old_runtime).unlink(missing_ok=True)
 
 entry = 'mods/goose/epic_lut/startup'
-startup = source('src/startup_bsl.lua').replace('__NATIVE_NAME__', NATIVE_NAME).replace('__NATIVE_HEX__', native.hex()).replace('-- __MODULE__', model).replace('-- __BRIDGE__', source('src/startup_bridge.lua'))
+startup = source('src/loaders/startup_bsl.lua').replace('__NATIVE_NAME__', NATIVE_NAME).replace('__NATIVE_HEX__', native.hex()).replace('-- __MODULE__', model).replace('-- __BRIDGE__', source('src/loaders/startup_bridge.lua'))
 (ROOT/'dist/Epic-LUT-BSL-startup.lua').write_text(startup, encoding='utf-8')
 envelope = struct.pack('<II',len(startup.encode()),2) + startup.encode()
 archive = write({hash_name(entry):envelope})

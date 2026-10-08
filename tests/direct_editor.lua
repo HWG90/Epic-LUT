@@ -42,24 +42,24 @@ os.remove(test_root .. '/tests/tmp/direct-state/direct-applied.tsv')
 local quick_select, quick_info
 local test_frontend
 local m = {
-    lut_files = dofile('src/lut_files.lua'),
-    table_index = dofile('src/table_index.lua'),
-    file_io = dofile('src/file_io.lua'),
-    editor_registry = dofile('src/editor_registry.lua'),
-    gear_catalog = dofile('src/gear_catalog.lua'),
-    lut_editor_controls = dofile('src/lut_editor_controls.lua'),
-    lut_editor_view = dofile('src/lut_editor_view.lua'),
-    import_job = dofile('src/import_job.lua'),
-    armory_collection = dofile('src/armory_collection.lua'),
-    configuration = dofile('src/configuration.lua'),
-    binding_session = dofile('src/binding_session.lua'),
-    import_protocol = dofile('src/import_protocol.lua'),
-    control_help = dofile('src/control_help.lua'),
-    resource_ids = dofile('src/resource_ids.lua'),
-    action_history = dofile('src/action_history.lua'),
-    basic_state = dofile('src/basic_state.lua'),
-    region_indicator = dofile('src/region_indicator.lua'),
-    windows = dofile('src/windows.lua'),
+    lut_files = dofile('src/presets/lut_files.lua'),
+    table_index = dofile('src/imports/table_index.lua'),
+    file_io = dofile('src/core/file_io.lua'),
+    editor_registry = dofile('src/editor/editor_registry.lua'),
+    gear_catalog = dofile('src/gear/gear_catalog.lua'),
+    lut_editor_controls = dofile('src/editor/lut_editor_controls.lua'),
+    lut_editor_view = dofile('src/editor/lut_editor_view.lua'),
+    import_job = dofile('src/imports/import_job.lua'),
+    armory_collection = dofile('src/presets/armory_collection.lua'),
+    configuration = dofile('src/editor/configuration.lua'),
+    binding_session = dofile('src/gear/binding_session.lua'),
+    import_protocol = dofile('src/imports/import_protocol.lua'),
+    control_help = dofile('src/editor/control_help.lua'),
+    resource_ids = dofile('src/core/resource_ids.lua'),
+    action_history = dofile('src/core/action_history.lua'),
+    basic_state = dofile('src/core/basic_state.lua'),
+    region_indicator = dofile('src/gear/region_indicator.lua'),
+    windows = dofile('src/platform/windows.lua'),
     ui_core = core,
     import_view = {
         new = function(info, tables, select)
@@ -68,17 +68,17 @@ local m = {
             return { draw = function() end }
         end,
     },
-    dds = dofile('src/dds.lua'),
+    dds = dofile('src/core/dds.lua'),
     provider_menu = {
         disable_matching = function()
             return true, false
         end,
     },
-    direct_setup = dofile('src/direct_setup.lua'),
-    native_import = dofile('src/windows.lua'),
-    palette = dofile('src/palette.lua'),
-    semantics = dofile('src/semantics.lua'),
-    lut_editor = dofile('src/lut_editor.lua'),
+    direct_setup = dofile('src/gear/direct_setup.lua'),
+    native_import = dofile('src/platform/windows.lua'),
+    palette = dofile('src/core/palette.lua'),
+    semantics = dofile('src/core/semantics.lua'),
+    lut_editor = dofile('src/editor/lut_editor.lua'),
     paths = {
         new = function()
             return {
@@ -156,7 +156,7 @@ local m = {
         end,
     },
 }
-local f = assert(io.open('src/direct_editor.lua', 'rb'))
+local f = assert(io.open('src/editor/direct_editor.lua', 'rb'))
 local source = f:read('*a')
 f:close()
 local editor = assert(loadstring('local m=...\n' .. source))(m)
@@ -180,7 +180,7 @@ m.basic_view = {
         return { draw = function() end, wheel = function() end }
     end,
 }
-m.outfit_presets = dofile('src/outfit_presets.lua')
+m.outfit_presets = dofile('src/presets/outfit_presets.lua')
 m.original_luts = {
     new = function()
         return {
@@ -221,6 +221,24 @@ for _, label in ipairs(outfit_choices) do
     end
 end
 assert(found_outfit, 'Saving original gear without a custom application failed to refresh Armory')
+for index, label in ipairs(outfit_choices) do
+    if label == 'Stock Outfit' then
+        assert(handle.set('outfit_preset', index))
+        break
+    end
+end
+assert(handle.activate('outfit_apply_armor'))
+local remembered = m.direct_setup.new(m, m.paths.new()).read()
+assert(next(remembered), 'Applying an Armory preset did not persist the active setup')
+assert(handle.activate('outfit_apply_helmet'))
+remembered = m.direct_setup.new(m, m.paths.new()).read()
+assert(
+    remembered['0:0:0:0'] and remembered['0:1:0:0'],
+    'Mixed Armor and Helmet applications were not retained together'
+)
+assert(handle.activate('restore'))
+assert(not next(m.direct_setup.new(m, m.paths.new()).read()), 'Restore Original retained a startup preset')
+
 local stock_preview = quick_info()
 assert(stock_preview.raw.basic.armor.resource == '[0xffffffffffffffff]', 'Hex resource ID missing')
 assert(stock_preview.armor[1].resource == '[0xffffffffffffffff]', 'Grouped display dropped the resource ID')
@@ -405,7 +423,7 @@ bound[4] = 100
 local fixture = io.open('tests/tmp/files/importtest.zip', 'rb')
 if fixture then
     fixture:close()
-    m.native_import = dofile('src/windows.lua')
+    m.native_import = dofile('src/platform/windows.lua')
     local script = assert(io.open('tools/import_zip.ps1', 'rb'))
     m.zip_import_script = script:read('*a'):gsub('.', function(c)
         return string.format('%02x', c:byte())

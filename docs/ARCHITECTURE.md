@@ -56,3 +56,18 @@ These rules describe how to extend the cleaned architecture. Large native owners
 
 
 The maintained bundle inventory is in `tools/module_inventory.py`. Run `python tools/format_lua.py --check` with StyLua 2.5.2 at the documented development-tool path (or `--stylua`). Three FFI-heavy files are excluded because AST verification warns; do not bypass that check to force formatting. Legacy MCM sources remain available for their regression tests, outside the release module inventory.
+
+
+## Source folders
+
+- `src/core`: DDS/color semantics, document copies, history and bounded IO.
+- `src/editor`: controller, views, registry definitions and guidance.
+- `src/gear`: local binding ownership, discovery, original snapshots and region indication.
+- `src/imports`: worker messages/lifetime, resource matching and table indexing.
+- `src/presets`: Armory collections and named DDS storage.
+- `src/platform`: Windows APIs, preferences, paths and standalone frontend.
+- `src/preview`: player model, render adapter, controls, input and lifecycle.
+- `src/loaders`: BSL startup and lifecycle bridge.
+- `src/legacy`: earlier MCM/catalog/companion implementation retained for compatibility contracts; excluded from normal bundles.
+
+`tools/module_inventory.py` maps module names to folders. Runtime modules still use injected dependencies; folder moves do not introduce filesystem `require` dependencies.

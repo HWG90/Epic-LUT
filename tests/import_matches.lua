@@ -1,4 +1,4 @@
-local M = dofile('src/import_matches.lua')
+local M = dofile('src/imports/import_matches.lua')
 local metadata =
     M.metadata('lut000.dds\t1111111111111111\nlut001.dds\t2222222222222222', { 'lut000.dds', 'lut001.dds' })
 assert(metadata['lut000.dds'] == '1111111111111111')

@@ -5,4 +5,10 @@ OWN = ['file_io', 'lut_files', 'dds', 'palette', 'semantics', 'windows', 'paths'
 PREVIEW = ['player_model', 'player_preview', 'player_preview_native', 'player_preview_submit', 'player_preview_controls', 'player_preview_input']
 
 # StyLua 2.5.2 AST verification warns on FFI string declarations in these files.
-FORMAT_EXCEPTIONS = {'src/windows.lua', 'src/standalone_frontend.lua', 'tests/native_ipc.lua'}
+FORMAT_EXCEPTIONS = {'src/platform/windows.lua', 'src/platform/standalone_frontend.lua', 'tests/native_ipc.lua'}
+
+SOURCE_GROUPS = {'action_history': 'core', 'basic_state': 'core', 'dds': 'core', 'file_io': 'core', 'palette': 'core', 'resource_ids': 'core', 'semantics': 'core', 'table_groups': 'core', 'armory_view': 'editor', 'basic_view': 'editor', 'configuration': 'editor', 'control_help': 'editor', 'direct_editor': 'editor', 'editor_registry': 'editor', 'import_view': 'editor', 'lut_editor': 'editor', 'lut_editor_controls': 'editor', 'lut_editor_view': 'editor', 'binding_session': 'gear', 'direct_setup': 'gear', 'gear_catalog': 'gear', 'original_luts': 'gear', 'region_indicator': 'gear', 'import_job': 'imports', 'import_matches': 'imports', 'import_protocol': 'imports', 'table_index': 'imports', 'armory_collection': 'presets', 'lut_files': 'presets', 'outfit_presets': 'presets', 'paths': 'platform', 'preferences': 'platform', 'standalone_frontend': 'platform', 'update_check': 'platform', 'windows': 'platform', 'player_model': 'preview', 'player_preview': 'preview', 'player_preview_candidate': 'preview', 'player_preview_controls': 'preview', 'player_preview_input': 'preview', 'player_preview_native': 'preview', 'player_preview_submit': 'preview', 'startup_bridge': 'loaders', 'startup_bsl': 'loaders', 'bindings': 'legacy', 'catalog': 'legacy', 'document': 'legacy', 'editor': 'legacy', 'editor_features': 'legacy', 'frontend': 'legacy', 'native_import': 'legacy', 'open_companion': 'legacy', 'presets': 'legacy', 'provider_menu': 'legacy', 'session': 'legacy'}
+
+def source_path(name):
+    actual = 'standalone_frontend' if name == 'frontend' else name
+    return f'src/{SOURCE_GROUPS[actual]}/{actual}.lua'

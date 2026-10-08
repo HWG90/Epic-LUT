@@ -29,11 +29,11 @@ local state = {
     palette_name = 'my-palette',
 }
 local picked
-local view = dofile('src/import_view.lua').new(
+local view = dofile('src/editor/import_view.lua').new(
     function()
         return state
     end,
-    dofile('src/table_groups.lua'),
+    dofile('src/core/table_groups.lua'),
     function(entry, row, col)
         picked = { entry = entry, row = row, col = col }
     end,

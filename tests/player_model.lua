@@ -1,4 +1,4 @@
-local M = dofile('src/player_model.lua')
+local M = dofile('src/preview/player_model.lua')
 local units =
     { root = { alive = true, pose = 10 }, armor = { alive = true, pose = 12 }, helmet = { alive = true, pose = 14 } }
 local E = { Application = {}, World = {}, Unit = {}, Matrix4x4 = {}, Mesh = {} }

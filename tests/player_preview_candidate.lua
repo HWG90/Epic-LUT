@@ -75,9 +75,9 @@ local env = setmetatable({
     },
     PREVIEW_INSPECT_ONLY = false,
     m = {
-        player_preview_controls = dofile('src/player_preview_controls.lua'),
-        player_preview_input = dofile('src/player_preview_input.lua'),
-        player_preview = dofile('src/player_preview.lua'),
+        player_preview_controls = dofile('src/preview/player_preview_controls.lua'),
+        player_preview_input = dofile('src/preview/player_preview_input.lua'),
+        player_preview = dofile('src/preview/player_preview.lua'),
         player_preview_native = {
             new = function()
                 return a
@@ -127,7 +127,7 @@ local env = setmetatable({
     render = function() end,
 }, { __index = _G })
 env._G = env
-local chunk = assert(loadfile('src/player_preview_candidate.lua'))
+local chunk = assert(loadfile('src/preview/player_preview_candidate.lua'))
 setfenv(chunk, env)
 local editor = chunk()
 local ctx = {

@@ -16,17 +16,17 @@ for r = 0, 7 do
     end
 end
 local m = {
-    lut_files = dofile('src/lut_files.lua'),
-    file_io = dofile('src/file_io.lua'),
-    lut_editor_controls = dofile('src/lut_editor_controls.lua'),
-    lut_editor_view = dofile('src/lut_editor_view.lua'),
-    semantics = dofile('src/semantics.lua'),
-    palette = dofile('src/palette.lua'),
-    dds = dofile('src/dds.lua'),
+    lut_files = dofile('src/presets/lut_files.lua'),
+    file_io = dofile('src/core/file_io.lua'),
+    lut_editor_controls = dofile('src/editor/lut_editor_controls.lua'),
+    lut_editor_view = dofile('src/editor/lut_editor_view.lua'),
+    semantics = dofile('src/core/semantics.lua'),
+    palette = dofile('src/core/palette.lua'),
+    dds = dofile('src/core/dds.lua'),
     ui_core = core,
-    windows = dofile('src/windows.lua'),
+    windows = dofile('src/platform/windows.lua'),
 }
-local editor = dofile('src/lut_editor.lua').new(m, function()
+local editor = dofile('src/editor/lut_editor.lua').new(m, function()
     return d
 end, function(s)
     return s

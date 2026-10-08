@@ -1,4 +1,4 @@
-local F = dofile('src/file_io.lua')
+local F = dofile('src/core/file_io.lua')
 local original = io.open
 local closed = 0
 io.open = function()

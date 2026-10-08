@@ -1,6 +1,6 @@
 local ffi = require('ffi')
-local C = dofile('src/catalog.lua')
-local DDS = dofile('src/dds.lua')
+local C = dofile('src/legacy/catalog.lua')
+local DDS = dofile('src/core/dds.lua')
 local name = '0123456789abcdef'
 local folder = 'tests/tmp/files'
 local values = ffi.new('float[?]', 23 * 2 * 4)

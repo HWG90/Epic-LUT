@@ -52,7 +52,7 @@ for mode in ('loose','bsl'):
   if flat_mode:model=model[:-1]+',flat_manifest_hash='+repr(flat_hash)+'}'
   if system_mode:model=model.replace('runtime_hash='+repr(runtime_hash)+',','system_python=true,')
   code="""local ffi=require('ffi');ffi.cdef('void Sleep(uint32_t);');local kernel=ffi.load('kernel32')
- local N=dofile('src/native_import.lua');N.configure(MODEL,CACHE,{port=PORT,bundle_dir=BUNDLE,game_data=GAMEDATA,owner_pid=OWNERPID})
+ local N=dofile('src/legacy/native_import.lua');N.configure(MODEL,CACHE,{port=PORT,bundle_dir=BUNDLE,game_data=GAMEDATA,owner_pid=OWNERPID})
  local client=N.new(FOLDER,'armor');client.choices={'fixture'};client.labels={'Fixture'};client.session='test-session'
  assert(client.apply(1));assert(client.pending and client.queued,'Startup did not queue the request')
  local message
@@ -73,8 +73,8 @@ local memory={time=os.clock,read_into=function(a,n,b)
  elseif a==0x40000 then ffi.cast('uint32_t *',b)[0]=123
  else error('Unexpected native snapshot address')end;return true
 end}
-local m={paths={files=FOLDER},native_import=N,dds=dofile('src/dds.lua'),kits={ARMOR='Armor',HELMET='Helmet',read_kit=function()return kit end}}
-local catalog=dofile('src/catalog.lua').new(m,memory,0x10000,'Armor');local result
+local m={paths={files=FOLDER},native_import=N,dds=dofile('src/core/dds.lua'),kits={ARMOR='Armor',HELMET='Helmet',read_kit=function()return kit end}}
+local catalog=dofile('src/legacy/catalog.lua').new(m,memory,0x10000,'Armor');local result
 local job=coroutine.create(function()result=catalog.load({target_id=123,body=0},coroutine.yield)end)
 for i=1,170 do local ok,why=coroutine.resume(job);assert(ok,why);if coroutine.status(job)=='dead'then break end;kernel.Sleep(100)end
 assert(result and #result.luts==1 and #result.references==1 and result.pieces['0:2'],'Catalog request did not complete')

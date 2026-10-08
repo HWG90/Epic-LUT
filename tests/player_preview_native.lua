@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local N = dofile('src/player_preview_native.lua')
+local N = dofile('src/preview/player_preview_native.lua')
 local function pack32(value)
     local out = ffi.new('uint32_t[1]', value)
     return ffi.string(out, 4)

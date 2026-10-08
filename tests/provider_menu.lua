@@ -1,7 +1,7 @@
 local root = assert(os.getenv('MCM_SOURCE_DIR'))
 local Core = dofile(root .. '/src/core.lua')
 local Grouping = dofile(root .. '/src/grouping.lua')
-local Mount = dofile('src/provider_menu.lua')
+local Mount = dofile('src/legacy/provider_menu.lua')
 local api = Core.new(nil, nil, Grouping)
 api.register({ id = 'epic', name = 'Epic LUT', pages = { { id = 'armor', name = 'Armor', controls = {} } } })
 local mount = Mount.new()

@@ -11,7 +11,7 @@ local api = core.new({
 local document = { width = 23, height = 8, data = ffi.new('float[736]') }
 local state =
     { editor = document, status = 'Ready', raw = { outfit = { armor = { document }, helmet = { document } } } }
-local view = dofile('src/armory_view.lua').new(function()
+local view = dofile('src/editor/armory_view.lua').new(function()
     return state
 end)
 local saved

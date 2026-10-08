@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local T = dofile('src/table_groups.lua')
+local T = dofile('src/core/table_groups.lua')
 local a, b, c = ffi.new('float[?]', 23 * 2 * 4), ffi.new('float[?]', 23 * 2 * 4), ffi.new('float[?]', 23 * 2 * 4)
 for i = 0, 23 * 2 * 4 - 1 do
     a[i] = i / 17

@@ -1,8 +1,8 @@
-local protocol = dofile('src/import_protocol.lua')
+local protocol = dofile('src/imports/import_protocol.lua')
 local now = 0
 local files = {}
 local cancellations = {}
-local jobs = dofile('src/import_job.lua').new(protocol, {
+local jobs = dofile('src/imports/import_job.lua').new(protocol, {
     clock = function()
         return now
     end,

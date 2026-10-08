@@ -1,4 +1,4 @@
-local c = dofile('src/player_preview_controls.lua').new()
+local c = dofile('src/preview/player_preview_controls.lua').new()
 local hit, event = c.pointer(40, 660, true, 1920, 1080)
 assert(hit and event == nil)
 c.pointer(400, 700, true, 1920, 1080)

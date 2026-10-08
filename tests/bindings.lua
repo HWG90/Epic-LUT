@@ -1,5 +1,5 @@
-local B = dofile('src/bindings.lua')
-local P = dofile('src/preferences.lua')
+local B = dofile('src/legacy/bindings.lua')
+local P = dofile('src/platform/preferences.lua')
 local Core = dofile('vendor/menu/core.lua')
 local Store = dofile('vendor/menu/store.lua')
 local prefs = P.new(Store.new('tests/tmp'))

@@ -4,7 +4,7 @@ ffi.cdef([[typedef void *epic_native_hwnd;
 epic_native_hwnd epic_native_foreground(void) __asm__("GetForegroundWindow");
 uint32_t epic_native_pid(void) __asm__("GetCurrentProcessId");
 uint32_t epic_native_window_pid(epic_native_hwnd,uint32_t *) __asm__("GetWindowThreadProcessId");]])
-local N=dofile('src/native_import.lua');local user,kernel=N.verify_interface()
+local N=dofile('src/legacy/native_import.lua');local user,kernel=N.verify_interface()
 assert(user.epic_native_allow_foreground and tonumber(kernel.epic_native_pid())>0)
 assert(N.verify_interface()) -- repeated module initialization is safe.
 local client=N.new('tests/tmp/files','armor')

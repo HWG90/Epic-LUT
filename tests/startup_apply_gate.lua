@@ -23,8 +23,8 @@ local memory = {
     end,
 }
 local m = {
-    presets = dofile('src/presets.lua'),
-    palette = dofile('src/palette.lua'),
+    presets = dofile('src/legacy/presets.lua'),
+    palette = dofile('src/core/palette.lua'),
     bingus_runtime = {},
     bingus_memory = {
         new = function()
@@ -87,7 +87,7 @@ local m = {
         end,
     },
 }
-local file = assert(io.open('src/editor.lua'))
+local file = assert(io.open('src/legacy/editor.lua'))
 local source = file:read('*a')
 file:close()
 local editor = assert(loadstring('local m=...\n' .. source))(m)

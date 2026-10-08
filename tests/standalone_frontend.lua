@@ -1,6 +1,6 @@
 local core = dofile('vendor/menu/core.lua')
 local menus = dofile('vendor/menu/menu.lua')
-local F = dofile('src/standalone_frontend.lua')
+local F = dofile('src/platform/standalone_frontend.lua')
 local keys, focused = {}, true
 local draws = 0
 local pending = false
@@ -91,7 +91,7 @@ api.register({
 })
 api.mods.test_editor.tabs_top = true
 f.default_mod_id = 'test_editor'
-f.preferences = dofile('src/preferences.lua').new(storage)
+f.preferences = dofile('src/platform/preferences.lua').new(storage)
 local h = api.mods.test_editor.handle
 -- Dynamic grid controls may be absent from page.controls, but must stay in mod.controls.
 api.mods.test_editor.controls.grid_tool =

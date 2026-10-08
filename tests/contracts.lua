@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local P = dofile('src/palette.lua')
+local P = dofile('src/core/palette.lua')
 local original = ffi.new('float[?]', 23 * 8 * 4)
 for i = 0, 23 * 8 * 4 - 1 do
     original[i] = (i % 53 - 12) / 7
@@ -17,7 +17,7 @@ assert(not pcall(P.copy, original, 23, 8, { [8] = '#FF0000' }, function(n)
     return ffi.new('float[?]', n)
 end, ffi.copy))
 assert(not pcall(P.rgb, '#GG0000'))
-local S = dofile('src/session.lua')
+local S = dofile('src/legacy/session.lua')
 local bound = 100
 local alive = true
 local membership = true
@@ -143,7 +143,7 @@ local memory = {
     end,
     time = os.clock,
 }
-local Presets = dofile('src/presets.lua')
+local Presets = dofile('src/legacy/presets.lua')
 local fake = {
     presets = Presets,
     palette = P,
@@ -199,7 +199,7 @@ local fake = {
         end,
     },
 }
-local f = assert(io.open('src/editor.lua'))
+local f = assert(io.open('src/legacy/editor.lua'))
 local source = f:read('*a')
 f:close()
 local chunk = assert(loadstring('local m=...\n' .. source))

@@ -23,7 +23,7 @@ TESTS = (
     'editor_state', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files',
 )
 runner = LuaRunner()
-for path in sorted([*ROOT.glob('src/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):
+for path in sorted([*ROOT.glob('src/**/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):
     runner.check(path)
 for path in (ROOT/'dist/armor_lut_editor/mod.lua', ROOT/'dist/Epic-LUT-BSL-startup.lua'):
     runner.check(path)

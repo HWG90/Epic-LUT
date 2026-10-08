@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local O = dofile('src/original_luts.lua')
+local O = dofile('src/gear/original_luts.lua')
 local original = { width = 23, height = 2, data = ffi.new('float[?]', 23 * 2 * 4) }
 local imported = { width = 23, height = 2, data = ffi.new('float[?]', 23 * 2 * 4) }
 for i = 0, 23 * 2 * 4 - 1 do
@@ -16,7 +16,7 @@ assert(
 )
 assert(protected.data[23 * 4 + 3] == 2 and protected.data[0] == 0.75 and imported.data[13 * 4] == 0.75)
 assert(not pcall(O.preserve, imported, nil), 'Missing readback was silently converted into a zero value')
-local D = dofile('src/dds.lua')
+local D = dofile('src/core/dds.lua')
 D.write('tests/tmp/files/armor-00000001-0-0123456789abcdef-original.dds', original.data, 23, 2)
 local m = {
     dds = D,

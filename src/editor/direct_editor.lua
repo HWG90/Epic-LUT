@@ -922,6 +922,7 @@ local function remove_lut()
     defaults = {}
     if setup then
         setup.clear()
+        edit.remember_application = false
     end
     return message('All applied LUTs removed; original bindings restored and saved application cleared.')
 end
@@ -1041,6 +1042,7 @@ local function resume_setup()
                 end
                 coroutine.yield()
             end
+            edit.remember_application = applied > 0
             message('Saved setup restored to ' .. applied .. ' local bindings. Unmatched slots were skipped.')
         end)
     end
@@ -1230,6 +1232,13 @@ local function restore_action(snapshot, expected)
         import_view.selected = nil
     end
     refresh(true)
+    if edit.remember_application and setup then
+        if #bindings.owned > 0 then
+            save_setup()
+        else
+            setup.clear()
+        end
+    end
     return true
 end
 local function refresh_outfits()
@@ -1297,6 +1306,9 @@ local function apply_outfit(kind)
             basic_documents[kind .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
         end
     end
+    assert(count > 0, 'No worn gear bindings available for this preset')
+    edit.remember_application = true
+    save_setup()
     return message('Applied ' .. selected_outfit.name .. ' ' .. kind .. ' palettes to ' .. count .. ' bindings.')
 end
 local function select_outfit(index)
@@ -1935,6 +1947,13 @@ end
 local function close()
     if stop_identification and not stop_identification() then
         return false
+    end
+    if edit.remember_application and setup then
+        local ok, why = pcall(save_setup)
+        if not ok then
+            message('Could not remember applied preset: ' .. tostring(why))
+        end
+        edit.remember_application = false
     end
     if import_jobs and not import_jobs.close() then
         pending = import_jobs.job

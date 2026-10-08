@@ -6,6 +6,9 @@ import json
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+import sys
+sys.path.insert(0,str(ROOT))
+from tools.module_inventory import source_path
 p = argparse.ArgumentParser()
 p.add_argument('--base', type=Path)
 p.add_argument('--inspect-only', action='store_true')
@@ -29,8 +32,8 @@ parts = ['local editor=(function()\n', base, '\nend)()\nlocal m={}\n',
 for name, folder in [('bingus_runtime','vendor'),('bingus_memory','vendor'),
                      ('avatar','vendor'),('engine','vendor'),('player_model','src'),
                      ('player_preview','src'),('player_preview_native','src'),('player_preview_submit','src'),('player_preview_controls','src'),('player_preview_input','src')]:
-    parts.append(f'm.{name}=(function()\n'+(ROOT/f'{folder}/{name}.lua').read_text(encoding='utf-8')+'\nend)()\n')
-parts.append((ROOT/'src/player_preview_candidate.lua').read_text(encoding='utf-8'))
+    parts.append(f'm.{name}=(function()\n'+(ROOT/source_path(name) if folder=='src'else ROOT/f'{folder}/{name}.lua').read_text(encoding='utf-8')+'\nend)()\n')
+parts.append((ROOT/'src/preview/player_preview_candidate.lua').read_text(encoding='utf-8'))
 candidate = ''.join(parts).encode('utf-8')
 (out/'mod.lua').write_bytes(candidate)
 (out/'base.lua').write_bytes(base_bytes)

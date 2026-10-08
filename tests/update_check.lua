@@ -1,4 +1,4 @@
-local module = dofile('src/update_check.lua')
+local module = dofile('src/platform/update_check.lua')
 local folder = 'tests/tmp/cache'
 local launched = 0
 local running = true

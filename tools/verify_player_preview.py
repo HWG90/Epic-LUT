@@ -12,7 +12,7 @@ os.chdir(ROOT)
 from tools.lua_runner import LuaRunner
 runner = LuaRunner()
 
-files = [*ROOT.glob('src/player_*.lua'), *ROOT.glob('tests/player_*.lua')]
+files = [*ROOT.glob('src/preview/player_*.lua'), *ROOT.glob('tests/player_*.lua')]
 candidate = ROOT/'dist/releases/player-preview-candidate/mod.lua'
 if candidate.exists():
     files.append(candidate)

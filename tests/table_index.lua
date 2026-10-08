@@ -1,4 +1,4 @@
-local I = dofile('src/table_index.lua')
+local I = dofile('src/imports/table_index.lua')
 local reads = {}
 local index = I.new({
     max_bytes = 100,

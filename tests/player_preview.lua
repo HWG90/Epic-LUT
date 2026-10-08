@@ -1,4 +1,4 @@
-local P = dofile('src/player_preview.lua')
+local P = dofile('src/preview/player_preview.lua')
 local events = {}
 local failure
 local id = 0

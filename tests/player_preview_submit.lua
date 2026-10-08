@@ -1,5 +1,5 @@
 local ffi = require('ffi')
-local S = dofile('src/player_preview_submit.lua')
+local S = dofile('src/preview/player_preview_submit.lua')
 local game, exe = 0x10000000, 0x20000000
 local api, app, world, real = 0x30000000, 0x40000000, 0x50000000, 0x60000000
 local bytes = {}

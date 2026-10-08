@@ -28,9 +28,18 @@ ModOptionsMenu = {
         return provider.get('mode')
     end,
 }
+local source_paths = {
+    palette = 'src/core/palette.lua',
+    dds = 'src/core/dds.lua',
+    semantics = 'src/core/semantics.lua',
+    document = 'src/legacy/document.lua',
+    provider_menu = 'src/legacy/provider_menu.lua',
+    editor_features = 'src/legacy/editor_features.lua',
+    presets = 'src/legacy/presets.lua',
+}
 local m = {}
 for _, name in ipairs({ 'palette', 'dds', 'semantics', 'document', 'provider_menu', 'editor_features', 'presets' }) do
-    m[name] = dofile('src/' .. name .. '.lua')
+    m[name] = dofile(source_paths[name])
 end
 local data = ffi.new('float[?]', 23 * 2 * 4)
 for i = 0, 23 * 2 * 4 - 1 do
@@ -129,7 +138,7 @@ m.session = {
         return s
     end,
 }
-local file = assert(io.open('src/editor.lua'))
+local file = assert(io.open('src/legacy/editor.lua'))
 local source = file:read('*a')
 file:close()
 local editor = assert(loadstring('local m=...\n' .. source))(m)

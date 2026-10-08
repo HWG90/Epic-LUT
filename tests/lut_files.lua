@@ -2,7 +2,7 @@ local ffi = require('ffi')
 local called
 local data = ffi.new('float[184]')
 data[92] = 0.75
-local files = dofile('src/lut_files.lua').new('folder', {
+local files = dofile('src/presets/lut_files.lua').new('folder', {
     dds = {
         MAX_BYTES = 100,
         write = function(path, pixels, w, h)

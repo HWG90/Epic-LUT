@@ -1,4 +1,4 @@
-local B = dofile('src/startup_bridge.lua')
+local B = dofile('src/loaders/startup_bridge.lua')
 local frames = 0
 local attempts = 0
 local cleanups = 0

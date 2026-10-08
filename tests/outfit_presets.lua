@@ -1,7 +1,7 @@
 local ffi = require('ffi')
-local dds = dofile('src/dds.lua')
-local store = dofile('src/outfit_presets.lua').new(
-    { file_io = dofile('src/file_io.lua'), dds = dds, windows = dofile('src/windows.lua') },
+local dds = dofile('src/core/dds.lua')
+local store = dofile('src/presets/outfit_presets.lua').new(
+    { file_io = dofile('src/core/file_io.lua'), dds = dds, windows = dofile('src/platform/windows.lua') },
     'tests/tmp/presets'
 )
 local a = ffi.new('float[736]')
@@ -32,7 +32,7 @@ assert(
 store.delete('Rename Destination')
 assert(not pcall(store.load, 'Rename Destination'), 'Deleted preset remains active')
 assert(not pcall(store.load, '../outside'), 'Preset path traversal accepted')
-local history = dofile('src/action_history.lua').new(function() end, function()
+local history = dofile('src/core/action_history.lua').new(function() end, function()
     error('foreign binding')
 end)
 history.record({ signature = 'before', bytes = 10 }, { signature = 'after', bytes = 10 })

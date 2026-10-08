@@ -1,4 +1,4 @@
-local A = dofile('src/armory_collection.lua')
+local A = dofile('src/presets/armory_collection.lua')
 local document = { height = 1, width = 23, data = { [0] = 0.5, [1] = 0.25, [2] = 0 } }
 local presets = {
     Alpha = { name = 'Alpha', armor = { document }, helmet = {}, entries = {} },

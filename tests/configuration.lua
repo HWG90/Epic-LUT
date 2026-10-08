@@ -1,4 +1,4 @@
-local C = dofile('src/configuration.lua')
+local C = dofile('src/editor/configuration.lua')
 local stored = { menu_key = 121, font_size = 12 }
 local saved
 local owner = {

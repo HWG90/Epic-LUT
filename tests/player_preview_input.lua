@@ -1,4 +1,4 @@
-local P = dofile('src/player_preview_input.lua')
+local P = dofile('src/preview/player_preview_input.lua')
 local x, y = 5, 5
 local focused = true
 local ready = true

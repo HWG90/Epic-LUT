@@ -1,8 +1,8 @@
 local ffi = require('ffi')
-local D = dofile('src/dds.lua')
-local S = dofile('src/semantics.lua')
-local P = dofile('src/palette.lua')
-local Doc = dofile('src/document.lua')
+local D = dofile('src/core/dds.lua')
+local S = dofile('src/core/semantics.lua')
+local P = dofile('src/core/palette.lua')
+local Doc = dofile('src/legacy/document.lua')
 local n = 23 * 8 * 4
 local original = ffi.new('float[?]', n)
 for i = 0, n - 1 do
@@ -87,7 +87,7 @@ model.row_paste(lut.name, 2)
 for i = 0, 23 * 4 - 1 do
     assert(model.documents[lut.name].data[23 * 4 + i] == model.documents[lut.name].data[i])
 end
-local Presets = dofile('src/presets.lua')
+local Presets = dofile('src/legacy/presets.lua')
 local catalog = { identity = { target_kind = 'helmet', target_id = 234, armor = 123, body = 0 }, luts = { lut } }
 local get = {
     get = function(id)

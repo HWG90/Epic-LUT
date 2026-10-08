@@ -2,7 +2,7 @@ local m = {}
 for _, name in ipairs({ 'core', 'store', 'menu', 'capture', 'grouping', 'legacy' }) do
     m['ui_' .. name] = dofile('vendor/menu/' .. name .. '.lua')
 end
-local F = dofile('src/frontend.lua')
+local F = dofile('src/legacy/frontend.lua')
 local folder = 'tests/tmp'
 local logs = {}
 local focused = true
