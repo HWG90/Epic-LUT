@@ -1,19 +1,19 @@
-# Epic LUT R5.4
+# Epic LUT R5.5 RC1
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.4 brings live character preview, named gear presets and fast per-LUT editing into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5 RC1 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
 
-**Still extremely alpha and work in progress.** [Download R5.4](https://github.com/HWG90/Epic-LUT/releases/tag/R5.4) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+**Release candidate.** [Download R5.5 RC1](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5-rc1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.4-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.4-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5-RC1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5-RC1-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.4: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5 RC1: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
@@ -77,13 +77,15 @@ On Import / Apply swatch previews:
 
 Painting targets the clicked gear table. **Undo Last Action / Redo Last Action** includes imports and gear applications. The LUT Editor also provides pixel-edit undo/redo and copy/paste.
 
-**Quick Scratch** opens a movable color panel with ten session swatch slots. Pick a color once and paint it where you need it.
+**Quick Scratch** opens a movable color panel with ten session swatch slots. Pick a color once and paint it where you need it. Scratch Copy/Paste uses system clipboard hex colors; the color picker HEX field also supports Ctrl+C/V.
 
 ## LUT Editor
 
-Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including stock-game values.
+Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including stock-game values. The Import toolbox includes Apply to All Armor LUTs or Apply to All Helmet LUTs beneath its selected-table action; it applies the current editor table.
 
-The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Shift-click selects a rectangle; grid tools support drawing, copy/paste and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
+The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
+
+Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields retain their own Ctrl+C/V behavior while typing.
 
 Typed values can exceed recommended slider ranges. Swatches clamp RGB for viewing; stored floats remain intact. Export edited DDS files to `%LOCALAPPDATA%/Epic LUT/files/exports` to share them.
 

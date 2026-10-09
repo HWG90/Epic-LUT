@@ -25,6 +25,39 @@ S.columns = {
     'Camo controls',
     'Bump scaling / matte-gloss',
 }
+-- Column 2 R selects this zero-based bump-map index; labels never alter raw values.
+S.bump_maps = {
+    'flat (dry grime)',
+    'flat (wet grime)',
+    'damascus',
+    'suede (dry grime)',
+    'suede (wet grime)',
+    'wall (bullet holes)',
+    'denim',
+    'corduroy',
+    'waffle',
+    'wall (plaster)',
+    'wall (concrete)',
+    'raincoat',
+    'wool (knitted)',
+    'wool (woven)',
+    'scrapmetal',
+    'leather (worn)',
+    'linen',
+    'linen (worn)',
+    'nylon',
+    'leather (wet grime)',
+    'leather (dry grime)',
+    'boulder',
+    'circuitboard',
+    'dimpled (square)',
+    'vinyl',
+    'circuitboard (light)',
+}
+function S.bump_label(index)
+    local name = index % 1 == 0 and S.bump_maps[index + 1]
+    return name and ('R' .. index .. ' - ' .. name) or ('Custom: ' .. string.format('%.7g', index))
+end
 S.color_columns = {
     [1] = true,
     [3] = true,

@@ -282,6 +282,17 @@ for _, width in ipairs({ 1100, 1800 }) do
             assert(tools.c[1] == 244 and tools.c[2] == 202, 'Tools entry lost its gold affordance')
             tap(tools)
             assert(editor.tools.is_open(), 'Gold Tools button does not open the menu')
+            commands = compose()
+            local all_armor = label(commands, 'Apply to All Armor LUTs', true)
+            local selected_apply = label(commands, 'Apply to Armor LUT ' .. handle.get('basic_armor_lut'), true)
+            assert(all_armor.y < selected_apply.y, 'Apply All is not beneath the selected-LUT action')
+            tap({ x = all_armor.x, y = all_armor.y, w = all_armor.text_width, h = all_armor.size })
+            assert(calls.editor_all_armor_activate, 'Apply All Armor routes to the wrong callback')
+            editor.gear = 'helmet'
+            local all_helmet = label(compose(), 'Apply to All Helmet LUTs', true)
+            tap({ x = all_helmet.x, y = all_helmet.y, w = all_helmet.text_width, h = all_helmet.size })
+            assert(calls.editor_all_helmet_activate, 'Apply All Helmet routes to the wrong callback')
+            editor.gear = 'armor'
             tap_label('Scratch')
             assert(
                 editor.tools.is_open() and editor.tools.tab == 'import' and editor.scratch_tool.is_open(),

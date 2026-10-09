@@ -28,8 +28,9 @@ local function normalize(c,v)
     if c.type=='input' then assert(type(v)=='string' and #v<=48 and ((c.allow_empty and v=='') or v:match('^[%w _-]+$')),'Use letters, numbers, spaces, underscores or hyphens');return v end
     if c.type=='color' then return M.color_hex(v)end
     if c.type=='toggle' then assert(type(v)=='boolean','Expected boolean');return v end
-    assert(type(v)=='number' and v==v and math.abs(v)<1e12,'Expected finite number')
+    assert(M.valid_number(c,v),'Expected a valid finite number')
     if c.type=='slider' then
+        if c.raw_numeric or c.allow_out_of_range then return v end
         assert(v>=c.min and v<=c.max,'Value outside slider range')
         return math.min(c.max,c.min+math.floor((v-c.min)/c.step+.5)*c.step)
     end
@@ -37,9 +38,14 @@ local function normalize(c,v)
     if c.type=='keybind' then assert(v%1==0 and v>=0 and v<=255,'Invalid virtual key');return v end
     error('Control has no stored value')
 end
+function M.valid_number(c,v)
+    if type(v)~='number' or v~=v then return false end
+    if c.type=='slider' and (c.raw_numeric or c.allow_out_of_range)then return math.abs(v)<=3.4028234663852886e38 end
+    return math.abs(v)<1e12 and (c.type~='slider' or (v>=c.min and v<=c.max))
+end
 local function stored(c)return c.type=='input' or c.type=='toggle' or c.type=='slider' or c.type=='choice' or c.type=='keybind' or c.type=='color'end
 function M.new(store,log,grouping)
-    local api={api=1,version='0.1.52',color_hex=M.color_hex,color_rgb=M.color_rgb,hsv_rgb=M.hsv_rgb,rgb_hsv=M.rgb_hsv,mods={},revision=0};log=log or function()end
+    local api={api=1,version='0.1.52',valid_number=M.valid_number,color_hex=M.color_hex,color_rgb=M.color_rgb,hsv_rgb=M.hsv_rgb,rgb_hsv=M.rgb_hsv,mods={},revision=0};log=log or function()end
     api.storage_per_mod=true;api.presentation_links=true;api.text_swatches=true;api.category_page_links=true
     local palette=store and store.load('mcm_custom_palette') or {};local swatches={}
     for i=1,12 do local ok,v=pcall(M.color_hex,palette['swatch_'..i]);if ok then swatches[#swatches+1]=v end end

@@ -133,6 +133,13 @@ function T.new(deps)
                         'editor_apply_' .. gear,
                         d ~= nil
                     )
+                    action(
+                        top - step * 5.3,
+                        'Apply to All ' .. (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUTs',
+                        'editor_all_' .. gear,
+                        d ~= nil,
+                        'Apply the current editor table to every LUT on this gear. Send an imported LUT to the editor first.'
+                    )
                 else
                     choice('lut', top - step * 4.3, half)
                     button(

@@ -53,7 +53,7 @@ function C.new(deps)
             local id, label, col, ch, lo, hi = unpack(spec)
             local choices = {}
             for v = lo, hi do
-                choices[#choices + 1] = tostring(v)
+                choices[#choices + 1] = id == 'detail_texture' and semantics.bump_label(v) or tostring(v)
             end
             advanced[#advanced + 1] = {
                 id = id,
@@ -75,6 +75,7 @@ function C.new(deps)
             advanced[#advanced + 1] = {
                 id = 'cell_' .. name,
                 type = 'slider',
+                raw_numeric = true,
                 label = name:upper(),
                 min = -1e10,
                 max = 1e10,
@@ -107,6 +108,8 @@ function C.new(deps)
                         choices = { 'RGB', 'RGBA', 'Red', 'Green', 'Blue', 'Alpha' },
                         default = 1,
                     },
+                    { id = 'copy_value', type = 'button', label = 'Copy Value', on_activate = self.copy_value },
+                    { id = 'paste_value', type = 'button', label = 'Paste Value', on_activate = self.paste_value },
                     { id = 'group_rows', type = 'toggle', label = 'Group by rows', default = true },
                     { id = 'value_editor_visible', type = 'toggle', label = 'Value Editor', default = true },
                     {
@@ -209,6 +212,8 @@ function C.new(deps)
                             self.scratch = { r * 255, g * 255, b * 255 }
                         end,
                     },
+                    { id = 'scratch_copy', type = 'button', label = 'Copy HEX', on_activate = self.scratch_copy },
+                    { id = 'scratch_paste', type = 'button', label = 'Paste HEX', on_activate = self.scratch_paste },
                     {
                         id = 'scratch_alpha',
                         type = 'slider',

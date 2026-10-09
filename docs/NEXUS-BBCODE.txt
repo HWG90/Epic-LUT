@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC LUT R5[/b][/size]
+[center][size=6][b]EPIC LUT R5.5 RC1[/b][/size]
 [size=5][b]STYLISH FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 
@@ -40,7 +40,7 @@ F10 opens the full editor; Basic has a configurable shortcut, default F9. Watch 
 
 R5 is a new version, not a promise that alpha is over. Direct palette importing and application have been confirmed during development. Recent UI additions, restart persistence, original-emissive matching, and extended loader/game transitions still need live acceptance. Multiplayer color sharing is not promised.
 
-Supports bounded 23-column float material LUTs. Weapons, equipped capes, EXR and pattern layouts are outside this version. Gear surfaces vary; material edits can change more than color. Native compatibility currently targets Steam build 25480438.
+Supports bounded 23-column float material LUTs and 3x1 Pattern LUTs. Weapons, equipped capes and EXR are outside this version. Gear surfaces vary; material edits can change more than color. Native compatibility currently targets Steam build 25480438.
 
 [b]Player Preview[/b] is included in R5. Dock it beside the LUT Editor or pop it out; pan, rotate and zoom while editing. Disable the older separate preview test addon before enabling R5. Close the preview before switching game screens. This feature remains experimental.
 

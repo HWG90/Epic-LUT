@@ -422,7 +422,23 @@ function M.new(api, measure)
     local wheel_remainder = 0
     local manual_scroll = false
 
-    local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag, scroll_drag
+    local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag, scroll_drag, custom_drag
+    local function cancel_custom_drag(reason)
+        local item = custom_drag
+        custom_drag = nil
+        if item and item.cancel then
+            local ok, why = pcall(item.cancel, reason)
+            if not ok then
+                self.notice = tostring(why)
+            end
+        end
+    end
+    local function numeric_allowed(control, value)
+        if api.valid_number then
+            return api.valid_number(control, value)
+        end
+        return type(value) == 'number' and value == value and value >= control.min and value <= control.max
+    end
     local choice_bounds = {}
 
     self.sidebar_width = 330
@@ -446,10 +462,12 @@ function M.new(api, measure)
             or split_drag ~= nil
             or preview_drag ~= nil
             or scroll_drag ~= nil
+            or custom_drag ~= nil
             or self.mouse_held == true
     end
 
     function self.recover()
+        cancel_custom_drag('recovery')
         self.release_console()
 
         self.visible = false
@@ -526,6 +544,11 @@ function M.new(api, measure)
     end
 
     local function select_control(c)
+        self.shortcut_context = self.shortcut_context or {}
+        if c.type ~= 'button' then
+            self.shortcut_context.control = c.id
+            api.focused_control = c.id
+        end
         if c.page.render_layout and c.page.id ~= 'save' then
             return
         end
@@ -735,7 +758,7 @@ function M.new(api, measure)
         end
     end
 
-    function self.key(code, ctrl)
+    function self.key(code, ctrl, shift)
         if self.visible and self.capture then
             local mod = active()
             local c = self.capture
@@ -765,6 +788,7 @@ function M.new(api, measure)
 
         local toggle = code == (self.toggle_key or 121) and not self.text_edit and not self.color_picker
         if toggle then
+            cancel_custom_drag('menu closed')
             drag = nil
             window_drag = nil
             window_resize = nil
@@ -805,10 +829,7 @@ function M.new(api, measure)
 
                 local value = e.control.type == 'input' and e.text or tonumber(e.text)
 
-                if
-                    e.control.type ~= 'input'
-                    and (not value or value ~= value or value < e.control.min or value > e.control.max)
-                then
+                if e.control.type ~= 'input' and not numeric_allowed(e.control, value) then
                     self.notice = 'Enter a number from ' .. e.control.min .. ' to ' .. e.control.max
                     return
                 end
@@ -827,6 +848,48 @@ function M.new(api, measure)
 
             if ctrl and code == 65 then
                 e.replace = true
+                return
+            end
+            if ctrl and (code == 67 or code == 86) then
+                local clipboard = self.clipboard
+                if not clipboard then
+                    self.notice = 'Clipboard unavailable.'
+                    return
+                end
+                if code == 67 then
+                    local called, ok, why = pcall(clipboard.set, e.text)
+                    self.notice = called and ok and 'Copied text' or tostring(called and why or ok)
+                    return
+                end
+                local called, value, why = pcall(clipboard.get)
+                if not called or type(value) ~= 'string' then
+                    self.notice = tostring(called and why or value)
+                    return
+                end
+                value = value:gsub('[\r\n\t]+', ' ')
+                local limit = e.control and e.control.type == 'input' and 48 or 24
+                local candidate = (e.replace and '' or e.text) .. value
+                local out, bytes = {}, 0
+                for glyph in candidate:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                    if bytes + #glyph > limit then
+                        break
+                    end
+                    out[#out + 1] = glyph
+                    bytes = bytes + #glyph
+                end
+                e.text, e.replace = table.concat(out), false
+                if e.color_channel then
+                    self.finish_color_field()
+                    self.text_edit = e
+                elseif e.control and e.control.type ~= 'input' then
+                    local number = tonumber(e.text)
+                    if numeric_allowed(e.control, number) and not e.control.disabled and not e.control.read_only then
+                        local saved, ok, reason = pcall(e.mod.handle.edit or e.mod.handle.set, e.control.id, number)
+                        self.notice = saved and ok and 'Value pasted' or tostring(saved and reason or ok)
+                    else
+                        self.notice = 'Paste a valid number from ' .. e.control.min .. ' to ' .. e.control.max
+                    end
+                end
                 return
             end
 
@@ -958,6 +1021,29 @@ function M.new(api, measure)
             end
 
             return
+        end
+        if self.outfit_dialog then
+            return
+        end
+        if code == 27 and custom_drag then
+            cancel_custom_drag('Escape')
+            return
+        end
+        if page.on_key then
+            local context = self.shortcut_context or {}
+            context.clipboard = self.clipboard
+            local called, handled, notice =
+                pcall(page.on_key, code, not not ctrl, not not (shift == nil and self.shift or shift), context)
+            if not called then
+                self.notice = 'Shortcut failed: ' .. tostring(handled)
+                return
+            end
+            if handled then
+                if notice then
+                    self.notice = tostring(notice)
+                end
+                return
+            end
         end
 
         if code == 27 then
@@ -1197,6 +1283,7 @@ function M.new(api, measure)
 
     function self.input_focus(focused, input)
         if not focused then
+            cancel_custom_drag('focus lost')
             if console then
                 console.release()
             end
@@ -1245,6 +1332,7 @@ function M.new(api, measure)
             and not window_drag
             and not window_resize
             and not scroll_drag
+            and not custom_drag
             and not self.text_edit
             and input.wheel
             and input.mouse
@@ -1257,7 +1345,7 @@ function M.new(api, measure)
         for code = 1, 255 do
             local down = input.down(code)
             if down and not held[code] and code ~= 1 then
-                self.key(code, input.down(17))
+                self.key(code, input.down(17), input.down(16))
             end
             held[code] = down
         end
@@ -1287,6 +1375,8 @@ function M.new(api, measure)
                             local twice = h.double_click
                                 and self.last_click_key == key
                                 and now - (self.last_click_time or -1) <= 0.35
+                            self.shortcut_context = { floating = h.floating_owner }
+                            api.shortcut_context = self.shortcut_context
                             h.click(x, y)
                             if twice then
                                 self.last_click_key = nil
@@ -1350,6 +1440,28 @@ function M.new(api, measure)
                     scroll_drag = nil
                 elseif y then
                     scroll_drag.move(y)
+                end
+            end
+            if custom_drag then
+                local item = custom_drag
+                local bounds = self.window_bounds
+                local px, py = x and (x - bounds.x) / bounds.scale, y and (y - bounds.y) / bounds.scale
+                if not self.visible then
+                    cancel_custom_drag('menu closed')
+                elseif x and y and input.down(1) then
+                    local ok, why = pcall(item.move, px, py)
+                    if not ok then
+                        cancel_custom_drag(tostring(why))
+                        self.notice = tostring(why)
+                    end
+                elseif not input.down(1) then
+                    custom_drag = nil
+                    if item.finish then
+                        local ok, why = pcall(item.finish, px, py)
+                        if not ok then
+                            self.notice = tostring(why)
+                        end
+                    end
                 end
             end
 
@@ -1500,6 +1612,7 @@ function M.new(api, measure)
             or palette_drag
             or split_drag
             or scroll_drag
+            or custom_drag
         then
             return true
         end
@@ -1521,6 +1634,7 @@ function M.new(api, measure)
     end
     function self.compose(w, h)
         if not self.visible then
+            cancel_custom_drag('menu closed')
             self.release_console()
             hits = {}
             drag = nil
@@ -1547,6 +1661,9 @@ function M.new(api, measure)
             self.floating_order[owner.id] = self.floating_revision
         end
         local selected_mod, selected_page = active()
+        if custom_drag and (custom_drag.mod ~= selected_mod or custom_drag.page ~= selected_page) then
+            cancel_custom_drag('page changed')
+        end
         local scale_id = selected_mod and selected_mod.controls.configuration_ui_scale and 'configuration_ui_scale'
             or (selected_mod and selected_mod.controls.ui_scale and 'ui_scale')
         local scale_value
@@ -1707,6 +1824,7 @@ function M.new(api, measure)
                 middle_click = owned(middle),
                 tooltip = tooltip,
                 double_click = owned(double),
+                floating_owner = owner and owner.id,
             }
         end
 
@@ -2085,6 +2203,29 @@ function M.new(api, measure)
                         end,
                         shift = function()
                             return self.shift
+                        end,
+                        clipboard = self.clipboard,
+                        begin_drag = function(move, finish, cancel)
+                            assert(type(move) == 'function', 'Drag movement callback required')
+                            cancel_custom_drag('replaced')
+                            local item = {
+                                move = move,
+                                finish = finish,
+                                cancel = cancel,
+                                owner = floating_context and floating_context.id,
+                                mod = mod,
+                                page = page,
+                            }
+                            custom_drag = item
+                            api.focused_control = nil
+                            if self.shortcut_context then
+                                self.shortcut_context.control = nil
+                            end
+                            return function(reason)
+                                if custom_drag == item then
+                                    cancel_custom_drag(reason or 'cancelled')
+                                end
+                            end
                         end,
                         load_color = function(seen)
                             local glow = seen and 1 or (0.82 + 0.18 * math.sin(elapsed * 4))
@@ -3069,6 +3210,9 @@ function M.new(api, measure)
         end
         if preview_drag and preview_drag.floating_owner and not floating_by_id[preview_drag.floating_owner] then
             preview_drag = nil
+        end
+        if custom_drag and custom_drag.owner and not floating_by_id[custom_drag.owner] then
+            cancel_custom_drag('owner closed')
         end
         for ordinal, f in ipairs(floating_requests) do
             local p = f.position

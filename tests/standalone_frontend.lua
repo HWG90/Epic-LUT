@@ -71,7 +71,16 @@ local m = {
         end,
     },
 }
+local clipboard = {
+    get = function()
+        return ''
+    end,
+    set = function()
+        return true
+    end,
+}
 local f = F.new(m, { settings_dir = 'tests/tmp', log = function() end }, {
+    clipboard = clipboard,
     input = input,
     capture = capture,
     view = view,
@@ -80,6 +89,10 @@ local f = F.new(m, { settings_dir = 'tests/tmp', log = function() end }, {
     end,
 })
 local api = f.resolve()
+assert(
+    api.clipboard == clipboard and f.menu.clipboard == clipboard and f.clipboard == clipboard,
+    'Frontend duplicated clipboard authority'
+)
 assert(api ~= _G.DBFMCM, 'Standalone frontend adopted MCM')
 api.register({
     id = 'test_editor',

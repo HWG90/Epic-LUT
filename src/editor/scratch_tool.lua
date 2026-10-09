@@ -34,7 +34,17 @@ function S.new(deps)
             ui.rect(x, y, w, ht, theme.panel)
             ui.rect(x, y + ht - 40, w, 40, theme.header)
             label(y + ht - 26, 'Scratch Pixel')
-            label(top, 'Click the swatch to open the color picker.', muted)
+            local hex_width, hex_y = (width - 12) / 2, top - 8
+            ui.button(bx, hex_y, hex_width, bh, 'HEX: ' .. h.get('scratch_color'), function()
+                ui.activate('scratch_color')
+            end, { help = 'Edit HEX in the color picker. Ctrl+V pastes in its HEX field.' })
+            local clip_width = (width - hex_width - 12) / 2
+            ui.button(bx + hex_width + 6, hex_y, clip_width, bh, 'Copy HEX', function()
+                ui.activate('scratch_copy')
+            end)
+            ui.button(bx + hex_width + clip_width + 12, hex_y, clip_width, bh, 'Paste HEX', function()
+                ui.activate('scratch_paste')
+            end)
             local color = editor.scratch or { 255, 255, 255 }
             local alpha = h.get('scratch_alpha')
             ui.rect(bx, top - 48, width, 30, color)

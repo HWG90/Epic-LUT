@@ -17,7 +17,7 @@ from tools.lua_runner import LuaRunner
 
 TESTS = (
     'sdk_catalog', 'ui_styling', 'window_frames',
-    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'picker_permissions',
+    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'clipboard', 'menu_clipboard_drag',
     'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc',
     'frontend', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'direct_editor', 'palette_editor', 'standalone_frontend',

@@ -38,6 +38,8 @@ function F.new(m,ctx,deps)
     end
     self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
     self.menu=m.ui_menu.new(self.api,self.view.measure)
+    self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({window=function()return self.input.window()end}))
+    self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
     self.menu.compact_fonts=true
     function self.open_advanced()

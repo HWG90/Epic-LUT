@@ -8,9 +8,23 @@ function V.new(deps)
     local document, note, paint = deps.document, deps.note, deps.paint
     local rgb, editable, color_columns = deps.rgb, deps.editable, deps.color_columns
     local ffi = require('ffi')
+    local selection_drag
     local function layout(ui)
         local d = document()
         local h = self.handle
+        if
+            selection_drag
+            and (
+                d ~= selection_drag.document
+                or not d
+                or d.data ~= selection_drag.data
+                or d.width ~= selection_drag.width
+                or d.height ~= selection_drag.height
+                or h.get('grid_tool') ~= 1
+            )
+        then
+            selection_drag.cancel()
+        end
         local mod = self.api.mods[h.id]
         local theme = ui.theme
         local dark, blue, white, muted = theme.panel, theme.header, theme.white, theme.muted
@@ -27,10 +41,10 @@ function V.new(deps)
         local extra_header = gear_controls and 36 or 0
         local gridbottom = ui.y + 42
         local portrait = package.loaded['epic.player_preview.v1']
-        local function panel(x, y, w, height, title)
+        local function panel(x, y, w, height, title, reserved)
             ui.rect(x, y, w, height, dark)
             ui.rect(x, y + height - 27, w, 27, blue)
-            ui.bounded(x + 8, y + height - 21, title, 17, white, w - 16)
+            ui.bounded(x + 8, y + height - 21, title, 17, white, math.max(0, w - 16 - (reserved or 0)))
         end
         local function button(x, y, w, label, id)
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
@@ -72,7 +86,22 @@ function V.new(deps)
                 )
         )
         if show_values then
-            panel(right, gridbottom, rightw, ui.h - 42, 'Value Editor - grouped by rows')
+            local actions = mod.controls.copy_value and mod.controls.paste_value
+            local compact = rightw < 360
+            local copy_label, paste_label = compact and 'Copy' or 'Copy Value', compact and 'Paste' or 'Paste Value'
+            local action_width = math.min(110, math.max(46, (rightw - 110) / 2))
+            local reserved = actions and action_width * 2 + 10 or 0
+            panel(right, gridbottom, rightw, ui.h - 42, 'Value Editor', reserved)
+            if actions then
+                local function value_action(id, label, x)
+                    local control = mod.controls[id]
+                    ui.button(x, top - 25, action_width, 23, label, function()
+                        ui.activate(id)
+                    end, { enabled = not control.disabled, size = 13, help = control.description })
+                end
+                value_action('copy_value', copy_label, right + rightw - 8 - action_width * 2 - 4)
+                value_action('paste_value', paste_label, right + rightw - 8 - action_width)
+            end
         end
         local function open_tools(tab)
             if not self.tools then
@@ -374,6 +403,102 @@ function V.new(deps)
         end
         local row = h.get('edit_row')
         local column = h.get('edit_column')
+        local function select_cell(selected_row, selected_col)
+            self.open_row = selected_row
+            if h.get('edit_row') ~= selected_row then
+                assert(h.set('edit_row', selected_row))
+            end
+            if h.get('edit_column') ~= selected_col then
+                assert(h.set('edit_column', selected_col))
+            end
+            self.focus_column = selected_col
+            for i, col in ipairs(color_columns) do
+                if col == selected_col then
+                    if h.get('color_field') ~= i then
+                        assert(h.set('color_field', i))
+                    end
+                    break
+                end
+            end
+            self.sync()
+        end
+        local function begin_selection_drag(selected_row, selected_col)
+            if not ui.begin_drag or not self.selection then
+                return
+            end
+            local state = {
+                document = d,
+                data = d.data,
+                width = d.width,
+                height = d.height,
+                source = d.source,
+                gear = self.gear,
+                row = selected_row,
+                column = selected_col,
+                anchor_row = self.selection.anchor_row or self.selection.r1,
+                anchor_col = self.selection.anchor_col or self.selection.c1,
+                selection = self.selection,
+            }
+            selection_drag = state
+            local function cancel()
+                local current = document()
+                if
+                    (current ~= d or not current or current.data ~= state.data)
+                    and self.selection == state.selection
+                then
+                    self.selection = nil
+                end
+                if selection_drag == state then
+                    selection_drag = nil
+                end
+            end
+            local function move(x, y)
+                local current = document()
+                if selection_drag ~= state then
+                    return
+                end
+                if
+                    current ~= d
+                    or current.data ~= state.data
+                    or current.width ~= state.width
+                    or current.height ~= state.height
+                    or current.source ~= state.source
+                    or self.gear ~= state.gear
+                    or h.get('grid_tool') ~= 1
+                then
+                    if state.cancel then
+                        state.cancel()
+                    else
+                        cancel()
+                    end
+                    return
+                end
+                if not x or not y then
+                    return
+                end
+                local selected_col = math.max(1, math.min(d.width, math.floor((x - ui.x - 82) / cell) + 1))
+                local selected_row =
+                    math.max(first_row, math.min(last_row, first_row + math.floor((grid_top - y) / cell)))
+                if selected_row == state.row and selected_col == state.column then
+                    return
+                end
+                state.row, state.column = selected_row, selected_col
+                self.selection = {
+                    anchor_row = state.anchor_row,
+                    anchor_col = state.anchor_col,
+                    r1 = math.min(state.anchor_row, selected_row),
+                    r2 = math.max(state.anchor_row, selected_row),
+                    c1 = math.min(state.anchor_col, selected_col),
+                    c2 = math.max(state.anchor_col, selected_col),
+                }
+                state.selection = self.selection
+                select_cell(selected_row, selected_col)
+            end
+            state.cancel = ui.begin_drag(move, function(x, y)
+                move(x, y)
+                cancel()
+            end, cancel)
+        end
         for r = first_row, last_row do
             for c = 1, d.width do
                 local selected_row, selected_col = r, c
@@ -416,6 +541,9 @@ function V.new(deps)
                     cell,
                     function()
                         local ok, why = pcall(function()
+                            if self.clear_value_focus then
+                                self.clear_value_focus()
+                            end
                             local tool = h.get('grid_tool')
                             if tool == 3 then
                                 self.move_selection(selected_row, selected_col)
@@ -434,20 +562,19 @@ function V.new(deps)
                                     c2 = math.max(anchor_col, selected_col),
                                 }
                             else
-                                self.selection =
-                                    { r1 = selected_row, r2 = selected_row, c1 = selected_col, c2 = selected_col }
+                                self.selection = {
+                                    anchor_row = selected_row,
+                                    anchor_col = selected_col,
+                                    r1 = selected_row,
+                                    r2 = selected_row,
+                                    c1 = selected_col,
+                                    c2 = selected_col,
+                                }
                             end
-                            self.open_row = selected_row
-                            assert(h.set('edit_row', selected_row))
-                            assert(h.set('edit_column', selected_col))
-                            self.focus_column = selected_col
-                            for i, col in ipairs(color_columns) do
-                                if col == selected_col then
-                                    assert(h.set('color_field', i))
-                                    break
-                                end
+                            select_cell(selected_row, selected_col)
+                            if tool == 1 then
+                                begin_selection_drag(selected_row, selected_col)
                             end
-                            self.sync()
                         end)
                         if not ok then
                             note(tostring(why))
@@ -575,7 +702,7 @@ function V.new(deps)
                                 self.value_scroll = math.max(0, clip_top + scroll - cursor)
                                 self.focus_column = nil
                             end
-                            local function prepare()
+                            local function prepare(channel)
                                 assert(h.set('edit_row', selected_row))
                                 assert(h.set('edit_column', selected_col))
                                 for i, col in ipairs(color_columns) do
@@ -585,6 +712,9 @@ function V.new(deps)
                                     end
                                 end
                                 self.sync()
+                                if channel and self.focus_value then
+                                    self.focus_value(selected_row, selected_col, channel)
+                                end
                             end
                             cursor = cursor - 21
                             if visible(cursor, 17) then
@@ -617,6 +747,7 @@ function V.new(deps)
                                 end
                             end
                             for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
+                                local selected_channel = ch
                                 local enum = (c == 1 and ch == 4 and 'shader_mode')
                                     or (c == 2 and ch == 1 and 'detail_texture')
                                     or (c == 22 and ch == 4 and 'camo_pattern')
@@ -627,7 +758,9 @@ function V.new(deps)
                                     local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
                                     ui.text(right + 12, cursor + 6, name:upper(), 13, muted)
                                     if enum and ui.choice then
-                                        ui.choice(enum, right + 29, cursor, rightw - 46, prepare)
+                                        ui.choice(enum, right + 29, cursor, rightw - 46, function()
+                                            prepare(selected_channel)
+                                        end)
                                     elseif ui.number then
                                         local lo, hi = semantics.range(c, ch, value)
                                         ui.number(
@@ -636,7 +769,9 @@ function V.new(deps)
                                             cursor,
                                             rightw - 46,
                                             value,
-                                            prepare,
+                                            function()
+                                                prepare(selected_channel)
+                                            end,
                                             editable(d, c, ch),
                                             lo,
                                             hi,

@@ -97,6 +97,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         note('Palette edited. Live preview updates automatically.')
     end
     function self.focus_cell(row, column)
+        self.value_target = nil
         self.sync()
         assert(self.handle.set('edit_row', row))
         assert(self.handle.set('edit_column', column))
@@ -118,6 +119,147 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         local r, g, b = m.palette.rgb(hex)
         d.data[at], d.data[at + 1], d.data[at + 2] = r, g, b
         self.sync()
+        return true
+    end
+    local function scalar_target()
+        local d = assert(document(), 'Load a LUT first')
+        assert(d.data and not d.stale, 'Load a current LUT first')
+        local target = self.value_target
+        if target then
+            assert(target.document == d, 'Value target changed; select a value again')
+        else
+            target = {
+                row = self.handle.get('edit_row'),
+                column = self.handle.get('edit_column'),
+                channel = channels[self.handle.get('grid_channel')][1],
+            }
+        end
+        local at = m.semantics.index(target.row, target.column, target.channel, d.width, d.height)
+        return d, target, at
+    end
+    function self.focus_value(row, column, channel)
+        local d = assert(document(), 'Load a LUT first')
+        m.semantics.index(row, column, channel, d.width, d.height)
+        self.value_target = { document = d, row = row, column = column, channel = channel }
+        self.sync()
+    end
+    function self.clear_value_focus()
+        self.value_target = nil
+    end
+    function self.copy_value()
+        local d, target, at = scalar_target()
+        local value = tonumber(d.data[at])
+        assert(value == value and math.abs(value) ~= math.huge, 'Cannot copy a nonfinite value')
+        self.value_clip = { bytes = ffi.string(d.data + at, 4), text = string.format('%.9g', value) }
+        if self.clipboard and self.clipboard.set then
+            local ok, why = self.clipboard.set(self.value_clip.text)
+            assert(ok, why or 'System clipboard unavailable')
+        end
+        return note('Copied ' .. ({ 'R', 'G', 'B', 'A' })[target.channel] .. ' value: ' .. self.value_clip.text)
+    end
+    function self.paste_value()
+        local d, target, at = scalar_target()
+        assert(not d.read_only, 'Load an editable LUT first')
+        assert(editable(d, target.column, target.channel), 'Unlock advanced edits to paste this channel')
+        local text
+        if self.clipboard and self.clipboard.get then
+            local why
+            text, why = self.clipboard.get()
+            assert(text, why or 'System clipboard unavailable')
+        else
+            text = self.value_clip and self.value_clip.text
+        end
+        assert(type(text) == 'string' and #text <= 128, 'Copy a finite numeric value first')
+        text = text:match('^%s*(.-)%s*$')
+        local value = tonumber(text)
+        assert(value and value == value and math.abs(value) ~= math.huge, 'Paste requires one finite numeric value')
+        local typed = ffi.new('float[1]', value)
+        assert(math.abs(tonumber(typed[0])) ~= math.huge, 'Value exceeds the float32 range')
+        local control =
+            self.api.mods[self.handle.id].controls[({ 'cell_r', 'cell_g', 'cell_b', 'cell_a' })[target.channel]]
+        if not (control.raw_numeric or control.allow_out_of_range) then
+            assert(value >= control.min and value <= control.max, 'Value exceeds the editor numeric range')
+        end
+        local bytes = self.value_clip and text == self.value_clip.text and self.value_clip.bytes or ffi.string(typed, 4)
+        if ffi.string(d.data + at, 4) ~= bytes then
+            d = remember()
+            ffi.copy(d.data + at, bytes, 4)
+            self.sync()
+        end
+        return note('Pasted one value; other channels are unchanged.')
+    end
+    function self.scratch_copy()
+        local hex = self.handle.get('scratch_color')
+        assert(self.clipboard and self.clipboard.set, 'System clipboard unavailable')
+        local ok, why = self.clipboard.set(hex)
+        assert(ok, why or 'System clipboard unavailable')
+        return note('Copied Scratch HEX: ' .. hex)
+    end
+    function self.scratch_paste()
+        assert(self.clipboard and self.clipboard.get, 'System clipboard unavailable')
+        local text, why = self.clipboard.get()
+        assert(type(text) == 'string' and #text <= 128, why or 'Paste requires a HEX color')
+        text = text:match('^%s*(.-)%s*$'):gsub('^#', ''):gsub('^0[xX]', '')
+        assert((#text == 6 or #text == 8) and text:match('^%x+$'), 'Paste a #RRGGBB or #RRGGBBAA HEX color')
+        local values = { scratch_color = '#' .. text:sub(1, 6):upper() }
+        if #text == 8 then
+            values.scratch_alpha = tonumber(text:sub(7, 8), 16) / 255
+        end
+        local ok, reason = self.handle.set_many(values)
+        assert(ok, reason)
+        return note('Scratch HEX pasted. Paint a selection to apply it.')
+    end
+    function self.key(code, ctrl, shift, context)
+        if not ctrl then
+            return false
+        end
+        context = context or {}
+        self.clipboard = context.clipboard or self.api.clipboard or self.clipboard
+        if context.floating == 'editor_scratch' then
+            if code == 67 then
+                self.scratch_copy()
+                return true
+            end
+            if code == 86 then
+                self.scratch_paste()
+                return true
+            end
+            return false
+        end
+        if context.floating and context.floating ~= 'editor_tools' then
+            return false
+        end
+        if code == 90 or code == 89 then
+            local d = assert(document(), 'Load a LUT first')
+            assert(not d.read_only and not d.stale, 'Load an editable current LUT first')
+            self.handle.activate((code == 89 or shift) and 'redo' or 'undo')
+            return true
+        end
+        if code ~= 67 and code ~= 86 then
+            return false
+        end
+        local scalar =
+            { cell_r = 1, cell_g = 2, cell_b = 3, cell_a = 4, shader_mode = 4, detail_texture = 1, camo_pattern = 4 }
+        local channel = scalar[context.control]
+        if channel then
+            local column = ({ shader_mode = 1, detail_texture = 2, camo_pattern = 22 })[context.control]
+                or self.handle.get('edit_column')
+            self.focus_value(self.handle.get('edit_row'), column, channel)
+            if code == 67 then
+                self.copy_value()
+            else
+                self.paste_value()
+            end
+        else
+            self.clear_value_focus()
+            if code == 67 then
+                self.copy_selection()
+            else
+                local d = assert(document(), 'Load a LUT first')
+                assert(not d.read_only and not d.stale, 'Load an editable current LUT first')
+                self.paste_selection()
+            end
+        end
         return true
     end
     function self.sync()
@@ -142,6 +284,8 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             'camo_pattern',
             'grid_tool',
             'grid_channel',
+            'copy_value',
+            'paste_value',
         }) do
             mod.controls[id].disabled = not d
         end
@@ -156,6 +300,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.value_scroll = 0
             self.grid_first, self.grid_selected = 1, nil
             self.selection = nil
+            self.value_target = nil
             if not d.original then
                 d.original = ffi.new('float[?]', d.width * d.height * 4)
                 ffi.copy(d.original, d.data, d.width * d.height * 16)
@@ -296,7 +441,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             local choices = {}
             for v = lo, hi do
                 local label = id == 'shader_mode' and (v == 0 and 'Off / default' or 'Shader mode ' .. v)
-                    or id == 'detail_texture' and 'Bump map ' .. v
+                    or id == 'detail_texture' and m.semantics.bump_label(v)
                     or (v == -1 and 'Off' or 'Pattern ' .. v)
                 choices[#choices + 1] = label
             end
@@ -320,6 +465,11 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         for _, id in ipairs({ 'shader_mode', 'detail_texture', 'camo_pattern' }) do
             mod.controls[id].disabled = not h.get('unlock')
         end
+        local target = self.value_target
+        local value_column = target and target.column or h.get('edit_column')
+        local value_channel = target and target.channel or channels[h.get('grid_channel')][1]
+        mod.controls.copy_value.disabled = d.stale == true
+        mod.controls.paste_value.disabled = d.read_only or d.stale or not editable(d, value_column, value_channel)
         for _, page in ipairs(mod.pages) do
             if page.id == 'colors' then
                 page.controls = { mod.controls.edit_row, mod.controls.color_field, mod.controls.cell_color }
@@ -366,6 +516,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
     end
     function self.attach(api, handle)
         self.api = api
+        self.clipboard = api.clipboard
         self.handle = handle
         assert(handle.set('scratch_alpha', 1)) -- New scratch starts fully opaque each session.
         self.sync()
@@ -374,6 +525,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             if page.id == 'colors' then
                 page.render_layout = self.layout
                 page.on_wheel = self.wheel
+                page.on_key = self.key
             end
         end
     end

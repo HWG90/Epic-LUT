@@ -248,7 +248,7 @@ for _, item in ipairs({ { 'Select', 'grid_tool' }, { 'RGB', 'grid_channel' }, { 
     commands = compose()
 end
 assert(editor.grid_bounds and editor.grid_bounds.h >= 480, 'Removed tool panels did not return usable grid height')
-assert(editor.value_bounds and label(commands, 'Value Editor - grouped by rows'), 'Value editor missing initially')
+assert(editor.value_bounds and label(commands, 'Value Editor'), 'Value editor missing initially')
 assert(not label(commands, 'Scratch Pixel'), 'Closed Scratch still occupies the editor')
 local initial_width = editor.grid_bounds.w
 local value = editor.value_bounds
@@ -256,7 +256,7 @@ tap_label('Hide Values')
 commands = compose()
 assert(not editor.value_bounds, 'Hidden inspector retained active scroll bounds')
 assert(editor.grid_bounds.w >= initial_width + 400, 'Hiding inspector failed to return its usable width')
-assert(not label(commands, 'Value Editor - grouped by rows'), 'Hidden inspector still rendered')
+assert(not label(commands, 'Value Editor'), 'Hidden inspector still rendered')
 -- The former inspector region now belongs to the grid, not its old value scroll handler.
 editor.value_scroll = 0
 editor.wheel(value.x + 10, value.y + 20, -120)
