@@ -11,7 +11,16 @@ for _, text in ipairs({ '7\tpicker\t100', '42\tunknown\t100', '42\tpicker\t103',
 end
 local result = p.result('ok\nlut001.dds\nlut015.dds')
 assert(result.names[2] == 'lut015.dds' and p.result('cancel').canceled)
-for _, text in ipairs({ 'ok', 'ok\n../outside.dds', 'ok\nlut001.dds\nlut001.dds', string.rep('x', 8193) }) do
+assert(p.result('preset\npreset.tsv\nShared Set').label == 'Shared Set', 'Shared preset result rejected')
+for _, text in ipairs({
+    'ok',
+    'ok\n../outside.dds',
+    'ok\nlut001.dds\nlut001.dds',
+    'preset\n../preset.tsv\nShared',
+    'preset\npreset.tsv\n../Shared',
+    'preset\npreset.tsv\nShared\nextra',
+    string.rep('x', 8193),
+}) do
     assert(not pcall(p.result, text), 'Invalid result accepted')
 end
 print('PASS import protocol: unified paths, heartbeat versions, ownership/time validation and bounded result filenames')

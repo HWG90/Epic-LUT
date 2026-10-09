@@ -34,4 +34,9 @@ function R.format(hash, decimal)
     cache[hash] = '[' .. value .. ']'
     return cache[hash]
 end
+function R.describe(hash, decimal, catalog)
+    local formatted = R.format(hash, decimal)
+    local name = catalog and catalog.resource_name(hash)
+    return name and (name .. ' ' .. formatted) or formatted
+end
 return R

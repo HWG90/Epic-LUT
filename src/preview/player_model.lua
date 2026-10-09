@@ -31,14 +31,21 @@ function Model.new(E, host)
                     local value = E.Mesh.visibility(U.mesh(unit, i))
                     local key = type(value) .. ':' .. tostring(value)
                     visibility_counts[key] = (visibility_counts[key] or 0) + 1
-                    assert(type(value)=='boolean' or value==0 or value==1, 'Unrecognized preview mesh visibility value')
+                    assert(
+                        type(value) == 'boolean' or value == 0 or value == 1,
+                        'Unrecognized preview mesh visibility value'
+                    )
                     visible[i] = value == true or value == 1
                 end
                 if host.note then
-                    local summary={}
-                    for key,count in pairs(visibility_counts) do summary[#summary+1]=key..'='..count end
+                    local summary = {}
+                    for key, count in pairs(visibility_counts) do
+                        summary[#summary + 1] = key .. '=' .. count
+                    end
                     table.sort(summary)
-                    host.note('preview: mesh visibility resource=' .. tostring(resource) .. ' ' .. table.concat(summary,','))
+                    host.note(
+                        'preview: mesh visibility resource=' .. tostring(resource) .. ' ' .. table.concat(summary, ',')
+                    )
                 end
                 local count = U.num_scene_graph_items(unit)
                 assert(count >= 1 and count <= 512, 'Equipped skeleton size is invalid')
@@ -88,18 +95,37 @@ function Model.new(E, host)
                 for i, visible in ipairs(spec.visible) do
                     -- Mesh.visibility describes the current render context. A true result is not
                     -- permission to override resource-default hidden damage/cap meshes.
-                    if visible == false then U.set_mesh_visibility(unit, i, false) end
+                    if visible == false then
+                        U.set_mesh_visibility(unit, i, false)
+                    end
                 end
                 local hidden_groups = {}
                 if type(U.has_visibility_group) == 'function' and type(U.set_visibility) == 'function' then
-                    for _, name in ipairs({'gore','gibs','gib','gore_left_leg','gore_right_leg','gore_left_knee','gore_right_knee','gore_l','gore_r'}) do
-                        if U.has_visibility_group(unit,name) then
-                            U.set_visibility(unit,name,false)
-                            hidden_groups[#hidden_groups+1]=name
+                    for _, name in ipairs({
+                        'gore',
+                        'gibs',
+                        'gib',
+                        'gore_left_leg',
+                        'gore_right_leg',
+                        'gore_left_knee',
+                        'gore_right_knee',
+                        'gore_l',
+                        'gore_r',
+                    }) do
+                        if U.has_visibility_group(unit, name) then
+                            U.set_visibility(unit, name, false)
+                            hidden_groups[#hidden_groups + 1] = name
                         end
                     end
                 end
-                if host.note then host.note('preview: gore groups hidden=' .. #hidden_groups .. ' groups=' .. table.concat(hidden_groups,',')) end
+                if host.note then
+                    host.note(
+                        'preview: gore groups hidden='
+                            .. #hidden_groups
+                            .. ' groups='
+                            .. table.concat(hidden_groups, ',')
+                    )
+                end
                 W.update_unit(world, unit)
                 -- Host copies material bindings only after proving source and
                 -- destination materials are distinct instances.

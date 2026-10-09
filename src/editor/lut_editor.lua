@@ -1,8 +1,41 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E = {}
-function E.new(m, document, note, save, presets, live_document, open_export, save_patch)
+function E.new(m, document, note, save, presets, live_document, open_export, save_patch, save_bulk)
     local ffi = require('ffi')
     local self = { undo = {}, redo = {}, busy = false, value_scroll = 0 }
+    local channels = { { 1, 2, 3 }, { 1, 2, 3, 4 }, { 1 }, { 2 }, { 3 }, { 4 } }
+    local function editable(d, column, channel)
+        return d
+            and not d.read_only
+            and (self.handle.get('unlock') or (m.semantics.is_color(d.width, column) and channel <= 3))
+    end
+    function self.can_pick(row, column, mode)
+        local d = document()
+        if not d or not d.data or d.read_only or d.stale then
+            return false, 'Load a current editable LUT first.'
+        end
+        if self.color_session and self.color_session.document ~= d then
+            return false, 'The editor target changed; reopen the picker.'
+        end
+        row, column = row or self.handle.get('edit_row'), column or self.handle.get('edit_column')
+        if row < 1 or row > d.height or column < 1 or column > d.width then
+            return false, 'The selected cell is unavailable.'
+        end
+        for _, ch in ipairs(channels[mode or self.handle.get('grid_channel')]) do
+            if not editable(d, column, ch) then
+                return false, 'Unlock advanced edits to edit this channel.'
+            end
+        end
+        return true
+    end
+    local function picker_channel(channel, mode)
+        for _, ch in ipairs(channels[mode or self.handle.get('grid_channel')]) do
+            if ch == channel then
+                return true
+            end
+        end
+        return false
+    end
     local preset_files = m.lut_files.new(
         presets,
         { dds = m.dds, read = m.file_io.read, row_names = m.windows and m.windows.row_presets }
@@ -129,22 +162,41 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             end
         end
         local h = self.handle
-        mod.controls.cell_color.picker_begin = function()
-            self.color_session =
-                { document = d, before = snapshot(d), row = h.get('edit_row'), column = h.get('edit_column') }
+        mod.controls.cell_color.can_open_picker = function(mode)
+            return self.can_pick(nil, nil, mode)
+        end
+        mod.controls.cell_color.picker_channel_enabled = function(channel, mode)
+            local session = self.color_session
+            return picker_channel(channel, mode or (session and session.mode))
+                and editable(d, session and session.column or h.get('edit_column'), channel)
+        end
+        mod.controls.cell_color.picker_begin = function(mode)
+            assert(self.can_pick(nil, nil, mode))
+            self.color_session = {
+                document = d,
+                before = snapshot(d),
+                row = h.get('edit_row'),
+                column = h.get('edit_column'),
+                mode = mode or h.get('grid_channel'),
+            }
         end
         mod.controls.cell_color.picker_preview = function(color, alpha)
             local session = assert(self.color_session)
             assert(document() == session.document, 'Editor target changed; reopen the picker')
+            assert(self.can_pick(session.row, session.column, session.mode))
             local current_pixels = snapshot(d)
             local at = m.semantics.index(session.row, session.column, 1, d.width, d.height)
             local original = ffi.new('float[?]', d.width * d.height * 4)
             ffi.copy(original, session.before, #session.before)
             local before = rgb(original, at)
             for ch = 1, 3 do
-                d.data[at + ch - 1] = color[ch] == before[ch] and original[at + ch - 1] or color[ch] / 255
+                if picker_channel(ch, session.mode) then
+                    d.data[at + ch - 1] = color[ch] == before[ch] and original[at + ch - 1] or color[ch] / 255
+                end
             end
-            d.data[at + 3] = alpha
+            if picker_channel(4, session.mode) then
+                d.data[at + 3] = alpha
+            end
             if snapshot(d) ~= current_pixels then
                 session.changed = true
                 d.revision = (d.revision or 0) + 1
@@ -177,15 +229,18 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
                 mod.controls.cell_color.picker_preview(rgb_value, alpha)
                 return true
             end
+            assert(self.can_pick())
             local target = remember()
             local at = m.semantics.index(h.get('edit_row'), h.get('edit_column'), 1, target.width, target.height)
             local before = rgb(target.data, at)
             for ch = 1, 3 do
-                if rgb_value[ch] ~= before[ch] then
+                if picker_channel(ch) and rgb_value[ch] ~= before[ch] then
                     target.data[at + ch - 1] = rgb_value[ch] / 255
                 end
             end
-            target.data[at + 3] = alpha
+            if picker_channel(4) then
+                target.data[at + 3] = alpha
+            end
             self.sync()
             return true
         end
@@ -340,10 +395,6 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.value_scroll = math.max(0, math.min(self.value_max or 0, self.value_scroll - delta / 120 * 90))
             return true
         end
-    end
-    local channels = { { 1, 2, 3 }, { 1, 2, 3, 4 }, { 1 }, { 2 }, { 3 }, { 4 } }
-    local function editable(d, column, channel)
-        return self.handle.get('unlock') or (m.semantics.is_color(d.width, column) and channel <= 3)
     end
     local function paint(row, column)
         local d = assert(document(), 'Import first')
@@ -517,6 +568,19 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         end
         return commands
     end
+    self.tools = m.editor_tools
+        and m.editor_tools.new({
+            editor = self,
+            document = document,
+            note = note,
+            ui_core = m.ui_core,
+        })
+    self.scratch_tool = m.scratch_tool
+        and m.scratch_tool.new({
+            editor = self,
+            document = document,
+            ui_core = m.ui_core,
+        })
     self.layout = m.lut_editor_view.new({
         editor = self,
         semantics = m.semantics,
@@ -540,6 +604,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         save = save,
         open_export = open_export,
         save_patch = save_patch,
+        save_bulk = save_bulk,
         remember = remember,
         change = change,
         history = history,

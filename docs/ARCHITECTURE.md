@@ -55,7 +55,7 @@ Build both loader candidates. Integrated preview builds share the native adapter
 These rules describe how to extend the cleaned architecture. Large native ownership changes still require separate live validation.
 
 
-The maintained bundle inventory is in `tools/module_inventory.py`. Run `python tools/format_lua.py --check` with StyLua 2.5.2 at the documented development-tool path (or `--stylua`). Three FFI-heavy files are excluded because AST verification warns; do not bypass that check to force formatting. Legacy MCM sources remain available for their regression tests, outside the release module inventory.
+The maintained bundle inventory is in `tools/module_inventory.py`. Run `python tools/format_lua.py --check` with StyLua 2.5.2 at the documented development-tool path (or `--stylua`). Its listed literal/FFI exceptions are excluded because AST verification warns or panics; preserve those sources rather than forcing formatting. Legacy MCM sources remain available for their regression tests, outside the release module inventory.
 
 
 ## Source folders
@@ -71,3 +71,21 @@ The maintained bundle inventory is in `tools/module_inventory.py`. Run `python t
 - `src/legacy`: earlier MCM/catalog/companion implementation retained for compatibility contracts; excluded from normal bundles.
 
 `tools/module_inventory.py` maps module names to folders. Runtime modules still use injected dependencies; folder moves do not introduce filesystem `require` dependencies.
+
+### Editor layout and optional tools
+
+`lut_editor_view.lua` composes the grid, compact toolbar and optional Value Editor. `editor_tools.lua` owns the movable Import/Rows/Export/Options window; it calls existing registry actions without owning palette data or persistence. `scratch_tool.lua` owns a separate brush window and caches HSV swatches by hue. The Value Editor visibility control uses the normal settings store. Tools compose only the selected tab. Popup dropdowns retain their clicked widget and owning window, and update their anchors during movement. Hidden or empty panels clear their wheel bounds.
+
+`configuration_view.lua` draws two independent settings columns using registered controls. `mcm_settings.lua` optionally mirrors that page into DBF-MCM and routes reads, writes, reset and actions back to the original owner. Preference aliases never become a second store. The bridge detaches on source/framework reload and waits for MCM to release input before opening Epic's editor.
+
+`preset_export.lua` exports the selected stored Armory preset. Shareable ZIPs include a bounded v2 manifest, exact DDS bytes and original patch-source metadata; v1 presets remain readable. Patch exports require captured original resource IDs, never a guess based on currently worn gear. Import stages validated flat files into the existing worker session, then saves a library entry without applying it.
+
+`bulk_dds_export.lua` exports current custom gear tables or stored preset entries into a timestamped folder. It validates and encodes every file before staging, formats resource IDs without floating-point conversion, deduplicates identical destinations and rejects conflicting values. Failed batches remove only their own staged files.
+
+Player Preview selects `ui_3d` and renders to its owned portrait output directly. The initialized UI-world lease and queue cleanup fence remain required. [Render path and Transmog comparison](PREVIEW-RENDER-PATH.md) documents the native material differences that still need live acceptance.
+
+## Development references
+
+Use [HD2SDK Community Edition](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition) as a primary format reference for texture, mesh and material work. Its archive and texture serializers informed Epic's patch writer; the local reference catalog retains known resource, binding and shader-variable names. Follow its linked modding wiki for additional format guidance. Inspect the relevant upstream revision before relying on layouts or mappings, and verify those against the targeted game build and round-trip fixtures. The Blender addon is a development reference, not an Epic LUT runtime dependency.
+
+Use [HD2-Transmog](https://github.com/tyrypyrking/HD2-Transmog) for native Armory/preview behavior. Pin the inspected commit in investigation notes and preserve Epic's own resource ownership when adapting its approach.

@@ -104,9 +104,11 @@ for _, name in ipairs({ 'set_type', 'set_color', 'set_intensity', 'set_casts_sha
     E.Light[name] = function() end
 end
 local calls = {}
+local reads = 0
 local a = N.new(E, m, {
     memory = {
         read = function(at, len)
+            reads = reads + 1
             local value = blocks[tonumber(ffi.cast('uintptr_t', at))]
             assert(value and #value == len)
             return value
@@ -145,12 +147,8 @@ E.Renderer.resource = function(name)
     return name
 end
 E.Renderer.run_resource_generator = function(name, mapping)
-    if name == 'gbuffer_normal_copy' then
-        assert(mapping.gbuffer1 == 'output_target' and mapping.gbuffer1_copy == 'portrait')
-        calls[#calls + 1] = 'copy output'
-    else
-        calls[#calls + 1] = 'clear'
-    end
+    assert(name == 'resource_clear' and mapping.output_rt == 'portrait', 'Portrait read shared gameplay output')
+    calls[#calls + 1] = 'clear'
 end
 E.Application.update_render_world = function()
     calls[#calls + 1] = 'world update'
@@ -158,6 +156,27 @@ end
 E.Application.render_world = function()
     calls[#calls + 1] = 'render'
 end
+local viewport_calls = {}
+E.Application.create_viewport = function(world, template)
+    assert(world == 'owned' and template == 'ui_3d', 'Preview selected the gameplay temporal pipeline')
+    viewport_calls[#viewport_calls + 1] = 'create'
+    return 'viewport'
+end
+E.Viewport.set_output_render_target = function(viewport, target)
+    assert(viewport == 'viewport' and target == 'portrait', 'Preview output is not private')
+    viewport_calls[#viewport_calls + 1] = 'target'
+end
+E.Viewport.set_rect = function(viewport, x, y, width, height)
+    assert(viewport == 'viewport' and x == 0 and y == 0 and width == 1 and height == 1)
+    viewport_calls[#viewport_calls + 1] = 'rect'
+end
+E.World.update = function(world, dt)
+    assert(world == 'owned' and dt == 0)
+    viewport_calls[#viewport_calls + 1] = 'update'
+end
+local viewport = a.create_viewport('owned', 'portrait')
+assert(viewport.world == 'owned' and viewport.viewport == 'viewport')
+assert(table.concat(viewport_calls, ',') == 'create,target,rect,update')
 E.ShadingEnvironment.apply = function()
     calls[#calls + 1] = 'lighting apply'
 end
@@ -171,13 +190,71 @@ a.create_target()
 a.render('owned', { camera = 'camera' }, { viewport = 'viewport' })
 assert(a.quiesce() and a.quiesce())
 assert(
-    table.concat(calls, ',') == 'lighting apply,clear,world update,render,copy output,fence wait,fence destroy queued',
+    table.concat(calls, ',') == 'lighting apply,clear,world update,render,fence wait,fence destroy queued',
     'Render work was not drained exactly once before release'
 )
 assert(
     type(dofile('vendor/engine.lua').create_texture) == 'function',
     'Fixture texture function differs from the actual adapter'
 )
+-- The actual render adapter prepares owned UI materials before submission and
+-- avoids rebuilding constants on an unchanged view.
+local ui_revision, preparations
+preparations = 0
+m.player_preview_ui = {
+    new = function(_, _, game)
+        assert(game == 0x99990000)
+        return {
+            needs_update = function(camera)
+                return camera.preview_revision ~= ui_revision
+            end,
+            apply = function(camera, materials, width, height)
+                assert(#materials == 1 and materials[1].material == 110000 and materials[1].owned)
+                assert(width == 3840 and height == 2160)
+                ui_revision = camera.preview_revision
+                preparations = preparations + 1
+                calls[#calls + 1] = 'ui constants'
+                return true
+            end,
+        }
+    end,
+}
+blocks[100024] = pack32(1) .. pack32(0) .. pack64(200000)
+local ui_adapter = N.new(E, m, {
+    game = 0x99990000,
+    memory = {
+        read = function(at, len)
+            local value = blocks[tonumber(ffi.cast('uintptr_t', at))]
+            assert(value and #value == len)
+            return value
+        end,
+    },
+    native = {
+        commit = function()
+            calls[#calls + 1] = 'material commit'
+        end,
+    },
+    log = function() end,
+    submit = function(world, camera, viewport, environment)
+        assert(world == 'owned' and camera == 'camera' and viewport == 'viewport' and environment == 'environment')
+        calls[#calls + 1] = 'native submit'
+    end,
+})
+local ui_model = ui_adapter.create_model('owned', { plan = { pieces = { piece } } })
+ui_adapter.create_target()
+calls = {}
+local ui_camera = { camera = 'camera', model = ui_model, preview_revision = 1 }
+ui_adapter.render('owned', ui_camera, { viewport = 'viewport' })
+assert(table.concat(calls, ',') == 'ui constants,material commit,lighting apply,clear,native submit')
+calls = {}
+ui_adapter.render('owned', ui_camera, { viewport = 'viewport' })
+assert(preparations == 1 and table.concat(calls, ',') == 'lighting apply,clear,native submit')
+ui_camera.preview_revision = 2
+local original_source = ui_model.pieces[1].source
+ui_model.pieces[1].source = ui_model.pieces[1].unit
+assert(not pcall(ui_adapter.render, 'owned', ui_camera, { viewport = 'viewport' }) and preparations == 1)
+ui_model.pieces[1].source = original_source
+m.player_preview_ui = nil
 local position, rotation
 E.Vector3 = setmetatable({}, {
     __call = function(_, x, y, z)
@@ -209,6 +286,26 @@ assert(math.abs(position[1] - 100) < 0.001 and math.abs(position[2] - 5) < 0.001
 assert(math.abs(rotation.direction[2] + 5) < 0.001 and rotation.up[3] == 1)
 a.rotate(camera, 360)
 assert(math.abs(position[1] - 100) < 0.001 and math.abs(position[2] - 5) < 0.001)
+assert(camera.preview_position[1] == 100 and camera.preview_position[2] == 5 and camera.preview_position[3] == 1)
+local visible = 2 * camera.distance * math.tan(math.rad(30 / 2))
+local revision = camera.preview_revision
+a.rotate(camera, 0, { fov = 30, pan_x = 0.5, pan_y = 1.5 })
+assert(
+    math.abs(position[3] - (1 - visible)) < 0.00001 and camera.preview_position[3] == position[3],
+    'Extended vertical pan was clipped or omitted from shader camera metadata'
+)
+assert(math.abs(position[1] - (100 + 0.25 * visible * 0.6)) < 0.00001 and camera.preview_revision > revision)
+a.rotate(camera, 0, { fov = 30, pan_x = 0, pan_y = -1.5 })
+assert(math.abs(position[3] - (1 + visible)) < 0.00001 and camera.preview_position[3] == position[3])
+local camera_fov
+E.Camera.set_vertical_fov = function(value, fov)
+    assert(value == 'camera')
+    camera_fov = fov
+end
+a.zoom(camera, 100)
+assert(camera.preview_fov == 65 and math.abs(camera_fov - math.rad(65)) < 0.00001)
+a.zoom(camera, -20)
+assert(camera.preview_fov == 12 and math.abs(camera_fov - math.rad(12)) < 0.00001)
 -- A borrowed initialized context must never be released by our adapter.
 local main = ffi.cast('void *', 0x700000)
 local ui = ffi.cast('void *', 0x800000)
@@ -243,6 +340,15 @@ local leased = N.new(E, m, {
     },
 })
 assert(leased.create_world() == ui)
+E.Application.create_viewport = function(world, template)
+    assert(world == ui and template == 'ui_3d', 'UI lease selected another render path')
+    return 'viewport'
+end
+E.World.update = function()
+    error('Updated simulation of the borrowed UI world')
+end
+local ui_viewport = leased.create_viewport(ui, 'portrait')
+assert(ui_viewport.world == ui and ui_viewport.viewport == 'viewport')
 leased.destroy_world(ui)
 assert(leased.create_world() == ui)
 ui_blocks[ui_manager + 0x3c48] = pack64(ui_real + 0x100)
@@ -263,25 +369,8 @@ E.Unit.resource_name = function()
     return 'leg-resource'
 end
 model.pieces[1].slot = 5
-local diagnostic = a.material_masks(model)
-assert(#diagnostic == 1 and diagnostic[1].mode == 'original')
 local retained_probes = package.loaded['epic.preview.mask.probes.v1']
-retained_probes.black = { object = 444444 }
-a.set_material_mask(model, 1, 1, 123, 'black')
-assert(writes[#writes][1] == 110000 and writes[#writes][3] == 444444, 'Probe wrote outside copied material')
-local before = #writes
-blocks[200000] = pack32(123) .. pack32(0) .. pack64(300008)
-a.apply_luts(model, { helmet = true })
-assert(#writes == before, 'Live sync overwrote diagnostic mask')
-a.reset_material_masks(model)
-assert(writes[#writes][3] == 300008, 'Reset failed to restore current source binding')
-assert(a.material_masks(model)[1].mode == 'original')
-assert(not pcall(a.set_material_mask, model, 1, 1, 999, 'black'), 'Unknown texture slot accepted')
-local own = model.pieces[1].unit
-model.pieces[1].unit = model.pieces[1].source
-assert(not pcall(a.set_material_mask, model, 1, 1, 123, 'black'), 'Live source unit accepted')
-model.pieces[1].unit = own
-retained_probes.black = nil
+assert(a.material_info == nil and a.material_masks == nil and a.meshes == nil, 'Removed inspector APIs remain')
 -- Mixed clothing/gib sections must retain clothing and never clear source slots.
 blocks[101024] = blocks[100024]
 engine.unit_materials = function(_, id)

@@ -1,3 +1,4 @@
+local Menu = dofile('vendor/menu/menu.lua')
 local ffi = require('ffi')
 local core = dofile('vendor/menu/core.lua')
 local api = core.new({
@@ -113,7 +114,7 @@ print(
 pattern.show('helmet')
 local palette = dofile('src/core/palette.lua')
 local rects, labels = {}, {}
-local ui = {
+local ui = Menu.custom_ui({
     rect = function(x, y, w, h, c)
         rects[#rects + 1] = { x = x, y = y, w = w, h = h, c = c }
     end,
@@ -128,7 +129,7 @@ local ui = {
         assert(id == 'pattern_lut_editor')
         draw(0, 0, w, h)
     end,
-}
+})
 pattern.popup(ui)
 assert(
     labels['Pattern LUT Editor']
@@ -154,6 +155,23 @@ assert(#samples == 1 and samples[1][1] == 255, 'Opaque swatch was checkerboard')
 
 pattern.column = 2
 local picker = api.mods.patterns.controls.pattern_picker
+local pattern_before = ffi.string(pattern.document.data, 48)
+local pattern_history = #pattern.undo
+pattern.column, pattern.raw = 3, false
+assert(
+    picker.can_open_picker() == false and not pcall(picker.picker_begin),
+    'Unknown Pattern channels opened without the Advanced raw gate'
+)
+assert(
+    ffi.string(pattern.document.data, 48) == pattern_before and #pattern.undo == pattern_history,
+    'Protected Pattern picker mutated pixels/history'
+)
+pattern.raw = true
+assert(picker.can_open_picker() == true, 'Advanced raw gate did not enable Pattern picker')
+pattern.document.read_only = true
+assert(picker.can_open_picker() == false, 'Read-only Pattern opened its picker')
+pattern.document.read_only = nil
+pattern.column, pattern.raw = 2, false
 assert(picker.picker_commit({ 255, 0, 0 }, 0.6))
 assert(pattern.document.data[4] == 1 and math.abs(pattern.document.data[7] - 0.6) < 0.00001)
 assert(picker.picker_alpha() == tonumber(pattern.document.data[7]))
@@ -204,12 +222,15 @@ local tab_pattern = dofile('src/editor/pattern_luts.lua').new({
     end,
 })
 
-local tabs_handle =
-    api.register({ id = 'pattern_tabs_test', name = 'Tabs', pages = {
+local tabs_handle = api.register({
+    id = 'pattern_tabs_test',
+    name = 'Tabs',
+    pages = {
         { id = 'p', name = 'Patterns', controls = tab_pattern.controls() },
-    } })
+    },
+})
 tab_pattern.attach(tabs_handle, api.mods.pattern_tabs_test.controls)
-assert(tab_pattern.switch('armor'))
+assert(tabs_handle.activate('pattern_load'))
 assert(math.abs(tab_pattern.document.data[0] - 0.1) < 0.00001)
 assert(tab_pattern.switch('helmet'))
 assert(
@@ -248,12 +269,16 @@ local flashing = dofile('src/editor/pattern_luts.lua').new({
         return '[pattern]'
     end,
 })
-local fh =
-    api.register({ id = 'pattern_flash_test', name = 'Flash', pages = {
+local fh = api.register({
+    id = 'pattern_flash_test',
+    name = 'Flash',
+    pages = {
         { id = 'p', name = 'Pattern', controls = flashing.controls() },
-    } })
+    },
+})
 flashing.attach(fh, api.mods.pattern_flash_test.controls)
 flashing.show('helmet')
+assert(fh.activate('pattern_load'))
 flashing.flash()
 assert(current ~= 100)
 flashing.flash()
@@ -387,6 +412,8 @@ local rh = api.register({
 })
 refresh.attach(rh, api.mods.pattern_refresh_test.controls)
 refresh.show('armor')
+assert(scans == 0 and refresh.document == nil and not refresh.ready)
+assert(rh.activate('pattern_load'))
 assert(scans == 1 and refresh.document)
 for i = 1, 20 do
     refresh.tick(0.01)
@@ -400,4 +427,175 @@ refresh.tick(1)
 assert(scans == 2 and refresh.document == nil, 'Closed popup kept rediscovering worn gear')
 print(
     'PASS Pattern robustness: import readiness/history, cached picker undo, flash/cancel, foreign ownership, exact unknown floats, throttled gear refresh'
+)
+
+-- Optional refresh failures stay within the Pattern popup instead of escaping the menu click.
+local bad_signature = dofile('src/editor/pattern_luts.lua').new({
+    auto_populate = function()
+        return true
+    end,
+    gear_signature = function()
+        error('identity not ready')
+    end,
+    note = function(t)
+        return t
+    end,
+    session = {
+        owned = {},
+        restore = function()
+            return true
+        end,
+    },
+    discover = function()
+        return {}
+    end,
+    key = function(b)
+        return b.material
+    end,
+    binding = function()
+        return 0
+    end,
+    rgb = dofile('src/core/palette.lua').rgb,
+    original = function()
+        return nil
+    end,
+    resource_id = tostring,
+})
+local bad_handle = api.register({
+    id = 'pattern_bad_identity',
+    name = 'Pattern',
+    pages = { { id = 'p', name = 'Pattern', controls = bad_signature.controls() } },
+})
+bad_signature.attach(bad_handle, api.mods[bad_handle.id].controls)
+assert(pcall(bad_signature.show), 'Identity failure escaped Pattern open')
+assert(pcall(bad_signature.switch, 'armor'), 'Identity failure escaped Armor button')
+assert(pcall(bad_signature.tick, 0.5), 'Identity failure escaped Pattern poll')
+assert(bad_signature.open and bad_signature.document == nil, 'Failed identity left unsafe editable values')
+
+-- Startup guidance is explicit: no discovery or enabled gear selectors before
+-- a successful manual load/import. Only the Load button flashes, and its saved
+-- cue can be reset without changing the automatic-populate preference.
+local cue_seen, cue_auto, cue_scans, cue_marks = false, false, 0, 0
+local cue_sources, cue_bindings = {}, {}
+for i = 1, 8 do
+    local data = ffi.new('float[12]')
+    for j = 0, 11 do
+        data[j] = i + j / 100
+    end
+    cue_sources[600 + i] = { width = 3, height = 1, data = data }
+    cue_bindings[i] = { material = 600 + i, armor = i <= 4, helmet = i > 4 }
+end
+local cue = dofile('src/editor/pattern_luts.lua').new({
+    session = {
+        owned = {},
+        restore = function()
+            return true
+        end,
+    },
+    auto_populate = function()
+        return cue_auto
+    end,
+    load_seen = function()
+        return cue_seen
+    end,
+    mark_load_seen = function()
+        cue_seen = true
+        cue_marks = cue_marks + 1
+    end,
+    key = function(b)
+        return b.material
+    end,
+    binding = function(b)
+        return b.material
+    end,
+    discover = function()
+        cue_scans = cue_scans + 1
+        return cue_bindings
+    end,
+    original = function(object)
+        return cue_sources[object]
+    end,
+    resource_id = tostring,
+    rgb = palette.rgb,
+    swatch = palette.swatch,
+    note = function(t)
+        return t
+    end,
+})
+local cue_list = cue.controls()
+cue_list[#cue_list + 1] = { id = 'show_alpha', type = 'toggle', label = 'Alpha', default = false }
+local ch = api.register({
+    id = 'pattern_cue_test',
+    name = 'Cue',
+    pages = { { id = 'p', name = 'Pattern', controls = cue_list } },
+})
+local cc = api.mods[ch.id].controls
+cue.attach(ch, cc)
+cue.show('armor')
+assert(cue.document == nil and cue_scans == 0 and cc.pattern_lut.disabled)
+assert(not cue.switch('helmet') and cue_scans == 0 and cue.gear == 'armor')
+local button_colors, hits = {}, {}
+local cu = Menu.custom_ui({
+    rect = function(x, y, w, h, color)
+        if y == 634 then
+            button_colors[x] = color
+        end
+    end,
+    bounded = function() end,
+    number = function() end,
+    choice = function() end,
+    activate = ch.activate,
+    hit = function(x, y, w, h, callback)
+        if y == 634 then
+            hits[x] = callback
+        end
+    end,
+    floating = function(_, draw, w, h)
+        draw(0, 0, w, h)
+    end,
+})
+cue.popup(cu)
+assert(
+    button_colors[12] == Menu.palette.panel and button_colors[144] == Menu.palette.panel,
+    'Unloaded Pattern tabs were not gray'
+)
+hits[144]()
+assert(cue_scans == 0 and cue.gear == 'armor', 'Gray Helmet button still discovered live data')
+assert(button_colors[284][1] == 244 and button_colors[284][2] ~= 202, 'First-load cue was not flashing gold')
+cue.tick(0.2)
+assert(cue_scans == 0, 'Unloaded Pattern popup auto-discovered despite manual-load setting')
+assert(ch.activate('pattern_load'))
+assert(cue.ready and cue.document and cue_marks == 1 and cue_seen and not cc.pattern_lut.disabled)
+cue.popup(cu)
+assert(button_colors[12] ~= Menu.palette.panel and button_colors[144] ~= Menu.palette.panel)
+assert(button_colors[284][1] == 244 and button_colors[284][2] == 202, 'Load button did not stay gold after first press')
+for _, gear in ipairs({ 'armor', 'helmet' }) do
+    assert(cue.switch(gear))
+    for i = 1, 4 do
+        assert(ch.set('pattern_lut', i))
+        assert(cue.document.data[0] == (gear == 'armor' and i or i + 4))
+    end
+end
+assert((function()
+    local count = 0
+    for _ in pairs(cue.documents) do
+        count = count + 1
+    end
+    return count
+end)() == 8, 'Pattern table caches mixed Armor and Helmet values')
+cue_seen = false
+cue.popup(cu)
+assert(button_colors[284][2] ~= 202, 'Reset Load cue did not override the in-memory seen state')
+assert(cue.close() and not cue.ready and cc.pattern_lut.disabled)
+cue_auto = true
+cue.show('armor')
+assert(cue.document and cue.ready, 'Automatic populate did not bypass manual-load guidance')
+cue.close()
+cue_auto = false
+cue.import(source)
+assert(cue.ready and not cue.document, 'A valid imported Pattern did not enable gear selection')
+cue.show('helmet')
+assert(cue.document and cue.gear == 'helmet')
+print(
+    'PASS Pattern startup guidance: manual readiness, gray selectors, resettable gold cue, automatic populate, exact eight-table caches'
 )

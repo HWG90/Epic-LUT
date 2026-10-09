@@ -15,6 +15,7 @@ local view = dofile('src/editor/armory_view.lua').new(function()
     return state
 end)
 local saved
+local exports = {}
 local menu
 local controls = {
     { id = 'armory_search', type = 'input', allow_empty = true, label = 'Search', default = '' },
@@ -22,6 +23,32 @@ local controls = {
     { id = 'basic_preset_name', type = 'input', label = 'Name', default = 'palette' },
     { id = 'basic_preset', type = 'choice', label = 'Palette', choices = { 'New preset' }, default = 1 },
     { id = 'outfit_preset', type = 'choice', label = 'Outfit', choices = { 'Choose outfit', 'Example' }, default = 1 },
+    { id = 'armory_export_name', type = 'input', label = 'Export name', default = 'Saved Set' },
+    {
+        id = 'armory_export_format',
+        type = 'choice',
+        label = 'Export format',
+        choices = {
+            'Shareable Preset ZIP',
+            'Selected LUT Patch ZIP',
+            'Entire Preset Patch ZIP',
+            'Raw DDS (selected LUT)',
+            'Raw DDS (entire preset)',
+        },
+        default = 1,
+        on_change = function(value)
+            state.armory_export_format = value
+        end,
+    },
+    {
+        id = 'armory_dds_naming',
+        type = 'choice',
+        presentation = 'dropdown',
+        label = 'DDS filenames',
+        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
+        default = 1,
+    },
+    { id = 'armory_export_lut', type = 'choice', label = 'Saved LUT', choices = { 'Armor LUT 1' }, default = 1 },
     {
         id = 'outfit_name',
         type = 'input',
@@ -42,12 +69,21 @@ for _, id in ipairs({
     'basic_save',
     'basic_export',
     'open_editor',
+    'armory_export',
+    'armory_import',
+    'open_export',
 }) do
     controls[#controls + 1] = {
         id = id,
         type = 'button',
         label = id,
         on_activate = function()
+            if id == 'armory_export' then
+                exports[#exports + 1] = {
+                    format = api.mods.armory_test.handle.get('armory_export_format'),
+                    naming = api.mods.armory_test.handle.get('armory_dds_naming'),
+                }
+            end
             return true
         end,
     }
@@ -88,6 +124,29 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(later['LUT 3'], 'Later saved LUT missing from Armory preview')
+-- A small viewport must retain access to export/import without controls escaping.
+menu.compose(960, 720)
+assert(view.sidebar_maximum > 0, 'Small Armory window did not scroll its controls')
+view.wheel(view.sidebar_bounds.x + 2, view.sidebar_bounds.y + 2, -1200)
+local bottom = {}
+for _, c in ipairs(menu.compose(960, 720)) do
+    if c.full_text then
+        bottom[c.full_text] = true
+    end
+end
+assert(
+    bottom['Export Selected Preset...'] and bottom['Import Shared Preset...'],
+    'Armory export/import controls unreachable'
+)
+state.raw.outfit.helmet = { { width = 3, height = 1, data = ffi.new('float[12]') } }
+view.scroll = 0
+local pattern_labels = {}
+for _, c in ipairs(menu.compose(1920, 1080)) do
+    if c.full_text then
+        pattern_labels[c.full_text] = true
+    end
+end
+assert(pattern_labels['Pattern LUT 1'], '3x1 Pattern preset missing safe preview')
 
 local saved_kind
 menu.outfit_dialog = {
@@ -168,4 +227,54 @@ assert(menu.text_edit and menu.outfit_dialog.phase == 'name', 'Yes did not open 
 menu.text_edit.text = 'Mixed Set'
 menu.key(13)
 assert(saved == 'Mixed Set' and not menu.outfit_dialog, 'Named preset did not save/close')
+local function composed(value)
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        if c.full_text == value then
+            return c
+        end
+    end
+end
+local function tap_label(value)
+    local c = assert(composed(value), 'Missing Armory export control: ' .. value)
+    for _, down in ipairs({ true, false }) do
+        menu.tick({
+            down = function(key)
+                return down and key == 1
+            end,
+            mouse = function()
+                return c.x + 3, c.y + 3
+            end,
+            wheel = function()
+                return 0
+            end,
+        })
+    end
+end
+for format = 1, 4 do
+    assert(h.set('armory_export_format', format))
+    menu.compose(1920, 1080)
+    view.sidebar_scroll = view.sidebar_maximum
+    assert(not composed('LUT# + HEX'), 'Armory naming chooser leaked into an existing format')
+    assert(
+        (composed('Armor LUT 1') ~= nil) == (format == 2 or format == 4),
+        'Armory selected-LUT chooser changed its original format eligibility'
+    )
+    tap_label('Export Selected Preset...')
+    assert(exports[#exports].format == format, 'Armory old export format callback changed')
+end
+assert(h.set('armory_export_format', 5))
+menu.compose(1920, 1080)
+view.sidebar_scroll = view.sidebar_maximum
+assert(not composed('Armor LUT 1'), 'Entire preset bulk DDS still asks for a single LUT')
+tap_label('LUT# + HEX')
+assert(menu.dropdown and menu.dropdown.control.id == 'armory_dds_naming', 'Armory bulk naming dropdown did not open')
+for i = 1, 3 do
+    menu.key(40)
+end
+menu.key(13)
+tap_label('Export Selected Preset...')
+assert(
+    exports[#exports].format == 5 and exports[#exports].naming == 4,
+    'Armory bulk export lost its HEX naming selection'
+)
 print('PASS Armory: split Armor/Helmet preview, keep-preset confirmation, editable naming popup')

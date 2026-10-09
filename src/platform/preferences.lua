@@ -20,6 +20,8 @@ function P.new(storage)
                     name = 'Menu controls',
                     require_confirmation = false,
                     controls = {
+                        { id = 'load_current_seen', type = 'toggle', label = 'Load current cue seen', default = false },
+                        { id = 'pattern_load_seen', type = 'toggle', label = 'Pattern load cue seen', default = false },
                         {
                             id = 'basic_key',
                             type = 'keybind',
@@ -98,6 +100,14 @@ function P.new(storage)
         })
         api.mods.epic_lut_preferences.pages = {} -- Presentation aliases expose the same authoritative controls in Extras.
         return self.handle
+    end
+    function self.load_seen(pattern)
+        return self.handle and self.handle.get(pattern and 'pattern_load_seen' or 'load_current_seen') == true or false
+    end
+    function self.mark_load_seen(pattern)
+        if self.handle then
+            return self.handle.set(pattern and 'pattern_load_seen' or 'load_current_seen', true)
+        end
     end
     function self.key()
         return self.handle and self.handle.get('menu_key') or 121

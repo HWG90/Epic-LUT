@@ -40,6 +40,7 @@ function C.append(pages, editor_pages, deps)
                 pages[1].controls[#pages[1].controls + 1] = control
             end
             page.name = 'Configuration'
+            page.tab_color = { 110, 69, 155 }
             page.controls = {}
             if deps.preferences and deps.preferences.mount then
                 deps.preferences.mount(deps.api)
@@ -53,6 +54,22 @@ function C.append(pages, editor_pages, deps)
                     end
                 end
             end
+            page.controls[#page.controls + 1] = {
+                id = 'auto_populate_worn',
+                type = 'toggle',
+                label = 'Always populate all LUT slots from current gear',
+                default = false,
+                description = 'Automatically load the current Armor and Helmet LUTs when equipment changes. Imported palettes remain available separately.',
+                on_change = deps.auto_populate_changed,
+            }
+            page.controls[#page.controls + 1] = {
+                id = 'disable_player_preview',
+                type = 'toggle',
+                label = 'Turn off Player Preview',
+                default = false,
+                description = 'Keep Player Preview disabled, including its shortcut and automatic dock. Turn this off to use the preview again.',
+                on_change = deps.preview_changed,
+            }
             page.controls[#page.controls + 1] = {
                 id = 'resource_format',
                 type = 'choice',
@@ -83,13 +100,20 @@ function C.append(pages, editor_pages, deps)
                         end)
                     end,
                 }
-                page.controls[#page.controls + 1] = {
-                    type = 'toggle',
-                    id = 'auto_updates',
-                    label = 'Check for updates at launch',
-                    default = preferences.auto_updates(),
-                    on_change = preferences.save_auto_updates,
-                }
+                local owner = deps.api.mods.epic_lut_preferences
+                local automatic = owner and link_preference(owner, 'auto_updates')
+                if automatic then
+                    automatic.id = 'auto_updates' -- Keep the existing visible control ID.
+                else
+                    automatic = {
+                        type = 'toggle',
+                        id = 'auto_updates',
+                        label = 'Check for updates at launch',
+                        default = preferences.auto_updates(),
+                        on_change = preferences.save_auto_updates,
+                    }
+                end
+                page.controls[#page.controls + 1] = automatic
                 page.controls[#page.controls + 1] = {
                     type = 'button',
                     id = 'open_updates',
@@ -103,6 +127,19 @@ function C.append(pages, editor_pages, deps)
             end
         end
         pages[#pages + 1] = page
+    end
+end
+function C.attach(api, handle, view_module, key_name)
+    if not view_module then
+        return
+    end
+    for _, page in ipairs(api.mods[handle.id].pages) do
+        if page.id == 'save' then
+            local view = view_module.new({ api = api, handle = handle, page = page, key_name = key_name })
+            page.tab_color = { 110, 69, 155 }
+            page.render_layout, page.on_wheel = view.draw, view.wheel
+            return view
+        end
     end
 end
 return C

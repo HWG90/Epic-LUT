@@ -39,7 +39,7 @@ local function normalize(c,v)
 end
 local function stored(c)return c.type=='input' or c.type=='toggle' or c.type=='slider' or c.type=='choice' or c.type=='keybind' or c.type=='color'end
 function M.new(store,log,grouping)
-    local api={api=1,version='0.1.50',color_hex=M.color_hex,color_rgb=M.color_rgb,hsv_rgb=M.hsv_rgb,rgb_hsv=M.rgb_hsv,mods={},revision=0};log=log or function()end
+    local api={api=1,version='0.1.52',color_hex=M.color_hex,color_rgb=M.color_rgb,hsv_rgb=M.hsv_rgb,rgb_hsv=M.rgb_hsv,mods={},revision=0};log=log or function()end
     api.storage_per_mod=true;api.presentation_links=true;api.text_swatches=true;api.category_page_links=true
     local palette=store and store.load('mcm_custom_palette') or {};local swatches={}
     for i=1,12 do local ok,v=pcall(M.color_hex,palette['swatch_'..i]);if ok then swatches[#swatches+1]=v end end
@@ -116,9 +116,15 @@ function M.new(store,log,grouping)
                     assert(type(c.choices)=='table' and #c.choices>0,'Choices required')
                     c.choices=copy(c.choices);for _,label in ipairs(c.choices)do plain(label)end
                 elseif c.type=='button' then assert(type(c.on_activate)=='function','Button callback required');assert(c.require_confirmation==nil or type(c.require_confirmation)=='boolean','Action require_confirmation must be boolean') end
+                if c.source_mod_id or c.source_control_id then
+                    id(c.source_mod_id);id(c.source_control_id)
+                    assert(c.source_mod_id~=mod.id,'Presentation links must use another settings owner')
+                end
                 if stored(c)then
                     c.default=normalize(c,c.default)
-                    local ok,value=pcall(normalize,c,saved[c.id]);if ok then mod.values[c.id]=value else mod.values[c.id]=c.default end
+                    if not c.source_mod_id then
+                        local ok,value=pcall(normalize,c,saved[c.id]);if ok then mod.values[c.id]=value else mod.values[c.id]=c.default end
+                    end
                 end
                 page.controls[#page.controls+1]=c
             end
@@ -126,10 +132,32 @@ function M.new(store,log,grouping)
         end
         api.mods[mod.id]=mod;api.revision=api.revision+1
         local handle={id=mod.id}
-        function handle.get(key)assert(mod.controls[key],'Unknown control');return mod.values[key]end
+        -- Presentation links read and mutate their owner directly. They never
+        -- persist a second value or swallow an owner's failed save in a callback.
+        local function linked(c,write)
+            local owner,key=mod,c.id
+            local seen={}
+            while c.source_mod_id do
+                assert(not seen[c],'Presentation link cycle');seen[c]=true
+                if write then assert(not c.disabled,'Control disabled')end
+                owner=assert(api.mods[c.source_mod_id],'Settings owner unavailable')
+                key=c.source_control_id
+                local target=assert(owner.controls[key],'Linked setting unavailable')
+                assert(target.type==c.type,'Linked setting type differs')
+                c=target
+            end
+            if write then assert(not c.disabled,'Control disabled')end
+            return owner.handle,key
+        end
+        function handle.get(key)
+            local c=assert(mod.controls[key],'Unknown control')
+            if c.source_mod_id then local owner,target=linked(c);return owner.get(target)end
+            return mod.values[key]
+        end
         function handle.set(key,value)
             assert(api.mods[mod.id]==mod,'Retired registration')
             local c=assert(mod.controls[key],'Unknown control');assert(stored(c),'Control is not a setting')
+            if c.source_mod_id then local owner,target=linked(c,true);return owner.set(target,value)end
             assert(not c.disabled,'Control disabled');value=normalize(c,value)
             if c.validate then assert(c.validate(value)~=false,'Value rejected by mod')end
             if value==mod.values[key]then return true end
@@ -143,12 +171,18 @@ function M.new(store,log,grouping)
         end
         function handle.preview(key)
             local c=assert(mod.controls[key],'Unknown control');local pending=c.page.pending
+            if c.source_mod_id then local owner,target=linked(c);return (owner.preview or owner.get)(target)end
             if pending[key]~=nil then return pending[key]end;return handle.get(key)
         end
         function handle.edit(key,value)
             assert(api.mods[mod.id]==mod,'Retired registration')
             local c=assert(mod.controls[key],'Unknown control')
-            if not c.page.require_confirmation then return handle.set(key,value)end
+            if c.source_mod_id then
+                local owner,target=linked(c,true)
+                if c.require_confirmation==false or not c.page.require_confirmation then return owner.set(target,value)end
+                return owner.edit(target,value)
+            end
+            if c.require_confirmation==false or not c.page.require_confirmation then return handle.set(key,value)end
             assert(stored(c) and not c.disabled,'Setting unavailable');value=normalize(c,value)
             if c.validate then assert(c.validate(value)~=false,'Value rejected by mod')end
             if value==handle.get(key)then c.page.pending[key]=nil else c.page.pending[key]=value end
@@ -161,6 +195,7 @@ function M.new(store,log,grouping)
         function handle.queue(key)
             assert(api.mods[mod.id]==mod,'Retired registration')
             local c=assert(mod.controls[key],'Unknown control');assert(c.type=='button' and not c.disabled,'Button unavailable')
+            if c.source_mod_id then local owner,target=linked(c,true);return owner.queue(target)end
             if c.require_confirmation~=true then return handle.activate(key)end
             c.page.actions[key]=true;return true
         end
@@ -191,6 +226,16 @@ function M.new(store,log,grouping)
         function handle.set_many(values)
             assert(api.mods[mod.id]==mod,'Retired registration')
             assert(type(values)=='table','Settings table required')
+            local owner,linked_values,targets,has_links=nil,{},{},false
+            for key,value in pairs(values)do
+                local c=assert(mod.controls[key],'Unknown control');assert(stored(c),'Control is not a setting')
+                local target_handle,target=linked(c,true)
+                if owner and owner~=target_handle then return false,'Settings batch spans multiple owners'end
+                if targets[target] and linked_values[target]~=value then return false,'Conflicting linked settings in batch'end
+                targets[target]=true
+                owner=target_handle;linked_values[target]=value;has_links=has_links or c.source_mod_id~=nil
+            end
+            if has_links then return owner.set_many(linked_values)end
             local next_values=copy(mod.values);local changes={};local keys={}
             for key in pairs(values)do keys[#keys+1]=key end;table.sort(keys)
             for _,key in ipairs(keys)do
@@ -208,10 +253,16 @@ function M.new(store,log,grouping)
             end
             api.revision=api.revision+1;log('Settings batch committed: '..mod.id..' ('..#changes..' settings)');return true
         end
-        function handle.reset(key)return handle.set(key,assert(mod.controls[key],'Unknown control').default)end
+        function handle.reset(key)
+            assert(api.mods[mod.id]==mod,'Retired registration')
+            local c=assert(mod.controls[key],'Unknown control')
+            if c.source_mod_id then local owner,target=linked(c,true);return owner.reset(target)end
+            return handle.set(key,c.default)
+        end
         function handle.activate(key)
             assert(api.mods[mod.id]==mod,'Retired registration')
             local c=assert(mod.controls[key],'Unknown control');assert(c.type=='button' and not c.disabled,'Button unavailable')
+            if c.source_mod_id then local owner,target=linked(c,true);return owner.activate(target)end
             local ok,result=pcall(c.on_activate)
             log((ok and 'Action completed: 'or 'Action failed: ')..mod.id..'.'..key..(not ok and (': '..tostring(result))or ''))
             return ok,result

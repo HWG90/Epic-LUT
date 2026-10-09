@@ -19,6 +19,8 @@ local function unhex(value)
 end
 bytes[exe + 0x318090] = unhex('48895c2408574883ec30488bf9488b0d64816f01488b9938030000488b93101c')
 bytes[exe + 0x318150] = unhex('48895c240848896c2410488974241848897c242041564883ec604c8b9c249800')
+bytes[game + 0x1390778] = unhex('c7442438a8b7431a')
+bytes[game + 0x139079f] = unhex('c74424300f800000')
 local memory = {
     read = function(at, n)
         local b = bytes[tonumber(ffi.cast('uintptr_t', at))]
@@ -40,7 +42,7 @@ local dependencies = {
     end,
     render = function(w, c, v, unused, e, window, flags, context)
         assert(addr(w) == real and addr(c) == 70000000 and addr(v) == 80000000 and addr(e) == 90000000)
-        assert(unused == nil and window == nil and flags == 0 and context == 0)
+        assert(unused == nil and window == nil and flags == 0x800f and context == 0x1a43b7a8)
         calls[#calls + 1] = 'render'
     end,
 }
@@ -50,4 +52,7 @@ assert(table.concat(calls, ',') == 'update,render')
 pointer(app + 0x28, exe + 0x318151)
 assert(not pcall(submit, world, 70000000, 80000000, 90000000) and #calls == 2, 'Changed native dispatch was called')
 assert(not pcall(S.new, memory, game, exe, dependencies), 'Changed entry was accepted')
+pointer(app + 0x28, exe + 0x318150)
+bytes[game + 0x139079f] = string.rep('\0', 8)
+assert(not pcall(S.new, memory, game, exe, dependencies), 'Changed UI flags were accepted')
 print('PASS native submission signatures, world unboxing, exact arguments and dispatch drift refusal')

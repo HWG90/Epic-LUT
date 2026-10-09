@@ -1,8 +1,12 @@
--- Build-checked Application C API submission, matching the inspected native
--- full-preview call contract. No code patches or game-owned object writes.
+-- Build-checked Application C API submission. The supplied owned viewport
+-- selects the render layers; this wrapper does not replace native Armory
+-- cameras, material parameters or its canvas. No game-owned object writes.
 local Submit = {}
+Submit.FLAGS, Submit.CONTEXT = 0x800f, 0x1a43b7a8
 local UPDATE = '48895c2408574883ec30488bf9488b0d64816f01488b9938030000488b93101c'
 local RENDER = '48895c240848896c2410488974241848897c242041564883ec604c8b9c249800'
+local UI_CONTEXT = 'c7442438a8b7431a'
+local UI_FLAGS = 'c74424300f800000'
 local function unhex(value)
     return (value:gsub('..', function(pair)
         return string.char(tonumber(pair, 16))
@@ -31,6 +35,10 @@ function Submit.new(memory, game, exe, dependencies)
         render_at == exe + 0x318150 and read(render_at, 32) == unhex(RENDER),
         'Native render-world submission changed'
     )
+    assert(
+        read(game + 0x1390778, 8) == unhex(UI_CONTEXT) and read(game + 0x139079f, 8) == unhex(UI_FLAGS),
+        'Native Game Default submission contract changed'
+    )
     local update = dependencies.update or ffi.cast('void (*)(void *)', update_at)
     local render = dependencies.render
         or ffi.cast(
@@ -55,8 +63,8 @@ function Submit.new(memory, game, exe, dependencies)
             nil,
             ffi.cast('void *', address(environment)),
             nil,
-            0,
-            0
+            Submit.FLAGS,
+            Submit.CONTEXT
         )
     end
 end

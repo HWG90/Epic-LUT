@@ -15,4 +15,6 @@ assert len(expected) == len(set(expected)), 'Duplicate module inventory'
 for name in expected:
     assert len(re.findall(r'm\.' + re.escape(name) + r'=\(function\(\)', model)) == 1, f'{name} missing or duplicated in model'
 assert source_path('frontend') == 'src/platform/standalone_frontend.lua'
+debug_hex = re.search(r"m\.debug_lut_dds_hex='([0-9a-f]+)'", model)
+assert debug_hex and bytes.fromhex(debug_hex[1]) == (ROOT/'assets/debug-lut.dds').read_bytes(), 'Bundled Debug LUT differs'
 print(f'PASS bundle inventory: {len(expected)} modules, each embedded once')

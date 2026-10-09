@@ -230,13 +230,32 @@ local function crc32(bytes)
 end
 function P.zip(patch)
     local base = patch.archive .. '.patch_0'
-    local local_records, central, offset = {}, {}, 0
-    for _, entry in ipairs({
+    return P.zip_entries({
         { base, patch.main },
         { base .. '.gpu_resources', patch.gpu },
-        { base .. '.stream', patch.stream },
-    }) do
+        {
+            base .. '.stream',
+            patch.stream,
+        },
+    })
+end
+function P.zip_entries(entries)
+    assert(type(entries) == 'table' and #entries > 0 and #entries <= 512, 'Invalid export ZIP entries')
+    local local_records, central, offset = {}, {}, 0
+    local seen = {}
+    for _, entry in ipairs(entries) do
         local name, bytes = entry[1], entry[2]
+        assert(
+            type(name) == 'string'
+                and #name > 0
+                and #name <= 200
+                and not name:find('[\\/:]')
+                and not name:find('..', 1, true)
+                and not seen[name],
+            'Unsafe export ZIP name'
+        )
+        assert(type(bytes) == 'string' and #bytes <= 8 * 1024 * 1024, 'Export ZIP entry too large')
+        seen[name] = true
         local crc = word(crc32(bytes))
         local common = short(20)
             .. short(0)
@@ -267,8 +286,8 @@ function P.zip(patch)
         .. word(0x06054b50)
         .. short(0)
         .. short(0)
-        .. short(3)
-        .. short(3)
+        .. short(#entries)
+        .. short(#entries)
         .. word(#directory)
         .. word(offset)
         .. short(0)

@@ -1,9 +1,8 @@
 local ffi = require('ffi')
 local dds = dofile('src/core/dds.lua')
-local store = dofile('src/presets/outfit_presets.lua').new(
-    { file_io = dofile('src/core/file_io.lua'), dds = dds, windows = dofile('src/platform/windows.lua') },
-    'tests/tmp/presets'
-)
+local module = dofile('src/presets/outfit_presets.lua')
+local modules = { file_io = dofile('src/core/file_io.lua'), dds = dds, windows = dofile('src/platform/windows.lua') }
+local store = module.new(modules, 'tests/tmp/presets')
 local a = ffi.new('float[736]')
 local h = ffi.new('float[736]')
 for i = 0, 735 do
@@ -32,6 +31,52 @@ assert(
 store.delete('Rename Destination')
 assert(not pcall(store.load, 'Rename Destination'), 'Deleted preset remains active')
 assert(not pcall(store.load, '../outside'), 'Preset path traversal accepted')
+-- Legacy presets remain loadable; patch metadata is never inferred from live gear.
+modules.file_io.write(
+    'tests/tmp/presets/outfit-Legacy.tsv',
+    'EPIC-OUTFIT\t1\narmor\t0:1:0:0\toutfit-Roundtrip Outfit-armor-1.dds'
+)
+local legacy = store.load('Legacy')
+assert(#legacy.entries == 1 and legacy.entries[1].original == nil, 'Legacy preset changed destination metadata')
+local pattern = ffi.new('float[12]')
+pattern[0], pattern[3], pattern[7] = 0.125, 0.375, -1.25
+local original = {
+    width = 3,
+    height = 1,
+    resource = '000000000000002a',
+    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. dds.encode(pattern, 3, 1):sub(1, 148),
+}
+store.save('Pattern Metadata', {
+    {
+        kind = 'helmet',
+        key = 'p:0:0:0:0',
+        document = { width = 3, height = 1, data = pattern },
+        original = original,
+    },
+})
+local saved_pattern = store.load('Pattern Metadata').entries[1]
+assert(
+    saved_pattern.original.resource == original.resource
+        and saved_pattern.original.patch_source == original.patch_source
+        and ffi.string(saved_pattern.document.data, 48) == ffi.string(pattern, 48),
+    'Pattern metadata or channels lost'
+)
+modules.file_io.write(
+    'tests/tmp/presets/unsafe-preset.tsv',
+    'EPIC-OUTFIT\t2\nhelmet\tp:0:0:0:0\t../outside.dds\t-\t-\t-\t-'
+)
+assert(
+    not pcall(module.read, modules, 'tests/tmp/presets/unsafe-preset.tsv', 'Unsafe'),
+    'Shared preset traversal accepted'
+)
+modules.file_io.write(
+    'tests/tmp/presets/duplicate-preset.tsv',
+    'EPIC-OUTFIT\t1\narmor\t0:1:0:0\toutfit-Roundtrip Outfit-armor-1.dds\narmor\t0:1:0:0\toutfit-Roundtrip Outfit-armor-1.dds'
+)
+assert(
+    not pcall(module.read, modules, 'tests/tmp/presets/duplicate-preset.tsv', 'Duplicate'),
+    'Duplicate preset destination accepted'
+)
 local history = dofile('src/core/action_history.lua').new(function() end, function()
     error('foreign binding')
 end)

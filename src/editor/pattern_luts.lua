@@ -62,6 +62,7 @@ function P.new(deps)
         }) do
             controls[id].disabled = self.document == nil
         end
+        controls.pattern_lut.disabled = not self.ready or #self.groups == 0
         controls.pattern_import_apply.disabled = self.imported == nil or self.document == nil
         controls.pattern_undo.disabled = self.document == nil or #self.undo == 0
         controls.pattern_redo.disabled = self.document == nil or #self.redo == 0
@@ -160,8 +161,12 @@ function P.new(deps)
                 end
             end
             self.busy = true
-            assert(handle.set('pattern_lut', selected_index))
+            local disabled = controls.pattern_lut.disabled
+            controls.pattern_lut.disabled = false
+            local ok, why = handle.set('pattern_lut', selected_index)
+            controls.pattern_lut.disabled = disabled
             self.busy = false
+            assert(ok, why)
         end
         return #ordered
     end
@@ -179,7 +184,7 @@ function P.new(deps)
         end
         if cached then
             self.document, self.undo, self.redo = cached.document, cached.undo, cached.redo
-            self.waiting = nil
+            self.ready, self.requested, self.waiting = true, true, nil
             sync()
             return note('Loaded cached current Pattern LUT values.')
         end
@@ -197,7 +202,7 @@ function P.new(deps)
             return note('Loading current Pattern LUT values automatically...')
         end
         validate(source)
-        self.waiting = nil
+        self.ready, self.requested, self.waiting = true, true, nil
         local data = ffi.new('float[12]')
         ffi.copy(data, source.data, 48)
         self.document = { data = data, width = 3, height = 1, original = original and pixels(original) or nil }
@@ -211,6 +216,7 @@ function P.new(deps)
         local data = ffi.new('float[12]')
         ffi.copy(data, source.data, 48)
         self.imported = { data = data, width = 3, height = 1 }
+        self.ready = true
         sync()
         return note('3x1 Pattern DDS ready. Load a destination Pattern LUT, then apply the imported table.')
     end
@@ -330,6 +336,10 @@ function P.new(deps)
                         type = 'button',
                         label = 'Load Current Pattern LUTs',
                         on_activate = function()
+                            self.load_seen, self.requested = true, true
+                            if deps.mark_load_seen then
+                                deps.mark_load_seen()
+                            end
                             assert(self.scan() > 0, 'No bound Pattern LUTs')
                             return self.load(true)
                         end,
@@ -495,14 +505,17 @@ function P.new(deps)
     end
     function self.switch(kind)
         assert(kind == 'armor' or kind == 'helmet')
-        local signature = deps.gear_signature and deps.gear_signature() or nil
-        if self.gear == kind and self.document and signature == self.gear_signature then
-            return true
+        if not self.ready then
+            return false
         end
-        self.gear_signature = signature
-        self.waiting = nil
-        self.gear = kind
         local ok, why = pcall(function()
+            local signature = deps.gear_signature and deps.gear_signature() or nil
+            if self.gear == kind and self.document and signature == self.gear_signature then
+                return
+            end
+            self.gear_signature = signature
+            self.waiting = nil
+            self.gear = kind
             assert(self.scan() > 0, 'No bound Pattern LUTs for ' .. kind)
             self.load()
         end)
@@ -539,27 +552,36 @@ function P.new(deps)
     end
     function self.tick(dt)
         dt = math.max(0, tonumber(dt) or 0)
+        if self.open then
+            self.cue_time = (self.cue_time or 0) + dt
+        end
         if deps.indicator then
             deps.indicator.tick(dt, self.open == true)
         end
-        if self.open and deps.gear_signature then
+        if self.open and self.requested and deps.gear_signature then
             self.gear_elapsed = (self.gear_elapsed or 0) + math.max(0, dt or 0)
             if self.gear_elapsed >= 0.5 then
                 self.gear_elapsed = 0
-                local signature = deps.gear_signature()
-                local group = self.groups[handle.get('pattern_lut')]
-                local missing = group and deps.present and not deps.present(group.bindings[1])
-                if signature ~= self.gear_signature or missing then
-                    self.gear_signature = signature
-                    self.document, self.waiting = nil, nil
-                    local ok, why = pcall(function()
+                local ok, why = pcall(function()
+                    local signature = deps.gear_signature()
+                    local group = self.groups[handle.get('pattern_lut')]
+                    local missing = group and deps.present and not deps.present(group.bindings[1])
+                    if signature ~= self.gear_signature or missing then
+                        self.gear_signature = signature
+                        self.document, self.waiting = nil, nil
                         assert(self.scan() > 0, 'No bound Pattern LUTs for current gear')
                         self.load()
-                    end)
-                    if not ok then
-                        sync()
+                    end
+                end)
+                if not ok then
+                    self.document = nil
+                    sync()
+                    if self.refresh_error ~= tostring(why) then
                         note(tostring(why))
                     end
+                    self.refresh_error = tostring(why)
+                else
+                    self.refresh_error = nil
                 end
             end
         end
@@ -585,13 +607,26 @@ function P.new(deps)
     function self.show(kind)
         self.open = true
         self.gear = kind or self.gear or 'armor'
-        self.gear_signature = deps.gear_signature and deps.gear_signature() or nil
         self.gear_elapsed = 0
+        local auto = deps.auto_populate and deps.auto_populate()
+        if not (auto or self.ready or self.imported or next(self.documents)) then
+            self.document, self.waiting, self.groups, self.all_groups = nil, nil, {}, nil
+            if controls then
+                controls.pattern_lut.choices = { 'Load current patterns first' }
+                controls.pattern_lut.choice_details = {}
+            end
+            sync()
+            return note('Load Current Patterns to edit the worn Armor and Helmet pattern tables.')
+        end
+        self.requested = true
         local ok, why = pcall(function()
+            self.gear_signature = deps.gear_signature and deps.gear_signature() or nil
             assert(self.scan() > 0, 'No bound Pattern LUTs for this gear')
             self.load()
         end)
         if not ok then
+            self.document, self.waiting = nil, nil
+            sync()
             note(tostring(why))
         end
         return self.status or 'Pattern LUT Editor opened'
@@ -601,33 +636,40 @@ function P.new(deps)
             return
         end
         local function draw(x, y, w, h)
-            local white, muted, blue = { 225, 230, 235 }, { 155, 166, 175 }, { 35, 62, 90 }
+            local theme = ui.theme
+            local white, muted = theme.white, theme.muted
             local function label(px, py, text, width)
                 ui.bounded(px, py, text, 13, white, width or w - 24)
             end
             local function button(px, py, width, text, id, enabled, callback, active)
-                local featured = enabled ~= false and (id == 'pattern_export' or id == 'pattern_export_patch')
-                ui.rect(
-                    px,
-                    py,
-                    width,
-                    26,
-                    enabled == false and { 35, 39, 43 }
-                        or (featured and { 244, 202, 53 } or (active and { 49, 82, 115 } or blue))
-                )
-                ui.bounded(px + 6, py + 6, text, 13, featured and { 25, 28, 31 } or white, width - 12)
-                ui.hit(px, py, width, 26, function()
-                    if enabled ~= false then
-                        if callback then
-                            callback()
-                        else
-                            ui.activate(id)
-                        end
+                local featured = enabled ~= false
+                    and (id == 'pattern_export' or id == 'pattern_export_patch' or id == 'pattern_load')
+                local featured_color = { 244, 202, 53 }
+                local seen = self.load_seen
+                if deps.load_seen then
+                    seen = deps.load_seen()
+                end
+                if id == 'pattern_load' and not seen then
+                    local pulse = math.floor(32 + 26 * math.sin((self.cue_time or 0) * 4))
+                    featured_color = { 244, math.min(255, 202 + pulse), 53 + pulse }
+                end
+                ui.button(px, py, width, 26, text, function()
+                    if callback then
+                        callback()
+                    else
+                        ui.activate(id)
                     end
-                end)
+                end, {
+                    enabled = enabled,
+                    selected = active,
+                    accent = featured and featured_color,
+                    ink = featured and { 25, 28, 31 },
+                    size = 13,
+                    padding = 6,
+                })
             end
-            ui.rect(x, y, w, h, { 24, 30, 35 })
-            ui.rect(x, y + h - 40, w, 40, blue)
+            ui.rect(x, y, w, h, theme.panel)
+            ui.rect(x, y + h - 40, w, 40, theme.header)
             label(x + 10, y + h - 27, 'Pattern LUT Editor', w - 40)
             for i, kind in ipairs({ 'armor', 'helmet' }) do
                 local gear = kind
@@ -637,7 +679,7 @@ function P.new(deps)
                     124,
                     (self.gear == kind and '> ' or '') .. (kind == 'armor' and 'Armor' or 'Helmet'),
                     nil,
-                    true,
+                    self.ready == true,
                     function()
                         self.switch(gear)
                     end,
@@ -779,7 +821,7 @@ function P.new(deps)
             button(x + 12, y + 256, bw, 'Undo', 'pattern_undo', d ~= nil and #self.undo > 0)
             button(x + 18 + bw, y + 256, bw, 'Redo', 'pattern_redo', d ~= nil and #self.redo > 0)
             button(x + 24 + bw * 2, y + 256, bw, 'Restore All Patterns', 'pattern_restore')
-            ui.rect(x + 12, y + 244, w - 24, 1, { 65, 76, 85 })
+            ui.rect(x + 12, y + 244, w - 24, 1, theme.line)
             label(x + 12, y + 222, 'Pattern Import', w - 24)
             if self.imported then
                 label(x + 12, y + 199, 'Imported:', 80)
@@ -820,7 +862,18 @@ function P.new(deps)
     end
     function self.attach(h, c)
         handle, controls = h, c
+        controls.pattern_picker.can_open_picker = function()
+            return self.document ~= nil
+                and not self.document.read_only
+                and not self.document.stale
+                and ((self.column or 1) <= 2 or self.raw == true),
+                'Enable Advanced raw values to edit this Pattern channel.'
+        end
+        controls.pattern_picker.picker_channel_enabled = function(channel)
+            return channel <= 3 or (self.column == 2 or self.raw == true)
+        end
         controls.pattern_picker.picker_begin = function()
+            assert(controls.pattern_picker.can_open_picker())
             assert(self.stop_flash(), 'Pattern highlight restoration pending')
             self.color_session = {
                 before = pixels(assert(self.document)),
@@ -831,6 +884,7 @@ function P.new(deps)
         end
         controls.pattern_picker.picker_preview = function(color, alpha)
             local session = assert(self.color_session, 'Pattern color session ended')
+            assert(controls.pattern_picker.can_open_picker())
             assert(
                 self.document == session.document and selected().object == session.object,
                 'Pattern changed while picking a color; close the picker and load current patterns'
@@ -844,7 +898,9 @@ function P.new(deps)
                 local displayed = math.floor(math.max(0, math.min(1, original[at + ch - 1])) * 255 + 0.5)
                 d.data[at + ch - 1] = color[ch] == displayed and original[at + ch - 1] or color[ch] / 255
             end
-            d.data[at + 3] = alpha
+            if session.column == 2 or self.raw then
+                d.data[at + 3] = alpha
+            end
             if pixels(d) ~= current_pixels then
                 local ok, why = pcall(function()
                     validate(d)
@@ -886,6 +942,7 @@ function P.new(deps)
             return self.document and tonumber(self.document.data[((self.column or 1) - 1) * 4 + 3]) or 1
         end
         controls.pattern_picker.picker_commit = function(color, alpha)
+            assert(controls.pattern_picker.can_open_picker())
             if self.color_session then
                 controls.pattern_picker.picker_preview(color, alpha)
                 return true
@@ -898,10 +955,20 @@ function P.new(deps)
                         data[at + ch - 1] = color[ch] / 255
                     end
                 end
-                data[at + 3] = alpha
+                if self.column == 2 or self.raw then
+                    data[at + 3] = alpha
+                end
             end)
         end
-        for _, name in ipairs({ 'picker_begin', 'picker_preview', 'picker_end', 'picker_alpha', 'picker_commit' }) do
+        for _, name in ipairs({
+            'can_open_picker',
+            'picker_channel_enabled',
+            'picker_begin',
+            'picker_preview',
+            'picker_end',
+            'picker_alpha',
+            'picker_commit',
+        }) do
             controls.pattern_color[name] = controls.pattern_picker[name]
         end
         sync()
@@ -915,6 +982,7 @@ function P.new(deps)
         if restored then
             self.document, self.documents, self.undo, self.redo = nil, {}, {}, {}
             self.color_session = nil
+            self.ready, self.requested = self.imported ~= nil, false
             sync()
         end
         return restored

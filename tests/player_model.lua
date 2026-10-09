@@ -104,29 +104,35 @@ assert(#destroyed == 3, 'Partial setup leaked garment')
 print('PASS independent garment copies, relative pose, exact skeleton, target LUTs and partial cleanup')
 
 local hidden = {}
-U.has_visibility_group=function(unit,name) return name=='gore_left_knee' or name=='gore_right_knee' end
-U.set_visibility=function(unit,name,visible)
-    assert(unit~='armor' and unit~='helmet','Gore filter changed equipped source')
-    assert(visible==false)
-    hidden[name]=true
+U.has_visibility_group = function(unit, name)
+    return name == 'gore_left_knee' or name == 'gore_right_knee'
 end
-local filtered=M.new(E,{copy_materials=function()end,retain_failed=function()end})
-local filtered_plan=filtered.capture('world','root',{{unit='armor',kind='armor'}})
-local cleaned=filtered.create('world',filtered_plan)
-assert(hidden.gore_left_knee and hidden.gore_right_knee,'Declared knee gore groups were not hidden')
+U.set_visibility = function(unit, name, visible)
+    assert(unit ~= 'armor' and unit ~= 'helmet', 'Gore filter changed equipped source')
+    assert(visible == false)
+    hidden[name] = true
+end
+local filtered = M.new(E, { copy_materials = function() end, retain_failed = function() end })
+local filtered_plan = filtered.capture('world', 'root', { { unit = 'armor', kind = 'armor' } })
+local cleaned = filtered.create('world', filtered_plan)
+assert(hidden.gore_left_knee and hidden.gore_right_knee, 'Declared knee gore groups were not hidden')
 filtered.destroy(cleaned)
 
-local prior_visibility=E.Mesh.visibility
-E.Mesh.visibility=function()return 0 end
-local numeric=M.new(E,{copy_materials=function()end,retain_failed=function()end})
-local numeric_plan=numeric.capture('world','root',{{unit='armor',kind='armor'}})
-assert(numeric_plan.pieces[1].visible[1]==false,'Numeric zero made a hidden damage mesh visible')
-E.Mesh.visibility=prior_visibility
+local prior_visibility = E.Mesh.visibility
+E.Mesh.visibility = function()
+    return 0
+end
+local numeric = M.new(E, { copy_materials = function() end, retain_failed = function() end })
+local numeric_plan = numeric.capture('world', 'root', { { unit = 'armor', kind = 'armor' } })
+assert(numeric_plan.pieces[1].visible[1] == false, 'Numeric zero made a hidden damage mesh visible')
+E.Mesh.visibility = prior_visibility
 
-local old_set_visibility=U.set_mesh_visibility
-U.set_mesh_visibility=function(unit,index,value) assert(value==false,'Preview force-enabled a resource-default hidden mesh') end
-local default_model=M.new(E,{copy_materials=function()end,retain_failed=function()end})
-local defaults=default_model.capture('world','root',{{unit='armor',kind='armor'}})
-local default_copy=default_model.create('world',defaults)
+local old_set_visibility = U.set_mesh_visibility
+U.set_mesh_visibility = function(unit, index, value)
+    assert(value == false, 'Preview force-enabled a resource-default hidden mesh')
+end
+local default_model = M.new(E, { copy_materials = function() end, retain_failed = function() end })
+local defaults = default_model.capture('world', 'root', { { unit = 'armor', kind = 'armor' } })
+local default_copy = default_model.create('world', defaults)
 default_model.destroy(default_copy)
-U.set_mesh_visibility=old_set_visibility
+U.set_mesh_visibility = old_set_visibility

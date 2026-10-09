@@ -1,6 +1,6 @@
 # Pattern LUTs
 
-Open **LUT Editor > Pattern LUT Editor**. Choose **Armor** or **Helmet**, then select the pattern table. The popup loads the current values automatically and refreshes when equipped gear changes. **Load Current Patterns** reloads the worn gear when you need to retry a missing snapshot.
+Open **LUT Editor > Pattern LUT Editor**, then **Load Current Patterns**. Armor and Helmet stay gray until current or imported pattern data is available. Choose either gear and a table. The popup refreshes loaded values when equipment changes; use the gold Load button to retry a missing snapshot. The optional automatic-population setting also enables loading on first open.
 
 Pattern LUTs contain **3 columns and 1 row**, bound through a separate pattern texture slot. They do not replace the 23-column material table. A garment can bind a pattern table without visibly using it; **Flash Pattern** identifies where the selected accent appears. **Stop Flash** restores its previous binding.
 

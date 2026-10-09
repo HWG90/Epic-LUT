@@ -73,7 +73,7 @@ function C.new()
         end
         if down and self.pan then
             local px = math.max(-0.25, math.min(0.25, self.pan.px + (x - self.pan.x) / self.w))
-            local py = math.max(-0.25, math.min(0.25, self.pan.py + (y - self.pan.y) / self.h))
+            local py = math.max(-1, math.min(1, self.pan.py + (y - self.pan.y) / self.h))
             if px ~= self.pan_x or py ~= self.pan_y then
                 self.pan_x, self.pan_y = px, py
                 event = 'pan'

@@ -41,8 +41,18 @@ local test_root = assert(os.getenv('EPIC_LUT_TEST_ROOT'))
 os.remove(test_root .. '/tests/tmp/direct-state/direct-applied.tsv')
 local quick_select, quick_info
 local test_frontend
+local pattern_deps
+local bulk_entries, bulk_naming
+local Pattern = dofile('src/editor/pattern_luts.lua')
 local m = {
+    pattern_luts = {
+        new = function(deps)
+            pattern_deps = deps
+            return Pattern.new(deps)
+        end,
+    },
     lut_files = dofile('src/presets/lut_files.lua'),
+    editor_tools = dofile('src/editor/editor_tools.lua'),
     table_index = dofile('src/imports/table_index.lua'),
     file_io = dofile('src/core/file_io.lua'),
     editor_registry = dofile('src/editor/editor_registry.lua'),
@@ -56,6 +66,16 @@ local m = {
     import_protocol = dofile('src/imports/import_protocol.lua'),
     control_help = dofile('src/editor/control_help.lua'),
     resource_ids = dofile('src/core/resource_ids.lua'),
+    bulk_dds_export = {
+        new = function()
+            return {
+                save = function(name, entries, naming)
+                    bulk_entries, bulk_naming = entries, naming
+                    return 'tests/tmp/bulk-export', #entries
+                end,
+            }
+        end,
+    },
     action_history = dofile('src/core/action_history.lua'),
     basic_state = dofile('src/core/basic_state.lua'),
     region_indicator = dofile('src/gear/region_indicator.lua'),
@@ -87,6 +107,14 @@ local m = {
                 cache = test_root .. '/tests/tmp/cache',
                 settings = test_root .. '/tests/tmp/direct-state',
                 presets = test_root .. '/tests/tmp/presets',
+                directory_exists = function(path)
+                    local file = io.open(path, 'rb')
+                    if file then
+                        file:close()
+                        return true
+                    end
+                    return false
+                end,
                 storage = store,
             }
         end,
@@ -161,7 +189,13 @@ local f = assert(io.open('src/editor/direct_editor.lua', 'rb'))
 local source = f:read('*a')
 f:close()
 local editor = assert(loadstring('local m=...\n' .. source))(m)
-local ctx = { log = function() end, on_cleanup = function() end }
+local cleanups = {}
+local ctx = {
+    log = function() end,
+    on_cleanup = function(fn)
+        cleanups[#cleanups + 1] = fn
+    end,
+}
 editor.on_enable(ctx)
 editor.on_update(ctx, 0)
 local handle = api.mods.epic_direct_lut.handle
@@ -191,7 +225,15 @@ m.original_luts = {
             tick = function() end,
             close = function() end,
             get = function()
-                return { data = stock, width = 23, height = 8, resource = 'ffffffffffffffff' }
+                return {
+                    data = stock,
+                    width = 23,
+                    height = 8,
+                    resource = 'ffffffffffffffff',
+                    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. m.dds
+                        .encode(stock, 23, 8)
+                        :sub(1, 148),
+                }
             end,
         }
     end,
@@ -199,6 +241,7 @@ m.original_luts = {
 local stock_editor = assert(loadstring('local m=...\n' .. source))(m)
 local patch_saved
 m.patch_export = {
+    zip_entries = dofile('src/presets/patch_export.lua').zip_entries,
     new = function(folder, deps)
         assert(folder == test_root .. '/tests/tmp/files' and deps.dds == m.dds)
         return {
@@ -209,9 +252,11 @@ m.patch_export = {
         }
     end,
 }
+m.preset_export = dofile('src/presets/preset_export.lua')
 stock_editor.on_enable(ctx)
 stock_editor.on_update(ctx, 0)
 handle = api.mods.epic_direct_lut.handle
+assert(not api.mods.epic_direct_lut.controls.export_material_report, 'Removed inspector export still registered')
 local armor_before, helmet_before = handle.get('target_armor'), handle.get('target_helmet')
 activate('populate_worn')
 assert(
@@ -275,6 +320,20 @@ for _, entry in ipairs(preset.entries) do
     end
 end
 assert(bad_entry)
+assert(
+    handle.get('armory_export_name') == 'Stock Outfit' and not api.mods[handle.id].controls.armory_export.disabled,
+    'Selected preset did not unlock named Armory export'
+)
+assert(handle.set('armory_export_format', 2))
+assert(not api.mods[handle.id].controls.armory_export_lut.disabled)
+patch_saved = nil
+assert(activate('armory_export'):find('Exported Stock Outfit', 1, true))
+assert(
+    patch_saved
+        and patch_saved.document == preset.entries[1].document
+        and patch_saved.original.resource == preset.entries[1].original.resource,
+    'Armory patch exported editor/worn bytes instead of selected stored preset'
+)
 local original_key, original_value = bad_entry.key, bad_entry.document.data[0]
 bad_entry.key = '2:9:63:63'
 bad_entry.document.data[0] = 0.77 -- A wrong fallback would visibly repaint the unmatched first material.
@@ -303,6 +362,41 @@ assert(
     remembered['0:0:0:0'] and remembered['0:1:0:0'],
     'Mixed Armor and Helmet applications were not retained together'
 )
+local shared_fixture = io.open('tests/tmp/files/armorytest.zip', 'rb')
+if shared_fixture then
+    shared_fixture:close()
+    local old_native_import = m.native_import
+    m.native_import = dofile('src/platform/windows.lua')
+    local script = assert(io.open('tools/import_zip.ps1', 'rb'))
+    m.zip_import_script = script:read('*a'):gsub('.', function(c)
+        return string.format('%02x', c:byte())
+    end)
+    script:close()
+    local before_armor, before_helmet = bound[3], bound[8]
+    assert(handle.set('format', 2) and handle.set('file', 'armorytest'))
+    activate('load')
+    ffi.cdef('void epic_armory_import_test_sleep(uint32_t) __asm__("Sleep");')
+    local kernel, completed = ffi.load('kernel32'), false
+    for _ = 1, 200 do
+        stock_editor.on_update(ctx, 0.05)
+        local selected = quick_info().raw.outfit
+        if selected and selected.name:match('^armorytest') then
+            completed = true
+            break
+        end
+        kernel.epic_armory_import_test_sleep(50)
+    end
+    assert(completed, 'Actual shared preset worker was not accepted into Armory')
+    assert(bound[3] == before_armor and bound[8] == before_helmet, 'Importing a shared preset applied it to worn gear')
+    local shared = quick_info().raw.outfit
+    assert(
+        #shared.entries == 2
+            and shared.entries[1].original.resource == '0000000000000001'
+            and shared.entries[2].document.width == 3,
+        'Shared preset import lost destination or Pattern data'
+    )
+    m.native_import = old_native_import
+end
 assert(handle.activate('restore'))
 assert(not next(m.direct_setup.new(m, m.paths.new()).read()), 'Restore Original retained a startup preset')
 
@@ -429,6 +523,18 @@ assert(
 assert(math.abs(handle.get('cell_r') - 0x12 / 255) < 0.0006, 'Scratch edit did not sync editor table')
 activate('undo')
 assert(creates == before_quick, 'Unchecked quick edit changed live bindings')
+assert(handle.set('basic_preset', 1) and handle.set('basic_preset', preset_index))
+local changed_preset = assert(quick_info().editor)
+local preset_bytes = ffi.string(changed_preset.data, changed_preset.width * changed_preset.height * 16)
+assert(
+    not api.mods.epic_direct_lut.controls.quick_color.can_open_picker(),
+    'Stale quick selection opened on a new preset'
+)
+assert(handle.set('quick_color', '#654321'))
+assert(
+    ffi.string(changed_preset.data, changed_preset.width * changed_preset.height * 16) == preset_bytes,
+    'Stale quick selection painted into a replacement preset'
+)
 activate('save_palette')
 assert(handle.set('edit_row', 1))
 assert(handle.set('edit_column', 1))
@@ -548,6 +654,21 @@ assert(
     helmet_object ~= armor_object and bound[3] == armor_object and bound[6] == armor_object,
     'Helmet application removed armor'
 )
+local bulk_uploads = creates
+assert(handle.set('export_format', 4) and handle.set('dds_naming', 2))
+activate('export_selected')
+assert(bulk_naming == 2 and #bulk_entries == 4, 'Bulk export did not collect all custom gear bindings')
+local armor_ordinals, helmets = {}, 0
+for _, entry in ipairs(bulk_entries) do
+    if entry.kind == 'armor' then
+        armor_ordinals[entry.ordinal] = true
+    else
+        helmets = helmets + 1
+    end
+end
+assert(armor_ordinals[1] and armor_ordinals[2] and helmets == 1)
+assert(creates == bulk_uploads and bound[3] == armor_object and bound[8] == helmet_object, 'DDS export changed gear')
+assert(handle.set('export_format', 1))
 assert(handle.set('target_armor', false))
 assert(handle.set('target_helmet', false))
 assert(activate('apply_checked'):find('Check Armor', 1, true) and bound[3] == armor_object)
@@ -718,7 +839,45 @@ assert(workers[4].closed and #workers == 5, 'Retry launched a second picker befo
 workers[5].alive = false
 recovery.on_update(ctx, 0.1)
 assert(recovery.on_disable(ctx))
+-- Reusing the same addon object must not carry old documents or worker results
+-- into the next activation, and cleanup must finish before state is discarded.
+recovery.on_enable(ctx)
+recovery.on_update(ctx, 0.1)
+rh = api.mods.epic_direct_lut.handle
+assert(rh.set('format', 1) and rh.set('file', 'palette'))
+assert(rh.activate('load') and rh.activate('save_palette'))
+quick_select({ width = 23, height = 8, data = data, source = quick_path, name = 'Table 1' }, 3, 6)
+local old_document = assert(quick_info().editor)
+local old_cleanup = cleanups[#cleanups]
+m.import_description = 'Old imported archive'
+local retained = package.loaded['epic.direct_lut.retained.v1']
+local retained_records, retained_bytes = #retained.records, retained.bytes
+assert(rh.activate('browse'))
+local old_worker = workers[#workers]
+local counter = package.loaded['epic.import.counter.v1'].value
+local ready, why = pcall(recovery.on_enable, ctx)
+assert(not ready and tostring(why):find('cleanup is still pending', 1, true))
+assert(quick_info().editor == old_document and quick_info().busy, 'Pending cleanup discarded active state')
+old_worker.alive = false
+recovery.on_enable(ctx)
+recovery.on_update(ctx, 0.1)
+assert(old_worker.closed, 'Reinitialize leaked the old import worker')
+local clean = quick_info()
+assert(not clean.loaded and not clean.editor and not clean.busy and #clean.raw.tables == 0)
+assert(m.quick_source == nil and m.import_description == nil, 'Old import metadata survived initialization')
+assert(not api.mods.epic_direct_lut.controls.quick_color.can_open_picker(), 'Stale region opened a picker')
+assert(old_cleanup() and api.mods.epic_direct_lut, 'Old cleanup callback closed the new activation')
+assert(package.loaded['epic.direct_lut.retained.v1'] == retained)
+assert(
+    #retained.records == retained_records and retained.bytes == retained_bytes,
+    'Initialization released GPU buffers'
+)
+assert(package.loaded['epic.import.counter.v1'].value == counter, 'Initialization reused an import job name')
+assert(recovery.on_disable(ctx))
 m.native_import.launch_worker = actual_launch
+print(
+    'PASS same-instance initialization: clean documents, selections and imports after worker cleanup; GPU buffers retained'
+)
 print(
     'PASS picker recovery: dead process, invalid heartbeat PID, cancellation and serialized retry; editor save is non-applying; checked targets and portable DDS export'
 )
@@ -767,3 +926,179 @@ assert(
 )
 assert(sharing_ticked, 'Sharing was not enabled through Configuration')
 assert(sharing_editor.on_disable(ctx))
+
+-- The real binding-only avatar contract has no body/armor/helmet kit fields.
+assert(
+    pattern_deps and type(pattern_deps.gear_signature()) == 'string',
+    'Partial avatar identity broke Pattern refresh'
+)
+local gear_before = pattern_deps.gear_signature()
+local unit_before = units[1].unit
+units[1].unit = unit_before + 100
+assert(pattern_deps.gear_signature() ~= gear_before, 'Garment replacement did not change Pattern refresh identity')
+units[1].unit = unit_before
+
+-- Startup restores Pattern slots separately, waits for them, and saves before cleanup.
+m.shared_appearance = nil
+m.outfit_presets = nil
+local old_binding, old_bind, old_create, old_originals =
+    m.engine.binding, m.engine.bind, m.engine.create_texture, m.original_luts
+local old_pattern_slot, old_time = m.engine.PATTERN_SLOT, memory.time
+local pattern_bound = { [3] = 900, [4] = 900, [6] = 901, [8] = 902 }
+local pattern_available, clock = false, 0
+local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
+pattern.data[0], pattern.data[3], pattern.data[7], pattern.data[11] = 0.3125, -0.125, 0.75, 13.25
+m.engine.PATTERN_SLOT = 2
+memory.time = function()
+    return clock
+end
+m.engine.binding = function(_, material, slot)
+    if slot == 2 then
+        return pattern_available and pattern_bound[material] or nil
+    end
+    return bound[material]
+end
+m.engine.bind = function(_, material, slot, object)
+    if slot == 2 then
+        pattern_bound[material] = object
+    else
+        bound[material] = object
+    end
+end
+local pattern_upload
+m.engine.create_texture = function(_, w, h, data)
+    if w == 3 then
+        assert(h == 1)
+        pattern_upload = ffi.string(data, 48)
+        return { object = 5000, data = data, width = w, height = h }
+    end
+    return old_create(nil, w, h, data)
+end
+m.original_luts = {
+    new = function()
+        return {
+            loaded = true,
+            status = 'Ready',
+            start = function() end,
+            tick = function() end,
+            close = function() end,
+            get = function(object)
+                if object >= 900 and object <= 902 then
+                    return pattern
+                end
+                return { data = stock, width = 23, height = 8, resource = 'ffffffffffffffff' }
+            end,
+        }
+    end,
+}
+local state_paths = m.paths.new()
+local combined_setup = m.direct_setup.new(m, state_paths)
+combined_setup.clear()
+bound[3], bound[4], bound[6], bound[8] = 100, 100, 300, 400
+combined_setup.save({
+    { save_key = '0:1:0:0', texture = { data = stock, width = 23, height = 8 } },
+    { save_key = 'p:0:1:0:0', texture = pattern },
+}, {})
+local combined_editor = assert(loadstring('local m=...\n' .. source))(m)
+combined_editor.on_enable(ctx)
+for _ = 1, 5 do
+    clock = clock + 0.3
+    combined_editor.on_update(ctx, 0.3)
+end
+assert(pattern_bound[3] == 900 and bound[3] == 100, 'Saved setup applied before Pattern slots became ready')
+pattern_available = true
+for _ = 1, 20 do
+    clock = clock + 0.3
+    combined_editor.on_update(ctx, 0.3)
+end
+assert(
+    pattern_bound[3] == 5000 and bound[3] ~= 100 and pattern_upload == ffi.string(pattern.data, 48),
+    'Mixed setup failed exact Pattern/material resume'
+)
+local mixed_handle = api.mods.epic_direct_lut.handle
+assert(mixed_handle.set('export_format', 4) and mixed_handle.activate('export_selected'))
+local exported_pattern = false
+for _, entry in ipairs(bulk_entries) do
+    if entry.document.width == 3 then
+        assert(ffi.string(entry.document.data, 48) == pattern_upload, 'Bulk export changed Pattern bits')
+        exported_pattern = true
+    end
+end
+assert(exported_pattern, 'Bulk DDS omitted applied Pattern LUTs')
+assert(quick_info().editor and quick_info().editor.width == 23, 'Pattern setup was loaded into the material editor')
+assert(combined_editor.on_disable(ctx))
+assert(bound[3] == 100 and pattern_bound[3] == 900, 'Owned Pattern/material cleanup did not restore source bindings')
+assert(combined_setup.read()['p:0:1:0:0'], 'Closing Pattern editor erased its persisted setup')
+
+combined_setup.save({ { save_key = 'p:0:1:0:0', texture = pattern } }, {})
+local pattern_only = assert(loadstring('local m=...\n' .. source))(m)
+pattern_only.on_enable(ctx)
+for _ = 1, 20 do
+    clock = clock + 0.3
+    pattern_only.on_update(ctx, 0.3)
+end
+assert(
+    pattern_bound[3] == 5000 and bound[3] == 100 and quick_info().editor == nil,
+    'Pattern-only startup altered material slots/editor'
+)
+assert(pattern_only.on_disable(ctx) and pattern_bound[3] == 900)
+assert(combined_setup.read()['p:0:1:0:0'], 'Pattern-only close could not remember its applied preset')
+local restored_pattern = assert(loadstring('local m=...\n' .. source))(m)
+restored_pattern.on_enable(ctx)
+for _ = 1, 20 do
+    clock = clock + 0.3
+    restored_pattern.on_update(ctx, 0.3)
+end
+assert(api.mods.epic_direct_lut.handle.activate('restore'))
+assert(
+    pattern_bound[3] == 900 and not next(combined_setup.read()),
+    'Global Restore Original left Pattern or persisted bindings applied'
+)
+assert(restored_pattern.on_disable(ctx))
+combined_setup.save({ { save_key = 'p:0:1:0:0', texture = pattern } }, {})
+local foreign_pattern = assert(loadstring('local m=...\n' .. source))(m)
+foreign_pattern.on_enable(ctx)
+for _ = 1, 20 do
+    clock = clock + 0.3
+    foreign_pattern.on_update(ctx, 0.3)
+end
+pattern_bound[3] = 7777
+assert(foreign_pattern.on_disable(ctx) and pattern_bound[3] == 7777, 'Pattern cleanup overwrote foreign ownership')
+assert(not next(combined_setup.read()), 'Foreign-overridden Pattern was retained for startup')
+m.engine.binding, m.engine.bind, m.engine.create_texture, m.original_luts =
+    old_binding, old_bind, old_create, old_originals
+m.engine.PATTERN_SLOT, memory.time = old_pattern_slot, old_time
+print(
+    'PASS Pattern startup: deferred discovery, exact mixed and Pattern-only resume, save-before-cleanup and foreign ownership'
+)
+
+-- Built-in table: exact float bits, a fresh editable copy and no live upload.
+local debug_file = assert(io.open('assets/debug-lut.dds', 'rb'))
+local debug_bytes = debug_file:read('*a')
+debug_file:close()
+m.debug_lut_dds_hex = debug_bytes:gsub('.', function(byte)
+    return string.format('%02x', byte:byte())
+end)
+local expected_debug, debug_width, debug_height = m.dds.decode(debug_bytes)
+local debug_pixels = ffi.string(expected_debug, debug_width * debug_height * 16)
+local debug_editor = assert(loadstring('local m=...\n' .. source))(m)
+debug_editor.on_enable(ctx)
+debug_editor.on_update(ctx, 0.1)
+local debug_handle = api.mods.epic_direct_lut.handle
+local debug_uploads, debug_armor, debug_helmet = creates, bound[3], bound[8]
+assert(debug_handle.activate('load_debug_lut'))
+local debug_document = assert(quick_info().editor)
+assert(debug_document.width == 23 and debug_document.height == 8)
+assert(ffi.string(debug_document.data, #debug_pixels) == debug_pixels)
+assert(quick_info().loaded.data ~= debug_document.data, 'Debug editor aliases its imported original')
+assert(creates == debug_uploads and bound[3] == debug_armor and bound[8] == debug_helmet, 'Debug load applied to gear')
+debug_document.data[0] = 123
+assert(debug_handle.activate('load_debug_lut'))
+assert(quick_info().editor ~= debug_document and ffi.string(quick_info().editor.data, #debug_pixels) == debug_pixels)
+assert(debug_handle.set('palette', 1) and debug_handle.activate('save_palette'))
+assert(
+    ffi.string(quick_info().editor.data, #debug_pixels) == debug_pixels,
+    'Built-in palette path tried to open a file'
+)
+assert(debug_editor.on_disable(ctx))
+print('PASS built-in Debug LUT: exact supplied DDS, fresh editable reloads and no live application')

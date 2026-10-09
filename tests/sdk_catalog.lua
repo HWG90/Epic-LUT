@@ -1,0 +1,51 @@
+local C = dofile('src/gear/sdk_catalog.lua')
+assert(C.revision == '5a886256e54db52b5d228335eae20ce796f87fc0')
+assert(C.counts.resources == 127 and C.counts.archives == 337)
+assert(C.counts.textures == 482 and C.counts.variables == 81 and C.counts.templates == 10)
+
+-- Above 2^53: string IDs must preserve every bit and reject rounded Lua numbers.
+assert(C.resource_name('d5f99488a6f12896') == 'Helmet A-9 Helljumper')
+assert(C.resource_name('0XD5F99488A6F12896') == 'Helmet A-9 Helljumper')
+assert(C.resource_kind('d5f99488a6f12896') == 'Helmet')
+assert(C.resource_name(15418518113916889238) == nil)
+assert(C.resource_name('d5f99488a6f12897') == nil)
+assert(C.resource_name('08f493d61756b3ac') == 'Agent of Oblivion')
+assert(C.resource_kind('08f493d61756b3ac') == 'Cape')
+
+-- Archive categories cannot silently become resource/texture names.
+assert(C.archive_name('1d6dc4216e7ce52d') == 'A-9 Helljumper')
+assert(C.archive_kind('1d6dc4216e7ce52d') == 'Armor')
+assert(C.archive_name('A856EDFF49CFDD95') == 'A-9 Helljumper')
+assert(C.archive_kind('A856EDFF49CFDD95') == 'Helmet')
+assert(C.archive_name('0476ad64c8b719fe') == 'Thundering Hooves of Loyalty')
+assert(C.resource_name('1d6dc4216e7ce52d') == nil)
+assert(C.resource_name('d3ce605892d5331b') == nil, 'Do not infer a helmet name from a LUT ID')
+
+assert(C.texture_name(0x7e662968) == 'MaterialLut')
+assert(C.texture_name('0X81D4C49D') == 'PatternLut')
+assert(C.texture_name(0xfaecf369) == 'TearNormalsGrayscale')
+assert(C.texture_name(0xfaecf369 - 4294967296) == 'TearNormalsGrayscale')
+assert(C.variable_name('955ef2e') == 'BloodWeightsPositive')
+assert(C.variable_name('0X26102C1E') == 'BloodWeightsNegative')
+assert(C.variable_name(0x83701be7) == 'BloodOverlayAmountDown')
+
+local label, status = C.compatibility('EF9B3FC2FC1BA61E')
+assert(label == 'Advanced' and status == 'supports_ui')
+label, status = C.compatibility('7712ee7808e0ec50')
+assert(label == 'Basic+' and status == 'supports_ui')
+label, status = C.compatibility('d84d04634a1e2f60')
+assert(label == 'Alpha Clip' and status == 'unsupported_ui')
+label, status = C.compatibility('c6042e3403385d40')
+assert(label == 'Alpha Clip+' and status == 'unsupported_ui')
+label, status = C.compatibility('f5ebd93181fdf00c')
+assert(label == 'Armor LUT' and status == 'unknown_ui', 'Undocumented compatibility must stay unknown')
+assert(C.compatibility('0000000000000000') == nil)
+
+for _, value in ipairs({ '', 'garbage', 'fffffffffffffffff', {}, true }) do
+    assert(C.resource_name(value) == nil and C.archive_name(value) == nil)
+    assert(C.compatibility(value) == nil and C.texture_name(value) == nil)
+end
+assert(C.variable_name(4294967296) == nil and C.texture_name(0.5) == nil)
+assert(C.texture_name(0 / 0) == nil and C.variable_name(math.huge) == nil)
+assert(C.resource_name(nil) == nil and C.texture_name(nil) == nil)
+print('PASS SDK catalog: exact ID namespaces, cosmetic labels, documented UI compatibility and unknown fallbacks')

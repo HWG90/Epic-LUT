@@ -1,6 +1,98 @@
 -- MCM layout/controller. Drawing is isolated from registry and settings storage.
 
 local M = {}
+-- Shared MCM surface colors; custom editor actions retain their own accents.
+M.palette = {
+    background = { 17, 22, 27 },
+    panel = { 23, 29, 35 },
+    header = { 31, 38, 44 },
+    border = { 65, 77, 85 },
+    line = { 43, 53, 61 },
+    white = { 231, 236, 239 },
+    muted = { 153, 166, 175 },
+    brass = { 221, 184, 105 },
+    focus = { 119, 185, 205 },
+    hover = { 35, 46, 55 },
+    selected = { 38, 53, 63 },
+    field = { 29, 39, 47 },
+    field_hover = { 40, 55, 65 },
+    enabled = { 118, 207, 177 },
+    disabled = { 111, 124, 133 },
+}
+-- Custom workspaces use the same surfaces and interaction feedback as MCM.
+-- Accents remain explicit so Load, Save and Export retain their meaning.
+function M.custom_ui(ui)
+    ui.theme = M.palette
+    ui.decorate = M.custom_ui
+    function ui.surface_color(x, y, w, h, options)
+        local o, T = options or {}, M.palette
+        local hovered = o.enabled ~= false and ui.hovering and ui.hovering(x, y, w, h)
+        return o.enabled == false and T.panel
+            or o.accent
+            or (o.selected and T.selected)
+            or (hovered and (o.field == false and T.hover or T.field_hover))
+            or (o.field == false and T.panel or T.field)
+    end
+    function ui.button(x, y, w, h, label, callback, options)
+        local o, T = options or {}, M.palette
+        local enabled = o.enabled ~= false
+        local color = ui.surface_color(x, y, w, h, o)
+        local hovered = enabled and ui.hovering and ui.hovering(x, y, w, h)
+        local size, pad = o.size or 14, o.padding or 8
+        local text_height = ui.text_size and ui.text_size(size) or size
+        ui.rect(x, y, w, h, color)
+        ui.bounded(
+            x + pad,
+            y + math.max(2, (h - text_height) / 2),
+            label,
+            size,
+            enabled and (o.ink or T.white) or T.disabled,
+            math.max(0, w - pad * 2)
+        )
+        if enabled and (o.selected or hovered) then
+            ui.rect(x, y, 2, h, T.focus)
+        end
+        ui.hit(x, y, w, h, function(...)
+            if enabled and callback then
+                callback(...)
+            end
+        end, nil, nil, o.help)
+    end
+    return ui
+end
+function M.picker_allowed(control, mode)
+    if not control or control.disabled or control.read_only then
+        return false, 'This value is not editable.'
+    end
+    if control.can_open_picker then
+        local called, allowed, why = pcall(control.can_open_picker, mode)
+        if not called then
+            return false, 'Color unavailable: ' .. tostring(allowed)
+        end
+        if allowed ~= true then
+            return false, why or 'This value is not editable.'
+        end
+    end
+    return true
+end
+local function picker_channel_allowed(control, channel, mode)
+    if not control.picker_channel_enabled then
+        return true
+    end
+    local ok, allowed = pcall(control.picker_channel_enabled, channel, mode)
+    return ok and allowed == true
+end
+local function saved_notice(c, handle)
+    if handle and c.id and handle.preview and handle.get then
+        local ok, preview = pcall(handle.preview, c.id)
+        local got, value = pcall(handle.get, c.id)
+        if ok and got then
+            return preview ~= value and 'Changes ready to apply' or 'Saved'
+        end
+    end
+    return c and c.page and c.page.require_confirmation and c.require_confirmation ~= false and 'Changes ready to apply'
+        or 'Saved'
+end
 function M.key_name(key)
     if key == 0 then
         return 'Unassigned'
@@ -72,29 +164,78 @@ function M.key_name(key)
     return names[key] or 'Unknown Key'
 end
 
--- Same dropdown + stepper combo for normal settings and custom editor workspaces.
+-- Custom choices honor the same dropdown/selector/combined presentation as MCM.
 function M.choice(ui, control, value, x, y, width, change, open)
-    ui.rect(x, y, width, 26, { 24, 39, 52 })
-    ui.rect(x, y, 2, 26, { 100, 137, 160 })
-    ui.text(x + width - 43, y + 5, '<', 16, { 224, 230, 234 })
-    ui.text(x + width - 17, y + 5, '>', 16, { 224, 230, 234 })
-    ui.text(x + width - 70, y + 5, 'v', 16, { 224, 230, 234 })
-    ui.bounded(x + 8, y + 5, tostring(control.choices[value]), 15, { 224, 230, 234 }, width - 88)
-    ui.hit(x + width - 50, y, 24, 26, function()
-        if not control.disabled then
-            change(-1)
+    local T = M.palette
+    local disabled = control.disabled
+    local hovered = not disabled and ui.hovering and ui.hovering(x, y, width, 26)
+    local color = disabled and T.disabled or T.white
+    local field = control.field_color
+    local valid = type(field) == 'table' and #field == 3
+    if valid then
+        for i = 1, 3 do
+            local channel = field[i]
+            if type(channel) ~= 'number' or channel ~= channel or channel < 0 or channel > 255 then
+                valid = false
+                break
+            end
         end
-    end)
-    ui.hit(x + width - 24, y, 24, 26, function()
-        if not control.disabled then
-            change(1)
-        end
-    end)
-    ui.hit(x, y, width - 52, 26, function()
-        if not control.disabled then
-            open()
-        end
-    end, nil, nil, control.description or 'Choose an option. Use the arrows to step through the list.')
+    end
+    local background = hovered and T.field_hover or T.field
+    if valid and not disabled then
+        background = hovered
+                and {
+                    math.min(255, field[1] + 12),
+                    math.min(255, field[2] + 12),
+                    math.min(255, field[3] + 12),
+                }
+            or field
+    end
+    ui.rect(x, y, width, 26, disabled and T.panel or background)
+    ui.rect(x, y, 2, 26, disabled and T.line or T.focus)
+    local presentation = control.presentation or 'combined'
+    local dropdown, selector = presentation == 'dropdown', presentation == 'selector'
+    local reserved = dropdown and 32 or (selector and 62 or 88)
+    if not dropdown then
+        ui.text(x + width - 43, y + 5, '<', 16, color)
+        ui.text(x + width - 17, y + 5, '>', 16, color)
+        ui.hit(x + width - 50, y, 24, 26, function()
+            if not control.disabled then
+                change(-1)
+            end
+        end)
+        ui.hit(x + width - 24, y, 24, 26, function()
+            if not control.disabled then
+                change(1)
+            end
+        end)
+    end
+    if not selector then
+        ui.text(x + width - (dropdown and 18 or 70), y + 5, 'v', 16, color)
+    end
+    ui.bounded(x + 8, y + 5, tostring(control.choices[value] or ''), 15, color, math.max(0, width - reserved))
+    ui.hit(
+        x,
+        y,
+        dropdown and width or width - 52,
+        26,
+        function()
+            if not control.disabled then
+                if selector then
+                    change(1)
+                else
+                    open()
+                end
+            end
+        end,
+        nil,
+        nil,
+        control.description
+            or (
+                dropdown and 'Choose an option from the list.'
+                or 'Choose an option. Use the arrows to step through the list.'
+            )
+    )
 end
 
 -- Whole-glyph viewport: never split UTF-8 or draw outside the allotted width.
@@ -174,7 +315,7 @@ function M.rich(value, width, size, measure)
         local font = heading and size + 3 or size
 
         body = body or paragraph
-        body = body:gsub('^%s*[-*]%s+', 'â€¢ ')
+        body = body:gsub('^%s*[-*]%s+', '- ')
 
         local spans, line, used = {}, {}, 0
         local strong, emphasis = false, false
@@ -281,7 +422,8 @@ function M.new(api, measure)
     local wheel_remainder = 0
     local manual_scroll = false
 
-    local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag
+    local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag, scroll_drag
+    local choice_bounds = {}
 
     self.sidebar_width = 330
     self.help_scroll = 0
@@ -291,6 +433,21 @@ function M.new(api, measure)
     local hits = {}
     local current
     local held = {}
+
+    function self.is_interacting()
+        return self.text_edit ~= nil
+            or self.color_picker ~= nil
+            or (self.capture ~= false and self.capture ~= nil)
+            or drag ~= nil
+            or window_drag ~= nil
+            or window_resize ~= nil
+            or color_drag ~= nil
+            or palette_drag ~= nil
+            or split_drag ~= nil
+            or preview_drag ~= nil
+            or scroll_drag ~= nil
+            or self.mouse_held == true
+    end
 
     function self.recover()
         self.release_console()
@@ -310,8 +467,11 @@ function M.new(api, measure)
         split_drag = nil
         preview_drag = nil
         self.preview_window = nil
+        self.floating_windows, self.floating_bounds = {}, nil
 
-        self.notice = 'Menu closed after an error; F10 reopens it'
+        self.pointer_x, self.pointer_y = nil, nil
+        scroll_drag = nil
+        self.notice = 'Menu closed after an error; use the menu shortcut to reopen it'
     end
 
     local function active()
@@ -365,10 +525,48 @@ function M.new(api, measure)
         return rows
     end
 
-    local function change(c, direction)
-        if not current or c.disabled then
+    local function select_control(c)
+        if c.page.render_layout and c.page.id ~= 'save' then
             return
         end
+        for index, control in ipairs(selectable(c.page)) do
+            if control == c then
+                self.row, self.focus = index, 'settings'
+                return
+            end
+        end
+    end
+
+    local function open_picker(owner, control, mode)
+        local allowed, why = M.picker_allowed(control, mode)
+        if not allowed then
+            self.notice = why
+            return false
+        end
+        local got, color = pcall(function()
+            return api.color_rgb((owner.handle.preview or owner.handle.get)(control.id))
+        end)
+        if not got then
+            self.notice = 'Color unavailable: ' .. tostring(color)
+            return false
+        end
+        local picker = { mod = owner, control = control, rgb = color, picker_mode = mode }
+        if control.picker_preview and control.picker_begin then
+            local called, result, reason = pcall(control.picker_begin, mode)
+            if not called or result == false then
+                self.notice = tostring(called and reason or result)
+                return false
+            end
+            picker.preview_started = true
+        end
+        self.color_picker = picker
+        return true
+    end
+    local function change(c, direction, picker_mode)
+        if not current or c.disabled or c.read_only then
+            return
+        end
+        select_control(c)
 
         if c.collapsible then
             local key = state_key(c.page, c.id)
@@ -392,8 +590,28 @@ function M.new(api, measure)
             self.capture = c
             self.notice = 'Press a key. Escape cancels.'
             return
+        elseif c.type == 'choice' and direction == 0 and c.presentation ~= 'selector' then
+            local anchor = choice_bounds[c]
+                or { x = self.sidebar_width + 50, top = (self.window_height or 820) - 205, width = 280 }
+            if anchor.prepare then
+                anchor.prepare()
+            end
+            local value = (h.preview or h.get)(c.id)
+            self.dropdown = {
+                mod = current,
+                control = c,
+                selected = value,
+                scroll = math.max(0, math.min(math.max(0, #c.choices - 8), value - 4)),
+                x = anchor.x,
+                top = anchor.top,
+                width = anchor.width,
+                owner = anchor.owner,
+                widget = anchor.widget,
+            }
+            return
         elseif c.type == 'color' then
-            self.color_picker = { mod = current, control = c, rgb = api.color_rgb((h.preview or h.get)(c.id)) }
+            picker_mode = picker_mode or c.picker_mode or (self.basic_only and 1)
+            open_picker(current, c, picker_mode)
             return
         else
             local v = (h.preview or h.get)(c.id)
@@ -412,12 +630,23 @@ function M.new(api, measure)
         end
 
         self.notice = ok
-                and (c.type == 'button' and (c.require_confirmation and 'Action awaiting confirmation' or (type(err) == 'string' and err or 'Action executed')) or (c.page and c.page.require_confirmation and 'Pending confirmation' or 'Saved'))
+                and (c.type == 'button' and (c.require_confirmation and 'Action ready to apply' or (type(err) == 'string' and err or 'Action completed')) or saved_notice(
+                    c,
+                    h
+                ))
             or ('Could not save: ' .. tostring(err))
     end
 
     function self.finish_color_field()
         local e = self.text_edit
+        if e and e.color_channel and self.color_picker then
+            local channel = e.color_channel == 'alpha' and 4 or e.color_channel
+            if channel ~= 'hex' and not picker_channel_allowed(self.color_picker.control, channel) then
+                self.text_edit = nil
+                self.notice = 'This channel is not editable.'
+                return false
+            end
+        end
         if not e or not e.color_channel then
             return true
         end
@@ -463,13 +692,16 @@ function M.new(api, measure)
     end
 
     function self.close_color(commit)
-        local p=self.color_picker
+        local p = self.color_picker
         if p and p.preview_started and p.control.picker_end then
-            local ok,why=pcall(p.control.picker_end,commit)
-            if not ok then self.notice=tostring(why) end
+            local ok, why = pcall(p.control.picker_end, commit)
+            if not ok then
+                self.notice = tostring(why)
+            end
         end
-        self.color_picker=nil
-        self.text_edit=nil
+        self.color_picker = nil
+        self.text_edit = nil
+        color_drag, palette_drag = nil, nil
     end
     function self.commit_color()
         if not self.finish_color_field() then
@@ -478,6 +710,12 @@ function M.new(api, measure)
 
         local p = self.color_picker
         if not p then
+            return
+        end
+        local allowed, why = M.picker_allowed(p.control, p.picker_mode)
+        if not allowed then
+            self.notice = why
+            self.close_color(false)
             return
         end
 
@@ -489,7 +727,7 @@ function M.new(api, measure)
         end
 
         if called and ok then
-            self.notice = p.control.page.require_confirmation and 'Pending confirmation' or 'Saved'
+            self.notice = saved_notice(p.control, p.mod.handle)
             self.close_color(true)
         else
             self.notice = tostring(called and err or ok)
@@ -504,7 +742,7 @@ function M.new(api, measure)
             self.capture = false
             if code ~= 27 and mod then
                 local ok, err = (mod.handle.edit or mod.handle.set)(c.id, code)
-                self.notice = ok and 'Binding saved' or tostring(err)
+                self.notice = ok and saved_notice(c, mod.handle) or tostring(err)
             end
             return
         end
@@ -525,16 +763,18 @@ function M.new(api, measure)
             return
         end
 
-        if code == (self.toggle_key or 121) then
+        local toggle = code == (self.toggle_key or 121) and not self.text_edit and not self.color_picker
+        if toggle then
             drag = nil
             window_drag = nil
             window_resize = nil
             self.dropdown = nil
+            scroll_drag = nil
             self.text_edit = nil
             self.close_color(false)
         end
 
-        if code == (self.toggle_key or 121) then
+        if toggle then
             self.visible = not self.visible
             self.capture = false
             return
@@ -580,8 +820,7 @@ function M.new(api, measure)
                     return
                 end
 
-                self.notice = e.control.page and e.control.page.require_confirmation and 'Pending confirmation'
-                    or 'Saved'
+                self.notice = saved_notice(e.control, e.mod.handle)
                 self.text_edit = nil
                 return
             end
@@ -662,6 +901,7 @@ function M.new(api, measure)
 
             if code == 27 then
                 self.dropdown = nil
+                scroll_drag = nil
                 return
             end
 
@@ -684,11 +924,10 @@ function M.new(api, measure)
             if code == 13 then
                 local ok, err = (d.mod.handle.edit or d.mod.handle.set)(d.control.id, d.selected)
 
-                self.notice = ok
-                        and (d.control.page and d.control.page.require_confirmation and 'Pending confirmation' or 'Saved')
-                    or tostring(err)
+                self.notice = ok and saved_notice(d.control, d.mod.handle) or tostring(err)
 
                 self.dropdown = nil
+                scroll_drag = nil
                 if ok and d.control.input_control and d.selected == 1 then
                     change(d.control.input_control, 0)
                 end
@@ -715,9 +954,7 @@ function M.new(api, measure)
 
             if code ~= 27 then
                 local ok, err = (mod.handle.edit or mod.handle.set)(c.id, code)
-                self.notice = ok
-                        and (c.page and c.page.require_confirmation and 'Pending confirmation' or 'Binding saved')
-                    or tostring(err)
+                self.notice = ok and saved_notice(c, mod.handle) or tostring(err)
             end
 
             return
@@ -730,20 +967,7 @@ function M.new(api, measure)
                 return
             end
             self.visible = false
-            return
-        end
-
-        if (page.require_confirmation or next(page.actions)) and (code == 120 or code == 119) then
-            local ok, err
-            if code == 120 then
-                ok, err = mod.handle.confirm(page.id)
-            else
-                ok, err = mod.handle.discard(page.id)
-            end
-
-            self.notice = ok
-                    and (code == 120 and ('Confirmed and saved' .. (err and '; ' .. tostring(err) or '')) or 'Pending edits discarded')
-                or tostring(err)
+            scroll_drag = nil
             return
         end
 
@@ -782,9 +1006,6 @@ function M.new(api, measure)
                 self.row = math.max(1, math.min(#rows, self.row + (code == 38 and -1 or 1)))
             elseif c and (code == 37 or code == 39 or code == 13) then
                 change(c, code == 13 and 0 or (code == 37 and -1 or 1))
-            elseif c and code == 36 and c.type ~= 'button' and not c.collapsible then
-                local ok, err = (mod.handle.edit or mod.handle.set)(c.id, c.default)
-                self.notice = ok and 'Default restored' or tostring(err)
             end
         end
     end
@@ -883,7 +1104,16 @@ function M.new(api, measure)
     end
 
     function self.wheel(delta, x, y)
-        if not self.visible or self.capture or drag or window_drag or window_resize or not wheel_bounds or not x or not y then
+        if
+            not self.visible
+            or self.capture
+            or drag
+            or window_drag
+            or window_resize
+            or not wheel_bounds
+            or not x
+            or not y
+        then
             return
         end
 
@@ -896,9 +1126,12 @@ function M.new(api, measure)
 
         local current_mod, current_page = active()
         -- A modal or floating popup owns the pointer; do not scroll the editor underneath.
-        if self.color_picker or self.outfit_dialog or self.preview_window then return end
-        local floating = self.floating_bounds
-        if floating and x >= floating.x and x <= floating.x + floating.w and y >= floating.y and y <= floating.y + floating.h then return end
+        if self.color_picker or self.outfit_dialog or self.preview_window then
+            return
+        end
+        if self.floating_at(x, y) then
+            return
+        end
         if current_page and current_page.on_wheel and self.window_bounds then
             local b = self.window_bounds
             if current_page.on_wheel((x - b.x) / b.scale, (y - b.y) / b.scale, delta) then
@@ -970,6 +1203,9 @@ function M.new(api, measure)
             drag = nil
             window_drag = nil
             window_resize = nil
+            scroll_drag, color_drag, palette_drag, split_drag, preview_drag = nil, nil, nil, nil, nil
+            self.pointer_x, self.pointer_y = nil, nil
+            self.floating_windows, self.floating_bounds = {}, nil
             self.capture = false
             self.mouse_held = false
             self.suspended = true
@@ -993,11 +1229,12 @@ function M.new(api, measure)
         end
 
         if not self.visible then
-            local down = input.down(self.toggle_key or 121)
-            if down and not held[121] then
-                self.key(self.toggle_key or 121)
+            local key = self.toggle_key or 121
+            local down = input.down(key)
+            if down and not held[key] then
+                self.key(key)
             end
-            held[121] = down
+            held[key] = down
 
             return
         end
@@ -1007,6 +1244,7 @@ function M.new(api, measure)
             and not drag
             and not window_drag
             and not window_resize
+            and not scroll_drag
             and not self.text_edit
             and input.wheel
             and input.mouse
@@ -1107,6 +1345,14 @@ function M.new(api, measure)
             end
             self.middle_mouse_held = input.down(4)
 
+            if scroll_drag then
+                if not self.visible or not input.down(1) then
+                    scroll_drag = nil
+                elseif y then
+                    scroll_drag.move(y)
+                end
+            end
+
             if palette_drag then
                 if not self.color_picker or not input.down(1) then
                     palette_drag = nil
@@ -1181,6 +1427,7 @@ function M.new(api, measure)
                     self.window_x, self.window_y = left, bottom
                     self.window_width, self.window_height = (right - left) / r.scale, (top - bottom) / r.scale
                     self.dropdown = nil
+                    scroll_drag = nil
                 end
             end
             if window_drag then
@@ -1199,19 +1446,26 @@ function M.new(api, measure)
                 elseif input.down(1) then
                     if x then
                         drag.move(x, y)
-                        if drag.live and drag.value ~= drag.last_value and (not drag.last_commit or os.clock()-drag.last_commit>=.04) then
-                            local ok,err=(drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id,drag.value)
-                            drag.last_value,drag.last_commit=drag.value,os.clock()
-                            if not ok then self.notice='Could not apply: '..tostring(err) end
+                        if
+                            drag.live
+                            and drag.value ~= drag.last_value
+                            and (not drag.last_commit or os.clock() - drag.last_commit >= 0.04)
+                        then
+                            local ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
+                            drag.last_value, drag.last_commit = drag.value, os.clock()
+                            if not ok then
+                                self.notice = 'Could not apply: ' .. tostring(err)
+                            end
                         end
                     end
                 else
                     local current = drag.mod.handle.get(drag.control.id)
-                    local ok,err=true,nil
-                    if not drag.live or math.abs(current-drag.value)>1e-9 then ok,err=(drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id,drag.value) end
+                    local ok, err = true, nil
+                    if not drag.live or math.abs(current - drag.value) > 1e-9 then
+                        ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
+                    end
 
-                    self.notice = ok
-                            and (drag.control.page and drag.control.page.require_confirmation and 'Pending confirmation' or 'Saved')
+                    self.notice = ok and saved_notice(drag.control, drag.mod.handle)
                         or ('Could not save: ' .. tostring(err))
                     drag = nil
                 end
@@ -1236,11 +1490,34 @@ function M.new(api, measure)
         end
     end
 
-    function self.owns_pointer(x,y)
-        if drag or window_drag or window_resize or preview_drag or color_drag or palette_drag or split_drag then return true end
-        if self.color_picker or self.outfit_dialog or self.dropdown then return true end
-        local b = self.floating_bounds
-        return b and x and y and x>=b.x and x<=b.x+b.w and y>=b.y and y<=b.y+b.h or false
+    function self.owns_pointer(x, y)
+        if
+            drag
+            or window_drag
+            or window_resize
+            or preview_drag
+            or color_drag
+            or palette_drag
+            or split_drag
+            or scroll_drag
+        then
+            return true
+        end
+        if self.color_picker or self.outfit_dialog or self.dropdown then
+            return true
+        end
+        return self.floating_at(x, y) ~= nil
+    end
+    function self.floating_at(x, y)
+        if not x or not y then
+            return nil
+        end
+        for i = #(self.floating_windows or {}), 1, -1 do
+            local b = self.floating_windows[i]
+            if x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+                return b
+            end
+        end
     end
     function self.compose(w, h)
         if not self.visible then
@@ -1250,17 +1527,41 @@ function M.new(api, measure)
             window_drag = nil
             window_resize = nil
             self.dropdown = nil
+            scroll_drag = nil
             self.text_edit = nil
             self.close_color(false)
+            self.pointer_x, self.pointer_y = nil, nil
+            preview_drag = nil
+            self.floating_windows, self.floating_bounds = {}, nil
             return {}
         end
 
         local commands = {}
         hits = {}
-        self.floating_bounds = nil
-        local floating_request, floating_context
-        local s = math.min(w / 1920, h / 1080) * (self.ui_scale or 1)
+        choice_bounds = {}
+        local floating_requests, floating_by_id, floating_context = {}, {}, nil
+        local choice_widgets = {}
+        local function focus_floating(owner)
+            self.floating_order = self.floating_order or {}
+            self.floating_revision = (self.floating_revision or 0) + 1
+            self.floating_order[owner.id] = self.floating_revision
+        end
         local selected_mod, selected_page = active()
+        local scale_id = selected_mod and selected_mod.controls.configuration_ui_scale and 'configuration_ui_scale'
+            or (selected_mod and selected_mod.controls.ui_scale and 'ui_scale')
+        local scale_value
+        if scale_id then
+            local ok, value = pcall(selected_mod.handle.preview or selected_mod.handle.get, scale_id)
+            if ok and type(value) == 'number' and value == value and value > 0 and value < math.huge then
+                scale_value = value
+                -- The shared preference alias is authoritative. Legacy standalone
+                -- layouts retain their existing externally supplied geometry scale.
+                if scale_id == 'configuration_ui_scale' then
+                    self.ui_scale = value / 100
+                end
+            end
+        end
+        local s = math.min(w / 1920, h / 1080) * (self.ui_scale or 1)
         local minimum_w = selected_page and selected_page.minimum_width
             or selected_mod and selected_mod.minimum_width
             or 1100
@@ -1285,21 +1586,43 @@ function M.new(api, measure)
             self.focus = 'settings'
         end
         local tree_visible = math.max(1, math.floor((wh - 260) / 31))
-        local settings_visible = math.max(1, math.floor((wh - 364) / 38))
+        local settings_visible = math.max(1, math.floor((wh - 356) / 42))
         self.tree_visible, self.settings_visible = tree_visible, settings_visible
 
         local visible_text_age = {}
 
         self.window_x, self.window_y = ox, oy
 
-        local white = { 224, 230, 234 }
-        local muted = { 145, 156, 165 }
-        local accent = { 244, 202, 53 }
-        local selection_text = { 24, 30, 35 }
+        local T = M.palette
+        local white, muted, accent, selection_text = T.white, T.muted, { 244, 202, 53 }, T.white
+        local text_focus = false
+        local function hovering(x, y, rw, rh)
+            return self.pointer_x
+                and self.pointer_y
+                and self.pointer_x >= ox + x * s
+                and self.pointer_x <= ox + (x + rw) * s
+                and self.pointer_y >= oy + y * s
+                and self.pointer_y <= oy + (y + rh) * s
+        end
 
         local function rect(x, y, rw, rh, color, a)
             commands[#commands + 1] =
                 { type = 'rect', x = ox + x * s, y = oy + y * s, w = rw * s, h = rh * s, c = color, a = a or 1 }
+        end
+        local function frame(id, x, y, rw, rh, color)
+            local thickness = math.min(2 / s, rw / 2, rh / 2)
+            local bounds = { x = ox + x * s, y = oy + y * s, w = rw * s, h = rh * s }
+            for _, edge in ipairs({
+                { 'bottom', x, y, rw, thickness },
+                { 'top', x, y + rh - thickness, rw, thickness },
+                { 'left', x, y + thickness, thickness, rh - thickness * 2 },
+                { 'right', x + rw - thickness, y + thickness, thickness, rh - thickness * 2 },
+            }) do
+                rect(edge[2], edge[3], edge[4], edge[5], color or T.border)
+                local command = commands[#commands]
+                command.window_frame, command.frame_edge, command.frame_bounds = id, edge[1], bounds
+                command.layer = 105
+            end
         end
 
         local function text(x, y, value, size, color, fitted)
@@ -1326,11 +1649,13 @@ function M.new(api, measure)
 
             local key = tostring(value) .. '|' .. x .. '|' .. y .. '|' .. width
 
-            if not text_age[key] then
-                text_age[key] = elapsed
+            local animate = text_focus
+                or (not self.color_picker and not self.dropdown and hovering(x, y - 5, width, 28))
+            local age = text_age[key]
+            if not age or age.active ~= animate then
+                age = { start = elapsed, active = animate }
             end
-
-            visible_text_age[key] = text_age[key]
+            visible_text_age[key] = age
 
             -- Prefer a readable fitted label; ticker remains for unusually long text.
             local total = 0
@@ -1340,7 +1665,7 @@ function M.new(api, measure)
             if total > width * s then
                 size = math.max(8, size * width * s / total)
             end
-            local result = M.flow(value, width * s, size * s, elapsed - text_age[key], measure)
+            local result = M.flow(value, width * s, size * s, animate and (elapsed - age.start) or 0, measure)
 
             text(x, y, result, size, color, true)
             commands[#commands].full_text = tostring(value)
@@ -1348,40 +1673,87 @@ function M.new(api, measure)
         end
 
         local function hit(x, y, rw, rh, fn, right, middle, tooltip, double)
+            local owner = floating_context
+            local function owned(callback)
+                if not owner or not callback then
+                    return callback
+                end
+                return function(...)
+                    focus_floating(owner)
+                    local editing = self.text_edit
+                    local dragging, scrolling, moving = drag, scroll_drag, preview_drag
+                    callback(...)
+                    if self.text_edit and self.text_edit ~= editing then
+                        self.text_edit.floating_owner = owner.id
+                    end
+                    if drag and drag ~= dragging then
+                        drag.floating_owner = owner.id
+                    end
+                    if scroll_drag and scroll_drag ~= scrolling then
+                        scroll_drag.floating_owner = owner.id
+                    end
+                    if preview_drag and preview_drag ~= moving then
+                        preview_drag.floating_owner = owner.id
+                    end
+                end
+            end
             hits[#hits + 1] = {
                 x = ox + x * s,
                 y = oy + y * s,
                 w = rw * s,
                 h = rh * s,
-                click = fn,
-                right_click = right,
-                middle_click = middle,
+                click = owned(fn),
+                right_click = owned(right),
+                middle_click = owned(middle),
                 tooltip = tooltip,
-                double_click = double,
+                double_click = owned(double),
             }
         end
 
-        local function scrollbar(role, x, y, height, total, visible, offset)
-            if total <= visible then
+        local function scrollbar(role, x, y, height, total, visible, offset, on_scroll)
+            if total <= visible or height <= 0 then
                 return
             end
-
-            local thumb = math.max(20, height * visible / total)
-
-            local travel = height - thumb
-            local maximum = total - visible
-
+            local thumb = math.min(height, math.max(20, height * visible / total))
+            local travel, maximum = height - thumb, total - visible
             local progress = math.max(0, math.min(1, offset / maximum))
-
-            rect(x, y, 5, height, { 52, 61, 68 })
-
-            rect(x - 1, y + travel * (1 - progress), 7, thumb, accent)
-
+            local ty = y + travel * (1 - progress)
+            rect(x, y, 4, height, T.line)
+            rect(x - 1, ty, 6, thumb, hovering(x - 7, y, 18, height) and T.focus or T.border)
             commands[#commands].scrollbar = role
+            local function set(value)
+                value = math.max(0, math.min(maximum, math.floor(value + 0.5)))
+                if on_scroll then
+                    on_scroll(value)
+                elseif role == 'mods' then
+                    tree_scroll = value
+                    tree_manual = true
+                elseif role == 'settings' then
+                    self.scroll = value
+                    manual_scroll = true
+                elseif role == 'help' then
+                    self.help_scroll = value
+                elseif role == 'dropdown' and self.dropdown then
+                    self.dropdown.scroll = value
+                end
+            end
+            hit(x - 7, y, 18, height, function(_, my)
+                local local_y = (my - oy) / s
+                local grab = local_y >= ty and local_y <= ty + thumb and local_y - ty or thumb / 2
+                scroll_drag = {
+                    move = function(pointer_y)
+                        local position = travel > 0 and ((pointer_y - oy) / s - grab - y) / travel or 0
+                        set((1 - math.max(0, math.min(1, position))) * maximum)
+                    end,
+                }
+                scroll_drag.move(my)
+            end)
         end
 
-        rect(0, 0, ww, wh, { 16, 20, 24 }, 0.98)
-        rect(0, wh - 60, ww, 60, { 28, 33, 38 })
+        rect(0, 0, ww, wh, T.background, 0.98)
+        commands[#commands].layer = 90
+        rect(0, wh - 60, ww, 60, T.header)
+        commands[#commands].layer = 90
         if not tabbed then
             rect(rail, 60, 2, wh - 120, muted)
         end
@@ -1405,13 +1777,14 @@ function M.new(api, measure)
             hit(ww - 224, wh - 58, 140, 30, mode_switch)
         end
 
-        rect(ww - 55, wh - 45, 38, 30, { 65, 73, 80 })
+        rect(ww - 55, wh - 45, 38, 30, hovering(ww - 55, wh - 45, 38, 30) and T.field_hover or T.field)
         text(ww - 43, wh - 38, 'X', 20, white)
 
         hit(ww - 55, wh - 45, 38, 30, function()
             self.visible = false
             self.capture = false
             self.dropdown = nil
+            scroll_drag = nil
             self.text_edit = nil
             self.close_color(false)
         end)
@@ -1434,7 +1807,22 @@ function M.new(api, measure)
                     local selected = index == self.page
                     local x = 25 + position * width
                     position = position + 1
-                    rect(x, wh - 120, width - 6, 38, selected and { 49, 82, 115 } or { 35, 62, 90 })
+                    local tab_color = entry.tab_color
+                    if tab_color then
+                        local level = selected and 1 or (hovering(x, wh - 120, width - 6, 38) and 0.9 or 0.72)
+                        tab_color = { tab_color[1] * level, tab_color[2] * level, tab_color[3] * level }
+                    end
+                    rect(
+                        x,
+                        wh - 120,
+                        width - 6,
+                        38,
+                        tab_color
+                            or (
+                                selected and T.selected
+                                or (hovering(x, wh - 120, width - 6, 38) and T.field_hover or T.field)
+                            )
+                    )
                     bounded(x + 10, wh - 108, entry.name:gsub('^%d+%.%s*', ''), 18, white, width - 25)
                     hit(x, wh - 120, width - 6, 38, function()
                         self.page = target_page
@@ -1591,221 +1979,403 @@ function M.new(api, measure)
                     pending = pending + 1
                 end
 
-                text(ww - 650, 90, 'CONFIRM REQUIRED (' .. pending .. ')', 16, accent)
+                text(
+                    rail + 35,
+                    91,
+                    pending .. (pending == 1 and ' change ready to apply' or ' changes ready to apply'),
+                    16,
+                    accent
+                )
 
-                rect(ww - 340, 81, 135, 29, { 65, 73, 80 })
-                text(ww - 330, 90, 'APPLY', 18, accent)
+                rect(ww - 340, 79, 135, 34, accent)
+                text(ww - 319, 89, 'APPLY', 18, T.background)
 
-                rect(ww - 190, 81, 135, 29, { 65, 73, 80 })
-                text(ww - 180, 90, 'DISCARD', 18, white)
+                rect(ww - 190, 79, 135, 34, hovering(ww - 190, 79, 135, 34) and T.field_hover or T.field)
+                text(ww - 176, 89, 'DISCARD', 18, white)
 
-                hit(ww - 340, 81, 135, 29, function()
+                hit(ww - 340, 79, 135, 34, function()
                     local ok, err = mod.handle.confirm(page.id)
                     self.notice = ok and ('Confirmed and saved' .. (err and '; ' .. tostring(err) or ''))
                         or tostring(err)
                 end)
 
-                hit(ww - 190, 81, 135, 29, function()
+                hit(ww - 190, 79, 135, 34, function()
                     mod.handle.discard(page.id)
                     self.notice = 'Pending edits discarded'
                 end)
             end
 
+            -- Settings defaults use an explicit action, leaving F9 to Basic Mode.
+            -- LUT workspaces retain their own row/cell and original-table resets.
+            if type(page.render_layout) ~= 'function' or page.id == 'save' then
+                local rows = selectable(page)
+                self.row = math.max(1, math.min(self.row, #rows))
+                local selected = rows[self.row]
+                local authoritative, seen = selected, {}
+                while authoritative and authoritative.source_mod_id and not seen[authoritative] do
+                    seen[authoritative] = true
+                    local owner = api.mods[authoritative.source_mod_id]
+                    authoritative = owner and owner.controls[authoritative.source_control_id]
+                end
+                local resettable = selected
+                    and authoritative
+                    and authoritative.default ~= nil
+                    and not selected.disabled
+                    and not authoritative.disabled
+                    and not self.text_edit
+                    and not self.color_picker
+                    and not self.capture
+                    and not self.dropdown
+                local rw = tabbed and 190 or math.max(160, rail - 40)
+                rect(20, 79, rw, 34, resettable and T.field or T.panel)
+                bounded(32, 89, 'RESET SETTING', 16, resettable and white or T.disabled, rw - 24)
+                hit(
+                    20,
+                    79,
+                    rw,
+                    34,
+                    function()
+                        if not resettable then
+                            return
+                        end
+                        local called, ok, reason =
+                            pcall(mod.handle.edit or mod.handle.set, selected.id, authoritative.default)
+                        self.notice = called and ok and ('Default restored; ' .. saved_notice(selected, mod.handle))
+                            or tostring(called and reason or ok)
+                    end,
+                    nil,
+                    nil,
+                    selected and ('Restore the default for ' .. selected.label .. '.')
+                        or 'Select a setting to restore its default.'
+                )
+            end
+
             if type(page.render_layout) == 'function' then
-                local primitives = { rect = rect, text = text, hit = hit, bounded = bounded }
-                local ok, why = pcall(page.render_layout, {
-                    x = rail + 20,
-                    y = 110,
-                    w = ww - rail - 40,
-                    h = wh - 280,
-                    rect = rect,
-                    text = text,
-                    hit = hit,
-                    bounded = bounded,
-                    text_size = function(size)
-                        return self.compact_fonts and (self.font_size or 12) or size
-                    end,
-                    text_width = function(value, size)
-                        size = self.compact_fonts and (self.font_size or 12) or size
-                        return measure and measure(tostring(value), size * s) / s or #tostring(value) * size * 0.62
-                    end,
-                    shift = function()
-                        return self.shift
-                    end,
-                    input_value = function(id)
-                        local control = mod.controls[id]
-                        if not control then return nil end
-                        local editing = self.text_edit and self.text_edit.mod == mod and self.text_edit.control == control
-                        return editing and (self.text_edit.text .. '|') or mod.handle.get(id)
-                    end,
-                    activate = function(id, direction)
-                        change(assert(mod.controls[id]), direction or 0)
-                    end,
-                    vertical = function(id, x, y, width, height)
-                        local control = assert(mod.controls[id])
-                        local value = drag and drag.control == control and drag.value or mod.handle.get(id)
-                        hit(x, y, width, height, function(mx, my)
-                            local item = { mod = mod, control = control, value = value }
-                            function item.move(px, py)
-                                if not py then return end
-                                local ratio = math.max(0, math.min(1, (py - (oy + y * s)) / (height * s)))
-                                item.value = control.min + math.floor(ratio * (control.max - control.min) / control.step + 0.5) * control.step
+                local primitives = { rect = rect, text = text, hit = hit, bounded = bounded, hovering = hovering }
+                local ok, why = pcall(
+                    page.render_layout,
+                    M.custom_ui({
+                        x = rail + 20,
+                        y = 110,
+                        w = ww - rail - 40,
+                        h = wh - 280,
+                        rect = rect,
+                        text = text,
+                        hit = hit,
+                        bounded = bounded,
+                        hovering = function(x, y, rw, rh)
+                            -- Modal controls own feedback as well as input. A covered
+                            -- workspace must not appear to react through a popup.
+                            if self.color_picker or self.dropdown then
+                                return false
                             end
-                            drag = item
-                            item.move(mx, my)
-                        end, nil, nil, 'Scratch alpha: checkerboard is transparent; solid color is opaque.')
-                        return value
-                    end,
-                    number = function(id, x, y, width, value, prepare, enabled, lo, hi, selected)
-                        local control = assert(mod.controls[id])
-                        if drag and drag.control == control and drag.widget_x == x and drag.widget_y == y then value = drag.value end
-                        local track = width - 92
-                        value = tonumber(value) or tonumber(mod.handle.get(id)) or tonumber(control.default) or 0
-                        lo = tonumber(lo) or control.min
-                        hi = tonumber(hi) or control.max
-                        prepare = prepare or function() end
-                        if enabled == nil then
-                            enabled = not control.disabled
-                        end
-                        rect(x, y, width, 21, enabled and { 35, 62, 90 } or { 35, 39, 43 })
-                        local ratio = math.max(0, math.min(1, (value - lo) / math.max(1e-12, hi - lo)))
-                        rect(x, y, track * ratio, 21, { 49, 111, 167 })
-                        local editing = selected
-                            and self.text_edit
-                            and self.text_edit.mod == mod
-                            and self.text_edit.control == control
-                        bounded(
-                            x + track + 5,
-                            y + 5,
-                            editing and self.text_edit.text .. '|' or string.format('%.7g', value),
-                            14,
-                            enabled and white or muted,
-                            85
-                        )
-                        hit(x, y, track, 21, function(mx)
-                            if not enabled then
-                                return
+                            local f = self.floating_at(self.pointer_x, self.pointer_y)
+                            if f and (not floating_context or floating_context.id ~= f.id) then
+                                return false
                             end
-                            prepare()
-                            local item = { mod = mod, control = control, value = value, live = true, widget_x = x, widget_y = y }
-                            function item.move(px)
-                                local fraction = math.max(0, math.min(1, (px - (ox + x * s)) / (track * s)))
-                                item.value = math.min(
-                                    hi,
-                                    lo + math.floor(fraction * (hi - lo) / control.step + 0.5) * control.step
-                                )
+                            return hovering(x, y, rw, rh)
+                        end,
+                        scrollbar = scrollbar,
+                        text_size = function(size)
+                            return self.compact_fonts and (self.font_size or 12) or size
+                        end,
+                        text_width = function(value, size)
+                            size = self.compact_fonts and (self.font_size or 12) or size
+                            return measure and measure(tostring(value), size * s) / s or #tostring(value) * size * 0.62
+                        end,
+                        shift = function()
+                            return self.shift
+                        end,
+                        load_color = function(seen)
+                            local glow = seen and 1 or (0.82 + 0.18 * math.sin(elapsed * 4))
+                            return { math.floor(244 * glow), math.floor(202 * glow), math.floor(53 * glow) }
+                        end,
+                        input_value = function(id)
+                            local control = mod.controls[id]
+                            if not control then
+                                return nil
                             end
-                            drag = item
-                            item.move(mx)
-                        end)
-                        hit(x + track, y, 92, 21, function()
-                            if not enabled then
-                                return
+                            local editing = self.text_edit
+                                and self.text_edit.mod == mod
+                                and self.text_edit.control == control
+                            return editing and (self.text_edit.text .. '|') or mod.handle.get(id)
+                        end,
+                        activate = function(id, direction, picker_mode)
+                            change(assert(mod.controls[id]), direction or 0, picker_mode)
+                        end,
+                        vertical = function(id, x, y, width, height)
+                            local control = assert(mod.controls[id])
+                            local value = drag and drag.control == control and drag.value or mod.handle.get(id)
+                            hit(x, y, width, height, function(mx, my)
+                                if control.disabled then
+                                    return
+                                end
+                                local item = { mod = mod, control = control, value = value }
+                                function item.move(px, py)
+                                    if not py then
+                                        return
+                                    end
+                                    local ratio = math.max(0, math.min(1, (py - (oy + y * s)) / (height * s)))
+                                    item.value = control.min
+                                        + math.floor(ratio * (control.max - control.min) / control.step + 0.5)
+                                            * control.step
+                                end
+                                drag = item
+                                item.move(mx, my)
+                            end, nil, nil, 'Scratch alpha: checkerboard is transparent; solid color is opaque.')
+                            return value
+                        end,
+                        number = function(id, x, y, width, value, prepare, enabled, lo, hi, selected)
+                            local control = assert(mod.controls[id])
+                            if drag and drag.control == control and drag.widget_x == x and drag.widget_y == y then
+                                value = drag.value
                             end
-                            prepare()
-                            self.text_edit =
-                                { mod = mod, control = control, text = tostring(mod.handle.get(id)), replace = true }
-                            self.notice = 'Type value; Enter saves, Escape cancels'
-                        end)
-                    end,
-                    floating = function(id, draw, width, height, close, header_height)
-                        self.floating_positions = self.floating_positions or {}
-                        local position = self.floating_positions[id]
-                            or { x = math.max(0, w - (width + 30) * s), y = math.max(0, (h - height * s) / 2) }
-                        self.floating_positions[id] = position
-                        floating_request =
-                            { position = position, draw = draw, width = width, height = height, close = close, header_height = header_height or 28 }
-                    end,
-                    set = function(id, value)
-                        local control = assert(mod.controls[id])
-                        if id == 'quick_color' and mod.handle.get(id) == value and control.on_change then
-                            control.on_change(value)
-                            return true
-                        end
-                        return mod.handle.set(id, value)
-                    end,
-                    preview = function(render)
-                        self.preview_window = {
-                            mod = mod,
-                            page = { render_preview = render },
-                            title = 'PALETTE PREVIEW - RGBA values',
-                            width = 1000,
-                            height = 620,
-                            x = math.max(0, (w - 1000 * s) / 2),
-                            y = math.max(0, (h - 620 * s) / 2),
-                        }
-                    end,
-                    preset = function(input_id, choice_id, x, y, width)
-                        local input = assert(mod.controls[input_id])
-                        local choice = assert(mod.controls[choice_id])
-                        local value = mod.handle.get(choice_id)
-                        local editing = self.text_edit and self.text_edit.mod == mod and self.text_edit.control == input
-                        choice.input_control = input
-                        rect(x, y, width, 26, { 24, 39, 52 })
-                        rect(x, y, 2, 26, { 100, 137, 160 })
-                        bounded(
-                            x + 8,
-                            y + 5,
-                            editing and self.text_edit.text .. '|' or mod.handle.get(input_id),
-                            14,
-                            white,
-                            width - 90
-                        )
-                        text(x + width - 70, y + 5, 'v', 16, white)
-                        text(x + width - 43, y + 5, '<', 16, white)
-                        text(x + width - 17, y + 5, '>', 16, white)
-                        hit(x, y, width - 82, 26, function()
-                            change(input, 0)
-                        end)
-                        hit(x + width - 82, y, 28, 26, function()
-                            self.dropdown = {
+                            local track = width - 92
+                            local font = self.compact_fonts and (self.font_size or 12) or 14
+                            local height = math.max(21, font + 8)
+                            value = tonumber(value) or tonumber(mod.handle.get(id)) or tonumber(control.default) or 0
+                            lo = tonumber(lo) or control.min
+                            hi = tonumber(hi) or control.max
+                            prepare = prepare or function() end
+                            if enabled == nil then
+                                enabled = not control.disabled
+                            end
+                            local ratio = math.max(0, math.min(1, (value - lo) / math.max(1e-12, hi - lo)))
+                            local editing = selected
+                                and self.text_edit
+                                and self.text_edit.mod == mod
+                                and self.text_edit.control == control
+                            rect(x, y, width, height, T.panel)
+                            rect(x, y + height / 2 - 3.5, track, 7, enabled and { 31, 76, 84 } or T.line)
+                            rect(x, y + height / 2 - 2.5, track * ratio, 5, enabled and T.focus or T.disabled)
+                            rect(
+                                x + track * ratio - 5,
+                                y + (height - 17) / 2,
+                                10,
+                                17,
+                                enabled and T.focus or T.disabled
+                            )
+                            rect(
+                                x + track,
+                                y,
+                                92,
+                                height,
+                                enabled and (editing or hovering(x + track, y, 92, height)) and T.field_hover or T.field
+                            )
+                            bounded(
+                                x + track + 5,
+                                y + (height - font) / 2,
+                                editing and self.text_edit.text .. '|' or string.format('%.7g', value),
+                                14,
+                                enabled and white or T.disabled,
+                                85
+                            )
+                            hit(x, y, track, height, function(mx)
+                                if not enabled then
+                                    return
+                                end
+                                select_control(control)
+                                prepare()
+                                local item = {
+                                    mod = mod,
+                                    control = control,
+                                    value = value,
+                                    live = true,
+                                    widget_x = x,
+                                    widget_y = y,
+                                }
+                                function item.move(px)
+                                    local fraction = math.max(0, math.min(1, (px - (ox + x * s)) / (track * s)))
+                                    item.value = math.min(
+                                        hi,
+                                        lo + math.floor(fraction * (hi - lo) / control.step + 0.5) * control.step
+                                    )
+                                end
+                                drag = item
+                                item.move(mx)
+                            end)
+                            hit(x + track, y, 92, height, function()
+                                if not enabled then
+                                    return
+                                end
+                                select_control(control)
+                                prepare()
+                                self.text_edit = {
+                                    mod = mod,
+                                    control = control,
+                                    text = tostring(mod.handle.get(id)),
+                                    replace = true,
+                                }
+                                self.notice = 'Type value; Enter saves, Escape cancels'
+                            end)
+                        end,
+                        floating = function(id, draw, width, height, close, header_height)
+                            self.floating_positions = self.floating_positions or {}
+                            local position = self.floating_positions[id]
+                                or {
+                                    x = math.max(0, w - (width + 30 + #floating_requests * 32) * s),
+                                    y = math.max(0, (h - height * s) / 2 + #floating_requests * 24 * s),
+                                }
+                            self.floating_positions[id] = position
+                            local request = {
+                                id = id,
+                                position = position,
+                                draw = draw,
+                                width = width,
+                                height = height,
+                                close = close,
+                                header_height = header_height or 28,
+                            }
+                            local found = false
+                            for _, b in ipairs(self.floating_windows or {}) do
+                                if b.id == id then
+                                    found = true
+                                end
+                            end
+                            if not found then
+                                focus_floating(request)
+                            end
+                            if floating_by_id[id] then
+                                floating_requests[floating_by_id[id]] = request
+                            else
+                                floating_requests[#floating_requests + 1] = request
+                                floating_by_id[id] = #floating_requests
+                            end
+                        end,
+                        set = function(id, value)
+                            local control = assert(mod.controls[id])
+                            if id == 'quick_color' and mod.handle.get(id) == value and control.on_change then
+                                control.on_change(value)
+                                return true
+                            end
+                            return mod.handle.set(id, value)
+                        end,
+                        preview = function(render)
+                            self.preview_window = {
                                 mod = mod,
-                                control = choice,
-                                selected = value,
-                                scroll = math.max(0, value - 4),
+                                page = { render_preview = render },
+                                title = 'PALETTE PREVIEW - RGBA values',
+                                width = 1000,
+                                height = 620,
+                                x = math.max(0, (w - 1000 * s) / 2),
+                                y = math.max(0, (h - 620 * s) / 2),
+                            }
+                        end,
+                        preset = function(input_id, choice_id, x, y, width)
+                            local input = assert(mod.controls[input_id])
+                            local choice = assert(mod.controls[choice_id])
+                            local value = mod.handle.get(choice_id)
+                            local editing = self.text_edit
+                                and self.text_edit.mod == mod
+                                and self.text_edit.control == input
+                            local owner = floating_context
+                            if self.dropdown and self.dropdown.control == choice and self.dropdown.mod == mod then
+                                self.dropdown.x, self.dropdown.top = x, y - 4
+                                self.dropdown.width, self.dropdown.owner =
+                                    math.max(width, choice.dropdown_width or 0), owner
+                            end
+                            choice_bounds[choice] = {
                                 x = x,
                                 top = y - 4,
-                                width = width,
-                            }
-                        end)
-                        hit(x + width - 50, y, 24, 26, function()
-                            change(choice, -1)
-                        end)
-                        hit(x + width - 24, y, 24, 26, function()
-                            change(choice, 1)
-                        end)
-                    end,
-                    choice = function(id, x, y, width, prepare)
-                        local control = assert(mod.controls[id], 'Editor control missing: ' .. id)
-                        local owner = floating_context
-                        if self.dropdown and self.dropdown.control == control and self.dropdown.mod == mod then
-                            self.dropdown.x, self.dropdown.top = x, y - 4
-                            self.dropdown.width, self.dropdown.owner = math.max(width, control.dropdown_width or 0), owner
-                        end
-                        local value = mod.handle.get(id)
-                        M.choice(primitives, control, value, x, y, width, function(direction)
-                            if prepare then
-                                prepare()
-                            end
-                            change(control, direction)
-                        end, function()
-                            if prepare then
-                                prepare()
-                                value = mod.handle.get(id)
-                            end
-                            self.dropdown = {
-                                mod = mod,
+                                width = math.max(width, choice.dropdown_width or 0),
                                 owner = owner,
-                                control = control,
-                                selected = value,
-                                scroll = math.max(0, math.min(math.max(0, #control.choices - 8), value - 4)),
+                            }
+                            choice.input_control = input
+                            rect(x, y, width, 26, editing and T.field_hover or T.field)
+                            rect(x, y, 2, 26, T.focus)
+                            bounded(
+                                x + 8,
+                                y + 5,
+                                editing and self.text_edit.text .. '|' or mod.handle.get(input_id),
+                                14,
+                                white,
+                                width - 90
+                            )
+                            text(x + width - 70, y + 5, 'v', 16, white)
+                            text(x + width - 43, y + 5, '<', 16, white)
+                            text(x + width - 17, y + 5, '>', 16, white)
+                            hit(x, y, width - 82, 26, function()
+                                change(input, 0)
+                            end)
+                            hit(x + width - 82, y, 28, 26, function()
+                                self.dropdown = {
+                                    mod = mod,
+                                    control = choice,
+                                    selected = value,
+                                    scroll = math.max(0, value - 4),
+                                    x = x,
+                                    top = y - 4,
+                                    width = math.max(width, choice.dropdown_width or 0),
+                                    owner = owner,
+                                }
+                            end)
+                            hit(x + width - 50, y, 24, 26, function()
+                                change(choice, -1)
+                            end)
+                            hit(x + width - 24, y, 24, 26, function()
+                                change(choice, 1)
+                            end)
+                        end,
+                        choice = function(id, x, y, width, prepare)
+                            local control = assert(mod.controls[id], 'Editor control missing: ' .. id)
+                            local owner = floating_context
+                            local key = tostring(owner and owner.id or 'main') .. ':' .. id
+                            choice_widgets[key] = (choice_widgets[key] or 0) + 1
+                            local widget = key .. ':' .. choice_widgets[key]
+                            if
+                                self.dropdown
+                                and self.dropdown.control == control
+                                and self.dropdown.mod == mod
+                                and self.dropdown.widget == widget
+                            then
+                                self.dropdown.x, self.dropdown.top = x, y - 4
+                                self.dropdown.width, self.dropdown.owner =
+                                    math.max(width, control.dropdown_width or 0), owner
+                            end
+                            local anchor = {
                                 x = x,
                                 top = y - 4,
                                 width = math.max(width, control.dropdown_width or 0),
+                                owner = owner,
+                                widget = widget,
+                                prepare = prepare,
                             }
-                        end)
-                    end,
-                })
+                            if
+                                not choice_bounds[control]
+                                or not self.choice_focus
+                                or self.choice_focus.control ~= control
+                                or self.choice_focus.widget == widget
+                            then
+                                choice_bounds[control] = anchor
+                            end
+                            local value = mod.handle.get(id)
+                            M.choice(primitives, control, value, x, y, width, function(direction)
+                                if prepare then
+                                    prepare()
+                                end
+                                change(control, direction)
+                            end, function()
+                                select_control(control)
+                                self.choice_focus = { control = control, widget = widget }
+                                if prepare then
+                                    prepare()
+                                    value = mod.handle.get(id)
+                                end
+                                self.dropdown = {
+                                    mod = mod,
+                                    owner = owner,
+                                    widget = widget,
+                                    control = control,
+                                    selected = value,
+                                    scroll = math.max(0, math.min(math.max(0, #control.choices - 8), value - 4)),
+                                    x = x,
+                                    top = y - 4,
+                                    width = math.max(width, control.dropdown_width or 0),
+                                }
+                            end)
+                        end,
+                    })
+                )
                 if not ok then
                     text(rail + 35, wh - 200, tostring(why), 18, muted)
                 end
@@ -1865,13 +2435,30 @@ function M.new(api, measure)
                         columns[col] = columns[col] + 1
 
                         local x = settings_x + (col - 1) * (available / 2)
-                        local y = wh - 197 - (columns[col] - 1) * 38
+                        local y = wh - 197 - (columns[col] - 1) * 42
                         local row_index = entry.row
-
-                        if c == selected then
-                            rect(x - 5, y - 7, row_width + 5, 34, { 48, 58, 65 })
-                            rect(x - 5, y - 7, 3, 34, accent)
-                        end
+                        local row_hover = not self.dropdown
+                            and not self.color_picker
+                            and hovering(x - 5, y - 7, row_width + 5, 34)
+                        text_focus = c == selected and self.focus == 'settings'
+                        rect(
+                            x - 5,
+                            y - 7,
+                            row_width + 5,
+                            34,
+                            c == selected and T.selected
+                                or (row_hover and T.hover or (i % 2 == 0 and T.panel or T.background))
+                        )
+                        commands[#commands].ui_role = 'setting_row'
+                        commands[#commands].layer = 95
+                        commands[#commands].hovered, commands[#commands].focused = row_hover == true, text_focus
+                        rect(
+                            x - 5,
+                            y - 7,
+                            2,
+                            34,
+                            c == selected and (text_focus and T.focus or T.border) or T.background
+                        )
 
                         local color = c.disabled and muted or accent
 
@@ -1932,15 +2519,7 @@ function M.new(api, measure)
                                             end
                                             self.row = row_index
                                             self.focus = 'settings'
-                                            self.color_picker = {
-                                                mod = item.owner,
-                                                control = item.control,
-                                                rgb = api.color_rgb(
-                                                    (item.owner.handle.preview or item.owner.handle.get)(
-                                                        item.control.id
-                                                    )
-                                                ),
-                                            }
+                                            open_picker(item.owner, item.control)
                                         end)
                                     end
                                 end
@@ -1980,6 +2559,9 @@ function M.new(api, measure)
 
                             hit(x - 5, y - 7, row_width + 5, 34, function()
                                 select()
+                                if control.type == 'toggle' and not control.disabled then
+                                    change(control, 0)
+                                end
                             end)
 
                             if c.type == 'slider' then
@@ -1992,7 +2574,7 @@ function M.new(api, measure)
                                 local fraction = math.max(0, math.min(1, (value - c.min) / (c.max - c.min)))
 
                                 -- Cyan sliders are distinct from gold choice selectors.
-                                local slider_fill = c.disabled and { 103, 118, 123 } or { 64, 203, 215 }
+                                local slider_fill = c.disabled and T.disabled or T.focus
                                 local slider_thumb = c.disabled and { 137, 148, 151 }
                                     or (c == selected and { 196, 251, 255 } or { 115, 231, 240 })
                                 rect(track, y + 4, width, 7, c.disabled and { 51, 59, 64 } or { 31, 76, 84 })
@@ -2010,33 +2592,13 @@ function M.new(api, measure)
                                     and self.text_edit.mod == mod
                                     and self.text_edit.control == c
 
-                                rect(
-                                    vx + 435,
-                                    y - 5,
-                                    90,
-                                    29,
-                                    c.disabled and { 35, 42, 48 }
-                                        or (
-                                            editing and { 31, 76, 84 }
-                                            or (c == selected and { 115, 231, 240 } or { 24, 56, 64 })
-                                        )
-                                )
+                                rect(vx + 435, y - 5, 90, 29, editing and T.field_hover or T.field)
+                                rect(vx + 435, y - 5, 90, 1, editing and T.focus or T.border)
 
                                 local display = editing and self.text_edit.text .. '|'
                                     or string.format('%.3f', value):gsub('0+$', ''):gsub('%.$', '')
 
-                                bounded(
-                                    vx + 440,
-                                    y,
-                                    display,
-                                    18,
-                                    c.disabled and muted
-                                        or (
-                                            editing and { 196, 251, 255 }
-                                            or (c == selected and selection_text or { 168, 238, 243 })
-                                        ),
-                                    80
-                                )
+                                bounded(vx + 440, y, display, 18, c.disabled and T.disabled or white, 80)
 
                                 hit(vx + 435, y - 5, 90, 29, function()
                                     if control.disabled then
@@ -2088,37 +2650,26 @@ function M.new(api, measure)
                                     change(control, 0)
                                 end)
 
-                                rect(
-                                    vx + 275,
-                                    y - 5,
-                                    250,
-                                    29,
-                                    not c.disabled and c == selected and accent or { 35, 42, 48 }
-                                )
-
+                                rect(vx + 275, y - 5, 250, 29, not c.disabled and editing and T.field_hover or T.field)
                                 bounded(
                                     vx + 285,
                                     y,
                                     editing and self.text_edit.text .. '|' or value,
                                     18,
-                                    c.disabled and muted or (c == selected and selection_text or white),
+                                    c.disabled and T.disabled or white,
                                     230
                                 )
                             elseif c.type == 'color' then
                                 rect(vx + 300, y - 3, 34, 23, api.color_rgb(value))
-                                rect(vx + 350, y - 5, 175, 29, c == selected and accent or { 35, 42, 48 })
-                                bounded(vx + 360, y, value, 18, c == selected and selection_text or white, 155)
+                                rect(vx + 350, y - 5, 175, 29, T.field)
+                                bounded(vx + 360, y, value, 18, c.disabled and T.disabled or white, 155)
 
                                 hit(vx + 295, y - 7, 230, 34, function()
                                     if control.disabled then
                                         return
                                     end
                                     select()
-                                    self.color_picker = {
-                                        mod = owner,
-                                        control = control,
-                                        rgb = api.color_rgb((owner.handle.preview or owner.handle.get)(control.id)),
-                                    }
+                                    open_picker(owner, control)
                                 end)
                             elseif c.type == 'toggle' then
                                 hit(vx + 350, y - 5, 175, 29, function()
@@ -2126,38 +2677,39 @@ function M.new(api, measure)
                                     change(control, 0)
                                 end)
 
+                                rect(vx + 350, y - 5, 175, 29, T.field)
                                 rect(
-                                    vx + 350,
-                                    y - 5,
-                                    175,
-                                    29,
-                                    not c.disabled and c == selected and accent or { 24, 30, 35 }
+                                    vx + 354,
+                                    y - 1,
+                                    36,
+                                    21,
+                                    c.disabled and T.line or (value and { 42, 82, 72 } or T.border)
                                 )
-
-                                rect(vx + 354, y - 1, 36, 21, { 65, 73, 80 })
-                                if value then
-                                    rect(vx + 358, y + 3, 28, 13, white)
-                                end
-
+                                rect(
+                                    vx + (value and 374 or 356),
+                                    y + 2,
+                                    14,
+                                    15,
+                                    c.disabled and T.disabled or (value and T.enabled or muted)
+                                )
                                 text(
                                     vx + 405,
                                     y,
                                     c.disabled and 'UNAVAILABLE' or (value and 'ON' or 'OFF'),
                                     c.disabled and 14 or 19,
-                                    c.disabled and muted or (c == selected and selection_text or white)
+                                    c.disabled and T.disabled or (value and T.enabled or muted)
                                 )
                             elseif c.type == 'choice' then
                                 local presentation = c.presentation or 'combined'
 
-                                local chosen = c.disabled and muted
-                                    or (c == selected and { 35, 27, 10 } or { 255, 226, 137 })
-                                local symbol = c.disabled and muted or { 35, 27, 10 }
-                                local value_bg = c.disabled and { 35, 42, 48 }
-                                    or (c == selected and { 255, 225, 120 } or { 79, 62, 28 })
-                                local arrow_bg = c.disabled and { 65, 73, 80 } or { 216, 166, 49 }
+                                local chosen = c.disabled and T.disabled or white
+                                local symbol = c.disabled and T.disabled or muted
+                                local value_bg = T.field
+                                local arrow_bg = c.disabled and T.line or T.field_hover
 
                                 local cw = value_width
                                 local cx = vx + 525 - (presentation ~= 'dropdown' and 60 or 0) - cw
+                                choice_bounds[c] = { x = cx, top = y - 8, width = cw }
 
                                 if presentation ~= 'dropdown' then
                                     rect(cx + cw + 3, y - 5, 27, 29, arrow_bg)
@@ -2178,7 +2730,7 @@ function M.new(api, measure)
                                 end
 
                                 if c == selected and not c.disabled then
-                                    rect(cx - 2, y - 7, cw + 4, 33, { 110, 77, 18 })
+                                    rect(cx - 2, y - 7, cw + 4, 33, T.border)
                                 end
                                 rect(cx, y - 5, cw, 29, value_bg)
 
@@ -2232,16 +2784,13 @@ function M.new(api, measure)
                                     select()
                                     change(control, 0)
                                 end)
-                                if c == selected and not c.disabled then
-                                    rect(bx - 1, y - 6, bw + 2, 31, accent)
-                                end
+                                rect(bx - 1, y - 6, bw + 2, 31, c == selected and not c.disabled and T.border or T.line)
                                 rect(
                                     bx,
                                     y - 5,
                                     bw,
                                     29,
-                                    c.disabled and { 35, 42, 48 }
-                                        or (c == selected and { 37, 47, 55 } or { 55, 65, 73 })
+                                    c.disabled and T.panel or (hovering(bx, y - 5, bw, 29) and T.field_hover or T.field)
                                 )
                                 bounded(bx + 12, y, label, 18, c.disabled and muted or white, math.max(0, bw - 24))
                             end
@@ -2249,6 +2798,7 @@ function M.new(api, measure)
                     end
                 end
 
+                text_focus = false
                 scrollbar('settings', ww - 20, 196, wh - 364, #display, settings_visible, self.scroll)
 
                 -- The scrollbar communicates position without debug row counts.
@@ -2337,7 +2887,7 @@ function M.new(api, measure)
             25,
             32,
             (self.menu_key_label or 'F10')
-                .. ' / Esc Close   Tab Focus   Arrows Navigate / Change   Enter Select   Home Default   PgUp / PgDn Sections',
+                .. ' / Esc Close   Tab Focus   Arrows Navigate / Change   Enter Select   PgUp / PgDn Sections',
             14,
             muted,
             ww - 380
@@ -2359,19 +2909,32 @@ function M.new(api, measure)
                 ww - 380
             )
         end
-        if mod and mod.controls.ui_scale then
-            local control = mod.controls.ui_scale
-            local value = mod.handle.get('ui_scale') or 100
+        if mod and scale_id and scale_value then
+            local control = mod.controls[scale_id]
+            local value = scale_value
             bounded(ww - 320, 12, 'UI Scale: ' .. value .. '%', 14, muted, 210)
-            rect(ww - 100, 6, 32, 22, { 35, 62, 90 })
+            rect(ww - 100, 6, 32, 22, T.field)
             text(ww - 89, 12, '<', 14, white)
-            rect(ww - 62, 6, 32, 22, { 35, 62, 90 })
+            rect(ww - 62, 6, 32, 22, T.field)
             text(ww - 51, 12, '>', 14, white)
+            local function step(direction)
+                if control.disabled then
+                    return
+                end
+                local requested = math.max(control.min, math.min(control.max, value + direction * control.step))
+                local called, ok, why = pcall(mod.handle.set, scale_id, requested)
+                if called and ok then
+                    self.ui_scale = (mod.handle.preview or mod.handle.get)(scale_id) / 100
+                    self.notice = 'Saved'
+                else
+                    self.notice = 'Could not save: ' .. tostring(called and why or ok)
+                end
+            end
             hit(ww - 100, 6, 32, 22, function()
-                assert(mod.handle.set('ui_scale', math.max(control.min, value - control.step)))
+                step(-1)
             end)
             hit(ww - 62, 6, 32, 22, function()
-                assert(mod.handle.set('ui_scale', math.min(control.max, value + control.step)))
+                step(1)
             end)
         end
         -- A readable URL; no external browser is opened by menu rendering.
@@ -2434,6 +2997,7 @@ function M.new(api, measure)
             rect(corner[2] + 4, corner[3] + 4, 6, 6, muted)
             commands[#commands].resize_handle = corner[1]
         end
+        frame('main', 0, 0, ww, wh)
         local pv = self.preview_window
         if pv and api.mods[pv.mod.id] ~= pv.mod then
             self.preview_window = nil
@@ -2471,34 +3035,70 @@ function M.new(api, measure)
                 text((px - ox) / s + 15, (py - oy) / s + 200, 'Preview unavailable', 18, muted)
             end
             text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted)
+            frame('preview', vx, vy, vw, vh)
             for i = first, #commands do
                 commands[i].hud_preview = true
                 commands[i].layer = 110 + (i - first) * 0.01
             end
         end
 
-        if floating_request then
-            local f = floating_request
+        table.sort(floating_requests, function(a, b)
+            return self.floating_order[a.id] < self.floating_order[b.id]
+        end)
+        self.floating_windows, self.floating_bounds = {}, nil
+        for _, f in ipairs(floating_requests) do
             local p = f.position
             local fw, fh = f.width * s, f.height * s
             p.x = math.max(0, math.min(w - fw, p.x))
             p.y = math.max(0, math.min(h - fh, p.y))
-            self.floating_bounds = {x=p.x,y=p.y,w=fw,h=fh}
+            self.floating_windows[#self.floating_windows + 1] = { id = f.id, x = p.x, y = p.y, w = fw, h = fh }
+            self.floating_bounds = self.floating_windows[#self.floating_windows]
+        end
+        if self.dropdown and self.dropdown.owner and not floating_by_id[self.dropdown.owner.id] then
+            self.dropdown = nil
+            scroll_drag = nil
+        end
+        if self.text_edit and self.text_edit.floating_owner and not floating_by_id[self.text_edit.floating_owner] then
+            self.text_edit = nil
+        end
+        if drag and drag.floating_owner and not floating_by_id[drag.floating_owner] then
+            drag = nil
+        end
+        if scroll_drag and scroll_drag.floating_owner and not floating_by_id[scroll_drag.floating_owner] then
+            scroll_drag = nil
+        end
+        if preview_drag and preview_drag.floating_owner and not floating_by_id[preview_drag.floating_owner] then
+            preview_drag = nil
+        end
+        for ordinal, f in ipairs(floating_requests) do
+            local p = f.position
+            local fw, fh = f.width * s, f.height * s
             local fx, fy = (p.x - ox) / s, (p.y - oy) / s
             local first = #commands + 1
-            hit(fx, fy, f.width, f.height, function() end)
             floating_context = f
+            hit(fx, fy, f.width, f.height, function() end)
             f.draw(fx, fy, f.width, f.height)
-            floating_context = nil
+            frame('floating:' .. tostring(f.id), fx, fy, f.width, f.height)
             local header_height = f.header_height or 28
             hit(fx, fy + f.height - header_height, f.width - 32, header_height, function(mx, my)
                 preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
             end)
             text(fx + f.width - 20, fy + f.height - 26, 'X', 14, white)
-            hit(fx + f.width - 32, fy + f.height - header_height, 32, header_height, function() self.dropdown=nil; f.close() end)
+            hit(fx + f.width - 32, fy + f.height - header_height, 32, header_height, function()
+                if self.dropdown and self.dropdown.owner and self.dropdown.owner.id == f.id then
+                    self.dropdown = nil
+                    scroll_drag = nil
+                end
+                if self.text_edit and self.text_edit.floating_owner == f.id then
+                    self.text_edit = nil
+                end
+                f.close()
+            end)
+            floating_context = nil
             for i = first, #commands do
                 commands[i].popup = true
-                commands[i].layer = 210 + (i - first) * 0.001
+                commands[i].floating_id = f.id
+                commands[i].layer = 210 + (ordinal - 1) * 0.5 + (i - first) * 0.0001
             end
         end
         if self.dropdown then
@@ -2512,32 +3112,53 @@ function M.new(api, measure)
             local dw = math.min(ww - 16, d.width or 250)
             local x = math.max(8, math.min(ww - dw - 8, d.x))
             if d.owner then
-                top = math.max(-oy/s + height + 8, math.min((h-oy)/s - 8, d.top))
-                dw = math.min(w/s-16,d.width or 250)
-                x = math.max(-ox/s+8,math.min((w-ox)/s-dw-8,d.x))
+                top = math.max(-oy / s + height + 8, math.min((h - oy) / s - 8, d.top))
+                dw = math.min(w / s - 16, d.width or 250)
+                x = math.max(-ox / s + 8, math.min((w - ox) / s - dw - 8, d.x))
             end
 
             -- Overlay hit regions take priority and consume outside clicks.
 
-            hit(-ox / s, -oy / s, w / s, h / s, function(mx,my)
+            hit(-ox / s, -oy / s, w / s, h / s, function(mx, my)
                 local owner = d.owner
                 local p = owner and owner.position
                 local header = owner and owner.header_height or 28
-                if p and mx >= p.x and mx < p.x+(owner.width-32)*s and my >= p.y+(owner.height-header)*s and my <= p.y+owner.height*s then
-                    preview_drag = {window=p,dx=mx-p.x,dy=my-p.y,max_x=math.max(0,w-owner.width*s),max_y=math.max(0,h-owner.height*s)}
-                else self.dropdown = nil end
+                if
+                    p
+                    and mx >= p.x
+                    and mx < p.x + (owner.width - 32) * s
+                    and my >= p.y + (owner.height - header) * s
+                    and my <= p.y + owner.height * s
+                then
+                    preview_drag = {
+                        window = p,
+                        floating_owner = owner.id,
+                        dx = mx - p.x,
+                        dy = my - p.y,
+                        max_x = math.max(0, w - owner.width * s),
+                        max_y = math.max(0, h - owner.height * s),
+                    }
+                else
+                    self.dropdown = nil
+                    scroll_drag = nil
+                end
             end)
 
-            rect(x - 2, top - height - 2, dw + 4, height + 4, accent)
-            rect(x, top - height, dw, height, { 24, 30, 35 })
+            rect(x, top - height, dw, height, T.panel)
 
             for index = d.scroll + 1, math.min(#d.control.choices, d.scroll + count) do
                 local y = top - 29 - (index - d.scroll - 1) * 31
                 local choice = index
 
-                if index == d.selected then
-                    rect(x + 3, y - 4, dw - 16, 30, accent)
-                end
+                rect(
+                    x + 3,
+                    y - 4,
+                    dw - 16,
+                    30,
+                    index == d.selected and T.selected or (hovering(x + 3, y - 4, dw - 16, 30) and T.hover or T.panel)
+                )
+                rect(x + 3, y - 4, 2, 30, index == d.selected and accent or T.panel)
+                text_focus = index == d.selected
 
                 local preview = d.control.choice_previews and d.control.choice_previews[index]
                 local detail = d.control.choice_details and d.control.choice_details[index]
@@ -2577,45 +3198,67 @@ function M.new(api, measure)
                 hit(x + 3, y - 4, dw - 16, 30, function()
                     local ok, err = (d.mod.handle.edit or d.mod.handle.set)(d.control.id, choice)
 
-                    self.notice = ok
-                            and (d.control.page and d.control.page.require_confirmation and 'Pending confirmation' or 'Saved')
-                        or tostring(err)
+                    self.notice = ok and saved_notice(d.control, d.mod.handle) or tostring(err)
                     self.dropdown = nil
+                    scroll_drag = nil
                     if ok and d.control.input_control and choice == 1 then
                         change(d.control.input_control, 0)
                     end
                 end)
             end
 
+            text_focus = false
             scrollbar('dropdown', x + dw - 7, top - height + 4, height - 8, #d.control.choices, count, d.scroll)
+            frame('dropdown', x, top - height, dw, height)
 
             for index = overlay_start, #commands do
                 commands[index].popup = true
                 commands[index].layer = 230
             end
-
-            if #d.control.choices > count then
-                hit(x + dw - 13, top - height, 13, height, function(_, my)
-                    local f = 1 - math.max(0, math.min(1, (my - (oy + (top - height) * s)) / (height * s)))
-
-                    d.scroll = math.floor(f * (#d.control.choices - count) + 0.5)
-                end)
-            end
         end
 
+        if self.color_picker then
+            local allowed, why = M.picker_allowed(self.color_picker.control, self.color_picker.picker_mode)
+            if not allowed then
+                self.notice = why
+                self.close_color(false)
+            end
+        end
         if self.color_picker then
             local p = self.color_picker
             if p.control.picker_preview then
                 if not p.preview_started then
-                    local ok,why=pcall(p.control.picker_begin)
-                    if ok then p.preview_started=true else p.error=tostring(why) end
+                    local ok, why = pcall(p.control.picker_begin, p.picker_mode)
+                    if ok then
+                        p.preview_started = true
+                    else
+                        p.error = tostring(why)
+                    end
                 end
-                local alpha=p.alpha or (p.control.picker_alpha and p.control.picker_alpha()) or 1
-                local signature=table.concat(p.rgb,',')..':'..tostring(alpha)
-                if p.preview_started and signature~=p.preview_signature and (not p.next_preview or os.clock()>=p.next_preview) then
-                    local ok,why=pcall(p.control.picker_preview,p.rgb,alpha)
-                    if not ok then p.error=tostring(why) end
-                    p.preview_signature,p.next_preview=signature,os.clock()+.04
+                if p.control.picker_channel_enabled then
+                    p.initial_rgb = p.initial_rgb or { p.rgb[1], p.rgb[2], p.rgb[3] }
+                    p.initial_alpha = p.initial_alpha or (p.control.picker_alpha and p.control.picker_alpha()) or 1
+                    for ch = 1, 3 do
+                        if not picker_channel_allowed(p.control, ch, p.picker_mode) then
+                            p.rgb[ch] = p.initial_rgb[ch]
+                        end
+                    end
+                    if not picker_channel_allowed(p.control, 4, p.picker_mode) then
+                        p.alpha = p.initial_alpha
+                    end
+                end
+                local alpha = p.alpha or (p.control.picker_alpha and p.control.picker_alpha()) or 1
+                local signature = table.concat(p.rgb, ',') .. ':' .. tostring(alpha)
+                if
+                    p.preview_started
+                    and signature ~= p.preview_signature
+                    and (not p.next_preview or os.clock() >= p.next_preview)
+                then
+                    local ok, why = pcall(p.control.picker_preview, p.rgb, alpha)
+                    if not ok then
+                        p.error = tostring(why)
+                    end
+                    p.preview_signature, p.next_preview = signature, os.clock() + 0.04
                 end
             end
             local start = #commands + 1
@@ -2632,8 +3275,8 @@ function M.new(api, measure)
                 color_drag = { ox = ox, oy = oy, scale = s, dx = (mx - ox) / s - px, dy = (my - oy) / s - py }
             end)
 
-            rect(px - 2, py - 2, 704, 434, accent)
-            rect(px, py, 700, 430, { 24, 30, 35 })
+            rect(px, py, 700, 430, T.panel)
+            rect(px, py + 385, 700, 45, T.header)
 
             rect(px + 650, py + 389, 32, 30, { 65, 73, 80 })
             text(px + 660, py + 396, 'X', 20, white)
@@ -2688,14 +3331,18 @@ function M.new(api, measure)
             end)
 
             if p.control.picker_alpha then
-                if p.alpha == nil then p.alpha = p.control.picker_alpha() end
+                if p.alpha == nil then
+                    p.alpha = p.control.picker_alpha()
+                end
                 local ax, ay, ah = px + 292, py + 160, 204
                 for row = 0, 19 do
                     local opacity = row / 19
                     for col = 0, 1 do
                         local background = (row + col) % 2 == 0 and 220 or 125
                         local color = {}
-                        for ch = 1, 3 do color[ch] = math.floor(background * (1 - opacity) + p.rgb[ch] * opacity + 0.5) end
+                        for ch = 1, 3 do
+                            color[ch] = math.floor(background * (1 - opacity) + p.rgb[ch] * opacity + 0.5)
+                        end
                         rect(ax + col * 8, ay + row * ah / 20, 8, ah / 20 + 1, color)
                     end
                 end
@@ -2706,11 +3353,25 @@ function M.new(api, measure)
                 local function alpha_slider(mx, my)
                     p.alpha = math.floor(math.max(0, math.min(1, ((my - oy) / s - ay) / ah)) * 1000 + 0.5) / 1000
                 end
-                hit(ax, ay, 16, ah, function(mx, my)
-                    if not self.finish_color_field() then return end
-                    palette_drag = alpha_slider
-                    alpha_slider(mx, my)
-                end, nil, nil, 'Alpha: checkerboard is transparent; solid color is opaque. Numeric A accepts raw values.')
+                hit(
+                    ax,
+                    ay,
+                    16,
+                    ah,
+                    function(mx, my)
+                        if not picker_channel_allowed(p.control, 4, p.picker_mode) then
+                            return
+                        end
+                        if not self.finish_color_field() then
+                            return
+                        end
+                        palette_drag = alpha_slider
+                        alpha_slider(mx, my)
+                    end,
+                    nil,
+                    nil,
+                    'Alpha: checkerboard is transparent; solid color is opaque. Numeric A accepts raw values.'
+                )
             end
 
             rect(px + 595, py + 287, 85, 65, p.rgb)
@@ -2723,14 +3384,23 @@ function M.new(api, measure)
             }
 
             if p.control.picker_alpha then
-                if p.alpha == nil then p.alpha = p.control.picker_alpha() end
+                if p.alpha == nil then
+                    p.alpha = p.control.picker_alpha()
+                end
                 fields[#fields + 1] = { key = 'alpha', label = 'A', value = p.alpha }
             end
             for index, field in ipairs(fields) do
                 local fy = py + 343 - (index - 1) * 42
+                local enabled = field.key == 'hex'
+                        and (picker_channel_allowed(p.control, 1, p.picker_mode) or picker_channel_allowed(
+                            p.control,
+                            2,
+                            p.picker_mode
+                        ) or picker_channel_allowed(p.control, 3))
+                    or picker_channel_allowed(p.control, field.key == 'alpha' and 4 or field.key, p.picker_mode)
 
                 text(px + 315, fy, field.label, 20, white)
-                rect(px + 370, fy - 5, 210, 30, { 55, 63, 70 })
+                rect(px + 370, fy - 5, 210, 30, enabled and T.field or T.panel)
 
                 local editing = self.text_edit and self.text_edit.color_channel == field.key
 
@@ -2743,12 +3413,17 @@ function M.new(api, measure)
                 )
 
                 hit(px + 370, fy - 5, 210, 30, function()
+                    if not enabled then
+                        return
+                    end
                     self.text_edit =
                         { color_channel = field.key, text = tostring(field.value):gsub('^#', ''), replace = true }
                 end)
             end
 
-            if p.error then bounded(px + 315, py + 153, p.error, 12, accent, 365) end
+            if p.error then
+                bounded(px + 315, py + 153, p.error, 12, accent, 365)
+            end
 
             text(px + 20, py + 126, 'CUSTOM SWATCHES', 17, muted)
 
@@ -2769,7 +3444,7 @@ function M.new(api, measure)
             end
 
             rect(px + 550, py + 78, 130, 32, { 65, 73, 80 })
-            text(px + 560, py + 88, 'SAVE SWATCH', 16, accent)
+            bounded(px + 560, py + 88, 'SAVE SWATCH', 16, accent, 110)
 
             hit(px + 550, py + 78, 130, 32, function()
                 local ok, err = api.save_swatch(p.rgb)
@@ -2789,8 +3464,8 @@ function M.new(api, measure)
                 self.notice = ok and 'Selected swatch replaced' or tostring(err)
             end)
 
-            rect(px + 20, py + 20, 300, 32, { 65, 73, 80 })
-            text(px + 35, py + 29, 'USE COLOR', 18, accent)
+            rect(px + 20, py + 20, 300, 32, accent)
+            text(px + 35, py + 29, 'USE COLOR', 18, T.background)
 
             hit(px + 20, py + 20, 300, 32, function()
                 self.commit_color()
@@ -2804,6 +3479,7 @@ function M.new(api, measure)
                 self.text_edit = nil
             end)
 
+            frame('color_picker', px, py, 700, 430, accent)
             for index = start, #commands do
                 commands[index].popup = true
                 commands[index].layer = 300
@@ -2815,7 +3491,7 @@ function M.new(api, measure)
 
             for _, command in ipairs(commands) do
                 if command.popup then
-                    command.layer = math.max(200,command.layer or 200)
+                    command.layer = math.max(200, command.layer or 200)
                 end
             end
         end
@@ -2826,7 +3502,7 @@ function M.new(api, measure)
             hits = {} -- This confirmation owns mouse input until saved or canceled.
             local first = #commands + 1
             rect(px, py, 440, 190, { 20, 25, 30 }, 0.99)
-            rect(px, py + 154, 440, 36, { 35, 62, 90 })
+            rect(px, py + 154, 440, 36, T.field)
             text(
                 px + 14,
                 py + 164,
@@ -2845,7 +3521,14 @@ function M.new(api, measure)
             end
             if dialog.phase == 'delete' then
                 bounded(px + 14, py + 116, dialog.preset_name or 'Selected preset', 14, white, 412)
-                bounded(px + 14, py + 90, dialog.description or 'Remove from Armory? Existing gear stays unchanged.', 12, white, 412)
+                bounded(
+                    px + 14,
+                    py + 90,
+                    dialog.description or 'Remove from Armory? Existing gear stays unchanged.',
+                    12,
+                    white,
+                    412
+                )
                 rect(px + 14, py + 22, 198, 30, { 90, 45, 40 })
                 bounded(px + 22, py + 30, dialog.action_label or 'Delete Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
@@ -2860,7 +3543,7 @@ function M.new(api, measure)
                 for i, option in ipairs({ { 'armor', 'Armor Only' }, { 'both', 'Both' }, { 'helmet', 'Helmet Only' } }) do
                     local bx = px + 14 + (i - 1) * 140
                     local kind, label = option[1], option[2]
-                    rect(bx, py + 70, 132, 32, { 35, 62, 90 })
+                    rect(bx, py + 70, 132, 32, T.field)
                     bounded(bx + 6, py + 80, label, 14, white, 120)
                     hit(bx, py + 70, 132, 32, function()
                         dialog.save_kind = kind
@@ -2870,7 +3553,7 @@ function M.new(api, measure)
                 end
             elseif dialog.phase == 'confirm' then
                 bounded(px + 14, py + 116, 'Save the current gear as a named preset.', 14, white, 412)
-                rect(px + 14, py + 22, 198, 30, { 35, 62, 90 })
+                rect(px + 14, py + 22, 198, 30, T.field)
                 bounded(px + 22, py + 30, 'Yes', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     dialog.phase = 'name'
@@ -2906,7 +3589,7 @@ function M.new(api, measure)
                 hit(px + 14, py + 89, 412, 30, function()
                     self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
                 end)
-                rect(px + 14, py + 22, 198, 30, { 35, 62, 90 })
+                rect(px + 14, py + 22, 198, 30, T.field)
                 bounded(px + 22, py + 30, 'Save Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     if self.text_edit then
@@ -2914,9 +3597,10 @@ function M.new(api, measure)
                     end
                 end)
             end
-            rect(px + 228, py + 22, 198, 30, { 35, 62, 90 })
+            rect(px + 228, py + 22, 198, 30, T.field)
             bounded(px + 236, py + 30, dialog.phase == 'confirm' and 'No' or 'Cancel', 14, white, 180)
             hit(px + 228, py + 22, 198, 30, cancel)
+            frame('outfit_dialog', px, py, 440, 190)
             for i = first, #commands do
                 commands[i].popup = true
                 commands[i].layer = 400
@@ -2951,28 +3635,44 @@ function M.new(api, measure)
             if key and elapsed - (self.tooltip_started or elapsed) >= 0.45 then
                 local lines = {}
                 local line = ''
-                local limit = 48
-                for word in target.tooltip:gmatch('%S+') do
-                    if #line + #word + 1 > limit then
-                        lines[#lines + 1] = line
-                        line = word
-                    else
-                        line = line == '' and word or line .. ' ' .. word
+                local width = math.min(360, ww - 24)
+                local size = self.compact_fonts and (self.font_size or 12) or 12
+                local step = size + 5
+                local maximum = math.max(1, math.floor((wh - 40) / step))
+                for paragraph in (target.tooltip .. '\n'):gmatch('(.-)\n') do
+                    for word in paragraph:gmatch('%S+') do
+                        local candidate = line == '' and word or line .. ' ' .. word
+                        local measured = 0
+                        for glyph in candidate:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                            measured = measured + (measure and measure(glyph, size * s) or size * s * 0.62)
+                        end
+                        if line ~= '' and measured > (width - 24) * s then
+                            lines[#lines + 1] = line
+                            line = word
+                        else
+                            line = candidate
+                        end
+                    end
+                    if line ~= '' then
+                        lines[#lines + 1], line = line, ''
                     end
                 end
-                if line ~= '' then
-                    lines[#lines + 1] = line
+                if #lines > maximum then
+                    for i = #lines, maximum + 1, -1 do
+                        lines[i] = nil
+                    end
+                    lines[maximum] = '...'
                 end
-                local width = math.min(360, ww - 24)
-                local height = 16 + #lines * 17
+                local height = 16 + #lines * step
                 local x = math.max(12, math.min(ww - width - 12, (self.pointer_x - ox) / s + 16))
                 local y = math.max(12, math.min(wh - height - 12, (self.pointer_y - oy) / s - height - 12))
                 local first = #commands + 1
-                rect(x, y, width, height, { 16, 22, 28 }, 0.98)
+                rect(x, y, width, height, T.panel, 0.98)
                 rect(x, y + height - 2, width, 2, accent)
                 for i, line in ipairs(lines) do
-                    bounded(x + 10, y + height - 10 - i * 17, line, 12, white, width - 20)
+                    bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20)
                 end
+                frame('tooltip', x, y, width, height, accent)
                 for i = first, #commands do
                     commands[i].popup = true
                     commands[i].layer = 450

@@ -80,12 +80,20 @@ assert(disk.save('armory_search_test', { search = '', other = 'valid name' }))
 local settings = disk.load('armory_search_test')
 assert(settings.search == '' and settings.other == 'valid name', 'Empty search did not round trip')
 local core = dofile('vendor/menu/core.lua').new(disk)
-local test = core.register({ id = 'armory_search_test', name = 'Search test', pages = {
-    { id = 'search', name = 'Search', controls = {
-        { id = 'search', type = 'input', label = 'Search', allow_empty = true, default = '' },
-        { id = 'other', type = 'input', label = 'Name', default = 'valid name' },
-    } },
-} })
+local test = core.register({
+    id = 'armory_search_test',
+    name = 'Search test',
+    pages = {
+        {
+            id = 'search',
+            name = 'Search',
+            controls = {
+                { id = 'search', type = 'input', label = 'Search', allow_empty = true, default = '' },
+                { id = 'other', type = 'input', label = 'Name', default = 'valid name' },
+            },
+        },
+    },
+})
 assert(test.set('other', 'new name'))
 assert(test.set('search', 'filter'))
 assert(test.set('search', ''))

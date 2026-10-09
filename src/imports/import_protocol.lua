@@ -32,6 +32,13 @@ function P.result(text)
     if lines[1] == 'cancel' then
         return { canceled = true, names = {} }
     end
+    if lines[1] == 'preset' then
+        assert(
+            #lines == 3 and lines[2] == 'preset.tsv' and #lines[3] <= 48 and lines[3]:match('^[%w _-]+$'),
+            'Invalid shared preset result'
+        )
+        return { preset = lines[2], label = lines[3], names = {} }
+    end
     assert(lines[1] == 'ok', lines[2] or 'Archive extraction failed')
     assert(#lines >= 2 and #lines <= P.MAX_TABLES + 1, 'Invalid extracted palette count')
     local names, seen = {}, {}

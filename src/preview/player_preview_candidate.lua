@@ -1,6 +1,7 @@
 -- Preview lifecycle adapter shared by integrated builds and the standalone test sidecar.
 local enable, update, disable, cleanup = editor.on_enable, editor.on_update, editor.on_disable, editor.on_cleanup_poll
 local controller, adapter, memory, game, log
+local activated, base_enabled = false, false
 local wrapper, previous
 local pressed = false
 local elapsed = 0
@@ -12,6 +13,7 @@ local capture_requested = false
 local debug_requested = false
 local single_frame = false
 local recovering = false
+local render_fault
 local retry_at = 0
 local recovery_attempts = 0
 local controls = m.player_preview_controls.new()
@@ -29,6 +31,19 @@ local function signature(identity)
     return table.concat(parts, ':')
 end
 local public = {}
+function public.is_enabled()
+    if not activated then
+        return false
+    end
+    local front = package.loaded['dbf.epic_lut.frontend.v1']
+    local owner = front and front.api and front.api.mods and front.api.mods.epic_direct_lut
+    if not owner or not owner.controls or not owner.controls.disable_player_preview or not owner.handle then
+        return true
+    end
+    local ok, disabled = pcall(owner.handle.get, 'disable_player_preview')
+    return not ok or disabled ~= true
+end
+local preview_disabled = false
 local dock_request
 local dock_age = 1
 local docked = false
@@ -43,6 +58,10 @@ local function release_input()
 end
 local state_path = (os.getenv('LOCALAPPDATA') or '') .. '/Epic LUT/cache/player-preview-state.txt'
 local function write_state(detail)
+    local owner = package.loaded['epic.player_preview.v1']
+    if owner and owner ~= public then
+        return
+    end
     local file = io.open(state_path, 'wb')
     if file then
         file:write((controller and controller.state or 'disabled') .. '\n' .. (detail or ''):sub(1, 512))
@@ -61,11 +80,36 @@ local function close()
     release_input()
     unhook()
     due = false
+    capture_requested, debug_requested = false, false
     local done = not controller or controller.close()
-    write_state(not done and controller and controller.error or '')
+    write_state(render_fault or (not done and controller and controller.error) or '')
     return done
 end
+local function reset_transients()
+    -- Only after close() acknowledges retirement. Adapter cleanup may still
+    -- reference the old controls until its render fence completes.
+    activated = false
+    pressed, due, first = false, false, true
+    elapsed, request_elapsed, source_elapsed, recovery_elapsed = 0, 0, 0, 0
+    capture_requested, debug_requested, single_frame = false, false, false
+    recovering, render_fault, retry_at, recovery_attempts = false, nil, 0, 0
+    source_signature = nil
+    preview_disabled = false
+    dock_request, dock_age, docked = nil, 1, false
+    floating_geometry, dock_hidden, floating_on_editor = nil, false, false
+    input_bridge = nil
+    controls = m.player_preview_controls.new()
+end
+local function discard_request()
+    os.remove(request_path)
+    local stale = io.open(request_path, 'rb')
+    if stale then
+        stale:close()
+        error('Stale Player Preview request could not be cleared', 0)
+    end
+end
 local function open()
+    assert(public.is_enabled(), 'Player Preview is turned off in Configuration')
     local front = package.loaded['dbf.epic_lut.frontend.v1']
     assert(
         front and front.preview_cleanup_guard == true,
@@ -84,9 +128,15 @@ local function open()
     source_elapsed = 0
     previous = rawget(_G, 'render')
     local forward = previous
+    local render_owner = controller
     first = true
     wrapper = function(...)
         forward(...)
+        -- A foreign wrapper may retain this function after we detach. It must
+        -- not submit a later activation's controller or consume its captures.
+        if not activated or controller ~= render_owner then
+            return
+        end
         local front = package.loaded['dbf.epic_lut.frontend.v1']
         if front and not front.menu.visible then
             due = false
@@ -106,6 +156,12 @@ local function open()
             then
                 recovering = recovery_attempts < 3
                 retry_at = recovery_elapsed + 1
+            elseif not done then
+                -- Missing APIs or invalid shader preparation are permanent for
+                -- this activation. Automatic docking must not recreate a failed
+                -- panel every frame; manual open is the retry boundary.
+                render_fault = tostring(problem)
+                recovering, dock_hidden = false, true
             end
             if first or not done then
                 log(
@@ -141,6 +197,12 @@ local function inspect()
     return adapter.capture(identity)
 end
 editor.on_enable = function(ctx)
+    local owner = package.loaded['epic.player_preview.v1']
+    assert(not owner or owner == public, 'Player Preview is already owned by another addon instance')
+    discard_request()
+    assert(close(), 'Player Preview cleanup is pending; wait before re-enabling')
+    reset_transients()
+    base_enabled = true
     enable(ctx)
     log = ctx.log
     memory = m.bingus_memory.new(m.bingus_runtime)
@@ -158,16 +220,26 @@ editor.on_enable = function(ctx)
         controls = controls,
     })
     controller = m.player_preview.new(adapter)
+    activated = true
     public.before_editor_close = function()
         recovering = false
         dock_hidden = false
         return close()
     end
     public.toggle = function()
+        if not public.is_enabled() then
+            local why = 'Player Preview is turned off in Configuration'
+            log('preview: ' .. why)
+            return false, why
+        end
+        local retry_fault = render_fault ~= nil
+        render_fault = nil
         recovering = false
         recovery_attempts = 0
         if dock_request and dock_age < 0.2 then
-            floating_on_editor = not floating_on_editor
+            if not retry_fault then
+                floating_on_editor = not floating_on_editor
+            end
             dock_hidden = false
             return true
         end
@@ -183,10 +255,23 @@ editor.on_enable = function(ctx)
         end
         return ok, why
     end
+    public.is_ready = function()
+        return public.is_enabled() and controller.state == 'ready' and controller.model ~= nil
+    end
+    public.last_error = function()
+        return render_fault
+    end
     public.is_docked = function()
-        return docked and not dock_hidden and not floating_on_editor and controller.state == 'ready'
+        return public.is_enabled()
+            and docked
+            and not dock_hidden
+            and not floating_on_editor
+            and controller.state == 'ready'
     end
     public.dock = function(bounds)
+        if not public.is_enabled() then
+            return
+        end
         local front = package.loaded['dbf.epic_lut.frontend.v1']
         local window = front and front.menu.window_bounds
         if not window then
@@ -196,58 +281,74 @@ editor.on_enable = function(ctx)
         dock_request = { x = window.x + bounds.x * s, y = window.y + bounds.y * s, w = bounds.w * s, h = bounds.h * s }
         dock_age = 0
     end
-    public.material_masks = function()
-        if controller.state ~= 'ready' or not controller.model then
-            return {}
-        end
-        return adapter.material_masks(controller.model)
-    end
-    public.set_material_mask = function(pi, ai, slot, mode)
-        if controller.state ~= 'ready' or not controller.model then
-            return
-        end
-        adapter.set_material_mask(controller.model, pi, ai, slot, mode)
-        due = true
-    end
-    public.reset_material_masks = function()
-        if controller.state ~= 'ready' or not controller.model then
-            return
-        end
-        adapter.reset_material_masks(controller.model)
-        due = true
-    end
-    public.meshes = function()
-        if controller.state ~= 'ready' or not controller.model then
-            return {}
-        end
-        return adapter.meshes(controller.model)
-    end
-    public.set_mesh = function(pi, mi, visible)
-        if controller.state ~= 'ready' or not controller.model then
-            return
-        end
-        adapter.set_mesh(controller.model, pi, mi, visible)
-        due = true
-    end
-    public.reset_meshes = function()
-        if controller.state ~= 'ready' or not controller.model then
-            return
-        end
-        adapter.reset_meshes(controller.model)
-        due = true
-    end
     package.loaded['epic.player_preview.v1'] = public
     write_state(PREVIEW_INSPECT_ONLY and 'inspection only' or 'ready to open')
-    ctx.on_cleanup(close)
+    local cleanup_owner = controller
+    ctx.on_cleanup(function()
+        if controller ~= cleanup_owner then
+            return cleanup_owner.close()
+        end
+        return close()
+    end)
     log(
         PREVIEW_INSPECT_ONLY and 'preview: read-only model inspector ready'
             or 'preview: independent player portrait candidate ready'
     )
 end
+local function read_request(dt)
+    request_elapsed = request_elapsed + (dt or 0)
+    if request_elapsed < 0.25 then
+        return
+    end
+    request_elapsed = 0
+    local file = io.open(request_path, 'rb')
+    if file then
+        local request = file:read(16)
+        file:close()
+        os.remove(request_path)
+        return request
+    end
+end
 editor.on_update = function(ctx, dt)
     update(ctx, dt)
+    if not activated then
+        return
+    end
     dock_age = dock_age + (dt or 0)
     local front = package.loaded['dbf.epic_lut.frontend.v1']
+    if not public.is_enabled() then
+        if not preview_disabled then
+            log('preview: Player Preview turned off in Configuration')
+        end
+        preview_disabled = true
+        recovering = false
+        recovery_attempts = 0
+        capture_requested, debug_requested = false, false
+        floating_on_editor, dock_hidden = false, false
+        dock_request = nil
+        controls.can_dock = false
+        controls.cancel()
+        if docked then
+            docked = false
+            controls.docked = false
+            controls.x, controls.y, controls.w, controls.h = unpack(floating_geometry)
+            floating_geometry = nil
+        end
+        -- Retain the controller and its cleanup receipts until the normal
+        -- render fence acknowledges retirement. Never force-release a lease.
+        if controller.state ~= 'closed' then
+            close()
+        end
+        -- Discard diagnostic requests while disabled so they cannot open a
+        -- stale portrait when the saved preference is enabled again.
+        read_request(dt)
+        pressed = false
+        return
+    end
+    if preview_disabled then
+        render_fault = nil
+    end
+    preview_disabled = false
     if front and not front.menu.visible then
         recovering = false
     end
@@ -270,7 +371,7 @@ editor.on_update = function(ctx, dt)
         local b = dock_request
         local changed = controls.x ~= b.x or controls.y ~= b.y or controls.w ~= b.w or controls.h ~= b.h
         controls.x, controls.y, controls.w, controls.h = b.x, b.y, b.w, b.h
-        if controller.state == 'closed' and not dock_hidden and not recovering then
+        if controller.state == 'closed' and not dock_hidden and not recovering and not render_fault then
             local ok, why = pcall(open)
             if not ok then
                 close()
@@ -315,17 +416,7 @@ editor.on_update = function(ctx, dt)
             and front.input.focused()
             and front.input.down(preview_key)
         or false
-    local request
-    request_elapsed = request_elapsed + (dt or 0)
-    if request_elapsed >= 0.25 then
-        request_elapsed = 0
-        local file = io.open(request_path, 'rb')
-        if file then
-            request = file:read(16)
-            file:close()
-            os.remove(request_path)
-        end
-    end
+    local request = read_request(dt)
     if request == 'close' then
         close()
     end
@@ -371,6 +462,7 @@ editor.on_update = function(ctx, dt)
         public.toggle()
     end
     if not PREVIEW_INSPECT_ONLY and (request == 'open' and controller.state == 'closed') then
+        render_fault = nil
         if controller.state ~= 'closed' then
             close()
             log('preview: portrait closed')
@@ -414,10 +506,11 @@ editor.on_update = function(ctx, dt)
             controls.cancel()
         end
         if not input_bridge then
+            local input_owner = controller
             input_bridge = m.player_preview_input.new({
                 controls = controls,
                 ready = function()
-                    return controller.state == 'ready'
+                    return activated and controller == input_owner and controller.state == 'ready'
                 end,
                 resolution = function()
                     return stingray.Gui.resolution()
@@ -448,6 +541,9 @@ editor.on_update = function(ctx, dt)
                     due = true
                 end,
                 failed = function(kind, why)
+                    if not activated or controller ~= input_owner then
+                        return
+                    end
                     close()
                     log('preview: ' .. kind .. ' stopped ' .. tostring(why))
                 end,
@@ -496,12 +592,31 @@ editor.on_disable = function(...)
     if package.loaded['epic.player_preview.v1'] == public then
         package.loaded['epic.player_preview.v1'] = nil
     end
-    return disable(...)
+    reset_transients()
+    if not base_enabled then
+        return true
+    end
+    local done = disable(...)
+    if done ~= false then
+        base_enabled = false
+    end
+    return done
 end
 editor.on_cleanup_poll = function(...)
     if not close() then
         return false
     end
-    return cleanup(...)
+    if package.loaded['epic.player_preview.v1'] == public then
+        package.loaded['epic.player_preview.v1'] = nil
+    end
+    reset_transients()
+    if not base_enabled then
+        return true
+    end
+    local done = cleanup(...)
+    if done ~= false then
+        base_enabled = false
+    end
+    return done
 end
 return editor

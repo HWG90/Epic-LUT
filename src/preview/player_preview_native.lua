@@ -1,11 +1,14 @@
 -- Native adapter for an owned, frozen visual copy. Optional candidate only.
 local Native = {}
+-- The game's Armory model uses ui_3d's forward layers. The default viewport
+-- includes the gameplay temporal pipeline and writes shared output_target.
+Native.VIEWPORT = 'ui_3d'
 function Native.new(E, m, host)
     local ffi = require('ffi')
     local A, W, U, G, R, V = E.Application, E.World, E.Unit, E.Gui, E.Renderer, E.Viewport
     local memory, native = host.memory, host.native
     local source_materials = {}
-    local probe_texture
+    local transparent_mask
     local function address(value)
         return tonumber(ffi.cast('uintptr_t', value))
     end
@@ -72,7 +75,6 @@ function Native.new(E, m, host)
                 mesh_index = dest.mesh_index,
                 material_index = dest.material_index,
                 objects = {},
-                probes = {},
             }
             piece.materials[#piece.materials + 1] = kept
             for _, resource in ipairs(bindings(source.material)) do
@@ -117,7 +119,7 @@ function Native.new(E, m, host)
                         local handle = E.Mesh.material(mesh, 'm_gibs')
                         if handle and address(handle) == material.material then
                             assert(not source_materials[material.material], 'Shared transparent material refused')
-                            m.engine.bind(native, material.material, 0x3aa8b87e, probe_texture('black'))
+                            m.engine.bind(native, material.material, 0x3aa8b87e, transparent_mask())
                             native.commit(material.mesh)
                             hidden = hidden + 1
                         end
@@ -180,7 +182,6 @@ function Native.new(E, m, host)
             for _, resource in ipairs(bindings(material.source)) do
                 if
                     (resource.slot == m.engine.LUT_SLOT or resource.slot == m.engine.PATTERN_SLOT)
-                    and not material.probes[resource.slot]
                     and material.objects[resource.slot] ~= resource.object
                 then
                     m.engine.bind(native, material.material, resource.slot, resource.object)
@@ -206,6 +207,7 @@ function Native.new(E, m, host)
     })
     local adapter = {}
     local environment
+    local ui_constants
     local owned_world
     local panel
     local portrait
@@ -422,6 +424,7 @@ function Native.new(E, m, host)
         host.log('preview: copy ' .. #gear.plan.pieces .. ' equipped pieces')
         local result = model.create(world, gear.plan)
         if host.use_ui_world then
+            result.preview_offset = { 100, 0, 0 }
             for _, piece in ipairs(result.pieces) do
                 U.set_local_position(piece.unit, 1, U.local_position(piece.unit, 1) + E.Vector3(100, 0, 0))
                 W.update_unit(world, piece.unit)
@@ -439,151 +442,22 @@ function Native.new(E, m, host)
         end
         return result
     end
-    -- Keep diagnostic textures alive across reloads: queued renderer reads may
-    -- outlive this adapter. Only two immutable one-pixel textures are allocated.
+    -- Retain the transparent gib mask across reloads while queued reads may
+    -- outlive the adapter. Reuse earlier retained buffers; never free them here.
     local probe_key = 'epic.preview.mask.probes.v1'
     local probes = package.loaded[probe_key] or {}
     package.loaded[probe_key] = probes
-    probe_texture = function(mode)
-        if probes[mode] then
-            return probes[mode].object
+    transparent_mask = function()
+        if probes.black then
+            return probes.black.object
         end
-        local v = mode == 'white' and 1 or 0
-        local data = ffi.new('float[4]', { v, v, v, v })
+        local data = ffi.new('float[4]')
         local texture, why = m.engine.create_texture(native, 1, 1, data, function(at, n, buffer)
             return memory.read_into(ffi.cast('const uint8_t *', at), n, buffer)
         end, ffi.new('uint8_t[16]'))
         assert(texture, why)
-        probes[mode] = texture
+        probes.black = texture
         return texture.object
-    end
-    function adapter.material_masks(value)
-        local rows = {}
-        for pi, piece in ipairs(value.pieces) do
-            if piece.slot == 5 or piece.slot == 6 or piece.slot == 7 then
-                local resource = tostring(U.resource_name(piece.unit))
-                resource = resource:match('#ID%[(%x+)%]') or resource
-                for ai, material in ipairs(piece.materials or {}) do
-                    for _, binding in ipairs(bindings(material.source)) do
-                        rows[#rows + 1] = {
-                            piece = pi,
-                            material = ai,
-                            slot = binding.slot,
-                            mode = material.probes[binding.slot] or 'original',
-                            label = string.format(
-                                'slot %s / mesh %d / material %d / texture %08x',
-                                tostring(piece.slot),
-                                material.mesh_index + 1,
-                                material.material_index + 1,
-                                binding.slot
-                            ),
-                            resource = resource,
-                        }
-                    end
-                end
-            end
-        end
-        return rows
-    end
-    function adapter.set_material_mask(value, pi, ai, slot, mode)
-        assert(mode == 'original' or mode == 'black' or mode == 'white', 'Invalid mask probe')
-        local piece = assert(value.pieces[pi], 'Preview piece unavailable')
-        assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
-        local material = assert(piece.materials[ai], 'Preview material unavailable')
-        assert(
-            material.material ~= material.source and not source_materials[material.material],
-            'Shared material refused'
-        )
-        local object
-        for _, binding in ipairs(bindings(material.source)) do
-            if binding.slot == slot then
-                object = binding.object
-                break
-            end
-        end
-        assert(object, 'Texture slot unavailable')
-        if mode ~= 'original' then
-            object = probe_texture(mode)
-        end
-        m.engine.bind(native, material.material, slot, object)
-        native.commit(material.mesh)
-        material.objects[slot] = object
-        material.probes[slot] = mode ~= 'original' and mode or nil
-        host.log(
-            string.format(
-                'preview: mask probe slot=%s resource=%s mesh=%d material=%d texture=%08x mode=%s',
-                tostring(piece.slot),
-                tostring(U.resource_name(piece.unit)),
-                material.mesh_index + 1,
-                material.material_index + 1,
-                slot,
-                mode
-            )
-        )
-    end
-    function adapter.reset_material_masks(value)
-        for _, row in ipairs(adapter.material_masks(value)) do
-            if row.mode ~= 'original' then
-                adapter.set_material_mask(value, row.piece, row.material, row.slot, 'original')
-            end
-        end
-    end
-    function adapter.meshes(value)
-        local rows = {}
-        for pi, piece in ipairs(value.pieces) do
-            assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
-            if not piece.mesh_choices then
-                piece.mesh_choices, piece.mesh_defaults = {}, {}
-                for mi = 1, U.num_meshes(piece.unit) do
-                    local visible = E.Mesh.visibility(U.mesh(piece.unit, mi))
-                    visible = visible == true or visible == 1
-                    piece.mesh_choices[mi], piece.mesh_defaults[mi] = visible, visible
-                end
-            end
-            local resource = tostring(U.resource_name(piece.unit))
-            resource = resource:match('#ID%[(%x+)%]') or resource
-            for mi, visible in ipairs(piece.mesh_choices) do
-                rows[#rows + 1] = {
-                    piece = pi,
-                    mesh = mi,
-                    visible = visible,
-                    label = string.format(
-                        '%s slot %s / %s / mesh %d',
-                        piece.kind or 'gear',
-                        tostring(piece.slot),
-                        resource,
-                        mi
-                    ),
-                }
-            end
-        end
-        return rows
-    end
-    function adapter.set_mesh(value, pi, mi, visible)
-        local piece = assert(value.pieces[pi], 'Preview piece unavailable')
-        assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
-        assert(piece.mesh_choices and piece.mesh_choices[mi] ~= nil, 'Preview mesh unavailable')
-        U.set_mesh_visibility(piece.unit, mi, visible == true)
-        piece.mesh_choices[mi] = visible == true
-        W.update_unit(value.world, piece.unit)
-        host.log(
-            string.format(
-                'preview: mesh toggle piece=%d slot=%s mesh=%d visible=%s resource=%s',
-                pi,
-                tostring(piece.slot),
-                mi,
-                tostring(visible),
-                tostring(U.resource_name(piece.unit))
-            )
-        )
-    end
-    function adapter.reset_meshes(value)
-        adapter.meshes(value)
-        for pi, piece in ipairs(value.pieces) do
-            for mi, visible in ipairs(piece.mesh_defaults) do
-                adapter.set_mesh(value, pi, mi, visible)
-            end
-        end
     end
     function adapter.destroy_model(value)
         host.log('preview: release copied pieces')
@@ -654,13 +528,27 @@ function Native.new(E, m, host)
             W.destroy_unit(world, unit)
             error(camera, 0)
         end
-        return { unit = unit, camera = camera, world = world, center = center, distance = distance, model = copied }
+        return {
+            unit = unit,
+            camera = camera,
+            world = world,
+            center = center,
+            distance = distance,
+            model = copied,
+            preview_revision = 0,
+            preview_position = { center[1], center[2] + distance, center[3] },
+            preview_fov = 45,
+            preview_near = 0.05,
+            preview_far = math.max(20, distance * 3),
+        }
     end
     function adapter.destroy_camera(camera)
         host.log('preview: release camera')
         if not context_lost and world_live(camera.world) and U.alive(camera.unit) then
             W.destroy_unit(camera.world, camera.unit)
         end
+        -- close() drains queued render work before releasing any camera state.
+        ui_constants = nil
     end
     function adapter.create_target()
         assert(#retired_targets < 2, 'Preview context retired; restart before opening more previews')
@@ -670,10 +558,9 @@ function Native.new(E, m, host)
             target_width > 0 and target_height > 0 and target_width * target_height * 4 <= 256 * 1024 * 1024,
             'Preview render dimensions are invalid'
         )
-        -- HD2's temporal-jitter period truncates 8*(output/reference)^2.
-        -- A 384-wide target against a 3840-wide render becomes zero and causes
-        -- integer division by zero on the renderer. Keep rendering full size;
-        -- the GUI crops and scales the image to the floating portrait.
+        -- Retain the verified back-buffer dimensions while changing render
+        -- paths. ui_3d has no gameplay TAA; smaller targets can be evaluated
+        -- separately after this path has visible in-game confirmation.
         portrait = assert(R.create_resource('render_target', 'R8G8B8A8', target_width, target_height))
         submitted = true
         return portrait
@@ -690,10 +577,11 @@ function Native.new(E, m, host)
     end
     function adapter.create_viewport(world, target)
         host.log('preview: create portrait viewport')
-        local viewport = assert(A.create_viewport(world, 'default'))
+        local viewport = assert(A.create_viewport(world, Native.VIEWPORT))
         local ok, why = pcall(function()
             V.set_output_render_target(viewport, target)
             V.set_rect(viewport, 0, 0, 1, 1)
+            host.log('preview: Game Default ui_3d viewport; private portrait output')
             -- Publish scene graphs and skinning data before the first render.
             if not host.use_ui_world then
                 W.update(world, 0)
@@ -743,6 +631,12 @@ function Native.new(E, m, host)
             )
         end
         rect(panel.x - 2, panel.y - 30, panel.w + 4, panel.h + 60, E.Color(255, 60, 80, 100))
+        local stroke = E.Color(255, 119, 185, 205)
+        local bx, by, bw, bh = panel.x - 2, panel.y - 30, panel.w + 4, panel.h + 60
+        rect(bx, by, 2, bh, stroke)
+        rect(bx + bw - 2, by, 2, bh, stroke)
+        rect(bx, by, bw, 2, stroke)
+        rect(bx, by + bh - 2, bw, 2, stroke)
         local span = math.min(1, (panel.w / panel.h) / (target_width / target_height))
         keep(
             'bitmap',
@@ -770,7 +664,10 @@ function Native.new(E, m, host)
     end
     function adapter.zoom(camera, fov)
         assert(lease_live(camera.world) and U.alive(camera.unit), 'Preview context disappeared')
-        E.Camera.set_vertical_fov(camera.camera, math.rad(math.max(12, math.min(65, fov))))
+        local value = math.max(12, math.min(65, fov))
+        E.Camera.set_vertical_fov(camera.camera, math.rad(value))
+        camera.preview_fov = value
+        camera.preview_revision = (camera.preview_revision or 0) + 1
     end
     function adapter.rotate(camera, yaw, controls)
         assert(lease_live(camera.world) and U.alive(camera.unit), 'Preview context disappeared')
@@ -806,7 +703,7 @@ function Native.new(E, m, host)
             local visible = camera.distance * math.tan(math.rad(controls.fov / 2)) * 2
             local horizontal = math.max(-0.25, math.min(0.25, controls.pan_x)) * visible * 0.6
             shiftx = horizontal
-            shiftz = -math.max(-0.25, math.min(0.25, controls.pan_y)) * visible
+            shiftz = -math.max(-1, math.min(1, controls.pan_y)) * visible
         end
         -- Update the camera component explicitly. The leased world does not
         -- run our simulation, so changing only its parent unit is insufficient.
@@ -816,6 +713,8 @@ function Native.new(E, m, host)
         local position = E.Vector3(c[1] + dx + shiftx, c[2] + dy + shifty, c[3] + shiftz)
         E.Camera.set_local_pose(camera.camera, camera.unit, E.Matrix4x4.from_quaternion_position(rotation, position))
         W.update_unit(camera.world, camera.unit)
+        camera.preview_position = { c[1] + dx + shiftx, c[2] + dy + shifty, c[3] + shiftz }
+        camera.preview_revision = (camera.preview_revision or 0) + 1
     end
     function adapter.create_panel(target)
         host.log('preview: create floating panel')
@@ -864,6 +763,36 @@ function Native.new(E, m, host)
         assert(environment, 'Preview environment is not prepared')
         local width, height = A.back_buffer_size()
         assert(width == target_width and height == target_height, 'Display resolution changed; reopen the preview')
+        if host.game then
+            if not ui_constants then
+                assert(m.player_preview_ui, 'Game Default UI material adapter unavailable')
+                ui_constants = m.player_preview_ui.new(E, memory, host.game, {
+                    origin_shift = camera.model and camera.model.preview_offset,
+                })
+            end
+            if ui_constants.needs_update(camera) then
+                local materials = {}
+                for _, piece in ipairs(assert(camera.model, 'UI preview model unavailable').pieces) do
+                    assert(piece.unit ~= piece.source and U.alive(piece.unit), 'UI preview copy unavailable')
+                    for _, material in ipairs(piece.materials) do
+                        assert(
+                            material.material ~= material.source and not source_materials[material.material],
+                            'Shared UI preview material refused'
+                        )
+                        materials[#materials + 1] = { material = material.material, mesh = material.mesh, owned = true }
+                    end
+                end
+                if ui_constants.apply(camera, materials, width, height) then
+                    local committed = {}
+                    for _, material in ipairs(materials) do
+                        if not committed[material.mesh] then
+                            native.commit(material.mesh)
+                            committed[material.mesh] = true
+                        end
+                    end
+                end
+            end
+        end
         submitted = true
         E.ShadingEnvironment.apply(environment)
         R.run_resource_generator('resource_clear', { output_rt = portrait })
@@ -875,12 +804,9 @@ function Native.new(E, m, host)
             end
             A.render_world(world, camera.camera, viewport.viewport, environment)
         end
-        -- The default layer explicitly writes the named output_target rather
-        -- than output_rt. Copy that completed output into the GUI-owned target.
-        R.run_resource_generator('gbuffer_normal_copy', {
-            gbuffer1 = R.resource('output_target'),
-            gbuffer1_copy = portrait,
-        })
+        -- ui_3d renders to the viewport's output_rt directly. Reading the shared
+        -- gameplay output_target here can capture another queued view instead
+        -- of the portrait, and reintroduces the full-pipeline flicker path.
     end
     return adapter
 end

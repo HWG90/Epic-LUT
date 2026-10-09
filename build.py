@@ -14,6 +14,8 @@ require_physical_runtime()
 ROOT = Path(__file__).resolve().parent
 VERSION = (ROOT/'VERSION').read_text(encoding='utf-8').strip()
 DISPLAY_VERSION = VERSION.replace('-alpha',' Alpha').replace('-rc',' RC')
+DESCRIPTION = DISPLAY_VERSION + ' - alpha prerelease. Basic and Advanced armor/helmet LUT editing, Pattern LUT editor, live Player Preview, DDS/ZIP/RAR import, named Armory presets, DDS and patch export, and optional squad appearance sharing. F9: Basic; F10: Advanced. Optional MCM settings integration. RAR requires 7-Zip.'
+CREDITS = 'CowboyBingus: native adapters and LUT discovery; Scarpheon: vital testing and assistance with Export to Patch; Plain Furniture: Debug LUT'
 parser = argparse.ArgumentParser()
 parser.add_argument('--loader', choices=('bsl','loose'), default='bsl')
 parser.add_argument('--output')
@@ -45,7 +47,9 @@ def module(name, relative):
 
 parts = [f'-- Epic LUT {DISPLAY_VERSION}: native adapters by CowboyBingus.\nlocal m={{direct_menu_keys=true,direct_lut=true}}\n']
 parts.append('m.version='+repr(VERSION)+'\n')
+parts.append('m.description='+repr(DESCRIPTION)+'\n')
 parts.append('m.build_label='+repr(Path(args.output).stem.removesuffix('-LLL').removesuffix('-BSL'))+'\n')
+parts.append('m.debug_lut_dds_hex='+repr((ROOT/'assets/debug-lut.dds').read_bytes().hex())+'\n')
 parts.append('m.original_snapshot_script=' + repr((ROOT/'tools/original_snapshots.ps1').read_bytes().hex()) + '\n')
 parts.append('m.original_snapshot_reader=' + repr((ROOT/'tools/original_snapshots.cs').read_bytes().hex()) + '\n')
 parts.append('m.zip_import_script=' + repr((ROOT/'tools/import_zip.ps1').read_bytes().hex()) + '\n')
@@ -66,11 +70,11 @@ else:
 model = ''.join(parts)
 
 (OUT/'mod.lua').write_text(model, encoding='utf-8')
-(OUT/'manifest.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','credits':'CowboyBingus native adapters'}, indent=2), encoding='utf-8')
+(OUT/'manifest.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','description':DESCRIPTION,'credits':CREDITS}, indent=2), encoding='utf-8')
 (OUT/NATIVE_NAME).write_bytes(native)
 (OUT/'library.txt').write_text(NATIVE_NAME, encoding='utf-8')
 (OUT/'LICENSE-CowboyBingus.txt').write_bytes((ROOT/'vendor/LICENSE').read_bytes())
-for folder, description in {'files':'Choose DDS/ZIP files from anywhere using the in-game picker. Edited DDS exports live in %LOCALAPPDATA%/Epic LUT/files.','presets':'Saved row presets live in %LOCALAPPDATA%/Epic LUT/presets as row-name.dds.'}.items():
+for folder, description in {'files':'Choose DDS/ZIP files from anywhere using the in-game picker. Edited DDS exports live in %LOCALAPPDATA%/Epic LUT/files/exports.','presets':'Saved row presets live in %LOCALAPPDATA%/Epic LUT/presets as row-name.dds.'}.items():
     (OUT/folder).mkdir(exist_ok=True)
     (OUT/folder/'README.txt').write_text(description,encoding='utf-8')
 for old_runtime in ('runtime.zip', 'runtime-manifest.json'):
@@ -83,7 +87,7 @@ envelope = struct.pack('<II',len(startup.encode()),2) + startup.encode()
 archive = write({hash_name(entry):envelope})
 assert read(archive)[hash_name(entry)][1] == envelope
 manager = {'Version':1,'Guid':'2ef4f437-4a43-47ed-b1d0-15505f11c761','Author':'Goose','Name':'Epic LUT '+DISPLAY_VERSION,
-    'Description':DISPLAY_VERSION+' - alpha release candidate. F10 opens the standalone armor/helmet LUT editor. DDS/ZIP/RAR import, live color editing, presets, floating Quick Scratch and original-game snapshots. Requires Bingus Shared Loader v15+; RAR requires 7-Zip. No Python or MCM setup. Live validation remains pending.',
+    'Description':DESCRIPTION + ' Requires Bingus Shared Loader v15+.',
     'Options':[{'Name':'Bingus Shared Loader startup','Include':['data']}]}
 with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as package:
     if args.loader=='bsl':
@@ -95,7 +99,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL-LLL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/PREVIEW-RENDER-PATH.md','docs/SDK-INTEGRATION.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
         package.write(ROOT/name,name)
 (ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'player_preview':args.player_preview,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)

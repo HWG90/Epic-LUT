@@ -156,6 +156,7 @@ originals[tall_base.resource] = tall_base
 local tall_packet = small.encode(identity, { { key = '0:1:0:0', document = tall_edit, original = tall_base } })
 local tall_decoded = small.decode(tall_packet).entries['0:1:0:0'].document
 assert(
-    tall_decoded.height == 32 and ffi.string(tall_decoded.data, 23 * 32 * 16) == ffi.string(tall_edit.data, 23 * 32 * 16),
+    tall_decoded.height == 32
+        and ffi.string(tall_decoded.data, 23 * 32 * 16) == ffi.string(tall_edit.data, 23 * 32 * 16),
     'Sharing truncated custom rows'
 )

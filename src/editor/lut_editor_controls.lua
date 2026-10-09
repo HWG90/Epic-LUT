@@ -94,7 +94,7 @@ function C.new(deps)
                     {
                         id = 'grid_tool',
                         type = 'choice',
-                        presentation = 'combined',
+                        presentation = 'dropdown',
                         label = 'Grid tool',
                         choices = { 'Select', 'Draw', 'Move selection' },
                         default = 1,
@@ -102,12 +102,13 @@ function C.new(deps)
                     {
                         id = 'grid_channel',
                         type = 'choice',
-                        presentation = 'combined',
+                        presentation = 'dropdown',
                         label = 'Channels',
                         choices = { 'RGB', 'RGBA', 'Red', 'Green', 'Blue', 'Alpha' },
                         default = 1,
                     },
                     { id = 'group_rows', type = 'toggle', label = 'Group by rows', default = true },
+                    { id = 'value_editor_visible', type = 'toggle', label = 'Value Editor', default = true },
                     {
                         id = 'copy_selection',
                         type = 'button',
@@ -354,7 +355,15 @@ function C.new(deps)
                         id = 'export_format',
                         type = 'choice',
                         label = 'Export format',
-                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch' },
+                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)' },
+                        default = 1,
+                    },
+                    {
+                        id = 'dds_naming',
+                        type = 'choice',
+                        presentation = 'dropdown',
+                        label = 'DDS filenames',
+                        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
                         default = 1,
                     },
                     {
@@ -365,6 +374,12 @@ function C.new(deps)
                             local format = self.handle.get('export_format')
                             if format == 1 then
                                 return save(self.handle.get('save_name'))
+                            end
+                            if format == 4 then
+                                return assert(deps.save_bulk, 'Bulk DDS exporter unavailable')(
+                                    self.handle.get('save_name'),
+                                    self.handle.get('dds_naming')
+                                )
                             end
                             return assert(deps.save_patch, 'Patch exporter unavailable')(
                                 self.handle.get('save_name'),

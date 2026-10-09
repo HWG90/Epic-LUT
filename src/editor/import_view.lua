@@ -2,7 +2,15 @@
 local V = {}
 function V.new(info, tables, select_color, core, help)
     help = help or {}
-    local self = { scroll = 0, advanced = false, show_all = false, scratch = { 255, 255, 255 }, hue = 0, swatches = {} }
+    local self = {
+        scroll = 0,
+        gear_scroll = {},
+        gear_bounds = {},
+        gear_max = {},
+        scratch = { 255, 255, 255 },
+        hue = 0,
+        swatches = {},
+    }
     function self.wheel(x, y, delta)
         local imported = self.import_bounds
         if
@@ -16,67 +24,100 @@ function V.new(info, tables, select_color, core, help)
                 math.max(0, math.min(self.import_max or 0, (self.import_scroll or 0) - delta / 120 * 22))
             return true
         end
-        local b = self.bounds
-        if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
-            self.scroll = math.max(0, math.min(self.maximum or 0, self.scroll - delta / 120 * 60))
-            return true
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            local b = self.gear_bounds[kind]
+            if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+                self.gear_scroll[kind] =
+                    math.max(0, math.min(self.gear_max[kind] or 0, (self.gear_scroll[kind] or 0) - delta / 120 * 60))
+                return true
+            end
         end
     end
     function self.draw(ui)
-        ui.rect(ui.x + ui.w - 150, ui.y - 24, 150, 28, { 35, 62, 90 })
-        ui.bounded(ui.x + ui.w - 142, ui.y - 16, 'Stop Highlight', 14, { 225, 230, 235 }, 134)
-        ui.hit(ui.x + ui.w - 150, ui.y - 24, 150, 28, function()
+        local theme = ui.theme
+        ui.button(ui.x + ui.w - 150, ui.y - 24, 150, 28, 'Stop Highlight', function()
             ui.activate('stop_identify')
         end)
         local portrait = package.loaded['epic.player_preview.v1']
-        if portrait and portrait.toggle then
-            ui.rect(ui.x + ui.w - 308, ui.y - 24, 150, 28, { 35, 62, 90 })
-            ui.bounded(ui.x + ui.w - 300, ui.y - 16, 'Player Preview', 14, { 225, 230, 235 }, 134)
-            ui.hit(ui.x + ui.w - 308, ui.y - 24, 150, 28, portrait.toggle)
+        if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
+            ui.button(ui.x + ui.w - 308, ui.y - 24, 150, 28, 'Player Preview', portrait.toggle)
         end
         local state = info()
+        local ready = state.palette_ready ~= false
+        if not ready then
+            self.selected = nil
+        end
         local top = ui.y + ui.h
         local gap = 18
         local lw = math.floor(ui.w * 0.55)
         local rx = ui.x + lw + gap
         local rw = ui.w - lw - gap
-        local white, muted, blue = { 225, 230, 235 }, { 155, 166, 175 }, { 35, 62, 90 }
+        local white, muted = theme.white, theme.muted
         local function text(x, y, value)
             ui.text(x, y, value, 14, white)
         end
         local guidance = help.imported or {}
-        local function button(x, y, w, label, id, enabled)
+        local function button(x, y, w, label, id, enabled, height)
+            height = height or 28
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
             if w < 20 then
                 return
             end
-            ui.rect(x, y, w, 28, enabled == false and { 35, 39, 43 } or blue)
-            ui.bounded(x + 9, y + 8, label, 15, enabled == false and muted or white, w - 18)
-            ui.hit(x, y, w, 28, function()
-                if enabled ~= false then
-                    ui.activate(id)
-                end
-            end, nil, nil, guidance[id])
+            local load = id == 'populate_worn' and enabled ~= false
+            local featured = load or id == 'save_setup'
+            ui.button(x, y, w, height, label, function()
+                ui.activate(id)
+            end, {
+                enabled = enabled,
+                accent = featured and (load and ui.load_color(state.load_seen) or { 244, 202, 53 }),
+                ink = featured and { 25, 28, 31 },
+                size = 15,
+                padding = 9,
+                help = guidance[id],
+            })
         end
-        ui.rect(ui.x, ui.y, lw, ui.h, { 20, 24, 28 })
-        ui.rect(rx, ui.y, rw, ui.h, { 20, 24, 28 })
-        local divider = { 65, 76, 85 }
-        ui.rect(ui.x + lw / 2, ui.y + 14, 1, math.max(0, ui.h - 130), divider)
+        ui.rect(ui.x, ui.y, lw, ui.h, theme.panel)
+        ui.rect(rx, ui.y, rw, ui.h, theme.panel)
+        local divider = theme.line
         ui.rect(rx - 9, ui.y, 1, ui.h, divider)
         for _, offset in ipairs({ 184 }) do
             ui.rect(rx + 12, top - offset, rw - 24, 1, divider)
         end
-        ui.rect(ui.x, top - 30, lw, 30, blue)
-        ui.rect(rx, top - 30, rw, 30, blue)
+        ui.rect(ui.x, top - 30, lw, 30, theme.header)
+        ui.rect(rx, top - 30, rw, 30, theme.header)
         text(ui.x + 12, top - 20, 'LUTs and colors')
         text(rx + 12, top - 20, 'Import and apply')
-        button(ui.x + 12, top - 77, lw - 24, 'Load Current Armor & Helmet', 'populate_worn')
-        local offset = 75
+        -- Reserve one toolbar row when labels fit; narrow windows use two rows.
+        local function text_width(value)
+            return ui.text_width and ui.text_width(value, 15) or #value * 15 * 0.62
+        end
+        local row_height = math.max(28, (ui.text_size and ui.text_size(15) or 15) + 12)
+        local available = lw - 24
+        local scratch_width = math.min(available, math.max(140, text_width('Quick Scratch') + 18))
+        local load_width = available - scratch_width - 8
+        local header_bottom = top - 49 - row_height
+        local scratch_y = header_bottom
+        if load_width < text_width('Load Current Armor & Helmet') + 18 then
+            load_width = available
+            scratch_y = header_bottom - row_height - 8
+        end
+        button(ui.x + 12, header_bottom, load_width, 'Load Current Armor & Helmet', 'populate_worn', nil, row_height)
+        local scratch_x = ui.x + lw - 12 - scratch_width
+        ui.button(scratch_x, scratch_y, scratch_width, row_height, 'Quick Scratch', function()
+            self.scratch_open = not self.scratch_open
+        end, {
+            selected = self.scratch_open,
+            size = 15,
+            padding = 9,
+            help = 'Open a floating color palette. Right-click a LUT swatch to paint with this color.',
+        })
+        header_bottom = scratch_y
         if (state.palette_count or 0) > 1 then
-            text(ui.x + 12, top - 101, 'Imported LUT')
+            text(ui.x + 12, header_bottom - 24, 'Imported LUT')
             local selector_width = math.min(280, lw * 0.4)
-            ui.choice('palette', ui.x + 12, top - 139, selector_width)
-            offset = 155
+            local selector_y = header_bottom - 62
+            ui.choice('palette', ui.x + 12, selector_y, selector_width)
+            header_bottom = selector_y
             if state.loaded then
                 local document = state.loaded
                 local sx = ui.x + selector_width + 24
@@ -87,16 +128,12 @@ function V.new(info, tables, select_color, core, help)
                     for ch = 0, 2 do
                         rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, document.data[at + ch])) * 255 + 0.5)
                     end
-                    ui.rect(sx + (row - 1) * size, top - 139, size - 2, 26, rgb)
+                    ui.rect(sx + (row - 1) * size, selector_y, size - 2, 26, rgb)
                 end
             end
         end
-        local cliptop, clipbottom = top - offset - 20, ui.y + 14
-        local cursor = cliptop + self.scroll
-        self.bounds = { x = ui.x, y = ui.y, w = lw, h = ui.h }
-        local function visible(y, h)
-            return y >= clipbottom and y + h <= cliptop
-        end
+        local cliptop, clipbottom = header_bottom - row_height - 12, ui.y + 14
+        ui.rect(ui.x + lw / 2, clipbottom, 1, math.max(0, cliptop - clipbottom), divider)
         local function paint()
             if self.selected and ui.set then
                 ui.set('quick_color', string.format('#%02X%02X%02X', self.scratch[1], self.scratch[2], self.scratch[3]))
@@ -105,8 +142,8 @@ function V.new(info, tables, select_color, core, help)
         local function draw_scratch(x, y, width, height)
             local scratchx, scratchw, sh, sy = x, width, height, y
             local scratchtop = y + height
-            ui.rect(scratchx, sy, scratchw, sh, { 25, 30, 35 })
-            ui.rect(scratchx, scratchtop - 28, scratchw, 28, blue)
+            ui.rect(scratchx, sy, scratchw, sh, theme.panel)
+            ui.rect(scratchx, scratchtop - 28, scratchw, 28, theme.header)
             text(scratchx + 8, scratchtop - 20, 'Quick Scratch')
             ui.rect(scratchx + 10, scratchtop - 60, scratchw - 20, 22, self.scratch)
             local gx, gy = scratchx + 10, sy + 110
@@ -138,12 +175,16 @@ function V.new(info, tables, select_color, core, help)
                 end
             end
             local bw = (scratchw - 25) / 2
-            ui.rect(scratchx + 10, sy + 73, bw, 28, blue)
-            ui.bounded(scratchx + 14, sy + 81, 'Paint selected RGB', 15, white, bw - 8)
-            ui.hit(scratchx + 10, sy + 73, bw, 28, paint)
-            ui.rect(scratchx + 15 + bw, sy + 73, bw, 28, blue)
-            ui.bounded(scratchx + 19 + bw, sy + 81, 'Save swatch', 15, white, bw - 8)
-            ui.hit(scratchx + 15 + bw, sy + 73, bw, 28, function()
+            ui.button(
+                scratchx + 10,
+                sy + 73,
+                bw,
+                28,
+                'Paint selected RGB',
+                paint,
+                { enabled = self.selected ~= nil, size = 15, padding = 4 }
+            )
+            ui.button(scratchx + 15 + bw, sy + 73, bw, 28, 'Save swatch', function()
                 local slot
                 for i = 1, 10 do
                     if not self.swatches[i] then
@@ -154,14 +195,14 @@ function V.new(info, tables, select_color, core, help)
                 slot = slot or self.next_slot or 1
                 self.swatches[slot] = { self.scratch[1], self.scratch[2], self.scratch[3] }
                 self.next_slot = slot % 10 + 1
-            end)
+            end, { accent = { 244, 202, 53 }, ink = { 25, 28, 31 }, size = 15, padding = 4 })
             local slotw = (scratchw - 20) / 5
             for i = 1, 10 do
                 local x = scratchx + 10 + ((i - 1) % 5) * slotw
                 local y = sy + 12 + (1 - math.floor((i - 1) / 5)) * 26
                 local color = self.swatches[i]
-                ui.rect(x, y, slotw - 4, 22, { 100, 110, 120 })
-                ui.rect(x + 2, y + 2, slotw - 8, 18, color or { 25, 30, 35 })
+                ui.rect(x, y, slotw - 4, 22, theme.border)
+                ui.rect(x + 2, y + 2, slotw - 8, 18, color or theme.panel)
                 if not color then
                     ui.bounded(x + 5, y + 7, 'Empty ' .. i, 10, muted, slotw - 14)
                 end
@@ -177,12 +218,6 @@ function V.new(info, tables, select_color, core, help)
                 end)
             end
         end
-        local toggle_x = ui.x + lw - 152
-        ui.rect(toggle_x, cliptop + 2, 140, 26, blue)
-        text(toggle_x + 8, cliptop + 10, 'Quick Scratch')
-        ui.hit(toggle_x, cliptop + 2, 140, 26, function()
-            self.scratch_open = not self.scratch_open
-        end)
         if self.scratch_open and ui.floating then
             ui.floating('quick_scratch', draw_scratch, 260, 330, function()
                 self.scratch_open = false
@@ -191,7 +226,7 @@ function V.new(info, tables, select_color, core, help)
         if self.selected then
             ui.bounded(
                 ui.x + 12,
-                cliptop + 9,
+                cliptop + 12,
                 'Editing: '
                     .. (self.selected.label or '')
                     .. ' / Row '
@@ -200,141 +235,162 @@ function V.new(info, tables, select_color, core, help)
                     .. (self.selected.field or self.selected.column),
                 13,
                 muted,
-                lw - 175
+                lw - 24
             )
         end
         local cols = { 1, 3, 6, 7, 13, 15, 17, 18, 19, 20 }
-        local function colors(title, entries, offset)
-            local ui = setmetatable({ x = ui.x + (offset or 0) }, { __index = ui })
-            cursor = cursor - 27
-            if visible(cursor, 23) then
-                ui.rect(ui.x + 10, cursor, 338, 23, blue)
-                text(ui.x + 17, cursor + 6, title)
-            end
-            if title ~= 'Imported tables' and state.loaded and visible(cursor, 23) then
-                ui.rect(ui.x + 155, cursor, 193, 23, { 24, 39, 52 })
-                ui.bounded(
-                    ui.x + 163,
-                    cursor + 5,
-                    'Apply to ' .. title .. ' ' .. (entries[1] and entries[1].name:match('LUT %d+') or 'LUT'),
-                    14,
-                    white,
-                    177
+        local labels = { 'Base', 'D1', 'In', 'Out', 'Curv', 'Tint', 'C1', 'C2', 'C3', 'C4' }
+        local fields =
+            { 'Base', 'Detail', 'Inner', 'Outer', 'Curvature', 'Tint', 'Camo 1', 'Camo 2', 'Camo 3', 'Camo 4' }
+        local function colors(title, kind, offset)
+            local x, width = ui.x + offset + 10, lw / 2 - 22
+            local font = ui.text_size and ui.text_size(13) or 13
+            local heading_height = math.max(23, font + 10)
+            local row_step = math.max(18, font + 6)
+            local title_height, hash_height, label_height = heading_height, math.max(26, font + 10), row_step
+            local listtop = cliptop - heading_height - 8
+            local viewport = math.max(0, listtop - clipbottom)
+            local entries = ready and ((state.raw and state.raw[kind]) or state[kind]) or {}
+            entries = entries or {}
+            ui.rect(x, cliptop - heading_height, width, heading_height, theme.header)
+            ui.bounded(x + 7, cliptop - heading_height + 5, title, 14, ready and white or muted, 80)
+            if state.loaded then
+                local target = state[kind .. '_lut']
+                    or (ui.input_value and ui.input_value('basic_' .. kind .. '_lut'))
+                    or 1
+                ui.button(
+                    x + 90,
+                    cliptop - heading_height,
+                    width - 90,
+                    heading_height,
+                    'Apply to ' .. title .. ' LUT ' .. target,
+                    function()
+                        ui.activate('apply_import_' .. kind)
+                    end,
+                    { enabled = ready and #entries > 0 and not state.busy, size = 14 }
                 )
-                ui.hit(ui.x + 155, cursor, 193, 23, function()
-                    ui.activate('apply_import_' .. title:lower())
-                end)
+            end
+            local content = 0
+            for _, entry in ipairs(entries) do
+                content = content + title_height + hash_height + label_height + entry.height * row_step + 12
+            end
+            self.gear_bounds[kind] = { x = x, y = clipbottom, w = width, h = viewport }
+            self.gear_max[kind] = math.max(0, content - viewport)
+            self.gear_scroll[kind] = math.max(0, math.min(self.gear_scroll[kind] or 0, self.gear_max[kind]))
+            local cursor = listtop + self.gear_scroll[kind]
+            local function visible(y, height)
+                return y >= clipbottom and y + height <= listtop
             end
             if #entries == 0 then
-                cursor = cursor - 21
-                if visible(cursor, 18) then
-                    ui.text(ui.x + 17, cursor + 4, 'Current colors unavailable or still loading.', 13, muted)
-                end
+                ui.bounded(
+                    x + 7,
+                    listtop - row_step,
+                    ready and 'Current colors unavailable or still loading.' or 'Load current gear or import a LUT.',
+                    13,
+                    muted,
+                    width - 16
+                )
             end
+            local size = math.min(22, (width - 84) / #cols - 4)
+            local step, gx = size + 4, x + 72
             for number, entry in ipairs(entries) do
-                local selection_key = title
-                    .. '/'
-                    .. tostring(entry.index or entry.ids and entry.ids[1] or entry.source or entry.name)
-                cursor = cursor - 22
-                if visible(cursor, 18) then
-                    text(ui.x + 17, cursor + 4, entry.name)
-                    ui.hit(ui.x + 12, cursor, 190, 18, function()
-                        local row = math.min(entry.height, self.selected and self.selected.row or 1)
-                        local column = self.selected and self.selected.column or 1
+                local ordinal = entry.lut or number
+                local selection_key = kind .. '/' .. tostring(entry.index or entry.resource or ordinal)
+                local selected = entry.selected
+                if selected == nil then
+                    selected = (
+                        state[kind .. '_lut'] or (ui.input_value and ui.input_value('basic_' .. kind .. '_lut'))
+                    ) == ordinal
+                end
+                local function choose_table()
+                    if ui.set then
+                        ui.set('basic_' .. kind .. '_lut', ordinal)
+                    end
+                    self.selected = nil
+                end
+                cursor = cursor - title_height
+                if visible(cursor, title_height) then
+                    ui.button(x + 2, cursor, width - 12, title_height, entry.name, choose_table, {
+                        selected = selected,
+                        size = 14,
+                        help = 'Select this ' .. kind .. ' LUT. Selecting does not apply or change its colors.',
+                    })
+                end
+                cursor = cursor - hash_height
+                if visible(cursor, hash_height) and entry.resource then
+                    ui.button(x + 2, cursor, width - 12, hash_height, entry.resource, choose_table, {
+                        selected = selected,
+                        field = false,
+                        ink = theme.brass,
+                        size = 12,
+                        help = 'Select this ' .. kind .. ' LUT by its texture resource ID.',
+                    })
+                end
+                cursor = cursor - label_height
+                if visible(cursor, label_height) then
+                    for i, label in ipairs(labels) do
+                        ui.bounded(gx + (i - 1) * step, cursor + 3, label, 12, muted, size)
+                    end
+                end
+                -- Only inspect pixel data for rows inside this gear's viewport.
+                local first = math.max(1, math.ceil((cursor + row_step - 1 - listtop) / row_step))
+                local last = math.min(entry.height, math.floor((cursor - clipbottom) / row_step))
+                for row = first, last do
+                    local y = cursor - row * row_step
+                    local pulse = 0.5 + 0.5 * math.sin((state.time or 0) * 3)
+                    ui.bounded(
+                        x + 7,
+                        y + 5,
+                        'Row ' .. row,
+                        13,
+                        { math.floor(175 + 69 * pulse), math.floor(180 + 22 * pulse), math.floor(140 - 87 * pulse) },
+                        60
+                    )
+                    local selected_row = row
+                    ui.hit(x + 2, y, 64, row_step - 1, function()
+                        choose_table()
                         if select_color then
-                            select_color(entry, row, column)
+                            select_color(entry, selected_row, 1, true, kind)
                         end
-                        self.selected = {
-                            key = selection_key,
-                            data = entry.data,
-                            row = row,
-                            column = column,
-                            label = title .. ' / ' .. entry.name,
-                        }
+                        ui.activate('identify_region')
                     end)
-                end
-                cursor = cursor - 30
-                if visible(cursor, 26) then
-                    if entry.resource then
-                        ui.bounded(ui.x + 17, cursor + 6, entry.resource, 12, { 244, 202, 53 }, 196)
-                    end
-                    if number == 1 and title ~= 'Imported tables' then
-                        ui.choice('basic_' .. title:lower() .. '_lut', ui.x + 220, cursor, 128)
-                    end
-                end
-                cursor = cursor - 18
-                if visible(cursor, 15) then
-                    for i, label in ipairs({ 'Base', 'D1', 'In', 'Out', 'Curv', 'Tint', 'C1', 'C2', 'C3', 'C4' }) do
-                        ui.text(ui.x + 90 + (i - 1) * 26, cursor + 3, label, 12, muted)
-                    end
-                end
-                for row = 1, entry.height do
-                    cursor = cursor - 18
-                    if visible(cursor, 17) then
-                        local pulse = 0.5 + 0.5 * math.sin((state.time or 0) * 3)
-                        ui.text(
-                            ui.x + 23,
-                            cursor + 5,
-                            'Row ' .. row,
-                            13,
-                            { math.floor(175 + 69 * pulse), math.floor(180 + 22 * pulse), math.floor(140 - 87 * pulse) }
-                        )
-                        local selected_row = row
-                        local selected_entry = entry
-                        ui.hit(ui.x + 12, cursor, 72, 17, function()
-                            if select_color then
-                                select_color(selected_entry, selected_row, 1, true, title:lower())
-                            end
-                            ui.activate('identify_region')
-                        end)
-                        for i, col in ipairs(cols) do
+                    for i, col in ipairs(cols) do
+                        if col <= entry.width then
                             local at = ((row - 1) * entry.width + col - 1) * 4
                             local rgb = {}
                             for ch = 0, 2 do
                                 rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, entry.data[at + ch])) * 255 + 0.5)
                             end
-                            ui.rect(ui.x + 90 + (i - 1) * 26, cursor, 22, 16, rgb)
-                            local selected_entry, selected_row, selected_col = entry, row, col
-                            local sx = ui.x + 90 + (i - 1) * 26
+                            local sx = gx + (i - 1) * step
+                            ui.rect(sx, y, size, row_step - 2, rgb)
                             if
                                 self.selected
                                 and self.selected.key == selection_key
                                 and self.selected.row == row
                                 and self.selected.column == col
                             then
-                                ui.rect(sx - 2, cursor - 2, 26, 2, { 244, 202, 53 })
-                                ui.rect(sx - 2, cursor + 16, 26, 2, { 244, 202, 53 })
+                                ui.rect(sx - 2, y - 2, size + 4, 2, { 244, 202, 53 })
+                                ui.rect(sx - 2, y + row_step - 2, size + 4, 2, { 244, 202, 53 })
                             end
                             local function select()
+                                choose_table()
                                 self.selected = {
                                     key = selection_key,
-                                    data = selected_entry.data,
+                                    data = entry.data,
                                     row = selected_row,
-                                    column = selected_col,
+                                    column = col,
                                     label = title .. ' / ' .. entry.name,
-                                    field = ({
-                                        'Base',
-                                        'Detail',
-                                        'Inner',
-                                        'Outer',
-                                        'Curvature',
-                                        'Tint',
-                                        'Camo 1',
-                                        'Camo 2',
-                                        'Camo 3',
-                                        'Camo 4',
-                                    })[i],
+                                    field = fields[i],
                                 }
-                                -- Selecting another table cell keeps the chosen scratch color.
                                 if select_color then
-                                    select_color(selected_entry, selected_row, selected_col, false, title:lower())
+                                    select_color(entry, selected_row, col, false, kind)
                                 end
                             end
                             ui.hit(
                                 sx,
-                                cursor,
-                                22,
-                                16,
+                                y,
+                                size,
+                                row_step - 2,
                                 select,
                                 function()
                                     select()
@@ -358,29 +414,25 @@ function V.new(info, tables, select_color, core, help)
                         end
                     end
                 end
+                cursor = cursor - entry.height * row_step - 12
+            end
+            if ui.scrollbar then
+                ui.scrollbar(
+                    'import_' .. kind,
+                    x + width - 4,
+                    clipbottom,
+                    viewport,
+                    content,
+                    viewport,
+                    self.gear_scroll[kind],
+                    function(value)
+                        self.gear_scroll[kind] = value
+                    end
+                )
             end
         end
-        local start = cursor
-        colors('Armor', state.armor, 0)
-        local armor_end = cursor
-        cursor = start
-        colors('Helmet', state.helmet, lw / 2)
-        cursor = math.min(cursor, armor_end)
-        local content = cliptop + self.scroll - cursor
-        local viewport = cliptop - clipbottom
-        self.maximum = math.max(0, content - viewport)
-        self.scroll = math.min(self.scroll, self.maximum)
-        if self.maximum > 0 then
-            local thumb = math.max(18, viewport * viewport / content)
-            ui.rect(ui.x + lw - 6, clipbottom, 4, viewport, { 50, 60, 70 })
-            ui.rect(
-                ui.x + lw - 7,
-                cliptop - thumb - (viewport - thumb) * self.scroll / self.maximum,
-                6,
-                thumb,
-                { 120, 135, 150 }
-            )
-        end
+        colors('Armor', 'armor', 0)
+        colors('Helmet', 'helmet', lw / 2)
         button(rx + 12, top - 77, rw - 24, 'Choose file - DDS / ZIP / RAR...', 'browse')
         if state.loaded then
             local path = (state.loaded.source or 'Imported LUT'):gsub('\\', '/')
@@ -415,7 +467,14 @@ function V.new(info, tables, select_color, core, help)
             button(rx + 12, top - 161, (rw - 29) / 2, 'Cancel import', 'cancel_import')
             button(rx + 17 + (rw - 29) / 2, top - 161, (rw - 29) / 2, 'Retry file picker', 'retry_import')
         end
-        button(rx + 12, top - 203, rw - 24, 'Send to LUT Editor', 'save_palette')
+        button(
+            rx + 12,
+            top - 203,
+            rw - 24,
+            'Send to LUT Editor',
+            'save_palette',
+            state.loaded ~= nil and not state.busy
+        )
         ui.bounded(rx + 12, top - 224, 'Overwrites the editor table; does not apply to gear.', 13, muted, rw - 24)
         local preview_height = math.max(44, math.min(200, ui.h - ((state.palette_count or 0) > 1 and 670 or 570)))
         local preview_top = top - 246
@@ -497,8 +556,22 @@ function V.new(info, tables, select_color, core, help)
             )
             actions = actions - 70
         else
-            button(rx + 12, actions - 36, apply_width, 'Apply to All Armor LUTs', 'apply_file_armor')
-            button(rx + 18 + apply_width, actions - 36, apply_width, 'Apply to All Helmet LUTs', 'apply_file_helmet')
+            button(
+                rx + 12,
+                actions - 36,
+                apply_width,
+                'Apply to All Armor LUTs',
+                'apply_file_armor',
+                state.loaded ~= nil and not state.busy
+            )
+            button(
+                rx + 18 + apply_width,
+                actions - 36,
+                apply_width,
+                'Apply to All Helmet LUTs',
+                'apply_file_helmet',
+                state.loaded ~= nil and not state.busy
+            )
             ui.bounded(rx + 12, actions - 55, 'Applies to every LUT on that gear.', 13, muted, rw - 24)
         end
         button(

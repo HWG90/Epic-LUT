@@ -149,7 +149,7 @@ try {
         Pulse
         $name=$entry.Name.Replace('\','/')
         if($name.StartsWith('/') -or $name.Contains(':') -or ($name.Split('/') -contains '..') -or $name.Contains('"') -or $name -match '[\x00-\x1f]') {throw 'Unsafe ZIP member'}
-        if($name -notmatch '(?i)(\.dds$|[0-9a-f]{16}\.patch_\d+(\.(gpu_resources|stream))?$)') {continue}
+        if($name -notmatch '(?i)(\.dds$|\.patch-source$|^preset\.tsv$|[0-9a-f]{16}\.patch_\d+(\.(gpu_resources|stream))?$)') {continue}
         if($members.ContainsKey($name)) {throw 'Duplicate ZIP member'}
         $members[$name]=$entry
     }
@@ -194,6 +194,34 @@ try {
             while($done -lt $Size) {$n=$f.Read($bytes,$done,$Size-$done);if($n -eq 0) {throw 'Truncated resource data'};$done+=$n}
             return ,$bytes
         } finally {$f.Dispose()}
+    }
+    if($members.ContainsKey('preset.tsv')) {
+        if($members['preset.tsv'].Length -gt 65536) {throw 'Preset manifest budget exceeded'}
+        $manifest=Stage 'preset.tsv';$lines=[IO.File]::ReadAllLines($manifest)
+        $version=if($lines[0] -eq "EPIC-OUTFIT`t1"){1}elseif($lines[0] -eq "EPIC-OUTFIT`t2"){2}else{0}
+        if(-not $version -or $lines.Count -lt 2 -or $lines.Count -gt 129) {throw 'Invalid shared preset manifest'}
+        $presetFiles=@{'preset.tsv'=$manifest};$targets=@{}
+        foreach($line in $lines[1..($lines.Count-1)]) {
+            $fields=$line.Split("`t")
+            if($fields.Count -ne $(if($version -eq 1){3}else{7}) -or $fields[0] -notin @('armor','helmet') -or $fields[1] -notmatch '^(p:)?[0-9:]+$' -or ($version -eq 1 -and $fields[1].StartsWith('p:'))) {throw 'Invalid shared preset target'}
+            $key=$fields[0]+':'+$fields[1];if($targets.ContainsKey($key)){throw 'Duplicate shared preset target'};$targets[$key]=$true
+            $file=$fields[2]
+            if($file -notmatch '^[A-Za-z0-9 _-]+\.dds$' -or -not $members.ContainsKey($file) -or $members[$file].Length -gt 1MB) {throw 'Invalid shared preset DDS filename or size'}
+            $header=Read-Header $members[$file];$width=U32 $header 16;$height=U32 $header 12
+            if((U32 $header 0) -ne 542327876 -or -not (Test-LutShape $width $height) -or (($width -eq 3) -ne $fields[1].StartsWith('p:'))) {throw 'Invalid shared preset LUT shape'}
+            $presetFiles[$file]=Stage $file
+            if($version -eq 2 -and $fields[3] -ne '-') {
+                $metadata=$fields[6]
+                if($fields[3] -notmatch '^[0-9a-fA-F]{16}$' -or $fields[4] -notmatch '^(3|23)$' -or $fields[5] -notmatch '^([1-9]|[12][0-9]|3[0-2])$' -or $metadata -notmatch '^[A-Za-z0-9 _-]+\.patch-source$' -or -not $members.ContainsKey($metadata) -or $members[$metadata].Length -ne 357) {throw 'Invalid shared preset patch metadata'}
+                $presetFiles[$metadata]=Stage $metadata
+            } elseif($version -eq 2 -and ($fields[4] -ne '-' -or $fields[5] -ne '-' -or $fields[6] -ne '-')) {throw 'Incomplete shared preset patch metadata'}
+            if($selectedBytes -gt 8MB){throw 'Shared preset extraction budget exceeded'}
+        }
+        New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
+        foreach($file in $presetFiles.Keys){[IO.File]::Copy($presetFiles[$file],(Join-Path $Output $file))}
+        $label=([IO.Path]::GetFileNameWithoutExtension($Package) -replace '[^A-Za-z0-9 _-]','').Trim()
+        if(-not $label){$label='Shared Preset'};if($label.Length -gt 48){$label=$label.Substring(0,48).Trim()}
+        $script:percent=100;Pulse 'extracting';Publish ("preset`npreset.tsv`n"+$label);return
     }
     if($Navigate -or $ListVariants -or $VariantFolder) {
         $folders=@{}

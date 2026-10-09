@@ -17,6 +17,7 @@ for r = 0, 7 do
 end
 local m = {
     lut_files = dofile('src/presets/lut_files.lua'),
+    editor_tools = dofile('src/editor/editor_tools.lua'),
     file_io = dofile('src/core/file_io.lua'),
     lut_editor_controls = dofile('src/editor/lut_editor_controls.lua'),
     lut_editor_view = dofile('src/editor/lut_editor_view.lua'),
@@ -46,7 +47,14 @@ table.insert(pages, 1, {
         { id = 'apply_editor', type = 'button', label = 'Apply edited palette', on_activate = function() end },
         { id = 'browse', type = 'button', label = 'Choose file', on_activate = function() end },
         { id = 'refresh', type = 'button', label = 'Refresh', on_activate = function() end },
-        { id = 'lut', type = 'choice', label = 'Target', default = 1, choices = { 'Armor LUT 1', 'Helmet LUT 2' } },
+        {
+            id = 'lut',
+            type = 'choice',
+            presentation = 'dropdown',
+            label = 'Target',
+            default = 1,
+            choices = { 'Armor LUT 1', 'Helmet LUT 2' },
+        },
         {
             id = 'palette',
             type = 'choice',
@@ -141,6 +149,7 @@ local ui = {
     end,
     activate = function() end,
 }
+dofile('vendor/menu/menu.lua').custom_ui(ui)
 editor.layout(ui)
 local cells = {}
 for _, hit in ipairs(hits) do
@@ -199,6 +208,7 @@ menu.page = 2
 menu.window_width = 1800
 menu.window_height = 1000
 menu.compact_fonts = true
+editor.tools.open('options')
 local rendered = menu.compose(1920, 1080)
 local grid = false
 local saved = false
@@ -239,6 +249,8 @@ local function tap(x, y)
     })
 end
 -- Custom preset input must show keystrokes and commit the typed name.
+editor.tools.open('rows')
+rendered = menu.compose(1920, 1080)
 local preset_label
 for _, c in ipairs(rendered) do
     if c.full_text == h.get('row_preset') then
@@ -260,6 +272,7 @@ end
 assert(typing, 'Preset input does not display typed text')
 menu.key(13)
 assert(h.get('row_preset') == 'AB', 'Preset input did not save typed name')
+editor.tools.open('import')
 local preview_button
 for _, c in ipairs(menu.compose(1920, 1080)) do
     if c.full_text == 'Preview Palette' then
@@ -280,6 +293,8 @@ assert(values >= 23 * 8 * 4, 'Read-only preview missing RGBA values')
 menu.key(27)
 assert(not menu.preview_window and menu.visible, 'Closing preview did not return to editor')
 -- A typed value must use its own field context, not a stale grid selection.
+editor.tools.close()
+rendered = menu.compose(1920, 1080)
 local numeric
 for _, c in ipairs(rendered) do
     if c.full_text == '0.5' and c.x > menu.window_bounds.x + 1200 then
@@ -427,6 +442,7 @@ editor.paste_selection()
 assert(ffi.string(d.data + 23 * 4, 23 * 16) == copied, 'RGB paint mode dropped clipboard alpha')
 
 local picker = api.mods.palette_test.controls.cell_color
+assert(h.set('grid_channel', 2)) -- RGBA edits are explicit; RGB preserves protected alpha.
 assert(picker.picker_commit({ 10, 20, 30 }, 4.25))
 local at = dofile('src/core/semantics.lua').index(h.get('edit_row'), h.get('edit_column'), 1, d.width, d.height)
 assert(math.abs(d.data[at] - 10 / 255) < 1e-6 and d.data[at + 3] == 4.25)
@@ -479,7 +495,7 @@ for _, c in ipairs(commands) do
         paint_label = c
     end
 end
-assert(alpha_label and paint_label and alpha_label.y > paint_label.y + 16, 'Scratch alpha readout overlaps Paint')
+assert(not alpha_label and not paint_label, 'Closed Scratch still renders its panel in the main workspace')
 assert(docked and docked.y + docked.h <= ui.y + ui.h - 140, 'Docked preview overlaps grid toolbar')
 package.loaded['epic.player_preview.v1'] = prior_preview
 

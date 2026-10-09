@@ -32,9 +32,9 @@ function P.new(deps)
             end
             local controls = deps.controls
             local preview_dragging = controls.drag or controls.resize or controls.pan or controls.orbit
-            if not preview_dragging and front.menu.owns_pointer and front.menu.owns_pointer(x,y) then
+            if not preview_dragging and front.menu.owns_pointer and front.menu.owns_pointer(x, y) then
                 controls.cancel()
-                return x,y
+                return x, y
             end
             local w, h = deps.resolution()
             local hit, event = deps.controls.pointer(x, y, input.down(1), w, h, input.down(2))
@@ -55,6 +55,9 @@ function P.new(deps)
                 local delta = wheel(...)
                 local x, y = mouse(...)
                 local controls = deps.controls
+                if front.menu.owns_pointer and front.menu.owns_pointer(x, y) then
+                    return delta
+                end
                 if
                     active()
                     and x

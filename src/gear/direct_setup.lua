@@ -1,5 +1,15 @@
 -- Persist applied DDS snapshots by local piece/mesh/material slot, never process pointers.
 local S = {}
+local function target(key)
+    assert(type(key) == 'string', 'Saved binding key unavailable')
+    local pattern = key:sub(1, 2) == 'p:'
+    local kind, slot, mesh, material = (pattern and key:sub(3) or key):match('^(%d+):(%d+):(%d+):(%d+)$')
+    assert(
+        kind and tonumber(kind) <= 2 and tonumber(slot) <= 9 and tonumber(mesh) < 64 and tonumber(material) < 64,
+        'Saved binding exceeds local limits'
+    )
+    return pattern
+end
 function S.new(m, paths)
     local self = { sequence = 0 }
     local manifest = paths.settings .. '/direct-applied.tsv'
@@ -17,15 +27,7 @@ function S.new(m, paths)
             local key, file = line:match('^([^\t]+)\t(setup%-%d+%-%d+%-%d+%.dds)$')
             assert(key and not plan[key], 'Invalid or duplicate saved binding')
             if key ~= 'armor-all' and key ~= 'helmet-all' then
-                local kind, slot, mesh, material = key:match('^(%d+):(%d+):(%d+):(%d+)$')
-                assert(
-                    kind
-                        and tonumber(kind) <= 2
-                        and tonumber(slot) <= 9
-                        and tonumber(mesh) < 64
-                        and tonumber(material) < 64,
-                    'Saved binding exceeds local limits'
-                )
+                target(key)
             end
             count = count + 1
             assert(count <= 4098, 'Saved setup exceeds binding budget')
@@ -60,10 +62,16 @@ function S.new(m, paths)
         end
         for kind, texture in pairs(defaults or {}) do
             assert(kind == 'armor' or kind == 'helmet', 'Invalid saved target')
+            assert(texture.width == 23, 'A material default must be a 23-column LUT')
             rows[#rows + 1] = kind .. '-all\t' .. save_texture(texture)
         end
         for _, b in ipairs(bindings) do
             local texture = assert(b.texture, 'An applied LUT is awaiting recovery; restore it before saving')
+            local pattern = target(b.save_key)
+            assert(
+                (pattern and texture.width == 3 and texture.height == 1) or (not pattern and texture.width == 23),
+                'Saved LUT layout does not match its destination'
+            )
             assert(not seen[b.save_key], 'Duplicate local binding key')
             seen[b.save_key] = true
             rows[#rows + 1] = b.save_key .. '\t' .. save_texture(texture)

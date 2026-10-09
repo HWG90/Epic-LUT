@@ -36,7 +36,24 @@ local controls = {
         choices = { 'Choose saved outfit...', 'Example' },
         default = 1,
     },
-    { id = 'export_format', type = 'choice', label = 'Export format', choices = {'DDS','Selected LUT Patch','Entire Palette Patch'}, default = 1 },
+    {
+        id = 'export_format',
+        type = 'choice',
+        label = 'Export format',
+        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)' },
+        default = 1,
+        on_change = function(value)
+            state.export_format = value
+        end,
+    },
+    {
+        id = 'dds_naming',
+        type = 'choice',
+        presentation = 'dropdown',
+        label = 'DDS filenames',
+        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
+        default = 1,
+    },
     { id = 'basic_target', type = 'choice', label = 'Worn gear', choices = { 'Armor', 'Helmet' }, default = 1 },
     { id = 'cell_color', type = 'color', label = 'Primary color', default = '#808080' },
     { id = 'basic_preset_name', type = 'input', label = 'Preset name', default = 'test' },
@@ -274,6 +291,79 @@ assert(
     selected == 8 and menu.color_picker and menu.color_picker.control.id == 'cell_color',
     'Basic click did not open primary-color picker for the selected row'
 )
+menu.close_color(false)
+state.palette_ready = false
+for _, command in ipairs(menu.compose(1920, 1080)) do
+    assert(
+        command.full_text ~= 'Region 1' and command.text ~= 'Region 1',
+        'Basic exposes editable regions before current/imported LUTs are loaded'
+    )
+end
+state.palette_ready = true
+local handle = api.mods.basic_test.handle
+local saved_editor = state.editor
+state.editor = nil
+local function bulk_label(value)
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        if c.full_text == value then
+            return c
+        end
+    end
+end
+local function tap_label(value)
+    local c = assert(bulk_label(value), 'Missing Basic bulk export control: ' .. value)
+    for _, down in ipairs({ true, false }) do
+        menu.tick({
+            down = function(key)
+                return down and key == 1
+            end,
+            mouse = function()
+                return c.x + 3, c.y + 3
+            end,
+            wheel = function()
+                return 0
+            end,
+        })
+    end
+end
+for _, format in ipairs({ 1, 2, 3, 4 }) do
+    assert(handle.set('export_format', format))
+    menu.compose(1920, 1080)
+    view.action_scroll = view.action_maximum
+    local prior = export_hits
+    tap_label('Export...')
+    assert(
+        export_hits == prior + ((format == 3 or format == 4) and 1 or 0),
+        'Basic full-collection export eligibility changed for format ' .. format
+    )
+    assert((bulk_label('LUT# + HEX') ~= nil) == (format == 4), 'Basic DDS naming appears in the wrong format')
+end
+tap_label('LUT# + HEX')
+assert(menu.dropdown and menu.dropdown.control.id == 'dds_naming', 'Basic bulk naming dropdown did not open')
+menu.key(40)
+menu.key(13)
+assert(
+    handle.get('dds_naming') == 2 and bulk_label('LUT# + Decimal'),
+    'Basic naming selection was not shared with Toolbox settings'
+)
+for _, font in ipairs({ 12, 20 }) do
+    menu.font_size = font
+    menu.compose(1920, 1080)
+    view.action_scroll = view.action_maximum
+    local naming = assert(bulk_label('LUT# + Decimal'))
+    local folder = assert(bulk_label('Open Export Location'))
+    local export = assert(bulk_label('Export...'))
+    assert(
+        export.y > naming.y + naming.size and naming.y > folder.y + folder.size,
+        'Basic bulk controls collide after font resizing'
+    )
+end
+state.busy = true
+local prior = export_hits
+tap_label('Export...')
+assert(export_hits == prior, 'Basic bulk export remained active during an import')
+state.busy = false
+state.editor = saved_editor
 print(
     'PASS Basic: eight primary regions at compact size, standard color picker, import/export/preset controls, no advanced fields'
 )

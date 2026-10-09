@@ -23,6 +23,22 @@ This prerelease adds full Armor, Helmet and Pattern LUT sharing for compatible E
 
 **LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo, DDS export and Pattern Patch ZIP export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
 
+## Roomier LUT Editor
+
+The Pixel Grid uses the full height above a compact action bar. **Hide Values** gives it the inspector's width; **Show Values** restores the numeric editor. The setting is remembered.
+
+Use the gold **Tools** button to open the movable toolbox and reveal **Import**, **Rows**, **Export**, and **Options** beside it. They switch the same toolbox. **Scratch** opens a separate brush palette with color and alpha controls; it can stay open alongside the toolbox. Export keeps the shared format selector and timestamped filenames.
+
+**Tools > Options > Load Debug LUT** loads the bundled 23x8 Debug table by **Plain Furniture** into the editor. Each load starts with a fresh copy; use the Apply controls to send it to gear.
+
+For one-click DDS export of every custom LUT currently applied to your Armor and Helmet, choose **Tools > Export > All Custom LUTs (DDS)**. Pick **LUT# + HEX**, **LUT# + Decimal**, **LUT#**, **HEX**, or **Decimal** naming, then press **Export**. The export name prefixes every file, for example `HONK LUT3-d3ce605892d5331b.dds`. Each batch gets a new timestamped folder under the export location. Pattern LUTs are included as `PatternLUT#`; unknown IDs use the LUT number.
+
+To export a saved Armory collection without equipping it, select the preset and choose **Raw DDS (entire preset)**. **Save Current Gear Preset** keeps the currently applied Armor and/or Helmet LUTs in the app for later reuse.
+
+Closing or popping out Player Preview returns its reserved grid width. Tools and Pattern Editor use one active popup at a time so dropdowns and input stay with the visible window.
+
+The active tools shortcut stays highlighted. Clicking it again keeps its window open; use that window's close button to close it. The LUT dropdown sits indented below Helmet/Armor, with Pattern Editor beside those gear buttons. Settings and the footer share one UI scale. Windows and popouts have visible borders.
+
 ## Larger tables and custom rows
 
 Material LUTs with up to **32 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
@@ -31,7 +47,7 @@ Tables above eight rows retain their added rows when Preserve Original Emissives
 
 ## Start with Basic
 
-Press **F9**. Your worn Armor and Helmet colors load into separate columns. Choose the LUT above a palette, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact.
+Press **F9**, then **Load Current Armor & Helmet**. Choose the LUT above either column, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact. Gear selectors stay gray until current or imported LUTs are ready. Gold Load buttons pulse until their first use.
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
@@ -46,7 +62,7 @@ Press **F9**. Your worn Armor and Helmet colors load into separate columns. Choo
 4. Use **Apply LUT N to All Armor / Helmet LUTs** to apply the selected source across that gear.
 5. **Apply Matching LUTs** maps patch tables by resource ID to your worn gear. Unmatched, unidentified and duplicate-ID entries stay untouched.
 
-Press **F10**, then **Import / Apply** for full table previews. Each gear has its own LUT selector. **Send to LUT Editor** copies the selected imported table into the editor.
+Press **F10**, then **Import / Apply** for full table previews. Every loaded Armor and Helmet LUT appears in its own scrollable column. Click a table's title or texture hash to select it; selecting a title leaves its colors unchanged. **Send to LUT Editor** copies the selected imported table into the editor.
 
 Matching uses texture IDs, not armor names or table order. Archives can contain gear you are not wearing; use manual targeting when no IDs match.
 
@@ -65,11 +81,11 @@ Painting targets the clicked gear table. **Undo Last Action / Redo Last Action**
 
 ## LUT Editor
 
-Select **Armor LUT** or **Helmet LUT**, then a table. Populating reads current worn colors, including stock-game LUTs.
+Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including stock-game values.
 
 The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Shift-click selects a rectangle; grid tools support drawing, copy/paste and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
 
-Typed values can exceed recommended slider ranges. Swatches clamp RGB for viewing; stored floats remain intact. Export edited DDS files to `%LOCALAPPDATA%/Epic LUT/files` to share them.
+Typed values can exceed recommended slider ranges. Swatches clamp RGB for viewing; stored floats remain intact. Export edited DDS files to `%LOCALAPPDATA%/Epic LUT/files/exports` to share them.
 
 ## Player Preview
 
@@ -81,6 +97,10 @@ Use **Player Preview** or **F6** to see your worn character while editing. It do
 
 Close the preview or editor before switching game screens. Player Preview is experimental; broader equipment and screen transitions still need testing.
 
+SDK names come from a compact, pinned Community Edition catalog. Unknown resources and shader parents remain unknown. Material Info captures on request; it does not scan archives or poll every material each frame. [SDK integration details](docs/SDK-INTEGRATION.md).
+
+Preview uses the game's lighter **Game Default UI pipeline**, with an independently owned model and portrait target. Material completeness and flicker reduction remain unconfirmed in-game. [Full Render vs Game Default](docs/PREVIEW-RENDER-PATH.md).
+
 ## The Armory
 
 **Save to Armory / Save Current Gear Preset** asks for **Armor Only, Helmet Only, or Both**, then a name.
@@ -89,6 +109,15 @@ Select a preset to preview it. Name-selector swatches give a quick glance; the f
 
 Presets live in `%LOCALAPPDATA%/Epic LUT/presets`. Library changes leave worn colors unchanged.
 
+To share a saved look, select it in **The Armory**, enter an export name and choose a format:
+
+- **Shareable Preset ZIP:** includes every saved Armor, Helmet and Pattern LUT. Use **Import Shared Preset** in The Armory to add it to another library.
+- **Selected LUT Patch ZIP:** packages the selected saved table for a mod manager.
+- **Entire Preset Patch ZIP:** packages all tables in that preset together.
+- **Raw DDS:** exports the selected saved table for another editor.
+
+Exports use the saved preset, including its original texture destinations. Older presets still load; resave them to capture destination metadata before patch export. Filenames receive a timestamp and export folders open through **Open Export Location**.
+
 ## Restore and configure
 
 **Restore Arrowhead LUT (Original)** restores original bindings and refreshes displayed colors. **Restore Imported** resets editor values to the imported file.
@@ -96,6 +125,10 @@ Presets live in `%LOCALAPPDATA%/Epic LUT/presets`. Library changes leave worn co
 **Preserve Original Emissives** defaults Off. It preserves original emissive RGBA and primary shader mode, including zeros. Missing snapshots or insufficient source rows produce an error instead of guessed values.
 
 **Configuration** lets you rebind Basic, Advanced and Player Preview shortcuts; adjust UI scale, fonts and window size; and display LUT IDs in hex or decimal. Keys have readable names such as **Insert** and **F9**.
+
+Settings are grouped in two scrollable columns. **Always populate all LUT slots from current gear** loads Armor and Helmet tables after equipment changes. **Turn off Player Preview** remembers your choice and disables its shortcut and automatic dock until you enable it again.
+
+When DBF-MCM is available, **Epic LUT Settings** appears there too. Both menus use the same saved values; its editor shortcuts open Basic or the LUT Editor directly.
 
 **Check for Updates** checks the public GitHub release. Automatic checks are opt-in, once per launch, and never install anything.
 
@@ -107,7 +140,15 @@ Native adapters target Steam build **25480438**; game updates may require change
 
 ## Credits
 
-Thank you to **Scarpheon** for his inexhaustible effort helping me test Epic LUT, track down bugs, and make it better.
+### A huge thank you to Scarpheon
+
+A huge thank you to **Scarpheon** for all the time he has dedicated to helping me build a better tool for people.
+
+His testing, bug reports, and continued assistance were vital to getting **Export to Patch** implemented correctly and working reliably. He kept trying builds, checking the results in-game, and helping me work through the problems until we got it right.
+
+That work deserves more than a name in a credits list. Epic LUT is a better tool because of the time and care he has put into it. **Thank you, Scarpheon. Your help made this possible.**
+
+**Plain Furniture** created the bundled **Debug LUT**.
 
 Made by **Goose**. Thanks to everyone testing this extremely alpha paint job.
 

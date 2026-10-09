@@ -24,12 +24,14 @@ function B.new(info, select_row, help)
     function self.draw(ui)
         local state = info()
         local d = state.editor
+        local bulk_dds = state.export_format == 4
         local top = ui.y + ui.h
         local left = ui.w * 0.54
         local right = ui.x + left + 18
         local width = ui.w - left - 18
-        local white, muted, blue = { 225, 230, 235 }, { 155, 166, 175 }, { 35, 62, 90 }
-        local divider = { 65, 76, 85 }
+        local theme = ui.theme
+        local white, muted = theme.white, theme.muted
+        local divider = theme.line
         ui.rect(ui.x + left / 2, ui.y + 48, 1, math.max(0, ui.h - 148), divider)
         ui.rect(right - 9, ui.y, 1, ui.h, divider)
         local function text(x, y, t)
@@ -38,23 +40,22 @@ function B.new(info, select_row, help)
         local guidance = help.basic or {}
         local function button(x, y, w, label, id, enabled, drawing)
             local ui = drawing or ui
-            local featured = enabled ~= false and (id == 'export_selected' or id == 'save_dds' or id == 'save_setup')
-            ui.rect(x, y, w, 28, enabled == false and { 35, 39, 43 } or (featured and { 244, 202, 53 } or blue))
-            ui.bounded(x + 8, y + 8, label, 14, featured and { 25, 28, 31 } or white, w - 16)
-            ui.hit(x, y, w, 28, function()
-                if enabled ~= false then
-                    ui.activate(id)
-                end
-            end, nil, nil, guidance[id])
+            local featured = enabled ~= false
+                and (id == 'populate_worn' or id == 'export_selected' or id == 'save_dds' or id == 'save_setup')
+            local accent = featured and (id == 'populate_worn' and ui.load_color(state.load_seen) or { 244, 202, 53 })
+            ui.button(x, y, w, 28, label, function()
+                ui.activate(id)
+            end, {
+                enabled = enabled,
+                accent = accent,
+                ink = featured and { 25, 28, 31 },
+                help = guidance[id],
+            })
         end
         text(ui.x + 10, top - 20, 'Basic - primary colors only')
         text(ui.x + 10, top - 44, 'Click a color region to edit. Importing a file is optional.')
         local panels = state.raw and state.raw.basic
-        if panels and ((panels.armor and panels.armor.document) or (panels.helmet and panels.helmet.document)) then
-            button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
-        else
-            ui.bounded(ui.x + 10, top - 75, 'Loading current colors...', 12, muted, left - 20)
-        end
+        button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
         local cliptop, clipbottom = top - 142, ui.y + (state.loaded and 102 or 56)
         local y = cliptop + self.scroll
         self.bounds = { x = ui.x, y = clipbottom, w = left, h = cliptop - clipbottom }
@@ -63,8 +64,15 @@ function B.new(info, select_row, help)
         for n, kind in ipairs({ 'armor', 'helmet' }) do
             local x = ui.x + 10 + (n - 1) * (half + 6)
             local panel = state.raw and state.raw.basic and state.raw.basic[kind]
-            local document = panel and panel.document
-            ui.bounded(x, top - 110, kind == 'armor' and 'Armor' or 'Helmet', 14, white, half)
+            local document = state.palette_ready ~= false and panel and panel.document
+            ui.bounded(
+                x,
+                top - 110,
+                kind == 'armor' and 'Armor' or 'Helmet',
+                14,
+                state.palette_ready == false and muted or white,
+                half
+            )
             if panel and panel.resource then
                 ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65)
             end
@@ -99,7 +107,7 @@ function B.new(info, select_row, help)
                         end, nil, nil, 'Flash this region on your character to find which part it colors.')
                         ui.hit(x + 80, cursor, half - 80, 28, function()
                             if select_row(selected, target) ~= false then
-                                ui.activate('cell_color')
+                                ui.activate('cell_color', nil, 1)
                             end
                         end, nil, nil, 'Edit this region color. Your changes apply to this gear table automatically.')
                     end
@@ -108,7 +116,8 @@ function B.new(info, select_row, help)
                 ui.bounded(
                     x,
                     top - 181,
-                    panel and panel.unavailable and 'Original LUT unavailable.' or 'Reading colors...',
+                    state.palette_ready == false and 'Load current gear or import a LUT.'
+                        or (panel and panel.unavailable and 'Original LUT unavailable.' or 'Reading colors...'),
                     12,
                     muted,
                     half
@@ -153,16 +162,14 @@ function B.new(info, select_row, help)
         self.scroll = math.min(self.scroll, self.maximum)
         button(right + width - 150, ui.y - 24, 150, 'Stop Highlight', 'stop_identify')
         local portrait = package.loaded['epic.player_preview.v1']
-        if portrait and portrait.toggle then
-            ui.rect(right, ui.y - 24, 150, 28, blue)
-            ui.bounded(right + 8, ui.y - 16, 'Player Preview', 14, white, 134)
-            ui.hit(right, ui.y - 24, 150, 28, portrait.toggle)
+        if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
+            ui.button(right, ui.y - 24, 150, 28, 'Player Preview', portrait.toggle)
         end
         -- Keep the action pane reachable at Basic's compact window height.
         local clip_top, clip_bottom = top - 30, ui.y + 12
         local viewport = clip_top - clip_bottom
         self.action_bounds = { x = right, y = clip_bottom, w = width + 8, h = viewport }
-        self.action_maximum = math.max(0, (state.loaded and 601 or 491) - ui.h + 12)
+        self.action_maximum = math.max(0, (state.loaded and 601 or 491) + (bulk_dds and 34 or 0) - ui.h + 12)
         self.action_scroll = math.min(self.action_scroll, self.action_maximum)
         local base_ui, offset = ui, self.action_scroll
         local function visible(y, height)
@@ -197,6 +204,10 @@ function B.new(info, select_row, help)
                 base_ui.choice(id, x, y, w)
             end
         end
+        actions.hovering = function(x, y, w, h)
+            return visible(y + offset, h) and base_ui.hovering(x, y + offset, w, h)
+        end
+        ui.decorate(actions)
         local draw_button = button
         do
             local ui = actions
@@ -313,8 +324,8 @@ function B.new(info, select_row, help)
             else
                 button(right, saved_top - 443, width, 'Restore Arrowhead LUT (Original)', 'restore')
             end
-            ui.bounded(right, saved_top - 466, state.status or '', 13, muted, width)
-            ui.rect(right, saved_top - 471, width, 1, { 65, 76, 85 })
+            ui.bounded(right, saved_top - 468, state.status or '', 13, muted, width)
+            ui.rect(right, saved_top - 471, width, 1, theme.line)
             text(right, saved_top - 495, 'Export')
             button(
                 right,
@@ -329,10 +340,13 @@ function B.new(info, select_row, help)
                 width * 0.35 - 3,
                 'Export...',
                 'export_selected',
-                state.editor ~= nil and not state.busy
+                (state.editor ~= nil or state.export_format == 3 or bulk_dds) and not state.busy
             )
             ui.choice('export_format', right + width * 0.35 + 3, saved_top - 567, width * 0.65 - 3)
-            button(right, saved_top - 601, width, 'Open Export Location', 'open_export')
+            if bulk_dds then
+                ui.choice('dds_naming', right, saved_top - 601, width)
+            end
+            button(right, saved_top - (bulk_dds and 635 or 601), width, 'Open Export Location', 'open_export')
         end
         if self.action_maximum > 0 then
             local thumb = math.max(24, viewport * viewport / (viewport + self.action_maximum))

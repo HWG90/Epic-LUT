@@ -23,4 +23,4 @@ command = [str(args.stylua), '--verify']
 if args.check:
     command.append('--check')
 subprocess.run(command + files, cwd=ROOT, check=True)
-print(f'PASS formatting: {len(files)} maintained Lua files; {len(FORMAT_EXCEPTIONS)} documented FFI exceptions')
+print(f'PASS formatting: {len(files)} maintained Lua files; {len(FORMAT_EXCEPTIONS)} documented literal exceptions')

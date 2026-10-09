@@ -1,4 +1,4 @@
--- Standalone editor frontend. No MCM detection, compatibility registry or binding adapter.
+-- Standalone editor frontend with an optional MCM settings bridge.
 local F={}
 function F.new(m,ctx,deps)
     deps=deps or {};local self={preview_cleanup_guard=true}
@@ -67,6 +67,10 @@ function F.new(m,ctx,deps)
         return false
     end
     function self.resolve()return self.api end
+    if m.mcm_settings then
+        self.mcm_settings=m.mcm_settings.new({api=self.api,source_mod_id='epic_direct_lut',version=m.version,
+            open_basic=self.open_basic,open_advanced=self.open_advanced,log=ctx.log})
+    end
     function self.tick(dt)
         if self.closed then return end
         local ok,why=pcall(function()
@@ -79,6 +83,7 @@ function F.new(m,ctx,deps)
                 if self.preferences.font_bold then self.menu.font_bold=self.preferences.font_bold()end
                 if not self.size_loaded and self.preferences.size then self.menu.window_width,self.menu.window_height=self.preferences.size();self.size_loaded=true end
             end
+            if self.mcm_settings then self.mcm_settings.tick() end
             self.input.poll();local focused=self.input.focused()
             local process_input=self.menu.input_focus(focused,self.input)
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
@@ -134,6 +139,7 @@ function F.new(m,ctx,deps)
         if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end
     end
     function self.close()
+        if self.mcm_settings then self.mcm_settings.close() end
         if self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
         self.menu.visible=false
         local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
@@ -141,7 +147,7 @@ function F.new(m,ctx,deps)
         if package.loaded['dbf.epic_lut.frontend.v1']==self then package.loaded['dbf.epic_lut.frontend.v1']=nil end
         return true
     end
-    ctx.log('Epic LUT standalone frontend ready; no MCM integration')
+    ctx.log('Epic LUT frontend ready; optional MCM settings bridge')
     return self
 end
 return F

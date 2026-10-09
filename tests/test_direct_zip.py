@@ -53,6 +53,28 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert completed.returncode==0,completed.stderr
     assert (folder/'dds/lut001.dds').read_bytes()==data
 
+    # Shared Armory bundles preserve exact manifest IDs, metadata and Pattern bytes.
+    pattern_header=bytearray(data[:148])
+    for offset,value in {12:1,16:3,20:48,128:2}.items():struct.pack_into('<I',pattern_header,offset,value)
+    pattern_dds=bytes(pattern_header)+struct.pack('<12f',*[i/9-1 for i in range(12)])
+    manifest='EPIC-OUTFIT\t2\narmor\t0:1:0:0\tlut001.dds\t0000000000000001\t23\t8\tlut001.patch-source\nhelmet\tp:0:0:0:0\tlut002.dds\t0000000000000002\t3\t1\tlut002.patch-source'
+    material_meta=b'0123456789abcdef\n'+bytes(192)+data[:148]
+    pattern_meta=b'0123456789abcdef\n'+bytes(192)+pattern_dds[:148]
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        for name,payload in [('preset.tsv',manifest.encode()),('lut001.dds',data),('lut002.dds',pattern_dds),('lut001.patch-source',material_meta),('lut002.patch-source',pattern_meta),('ignored.lua',b'error("never execute")')]:archive.writestr(name,payload)
+    result=folder/'preset.txt';completed=run(package,folder/'preset',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert result.read_text().splitlines()==['preset','preset.tsv','mod']
+    assert (folder/'preset/preset.tsv').read_text()==manifest and (folder/'preset/lut002.dds').read_bytes()==pattern_dds
+    assert (folder/'preset/lut001.patch-source').read_bytes()==material_meta and len(list((folder/'preset').iterdir()))==5
+    fixture=ROOT/'tests/tmp/files/armorytest.zip'
+    fixture.write_bytes(package.read_bytes())
+    for index,bad_manifest in enumerate((manifest.replace('lut001.dds','../outside.dds'),manifest.replace('0000000000000001','not-a-texture-id'),manifest+'\n'+manifest.splitlines()[1])):
+        with zipfile.ZipFile(package,'w')as archive:
+            for name,payload in [('preset.tsv',bad_manifest.encode()),('lut001.dds',data),('lut002.dds',pattern_dds),('lut001.patch-source',material_meta),('lut002.patch-source',pattern_meta)]:archive.writestr(name,payload)
+        result=folder/f'bad-preset{index}.txt';completed=run(package,folder/f'bad-preset{index}',result)
+        assert completed.returncode!=0 and result.read_text().startswith('error\n'),'Unsafe shared preset accepted'
+
     # A large texture collection must not consume the LUT extraction budget.
     large_patch=bytearray(PATCH);offset=65*1024*1024
     struct.pack_into('<Q',large_patch,104+32,offset)

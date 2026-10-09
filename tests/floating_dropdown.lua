@@ -15,7 +15,13 @@ local handle = api.register({
             id = 'main',
             name = 'Main',
             controls = {
-                { id = 'floating_selector', type = 'choice', label = 'Choice', choices = { 'Alpha', 'Beta' }, default = 1 },
+                {
+                    id = 'floating_selector',
+                    type = 'choice',
+                    label = 'Choice',
+                    choices = { 'Alpha', 'Beta' },
+                    default = 1,
+                },
             },
         },
     },
@@ -115,3 +121,52 @@ menu.color_picker = {}
 menu.wheel(-120, menu.window_bounds.x + 200, menu.window_bounds.y + 250)
 assert(underlying == 0, 'Color picker scrolled underlying page')
 menu.color_picker = nil
+
+-- One control appears at two authored locations. Each actual hit must anchor
+-- its dropdown locally, including subsequent redraws and moving popup owners.
+page.render_layout = function(ui)
+    ui.choice('floating_selector', ui.x + 20, ui.y + 200, 180)
+    ui.choice('floating_selector', ui.x + 420, ui.y + 200, 180)
+end
+local function duplicate_labels(commands)
+    local labels = {}
+    for _, c in ipairs(commands) do
+        if c.full_text == 'Alpha' then
+            labels[#labels + 1] = c
+        end
+    end
+    assert(#labels == 2)
+    return labels
+end
+local duplicate = duplicate_labels(menu.compose(1920, 1080))
+input(duplicate[1].x + 3, duplicate[1].y + 3, true)
+input(duplicate[1].x + 3, duplicate[1].y + 3, false)
+assert(menu.dropdown and menu.dropdown.widget)
+local left_anchor = menu.dropdown.x
+menu.compose(1920, 1080)
+assert(menu.dropdown.x == left_anchor, 'Redrawing the right duplicate stole the left dropdown anchor')
+menu.key(27)
+duplicate = duplicate_labels(menu.compose(1920, 1080))
+input(duplicate[2].x + 3, duplicate[2].y + 3, true)
+input(duplicate[2].x + 3, duplicate[2].y + 3, false)
+assert(menu.dropdown.x > left_anchor + 200, 'Right duplicate opened below the left widget')
+menu.key(27)
+page.render_layout = function(ui)
+    ui.floating('test_popup', function(x, y, w, h)
+        ui.rect(x, y, w, h, ui.theme.panel)
+        ui.choice('floating_selector', x + 10, y + 100, 180)
+        ui.choice('floating_selector', x + 210, y + 100, 180)
+    end, 420, 260, function() end, 40)
+end
+duplicate = duplicate_labels(menu.compose(1920, 1080))
+input(duplicate[1].x + 3, duplicate[1].y + 3, true)
+input(duplicate[1].x + 3, duplicate[1].y + 3, false)
+left_anchor = menu.dropdown.x
+position = menu.floating_positions.test_popup
+position.x = position.x - 50
+menu.compose(1920, 1080)
+assert(
+    menu.dropdown.owner.id == 'test_popup' and menu.dropdown.x < left_anchor,
+    'Duplicate dropdown lost its own moving window anchor'
+)
+print('PASS duplicate choice anchors: left/right hits keep separate anchors and follow their own popup')

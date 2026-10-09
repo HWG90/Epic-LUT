@@ -112,7 +112,8 @@ for i = 0, 23 * 12 * 4 - 1 do
 end
 local retained = O.preserve(custom, eight, true)
 assert(
-    retained.height == 12 and ffi.string(retained.data + 23 * 8 * 4, 23 * 4 * 16) == ffi.string(custom.data + 23 * 8 * 4, 23 * 4 * 16),
+    retained.height == 12
+        and ffi.string(retained.data + 23 * 8 * 4, 23 * 4 * 16) == ffi.string(custom.data + 23 * 8 * 4, 23 * 4 * 16),
     'Preserving original emissives truncated custom rows'
 )
 assert(retained.data[13 * 4] == eight.data[13 * 4], 'Known original emissives changed for custom rows')

@@ -71,3 +71,36 @@ local cape_catalog = G.new({
 local result = cape_catalog.refresh({ { unit = 1, mesh = 2, material = 3, original = 10, current = 99 } }, nil)
 assert(restored and cape_object == 10 and #result.owned == 0, 'Prior owned cape binding was not restored')
 assert(#result.groups == 1 and result.groups[1].bindings[1].material == 6, 'Cape material included in Armor targets')
+
+local calls = 0
+local names = G.new({
+    identity = function()
+        return {}
+    end,
+    units = function()
+        return { { unit = 9, slot = 0, type = 0 } }
+    end,
+    resource_name = function(unit)
+        assert(unit == 9)
+        calls = calls + 1
+        return 'Helmet RS-40 Beast of Prey'
+    end,
+    materials = function()
+        return { { mesh = 20, material = 30 }, { mesh = 21, material = 31 } }
+    end,
+    present = function()
+        return true
+    end,
+    binding = function()
+        return 77
+    end,
+    key = function(b)
+        return b.material
+    end,
+})
+local named = names.refresh({}, 77)
+assert(
+    calls == 1 and named.labels[1]:find('Helmet RS-40 Beast of Prey', 1, true),
+    'SDK resource name was guessed or looked up repeatedly for each material'
+)
+assert(#named.groups[1].resource_names == 1 and named.signature)

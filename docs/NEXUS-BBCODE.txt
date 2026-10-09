@@ -44,10 +44,19 @@ Supports bounded 23-column float material LUTs. Weapons, equipped capes, EXR and
 
 [b]Player Preview[/b] is included in R5. Dock it beside the LUT Editor or pop it out; pan, rotate and zoom while editing. Disable the older separate preview test addon before enabling R5. Close the preview before switching game screens. This feature remains experimental.
 
+[size=4][b]A HUGE THANK YOU TO SCARPHEON[/b][/size]
+A huge thank you to [b]Scarpheon[/b] for all the time he has dedicated to helping me build a better tool for people.
+
+His testing, bug reports, and continued assistance were vital to getting [b]Export to Patch[/b] implemented correctly and working reliably. He kept trying builds, checking the results in-game, and helping me work through the problems until we got it right.
+
+That work deserves more than a name in a credits list. Epic LUT is a better tool because of the time and care he has put into it. [b]Thank you, Scarpheon. Your help made this possible.[/b]
+
+[b]Plain Furniture[/b] - creator of the bundled [b]Debug LUT[/b].
+
 [size=4][b]THE PEOPLE BEHIND THE PALETTE[/b][/size]
 [b]CowboyBingus[/b] found the path. Epic LUT builds on his original LUT discovery and [url=https://github.com/CowboyBingus/MatchYourColors]Match Your Colors[/url] foundation. Reused native adapters retain his Zero-Clause BSD license. Thank you, Bingus, for the work and generosity that made this possible.
 
-[b]Goose🪿 (honk dat's me honk)[/b] — editor, workflow, vibing, and questionable fashion decisions.
+[b]GooseðŸª¿ (honk dat's me honk)[/b] â€” editor, workflow, vibing, and questionable fashion decisions.
 
 Thank you to the [b]Helldivers modding Discord community, Kaiser & Amiba[/b] for the shared knowledge, idea, experimentation and encouragement.
 
@@ -58,6 +67,4 @@ Thank you to [b]Shikami[/b] for the [b]Region Indicator[/b] idea, and [b]content
 [url=https://github.com/HWG90/Epic-LUT]Source, installation details and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/issues]Report bugs on GitHub[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
-[size=1][i]Community-made; not affiliated with or endorsed by Arrowhead, Sony or Nexus Mods. Promotional artwork is not gameplay proof or proof of multiplayer color sharing. No third-party palettes or game textures are packaged.[/i][/size]
-
-[b]Scarpheon[/b] - thank you for your inexhaustible effort helping me test Epic LUT, track down bugs, and make it better.
+[size=1][i]Community-made; not affiliated with or endorsed by Arrowhead, Sony or Nexus Mods. Promotional artwork is not gameplay proof or proof of multiplayer color sharing. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

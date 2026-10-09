@@ -78,11 +78,17 @@ print(
     'PASS preview input bridge: single ownership, hit/zoom isolation, focus cancellation and foreign-wrapper preservation'
 )
 
-ready=true;focused=true
-input.mouse=mouse
+ready = true
+focused = true
+input.mouse = mouse
 bridge.attach(front)
-front.menu.owns_pointer=function() return true end
-local px,py=input.mouse()
-assert(px==x and py==y,'Preview swallowed an existing editor drag')
-front.menu.owns_pointer=nil
+front.menu.owns_pointer = function()
+    return true
+end
+local px, py = input.mouse()
+assert(px == x and py == y, 'Preview swallowed an existing editor drag')
+x, y = 5, 5
+local before = zooms
+assert(input.wheel() == 120 and zooms == before, 'Popup wheel zoomed the preview underneath')
+front.menu.owns_pointer = nil
 bridge.release()

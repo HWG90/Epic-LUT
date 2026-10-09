@@ -18,6 +18,7 @@ function G.new(deps)
         end
         owned = active
         for _, u in ipairs(deps.units(identity)) do
+            local unit_name = deps.resource_name and deps.resource_name(u.unit)
             for vi, v in ipairs(deps.materials(u.unit)) do
                 local b = { unit = u.unit, mesh = v.mesh, material = v.material }
                 local existing = kept[deps.key(b)]
@@ -40,6 +41,7 @@ function G.new(deps)
                         b.current = existing and existing.current or object
                         b.helmet = u.slot == 0
                         b.armor = not b.helmet
+                        b.resource_name = unit_name
                         b.save_key = (u.type or 0)
                             .. ':'
                             .. (u.slot or 0)
@@ -65,6 +67,21 @@ function G.new(deps)
         for i, g in ipairs(groups) do
             local target = g.helmet and (g.armor and 'Shared Armor / Helmet' or 'Helmet') or 'Armor'
             labels[i] = target .. ' LUT ' .. i
+            local names = {}
+            for _, b in ipairs(g.bindings) do
+                if b.resource_name then
+                    names[b.resource_name] = true
+                end
+            end
+            local ordered = {}
+            for name in pairs(names) do
+                ordered[#ordered + 1] = name
+            end
+            table.sort(ordered)
+            g.resource_names = ordered
+            if #ordered == 1 then
+                labels[i] = labels[i] .. ' / ' .. ordered[1]
+            end
         end
         local selected = 1
         for i, g in ipairs(groups) do
@@ -73,7 +90,19 @@ function G.new(deps)
                 break
             end
         end
-        return { groups = groups, owned = owned, labels = labels, selected = selected }
+        local signature = {}
+        for _, group in ipairs(groups) do
+            for _, b in ipairs(group.bindings) do
+                signature[#signature + 1] = tostring(group.object) .. ':' .. tostring(b.unit) .. ':' .. b.save_key
+            end
+        end
+        return {
+            groups = groups,
+            owned = owned,
+            labels = labels,
+            selected = selected,
+            signature = table.concat(signature, ';'),
+        }
     end
     return self
 end
