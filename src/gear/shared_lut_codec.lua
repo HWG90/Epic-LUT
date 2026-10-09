@@ -1,6 +1,7 @@
 -- Full RGBA32F tables and stable garment/material destinations. No lossy color conversion.
 local C = { MAX_RAW = 65536, MAX_TEXT = 3600, MAX_DOCS = 32, MAX_BINDINGS = 128 }
 local ffi = require('ffi')
+local bit = require('bit')
 local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 local digits = {}
 for i = 1, #alphabet do digits[alphabet:sub(i, i)] = i - 1 end
@@ -52,22 +53,28 @@ function C.compression()
         end,
     }
 end
-function C.new(compression)
+function C.new(compression, original)
     compression = compression or C.compression()
     local function word(n)
         assert(type(n) == 'number' and n >= 0 and n < 4294967296 and n % 1 == 0, 'Invalid shared kit')
         return ffi.string(ffi.new('uint32_t[1]', n), 4)
     end
     local function finite(doc)
-        assert(((doc.width == 23 and doc.height >= 1 and doc.height <= 16) or (doc.width == 3 and doc.height == 1)) and doc.height % 1 == 0, 'Unsupported shared table shape')
+        assert(((doc.width == 23 and doc.height >= 1 and doc.height <= 32) or (doc.width == 3 and doc.height == 1)) and doc.height % 1 == 0, 'Unsupported shared table shape')
         for i = 0, doc.width * doc.height * 4 - 1 do
             local n = tonumber(doc.data[i])
             assert(n == n and math.abs(n) <= 1e10, 'Invalid shared LUT float')
         end
     end
+    local function checksum(bytes)
+        local a, b = 1, 0
+        for i = 1, #bytes do a = (a + bytes:byte(i)) % 65521; b = (b + a) % 65521 end
+        return string.format('%08x', b * 65536 + a)
+    end
+    local function short(n) return string.char(n % 256, math.floor(n / 256)) end
     local self = {}
     function self.encode(identity, entries)
-        local docs, lookup, bindings, seen = {}, {}, {}, {}
+        local docs, delta_docs, xor_docs, lookup, bindings, seen = {}, {}, {}, {}, {}, {}
         for _, entry in ipairs(entries) do
             if not seen[entry.key] then
                 local d = entry.document
@@ -75,7 +82,39 @@ function C.new(compression)
                 local pixels = ffi.string(d.data, d.width * d.height * 16)
                 local signature = string.char(d.width, d.height) .. pixels
                 local index = lookup[signature]
-                if not index then docs[#docs + 1] = signature; index = #docs; lookup[signature] = index end
+                if not index then
+                    docs[#docs + 1] = signature; index = #docs; lookup[signature] = index
+                    local encoded = string.char(0) .. signature
+                    xor_docs[index] = encoded
+                    local base = entry.original
+                    if base and base.resource and base.resource:match('^%x+$') and #base.resource == 16
+                        and base.width == d.width and base.height == d.height then
+                        finite(base)
+                        local bytes = ffi.string(base.data, #pixels)
+                        -- Four byte planes retain every IEEE-754 bit; XOR makes
+                        -- unchanged bytes zero and groups similarly changing bytes.
+                        local planes = {}
+                        for lane = 1, 4 do
+                            local plane = {}
+                            for at = lane, #pixels, 4 do
+                                plane[#plane + 1] = string.char(bit.bxor(pixels:byte(at), bytes:byte(at)))
+                            end
+                            planes[#planes + 1] = table.concat(plane)
+                        end
+                        xor_docs[index] = string.char(2,d.width,d.height) .. base.resource:lower()
+                            .. checksum(bytes) .. table.concat(planes)
+                        local changes = {}
+                        for at = 1, #pixels, 4 do
+                            if pixels:sub(at, at + 3) ~= bytes:sub(at, at + 3) then
+                                changes[#changes + 1] = short((at - 1) / 4) .. pixels:sub(at, at + 3)
+                            end
+                        end
+                        local delta = string.char(1,d.width,d.height) .. base.resource:lower()
+                            .. checksum(bytes) .. short(#changes) .. table.concat(changes)
+                        if #delta < #encoded then encoded = delta end
+                    end
+                    delta_docs[index] = encoded
+                end
                 local pattern = entry.key:sub(1,2) == 'p:'
                 local destination = pattern and entry.key:sub(3) or entry.key
                 local t, slot, mesh, material = destination:match('^(%d+):(%d+):(%d+):(%d+)$')
@@ -90,16 +129,27 @@ function C.new(compression)
             .. string.char(#docs, #bindings) .. table.concat(docs) .. table.concat(bindings)
         assert(#raw <= C.MAX_RAW, 'Shared LUT raw budget exceeded')
         local text = '1|' .. #raw .. '|' .. base64(compression.compress(raw))
-        assert(#text <= C.MAX_TEXT, 'Full LUT appearance exceeds lobby size limit; local edits are kept')
+        local delta = 'EL2' .. raw:sub(4,17) .. table.concat(delta_docs) .. table.concat(bindings)
+        assert(#delta <= C.MAX_RAW, 'Shared delta raw budget exceeded')
+        local compact = '2|' .. #delta .. '|' .. base64(compression.compress(delta))
+        self.packet_sizes = { full = #text, sparse = #compact }
+        if #compact < #text then text = compact end
+        local xored = 'EL3' .. raw:sub(4,17) .. table.concat(xor_docs) .. table.concat(bindings)
+        if #xored <= C.MAX_RAW then
+            local packed = '3|' .. #xored .. '|' .. base64(compression.compress(xored))
+            self.packet_sizes.xor = #packed
+            if #packed < #text then text = packed end
+        end
+        assert(#text <= C.MAX_TEXT, 'Full LUT appearance needs ' .. #text .. ' bytes; lobby budget is ' .. C.MAX_TEXT .. '; local edits are kept')
         return text
     end
     function self.decode(text)
         assert(type(text) == 'string' and #text <= C.MAX_TEXT, 'Invalid shared LUT packet size')
-        local size, encoded = text:match('^1|(%d+)|(.+)$')
+        local version, size, encoded = text:match('^([123])|(%d+)|(.+)$')
         size = tonumber(size)
         assert(size and size >= 17 and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
         local raw = compression.decompress(unbase64(encoded), size)
-        assert(#raw == size and raw:sub(1,3) == 'EL1', 'Invalid shared LUT header')
+        assert(#raw == size and raw:sub(1,3) == 'EL' .. version, 'Invalid shared LUT header')
         local at = 4
         local function take(n)
             assert(at + n - 1 <= #raw, 'Truncated shared appearance')
@@ -110,12 +160,50 @@ function C.new(compression)
         end
         local result = {body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {}}
         local docs, bindings = take(1):byte(), take(1):byte()
+        local decoded_bytes = 0
         assert(docs <= C.MAX_DOCS and bindings <= C.MAX_BINDINGS, 'Shared appearance count exceeds budget')
         for i = 1, docs do
+            local mode = version ~= '1' and take(1):byte() or 0
+            assert(mode == 0 or mode == 1 or (version == '3' and mode == 2), 'Invalid shared LUT representation')
             local width, height = take(2):byte(1,2)
-            assert((width == 23 and height >= 1 and height <= 16) or (width == 3 and height == 1), 'Invalid shared LUT shape')
+            assert((width == 23 and height >= 1 and height <= 32) or (width == 3 and height == 1), 'Invalid shared LUT shape')
+            decoded_bytes = decoded_bytes + width * height * 16
+            assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
             local data = ffi.new('float[?]', width * height * 4)
-            ffi.copy(data, take(width * height * 16), width * height * 16)
+            if mode == 0 then
+                ffi.copy(data, take(width * height * 16), width * height * 16)
+            else
+                local resource, expected = take(16), take(8)
+                assert(resource:match('^%x+$') and expected:match('^%x+$'), 'Invalid shared baseline identity')
+                local base = original and original(resource)
+                assert(base, 'Sharing: waiting for original LUT ' .. resource)
+                assert(base.width == width and base.height == height, 'Shared baseline dimensions disagree')
+                local bytes = ffi.string(base.data, width * height * 16)
+                assert(checksum(bytes) == expected, 'Sharing: original LUT differs from sender ' .. resource)
+                ffi.copy(data, bytes, #bytes)
+                if mode == 2 then
+                    local planes = take(#bytes)
+                    local target = ffi.cast('uint8_t *',data)
+                    local count = width * height * 4
+                    for lane = 0, 3 do
+                        for i = 0, count - 1 do
+                            local at = i * 4 + lane
+                            target[at] = bit.bxor(bytes:byte(at + 1), planes:byte(lane * count + i + 1))
+                        end
+                    end
+                else
+                local lo, hi = take(2):byte(1,2)
+                local count, prior = lo + hi * 256, -1
+                assert(count <= width * height * 4, 'Too many shared changes')
+                for _ = 1, count do
+                    lo, hi = take(2):byte(1,2)
+                    local index = lo + hi * 256
+                    assert(index > prior and index < width * height * 4, 'Invalid shared change index')
+                    ffi.copy(data + index, take(4), 4)
+                    prior = index
+                end
+                end
+            end
             local doc = {width = width, height = height, data = data}
             finite(doc); result.documents[i] = doc
         end

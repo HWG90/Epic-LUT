@@ -463,22 +463,89 @@ assert(h.get('scratch_alpha') == 0.4 and scratch_picker.picker_alpha() == 0.4)
 -- Toolbar and Scratch readout remain clear of the preview and Paint button.
 local prior_preview = package.loaded['epic.player_preview.v1']
 local docked
-package.loaded['epic.player_preview.v1'] = {dock = function(bounds) docked = bounds end}
+package.loaded['epic.player_preview.v1'] = {
+    dock = function(bounds)
+        docked = bounds
+    end,
+}
 commands, hits = {}, {}
 editor.layout(ui)
 local alpha_label, paint_label
 for _, c in ipairs(commands) do
-    if c.text and c.text:match('^A: ') then alpha_label = c end
-    if c.text == 'Paint selected RGB' then paint_label = c end
+    if c.text and c.text:match('^A: ') then
+        alpha_label = c
+    end
+    if c.text == 'Paint selected RGB' then
+        paint_label = c
+    end
 end
 assert(alpha_label and paint_label and alpha_label.y > paint_label.y + 16, 'Scratch alpha readout overlaps Paint')
 assert(docked and docked.y + docked.h <= ui.y + ui.h - 140, 'Docked preview overlaps grid toolbar')
 package.loaded['epic.player_preview.v1'] = prior_preview
 
 local live_control = api.mods.palette_test.controls.cell_color
-local before_live = ffi.string(d.data,d.width*d.height*16)
+local before_live = ffi.string(d.data, d.width * d.height * 16)
 live_control.picker_begin()
-live_control.picker_preview({ 13, 37, 59 }, .42)
-assert(ffi.string(d.data,d.width*d.height*16)~=before_live,'Color picker preview did not update document')
+live_control.picker_preview({ 13, 37, 59 }, 0.42)
+assert(ffi.string(d.data, d.width * d.height * 16) ~= before_live, 'Color picker preview did not update document')
 live_control.picker_end(false)
-assert(ffi.string(d.data,d.width*d.height*16)==before_live,'Cancel did not restore color picker starting values')
+assert(
+    ffi.string(d.data, d.width * d.height * 16) == before_live,
+    'Cancel did not restore color picker starting values'
+)
+
+-- Custom tables retain readable, bounded hit targets and all rows remain reachable.
+d = { width = 23, height = 32, data = ffi.new('float[?]', 23 * 32 * 4) }
+for i = 0, 23 * 32 * 4 - 1 do
+    d.data[i] = (i % 19) / 16
+end
+editor.sync()
+editor.focus_cell(32, 1)
+commands, hits = {}, {}
+editor.layout(ui)
+local row32, first_count = false, 0
+for _, c in ipairs(commands) do
+    if c.text == 'Row 32' then
+        row32 = true
+    end
+    if c.text and c.text:match('^Row %d+$') then
+        first_count = first_count + 1
+    end
+end
+assert(row32 and first_count < 32 and editor.grid_first > 1, 'Custom row selection is not scrolled into view')
+local before_custom = ffi.string(d.data, 23 * 32 * 16)
+local alpha32 = d.data[(31 * 23) * 4 + 3]
+editor.paint_rgb(32, 1, '#123456')
+assert(math.abs(d.data[(31 * 23) * 4] - 18 / 255) < 1e-6 and d.data[(31 * 23) * 4 + 3] == alpha32)
+assert(ffi.string(d.data, 31 * 23 * 16) == before_custom:sub(1, 31 * 23 * 16), 'Custom row edit changed another row')
+local selected_first = editor.grid_first
+assert(editor.wheel(editor.grid_bounds.x + 5, editor.grid_bounds.y + 5, 120))
+commands, hits = {}, {}
+editor.layout(ui)
+assert(editor.grid_first < selected_first, 'Pixel grid wheel did not scroll custom rows')
+local encoded = m.dds.encode(d.data, 23, 32)
+local back, w, h = m.dds.decode(encoded)
+assert(w == 23 and h == 32 and ffi.string(back, 23 * 32 * 16) == ffi.string(d.data, 23 * 32 * 16))
+print('PASS custom rows: 32-row viewport, last-row edit isolation, scrolling and exact DDS export')
+
+local preview_before = package.loaded['epic.player_preview.v1']
+local docked_width, requests = true, 0
+package.loaded['epic.player_preview.v1'] = {
+    is_docked = function()
+        return docked_width
+    end,
+    dock = function()
+        requests = requests + 1
+    end,
+}
+commands, hits = {}, {}
+editor.layout(ui)
+local narrow = editor.grid_bounds.w
+docked_width = false
+commands, hits = {}, {}
+editor.layout(ui)
+assert(
+    editor.grid_bounds.w == narrow + 200 and requests == 2,
+    'Hidden/floating preview still reserved width or stopped lifecycle signaling'
+)
+package.loaded['epic.player_preview.v1'] = preview_before

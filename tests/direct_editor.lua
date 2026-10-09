@@ -563,22 +563,31 @@ activate('undo')
 activate('apply_editor')
 assert(bound[8] == helmet_object)
 assert(handle.set('save_name', 'shared-palette'))
-os.remove('tests/tmp/files/shared-palette.dds')
+local actual_date = os.date
+os.date = function()
+    return '2026-10-08_21-15-30'
+end
+local export_base = 'tests/tmp/files/shared-palette-2026-10-08_21-15-30'
+for _, suffix in ipairs({ '', '-01', '-02' }) do
+    os.remove(export_base .. suffix .. '.dds')
+end
 activate('save_dds')
-local shared = m.dds.read('tests/tmp/files/shared-palette.dds')
+local shared = m.dds.read(export_base .. '.dds')
 assert(shared[0] == 0.25, 'Shared preset did not retain full LUT data')
-local existing_bytes = assert(io.open('tests/tmp/files/shared-palette.dds', 'rb'))
-local existing = existing_bytes:read('*a')
-existing_bytes:close()
+local f = assert(io.open(export_base .. '.dds', 'rb'))
+local existing = f:read('*a')
+f:close()
 test_frontend.menu = {}
 activate('save_dds')
-assert(test_frontend.menu.outfit_dialog and test_frontend.menu.outfit_dialog.action_label == 'Overwrite DDS')
-local unchanged = assert(io.open('tests/tmp/files/shared-palette.dds', 'rb'))
-assert(unchanged:read('*a') == existing, 'Export overwrote before confirmation')
-unchanged:close()
-test_frontend.menu.outfit_dialog = nil -- cancel preserves the file
-activate('save_dds')
-assert(test_frontend.menu.outfit_dialog.on_save())
+assert(not test_frontend.menu.outfit_dialog, 'Timestamp export asked to overwrite')
+assert(m.dds.read(export_base .. '-01.dds')[0] == 0.25)
+f = assert(io.open(export_base .. '.dds', 'rb'))
+assert(f:read('*a') == existing, 'Timestamp export overwrote earlier file')
+f:close()
+for _, suffix in ipairs({ '', '-01' }) do
+    os.remove(export_base .. suffix .. '.dds')
+end
+os.date = actual_date
 test_frontend.menu = nil
 
 activate('refresh')

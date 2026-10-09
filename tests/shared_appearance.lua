@@ -94,3 +94,25 @@ assert(next(local_only.peers) == nil, 'Local player was treated as a remote targ
 print(
     'PASS sharing lifecycle: exact peer ownership, packet updates, unchanged no-op, malformed restore, off and cleanup'
 )
+
+-- A receiver waits for every baseline before applying any texture; retry succeeds on readiness.
+peer['local'] = false
+local ready = false
+local real_decode = deps.codec.decode
+deps.codec.decode = function(text)
+    assert(ready, 'Sharing: waiting for original LUT 1234567890abcdef')
+    return appearance
+end
+members = { { peer_low = 12, peer_high = 0, text = 'delta' } }
+local waiting = S.new(deps)
+local before = applied
+waiting.tick(2, true)
+waiting.tick(0.1, true)
+assert(applied == before and next(waiting.peers) == nil, 'Incomplete baseline packet applied partially')
+assert(waiting.status:find('waiting for original LUT', 1, true))
+ready = true
+waiting.tick(2, true)
+waiting.tick(0.1, true)
+assert(applied == before + 1, 'Baseline readiness did not retry incoming delta')
+assert(waiting.close())
+deps.codec.decode = real_decode

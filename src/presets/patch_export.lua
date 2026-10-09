@@ -43,9 +43,9 @@ function P.encode(dds, document, original)
     )
     assert(
         document.width == original.width
-            and document.height == original.height
-            and uint(template, 208) == document.width
-            and uint(template, 204) == document.height,
+            and (document.height == original.height or (document.width == 23 and document.height > 8 and document.height >= original.height))
+            and uint(template, 208) == original.width
+            and uint(template, 204) == original.height,
         'Editor LUT dimensions differ from selected destination'
     )
     assert(document.width == 23 or (document.width == 3 and document.height == 1), 'Unsupported patch LUT layout')
@@ -86,6 +86,73 @@ function P.encode(dds, document, original)
         stream = '',
     }
 end
+function P.encode_set(dds, documents)
+    assert(
+        type(documents) == 'table' and #documents > 0 and #documents <= 128,
+        'No complete palette to export or too many LUTs'
+    )
+    local unique, ordered = {}, {}
+    for _, item in ipairs(documents) do
+        local patch = P.encode(dds, item.document, item.original)
+        local previous = unique[patch.resource]
+        if previous then
+            assert(
+                previous.main == patch.main and previous.gpu == patch.gpu,
+                'Shared texture has conflicting applied palettes: ' .. patch.resource
+            )
+        else
+            unique[patch.resource] = patch
+            ordered[#ordered + 1] = patch
+        end
+    end
+    table.sort(ordered, function(a, b)
+        return a.resource < b.resource
+    end)
+    local count = #ordered
+    local kind = hash('cd4238c6a0c69e32')
+    local offset, gpu_offset = 104 + count * 80, 0
+    local entries, bodies, gpu = {}, {}, {}
+    for i, patch in ipairs(ordered) do
+        local body = patch.main:sub(185)
+        local aligned = math.ceil(gpu_offset / 64) * 64
+        gpu[#gpu + 1] = string.rep('\0', aligned - gpu_offset)
+        gpu[#gpu + 1] = patch.gpu
+        entries[#entries + 1] = hash(patch.resource)
+            .. kind
+            .. qword(offset)
+            .. qword(0)
+            .. qword(aligned)
+            .. qword(0)
+            .. qword(0)
+            .. word(#body)
+            .. word(0)
+            .. word(#patch.gpu)
+            .. word(16)
+            .. word(64)
+            .. word(i)
+        bodies[#bodies + 1] = body
+        offset, gpu_offset = offset + #body, aligned + #patch.gpu
+    end
+    return {
+        archive = P.BASE_ARCHIVE,
+        resource = tostring(count) .. ' LUTs',
+        count = count,
+        main = word(0xf0000011)
+            .. word(1)
+            .. word(count)
+            .. word(0)
+            .. string.rep('\0', 56)
+            .. qword(0)
+            .. kind
+            .. qword(count)
+            .. word(16)
+            .. word(64)
+            .. table.concat(entries)
+            .. table.concat(bodies),
+        gpu = table.concat(gpu),
+        stream = '',
+    }
+end
 function P.new(folder, deps)
     local self = {}
     function self.save(name, document, original)
@@ -93,7 +160,7 @@ function P.new(folder, deps)
             type(name) == 'string'
                 and #name > 0
                 and #name <= 48
-                and name:match('^[%w _-]+$')
+                and name:match('^[%w _()%-]+$')
                 and not name:match('^%s')
                 and not name:match('%s$'),
             'Invalid patch export name'
@@ -107,8 +174,12 @@ function P.new(folder, deps)
                 and not name:upper():match('^LPT%d$'),
             'Reserved export name'
         )
-        local patch = P.encode(deps.dds, document, original)
+        local patch = original and P.encode(deps.dds, document, original) or P.encode_set(deps.dds, document)
         local zip = P.zip(patch)
+        name = assert(deps.available_name, 'Export naming service unavailable')(name, function(candidate)
+            return deps.directory_exists(folder .. '/' .. candidate)
+                or deps.directory_exists(folder .. '/' .. candidate .. '.pending')
+        end)
         local destination, staging = folder .. '/' .. name, folder .. '/' .. name .. '.pending'
         assert(not deps.directory_exists(destination), 'Patch export already exists; choose another name')
         deps.mkdir_new(staging)

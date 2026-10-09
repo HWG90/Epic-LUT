@@ -42,6 +42,8 @@ function S.new(deps)
                 .. ':'
                 .. d.height
                 .. ':'
+                .. (entry.original and entry.original.resource or '')
+                .. ':'
                 .. require('ffi').string(d.data, d.width * d.height * 16)
         end
         local now = table.concat(marks, '|')
@@ -49,7 +51,8 @@ function S.new(deps)
             local ok, packet = pcall(codec.encode, identity, entries)
             signature = now
             text = ok and packet or nil
-            self.status = ok and ('Ready to share ' .. #entries .. ' full LUT bindings; waiting for stable lobby')
+            self.status = ok
+                    and ('Ready to share ' .. #entries .. ' full LUT bindings (' .. #packet .. ' bytes); waiting for stable lobby')
                 or tostring(packet)
             if not ok then
                 deps.note(self.status)
@@ -68,6 +71,13 @@ function S.new(deps)
                     ok, appearance = true, old.appearance
                 else
                     ok, appearance = pcall(codec.decode, member.text)
+                end
+                if not ok then
+                    local status = tostring(appearance)
+                    if self.status ~= status then
+                        self.status = status
+                        deps.note(status)
+                    end
                 end
                 if ok then
                     players = players or deps.players()

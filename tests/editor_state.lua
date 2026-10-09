@@ -65,3 +65,37 @@ start()
 object = 99
 assert(r.stop() and object == 99, 'Highlight overwrote a competing binding')
 print('PASS editor state: independent copies, unequal row counts, cache reset, restoration retry, foreign ownership')
+
+local tall = { width = 23, height = 12, data = ffi.new('float[?]', 23 * 12 * 4) }
+tall.data[(11 * 23) * 4 + 3] = 0.625
+local current = 10
+local tall_binding = { current = 10 }
+local tall_indicator = R.new({
+    present = function()
+        return true
+    end,
+    binding = function()
+        return current
+    end,
+    bind = function(_, object)
+        current = object
+    end,
+    apply = function(document)
+        local at = 11 * 23 * 4
+        assert(
+            document.height == 12
+                and document.data[at] == 1
+                and document.data[at + 1] == 0
+                and document.data[at + 2] == 1
+                and document.data[at + 3] == 0.625
+                and document.data[0] == 0,
+            'Wrong custom region highlighted'
+        )
+        current = 20
+        tall_binding.current = 20
+        return 1, { object = 20 }
+    end,
+})
+tall_indicator.start({ { binding = tall_binding, object = 10, source = tall, document = tall } }, 12)
+assert(tall.data[11 * 23 * 4] == 0, 'Region flash mutated custom LUT')
+assert(tall_indicator.stop() and current == 10)

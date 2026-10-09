@@ -181,6 +181,7 @@ registry['dbf.epic_lut.frontend.v1'].menu.window_bounds = { x = 10, y = 20, scal
 public.dock({ x = 100, y = 100, w = 180, h = 300 })
 editor.on_update(ctx, 0.01)
 assert(opens == 7, 'Editor dock did not open')
+assert(public.is_docked(), 'Visible dock did not report its layout reservation')
 x, y, down = 250, 250, false
 local z = zooms
 assert(input.wheel() == 0 and zooms == z + 1, 'Preview wheel zoom leaked to page')
@@ -189,6 +190,7 @@ assert(input.wheel() == 120, 'Preview consumed wheel outside its bounds')
 assert(public.toggle())
 editor.on_update(ctx, 0.01)
 assert(opens == 8, 'Pop Out did not reopen at floating geometry')
+assert(not public.is_docked(), 'Floating preview retained a dock width reservation')
 assert(public.toggle())
 editor.on_update(ctx, 0.01)
 assert(opens == 8, 'Dock Back rebuilt the owned model unnecessarily')

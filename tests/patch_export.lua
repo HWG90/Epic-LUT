@@ -46,11 +46,68 @@ local pixels, w, h = D.decode(main:sub(193) .. p.gpu)
 assert(w == 23 and h == 2 and ffi.string(pixels, #p.gpu) == ffi.string(document.data, #p.gpu))
 assert(not pcall(P.encode, D, document, { width = 23, height = 2, resource = original.resource }))
 assert(not pcall(P.encode, D, { width = 23, height = 1, data = document.data }, original))
+-- Multi-LUT palette: one TOC, exact IDs, independently aligned GPU ranges, all channels retained.
+local items = {}
+for i = 1, 10 do
+    local pixels = ffi.new('float[?]', 23 * 2 * 4)
+    ffi.copy(pixels, document.data, 23 * 2 * 16)
+    pixels[0] = i + 0.25
+    local orig = {}
+    for key, value in pairs(original) do
+        orig[key] = value
+    end
+    orig.resource = string.format('%016x', i)
+    items[#items + 1] = { document = { width = 23, height = 2, data = pixels }, original = orig }
+end
+local batch = P.encode_set(D, items)
+assert(batch.count == 10 and u(batch.main, 8) == 10 and u(batch.main, 88) == 10)
+for i = 1, 10 do
+    local at = 104 + (i - 1) * 80
+    assert(u(batch.main, at) == i and u(batch.main, at + 76) == i)
+    local body_at, gpu_at, size = u(batch.main, at + 16), u(batch.main, at + 32), u(batch.main, at + 64)
+    assert(gpu_at % 64 == 0 and body_at + 340 <= #batch.main and gpu_at + size <= #batch.gpu)
+    local data, width, height =
+        D.decode(batch.main:sub(body_at + 193, body_at + 340) .. batch.gpu:sub(gpu_at + 1, gpu_at + size))
+    assert(width == 23 and height == 2 and ffi.string(data, size) == ffi.string(items[i].document.data, size))
+end
+local pattern_data = ffi.new('float[12]')
+pattern_data[0], pattern_data[3], pattern_data[7] = 0.125, 0.5, 0.75
+local pattern_original = {
+    width = 3,
+    height = 1,
+    resource = '0000000000000011',
+    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. D.encode(pattern_data, 3, 1):sub(1, 148),
+}
+local mixed = {}
+for i, item in ipairs(items) do
+    mixed[i] = item
+end
+mixed[#mixed + 1] = { document = { width = 3, height = 1, data = pattern_data }, original = pattern_original }
+local combined = P.encode_set(D, mixed)
+assert(combined.count == 11 and u(combined.main, 8) == 11)
+local last = 104 + 10 * 80
+local patbody, patgpu, patsize = u(combined.main, last + 16), u(combined.main, last + 32), u(combined.main, last + 64)
+local pat, w, h =
+    D.decode(combined.main:sub(patbody + 193, patbody + 340) .. combined.gpu:sub(patgpu + 1, patgpu + patsize))
+assert(
+    w == 3 and h == 1 and ffi.string(pat, 48) == ffi.string(pattern_data, 48),
+    'Pattern LUT lost from mixed palette patch'
+)
+items[#items + 1] = items[1]
+assert(P.encode_set(D, items).count == 10, 'Shared LUT not deduplicated')
+local conflict = { document = items[2].document, original = items[1].original }
+items[#items + 1] = conflict
+assert(not pcall(P.encode_set, D, items), 'Conflicting shared LUT silently overwritten')
+assert(not pcall(P.encode_set, D, {}), 'Empty full palette exported')
 document.data[0] = 0 / 0
 assert(not pcall(P.encode, D, document, original), 'Nonfinite pixels exported')
 document.data[0] = -2
 -- Filesystem transaction: publish only a complete triplet; no overwrite or partial output.
-local root = os.getenv('EPIC_LUT_TEST_ROOT') .. '/tests/tmp/patch-export'
+local root = os.getenv('TEMP')
+    .. '/EpicLUT-patch-export-'
+    .. tostring(os.time())
+    .. '-'
+    .. tostring(math.floor(os.clock() * 1000000))
 ffi.cdef(
     'int CreateDirectoryW(const uint16_t *,void *); int RemoveDirectoryW(const uint16_t *); uint32_t GetFileAttributesW(const uint16_t *);'
 )
@@ -74,9 +131,15 @@ local function rmdir(path)
     assert(kernel.RemoveDirectoryW(wide(path)) ~= 0)
 end
 local name = 'test-' .. tostring(os.time())
-local exporter = P.new(root, { dds = D, directory_exists = exists, mkdir_new = mkdir, rmdir = rmdir })
+local exporter = P.new(root, {
+    available_name = dofile('src/presets/lut_files.lua').available_name,
+    dds = D,
+    directory_exists = exists,
+    mkdir_new = mkdir,
+    rmdir = rmdir,
+})
 local destination, resource, zip_path = exporter.save(name, document, original)
-assert(resource == original.resource and zip_path == destination .. '/' .. name .. '.zip')
+assert(resource == original.resource and zip_path == destination .. '/' .. destination:match('[^/]+$') .. '.zip')
 local zip_file = assert(io.open(zip_path, 'rb'))
 local zip_bytes = zip_file:read('*a')
 zip_file:close()
@@ -91,7 +154,16 @@ for _, suffix in ipairs(files) do
     f:close()
     assert(contents == (suffix == '' and p.main or suffix == '.stream' and p.stream or p.gpu))
 end
-assert(not pcall(exporter.save, name, document, original), 'Existing export overwritten')
+local extra, _, extra_zip = exporter.save(name, document, original)
+assert(
+    extra ~= destination and extra:match('%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d'),
+    'Duplicate patch did not use a timestamp'
+)
+for _, suffix in ipairs(files) do
+    os.remove(extra .. '/' .. p.archive .. '.patch_0' .. suffix)
+end
+os.remove(extra_zip)
+rmdir(extra)
 assert(not pcall(exporter.save, '../escape', document, original))
 assert(not pcall(exporter.save, 'CON', document, original))
 local rename = os.rename
@@ -110,3 +182,15 @@ rmdir(root)
 print(
     'PASS patch export: exact 64-bit IDs, native wrapper, float pixel round trip, complete triplet, no overwrite, rollback and malformed-input rejection'
 )
+
+local custom_pixels = ffi.new('float[?]', 23 * 32 * 4)
+custom_pixels[31 * 23 * 4] = 0.75
+local custom_source = {
+    width = 23,
+    height = 8,
+    resource = '1234567890abcdef',
+    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. D.encode(ffi.new('float[736]'), 23, 8):sub(1, 148),
+}
+local custom_patch = P.encode(D, { width = 23, height = 32, data = custom_pixels }, custom_source)
+local custom_data, cw, ch = D.decode(custom_patch.main:sub(377) .. custom_patch.gpu)
+assert(cw == 23 and ch == 32 and custom_data[31 * 23 * 4] == 0.75, 'Patch export truncated custom row count')

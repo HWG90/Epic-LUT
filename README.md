@@ -21,7 +21,13 @@ No Python or MCM installation required. Windows PowerShell/.NET handles file pic
 
 This prerelease adds full Armor, Helmet and Pattern LUT sharing for compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. Multiplayer sharing still needs a two-player live test. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
 
-**LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo and DDS export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
+**LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo, DDS export and Pattern Patch ZIP export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
+
+## Larger tables and custom rows
+
+Material LUTs with up to **32 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
+
+Tables above eight rows retain their added rows when Preserve Original Emissives is enabled. Original values are preserved for the rows present in the game snapshot; extra rows keep the imported values. DDS and patch export retain the custom row count. The model must reference those rows for them to be visible.
 
 ## Start with Basic
 

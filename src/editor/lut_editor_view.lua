@@ -35,7 +35,7 @@ function V.new(deps)
             if w < 20 then
                 return
             end
-            local featured = id == 'save_dds' or id == 'save_setup' or id == 'save_row'
+            local featured = id == 'export_selected' or id == 'save_dds' or id == 'save_setup' or id == 'save_row'
             ui.rect(x, y, w, 26, featured and { 244, 202, 53 } or blue)
             ui.bounded(x + 6, y + 5, label, 15, featured and { 25, 28, 31 } or white, w - 12)
             ui.hit(x, y, w, 26, function()
@@ -84,9 +84,18 @@ function V.new(deps)
         local portrait = package.loaded['epic.player_preview.v1']
         local portrait_width
         if portrait and portrait.dock then
-            portrait_width = math.min(200, left * 0.30)
+            local requested_width = math.min(200, left * 0.30)
             local ph = math.max(80, top - (gear_controls and 34 or 0) - 160 - gridbottom)
-            portrait.dock({ x = ui.x + left - portrait_width - 8, y = gridbottom + 32, w = portrait_width, h = ph - 12 })
+            -- Keep page/lifecycle signaling even while floated or hidden.
+            portrait.dock({
+                x = ui.x + left - requested_width - 8,
+                y = gridbottom + 32,
+                w = requested_width,
+                h = ph - 12,
+            })
+            if not portrait.is_docked or portrait.is_docked() then
+                portrait_width = requested_width
+            end
         end
         if not d then
             local gear = self.api and self.api.mods[self.handle.id].controls.editor_load_armor
@@ -153,9 +162,48 @@ function V.new(deps)
             '[ ' .. (h.get('show_alpha') and 'x' or ' ') .. ' ] Show Alpha',
             'show_alpha'
         )
-        local cell = math.min((left - 98) / d.width, (ui.h - bottomh - 140 - (gear_controls and 34 or 0)) / d.height)
+        local grid_top = top - 120
+        local grid_floor = gridbottom + 30
+        local width_cell = (left - 98) / d.width
         if portrait_width then
-            cell = math.min(cell, (left - portrait_width - 112) / d.width)
+            width_cell = math.min(width_cell, (left - portrait_width - 112) / d.width)
+        end
+        local space = math.max(18, grid_top - grid_floor)
+        local cell = math.max(18, math.min(width_cell, space / math.min(d.height, 8)))
+        local visible_rows = math.max(1, math.min(d.height, math.floor(space / cell)))
+        self.grid_max = math.max(0, d.height - visible_rows)
+        self.grid_first = math.max(1, math.min(self.grid_max + 1, self.grid_first or 1))
+        local selected_grid_row = h.get('edit_row')
+        if self.grid_selected ~= selected_grid_row then
+            if selected_grid_row < self.grid_first then
+                self.grid_first = selected_grid_row
+            end
+            if selected_grid_row >= self.grid_first + visible_rows then
+                self.grid_first = selected_grid_row - visible_rows + 1
+            end
+            self.grid_selected = selected_grid_row
+        end
+        local first_row, last_row = self.grid_first, self.grid_first + visible_rows - 1
+        self.grid_bounds = { x = ui.x, y = grid_floor, w = left - (portrait_width or 0) - 8, h = space }
+        if self.grid_max > 0 then
+            ui.bounded(
+                ui.x + 10,
+                gridbottom + 11,
+                'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
+                12,
+                muted,
+                left - 150
+            )
+            local function navigate(x, label, direction)
+                ui.rect(x, gridbottom + 3, 54, 24, blue)
+                ui.bounded(x + 5, gridbottom + 8, label, 12, white, 44)
+                ui.hit(x, gridbottom + 3, 54, 24, function()
+                    self.grid_first =
+                        math.max(1, math.min(self.grid_max + 1, self.grid_first + direction * visible_rows))
+                end)
+            end
+            navigate(ui.x + left - 124, '< Rows', -1)
+            navigate(ui.x + left - 64, 'Rows >', 1)
         end
         for c = 1, d.width do
             ui.bounded(
@@ -167,8 +215,8 @@ function V.new(deps)
                 cell - 2
             )
         end
-        for r = 1, d.height do
-            local y = top - 120 - r * cell
+        for r = first_row, last_row do
+            local y = grid_top - (r - first_row + 1) * cell
             local selected_row = r
             ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, { 244, 202, 53 }, 68)
             if self.api and self.api.mods[self.handle.id].controls.identify_region then
@@ -181,12 +229,12 @@ function V.new(deps)
         end
         local row = h.get('edit_row')
         local column = h.get('edit_column')
-        for r = 1, d.height do
+        for r = first_row, last_row do
             for c = 1, d.width do
                 local selected_row, selected_col = r, c
                 local index = semantics.index(r, c, 1, d.width, d.height)
                 local x = ui.x + 82 + (c - 1) * cell
-                local y = top - 120 - r * cell
+                local y = grid_top - (r - first_row + 1) * cell
                 local s = self.selection
                 local selected = s and r >= s.r1 and r <= s.r2 and c >= s.c1 and c <= s.c2
                 local color = rgb(d.data, index)
@@ -471,7 +519,7 @@ function V.new(deps)
         local optionw = left * 0.4 - 20
         local gear = self.api and self.api.mods[self.handle.id].controls.editor_load_armor
         if gear then
-            step = math.min(30, (bottomh - 65) / (self.more_options and 11 or 8))
+            step = math.min(30, (bottomh - 65) / (self.more_options and 12 or 8))
             ui.rect(ui.x + 10, optionsy - step * 1.5, optionw, 1, { 65, 76, 85 })
             ui.rect(ui.x + 10, optionsy - step * 4.5, optionw, 1, { 65, 76, 85 })
             button(ui.x + 10, optionsy, (optionw - 5) / 2, 'Import file', 'browse')
@@ -511,15 +559,11 @@ function V.new(deps)
                 'Export Name: ' .. (ui.input_value and ui.input_value('save_name') or h.get('save_name')),
                 'save_name'
             )
-            button(ui.x + 10, optionsy - step * 6 - 5, (optionw - 5) / 2, 'Export DDS', 'save_dds')
-            button(
-                ui.x + 15 + (optionw - 5) / 2,
-                optionsy - step * 6 - 5,
-                (optionw - 5) / 2,
-                'Open Export Location',
-                'open_export'
-            )
-            button(ui.x + 10, optionsy - step * 7 - 5, optionw, 'Export Patch ZIP', 'save_patch')
+            button(ui.x + 10, optionsy - step * 6 - 5, optionw * 0.35 - 3, 'Export...', 'export_selected')
+            if ui.choice then
+                ui.choice('export_format', ui.x + 15 + optionw * 0.35, optionsy - step * 6 - 5, optionw * 0.65 - 5)
+            end
+            button(ui.x + 10, optionsy - step * 7 - 5, optionw, 'Open Export Location', 'open_export')
             ui.rect(ui.x + 10, optionsy - step * 8 - 5, optionw, 26, { 24, 39, 52 })
             ui.bounded(
                 ui.x + 16,
@@ -681,7 +725,7 @@ function V.new(deps)
                     local masks = self.mesh_masks == true and portrait.material_masks ~= nil
                     local rows = masks and portrait.material_masks() or portrait.meshes()
                     ui.rect(x + 12, y + ht - 63, 185, 24, blue)
-                    ui.bounded(x + 18, y + ht - 58, masks and 'Leg Material Masks' or 'Mesh Visibility', 13, white, 173)
+                    ui.bounded(x + 18, y + ht - 58, masks and 'Hip / Leg Masks' or 'Mesh Visibility', 13, white, 173)
                     ui.hit(x + 12, y + ht - 63, 185, 24, function()
                         self.mesh_masks = not masks
                         self.mesh_page = 1

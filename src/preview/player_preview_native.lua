@@ -5,6 +5,7 @@ function Native.new(E, m, host)
     local A, W, U, G, R, V = E.Application, E.World, E.Unit, E.Gui, E.Renderer, E.Viewport
     local memory, native = host.memory, host.native
     local source_materials = {}
+    local probe_texture
     local function address(value)
         return tonumber(ffi.cast('uintptr_t', value))
     end
@@ -79,6 +80,59 @@ function Native.new(E, m, host)
                 kept.objects[resource.slot] = resource.object
             end
             native.commit(dest.mesh)
+        end
+        -- The base garments carry m_gibs as a separate material section within
+        -- the same skinned mesh as the pants/jacket. Use the authored shadow-only
+        -- transparent material for that slot on the copy (nil produces a pink error surface),
+        -- rather than hiding the complete limb or changing its texture masks.
+        if
+            type(U.set_material) == 'function'
+            and E.Mesh
+            and type(E.Mesh.has_material) == 'function'
+            and type(E.Mesh.material) == 'function'
+        then
+            local removed = {}
+            for _, material in ipairs(piece.materials) do
+                local mesh = U.mesh(piece.unit, material.mesh_index + 1)
+                if E.Mesh.has_material(mesh, 'm_gibs') then
+                    local handle = E.Mesh.material(mesh, 'm_gibs')
+                    if handle and address(handle) == material.material then
+                        assert(
+                            material.material ~= material.source and not source_materials[material.material],
+                            'Shared gore material refused'
+                        )
+                        removed[material.material] = true
+                    end
+                end
+            end
+            if next(removed) then
+                local transparent = 'content/ui/shared/material/gui_diffuse_map'
+                assert(A.can_get('material', transparent), 'Preview transparent material unavailable')
+                U.set_material(piece.unit, 'm_gibs', transparent)
+                local copies = m.engine.unit_materials(native, token(piece.unit))
+                local hidden = 0
+                for _, material in ipairs(copies) do
+                    local mesh = U.mesh(piece.unit, material.mesh_index + 1)
+                    if E.Mesh.has_material(mesh, 'm_gibs') then
+                        local handle = E.Mesh.material(mesh, 'm_gibs')
+                        if handle and address(handle) == material.material then
+                            assert(not source_materials[material.material], 'Shared transparent material refused')
+                            m.engine.bind(native, material.material, 0x3aa8b87e, probe_texture('black'))
+                            native.commit(material.mesh)
+                            hidden = hidden + 1
+                        end
+                    end
+                end
+                assert(hidden > 0, 'Preview transparent gib material did not resolve')
+                local kept = {}
+                for _, material in ipairs(piece.materials) do
+                    if not removed[material.material] then
+                        kept[#kept + 1] = material
+                    end
+                end
+                piece.materials = kept
+                host.log('preview: transparent owned m_gibs slot resource=' .. tostring(U.resource_name(piece.unit)))
+            end
         end
         if
             m.limb_caps
@@ -390,7 +444,7 @@ function Native.new(E, m, host)
     local probe_key = 'epic.preview.mask.probes.v1'
     local probes = package.loaded[probe_key] or {}
     package.loaded[probe_key] = probes
-    local function probe_texture(mode)
+    probe_texture = function(mode)
         if probes[mode] then
             return probes[mode].object
         end
@@ -406,7 +460,7 @@ function Native.new(E, m, host)
     function adapter.material_masks(value)
         local rows = {}
         for pi, piece in ipairs(value.pieces) do
-            if piece.slot == 6 or piece.slot == 7 then
+            if piece.slot == 5 or piece.slot == 6 or piece.slot == 7 then
                 local resource = tostring(U.resource_name(piece.unit))
                 resource = resource:match('#ID%[(%x+)%]') or resource
                 for ai, material in ipairs(piece.materials or {}) do

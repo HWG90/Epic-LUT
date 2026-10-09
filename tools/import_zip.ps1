@@ -1,5 +1,6 @@
 param([string]$Package='',[switch]$Pick,[switch]$Navigate,[switch]$ListVariants,[string]$VariantFolder='',[Parameter(Mandatory=$true)][string]$Output,[Parameter(Mandatory=$true)][string]$Result,[int]$OwnerPID=0,[string]$SevenZip='')
 $ErrorActionPreference='Stop'
+function Test-LutShape($Width,$Height) { return (($Width -eq 23 -and $Height -ge 1 -and $Height -le 32) -or ($Width -eq 3 -and $Height -eq 1)) }
 # Data only: ZIP members are never installed or executed. All work is outside the game.
 $script:lastOwnerCheck=[DateTime]::MinValue
 function Check-Owner {
@@ -204,7 +205,7 @@ try {
             $slash=$member.LastIndexOf('/');$folder=if($slash -lt 0){''}else{$member.Substring(0,$slash)}
             if(!$folders.ContainsKey($folder)) {$folders[$folder]=0}
             if($member -match '(?i)\.dds$') {
-                if($members[$member].Length -ge 148) {$h=Read-Header $members[$member];if((U32 $h 0) -eq 542327876 -and (U32 $h 16) -eq 23 -and (U32 $h 12) -le 32){$folders[$folder]++}}
+                if($members[$member].Length -ge 148) {$h=Read-Header $members[$member];if((U32 $h 0) -eq 542327876 -and (Test-LutShape (U32 $h 16) (U32 $h 12))){$folders[$folder]++}}
                 continue
             }
             $path=Stage $member;$length=(Get-Item -LiteralPath $path).Length
@@ -219,7 +220,7 @@ try {
                 $pos=U64 $records ($at+16);$size=U32 $records ($at+56)
                 if($size -lt 340 -or $pos -lt $start+80*[long]$count -or $pos -gt $length -or $size -gt $length-$pos){continue}
                 $h=Read-Range $path $pos 340
-                if((U32 $h 192) -eq 542327876 -and (U32 $h 208) -eq 23 -and (U32 $h 204) -ge 1 -and (U32 $h 204) -le 32 -and (U32 $h 320) -in @(2,10)){$folders[$folder]++}
+                if((U32 $h 192) -eq 542327876 -and (Test-LutShape (U32 $h 208) (U32 $h 204)) -and (U32 $h 320) -in @(2,10)){$folders[$folder]++}
             }
         }
         if($ListVariants) {
@@ -286,7 +287,7 @@ public static class EpicVariantWindow {
             # Inspect only the header of ordinary large textures; copy actual LUTs only.
             $entry=$members[$name];if($entry.Length -lt 148) {continue}
             $header=Read-Header $entry
-            if((U32 $header 0) -ne 542327876 -or (U32 $header 16) -ne 23 -or (U32 $header 12) -gt 32) {continue}
+            if((U32 $header 0) -ne 542327876 -or -not (Test-LutShape (U32 $header 16) (U32 $header 12))) {continue}
             if($entry.Length -gt 1MB) {throw 'LUT DDS payload exceeds 1 MB'}
             $path=Stage $name;Save-Lut (Read-Range $path 0 $entry.Length);continue
         }
@@ -308,7 +309,7 @@ public static class EpicVariantWindow {
             $main=Read-Range $path $mainAt ([Math]::Min(340,$mainSize))
             if($main.Length -lt 340 -or (U32 $main 192) -ne 542327876) {continue}
             $header=Slice $main 192 148;$w=U32 $header 16;$h=U32 $header 12;$format=U32 $header 128
-            if($w -ne 23 -or $h -lt 1 -or $h -gt 32 -or $format -notin @(2,10)) {continue}
+            if(-not (Test-LutShape $w $h) -or $format -notin @(2,10)) {continue}
             if((U32 $header 84) -ne 808540228 -or (U32 $header 132) -ne 3 -or (U32 $header 136) -ne 0 -or (U32 $header 140) -ne 1) {throw 'Unsupported DDS texture kind'}
             $need=$w*$h*4*$(if($format -eq 2) {4} else {2})
             $gpuAt=U64 $table ($at+32);$gpuSize=U32 $table ($at+64)
@@ -323,7 +324,7 @@ public static class EpicVariantWindow {
             Save-Lut ([byte[]]($header+$pixels)) ((U64 $table $at).ToString('x16'))
         }
     }
-    if($files.Count -eq 0) {throw 'ZIP contains no supported 23-column DDS LUTs'}
+    if($files.Count -eq 0) {throw 'Archive contains no supported Material or 3x1 Pattern LUTs'}
     [IO.File]::WriteAllText((Join-Path $Output 'resources.tsv'),($resourceRows -join "`n"),(New-Object Text.UTF8Encoding($false)))
     $script:percent=100;Pulse 'extracting'
     Publish ("ok`n"+($files -join "`n"))

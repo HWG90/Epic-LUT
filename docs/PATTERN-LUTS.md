@@ -1,15 +1,21 @@
 # Pattern LUTs
 
-Open **LUT Editor**, then **Pattern LUT Editor** to open the movable popup. Select the Armor or Helmet tab. Choose **Load Current Pattern LUTs** and select the bound Armor or Helmet pattern table. Original snapshots may take a moment to finish loading.
+Open **LUT Editor > Pattern LUT Editor**. Choose **Armor** or **Helmet**, then select the pattern table. The popup loads the current values automatically and refreshes when equipped gear changes. **Load Current Patterns** reloads the worn gear when you need to retry a missing snapshot.
 
-Pattern LUTs are **3 columns by 1 row**, bound through the separate pattern texture slot. They do not replace the 23-column gear LUT.
+Pattern LUTs contain **3 columns and 1 row**, bound through a separate pattern texture slot. They do not replace the 23-column material table. A garment can bind a pattern table without visibly using it; **Flash Pattern** identifies where the selected accent appears. **Stop Flash** restores its previous binding.
 
-- Column 1 RGB: accent color. Alpha remains unknown.
-- Column 2 RGB: metallic controls, with a useful range of 0 to 1. Alpha: pattern opacity. These are provisional mappings from the supplied pattern reference.
-- Column 3 RGBA: unknown, preserved unless explicitly edited under raw values.
+- **Column 1 RGB:** accent color. Alpha is unknown.
+- **Column 2 RGB:** metallic controls, normally edited between 0 and 1. Alpha is pattern opacity. These mappings are provisional; their effect depends on the material.
+- **Column 3 RGBA:** unknown. Values stay intact until explicitly edited.
 
-Edits apply to the selected pattern table's live bindings. Use **Undo Pattern Edit**, **Redo Pattern Edit**, or **Restore Original Pattern LUTs**. Enter a name and **Export Pattern DDS** to save all 12 floats in `files/exports`. Import a 3x1 DDS using the normal file chooser; then choose the destination and explicitly apply it in this section.
+Click a swatch to select its controls. Double-click to open the color picker. Color and alpha preview live; **Use Color** keeps the edit and **Cancel** restores the values from when the picker opened. For exact numbers, use the channel fields. **Advanced** exposes the unknown channels without assigning them invented meanings.
 
-Edited pattern tables are included in the compatible Epic LUT full-appearance sharing packet. Their live mapping still needs in-game confirmation.
+**Undo** and **Redo** apply to the selected table. History follows that table when switching Armor and Helmet. **Restore All Patterns** restores the original bindings for every pattern table edited in this session.
 
-**Show Alpha** is shared with the LUT Editor grid. It displays each swatch over a checkerboard as alpha approaches zero; values outside 0 to 1 are clamped only for display. Alpha can be a shader control instead of opacity, so this display does not change the actual material behavior.
+**Show Alpha** is shared with the LUT Editor. It draws a checkerboard as alpha approaches zero. Display values are clamped to 0-1; stored floats are preserved. Shader alpha is not always transparency.
+
+To import a pattern, choose **Import** and select a 3x1 DDS. Preview its three swatches, choose a loaded destination, then **Apply Imported DDS to Selected Pattern LUT**. Importing a file alone does not change the model. An unavailable destination must finish loading before an import can be applied.
+
+Name the export, then choose **Export DDS** for the selected table or **Export Patch ZIP** for its game texture replacement. **Export Entire Palette** in the main editor also includes edited pattern tables. Exports append a timestamp in `files/exports`; **Open Export Location** opens that folder. All twelve floats, including unknown values, remain intact.
+
+Edited patterns are included in compatible Epic LUT appearance sharing. Pattern rendering and multiplayer appearance still require confirmation in the game; an unused pattern may produce no visible change.

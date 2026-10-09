@@ -2,7 +2,13 @@
 -- No identity guesses, zero-value guesses, GPU probing or archive decoding on the game thread.
 local O = {}
 function O.new(m, paths, native, targets)
-    local self = { snapshots = {}, loaded = false, status = 'Original LUT snapshots not requested', attempted = {} }
+    local self = {
+        snapshots = {},
+        loaded = false,
+        status = 'Original LUT snapshots not requested',
+        attempted = {},
+        requested = {},
+    }
     local folder = paths.originals or paths.files
     local function exists(path)
         local f = io.open(path, 'rb')
@@ -160,6 +166,10 @@ function O.new(m, paths, native, targets)
             return false
         end
         local wanted = targets()
+        wanted = wanted or {}
+        for object in pairs(self.requested) do
+            wanted[object] = true
+        end
         if not wanted or next(wanted) == nil then
             self.status = 'Waiting for equipped Armor / Helmet LUTs'
             return false
@@ -275,6 +285,18 @@ function O.new(m, paths, native, targets)
         end
         return self.snapshots[object]
     end
+    function self.get_resource(resource)
+        assert(
+            type(resource) == 'string' and #resource == 16 and resource:match('^%x+$'),
+            'Invalid original resource request'
+        )
+        local object = m.engine.texture_object(native, resource)
+        if not object then
+            return nil
+        end
+        self.requested[object] = true
+        return self.get(object)
+    end
     function self.retry()
         self.attempted = {}
         if not self.worker and not self.job then
@@ -286,7 +308,7 @@ function O.new(m, paths, native, targets)
     end
     return self
 end
-function O.preserve(document, original)
+function O.preserve(document, original, retain_rows)
     assert(
         original,
         'Original game LUT snapshot not found for this live resource. Unavailable pixels are not zero values.'
@@ -297,14 +319,15 @@ function O.preserve(document, original)
         'Imported LUT has fewer rows than this original game LUT; cannot preserve missing color rows'
     )
     local ffi = require('ffi')
-    local data = ffi.new('float[?]', document.width * original.height * 4)
-    ffi.copy(data, document.data, document.width * original.height * 16)
+    local height = retain_rows and document.height or original.height
+    local data = ffi.new('float[?]', document.width * height * 4)
+    ffi.copy(data, document.data, document.width * height * 16)
     for row = 0, original.height - 1 do
         data[row * document.width * 4 + 3] = original.data[row * original.width * 4 + 3]
         for ch = 0, 3 do
             data[(row * document.width + 13) * 4 + ch] = original.data[(row * original.width + 13) * 4 + ch]
         end
     end
-    return { data = data, width = document.width, height = original.height, source = document.source }
+    return { data = data, width = document.width, height = height, source = document.source }
 end
 return O

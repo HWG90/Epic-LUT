@@ -135,10 +135,16 @@ local function load_dds(path)
     local bytes = m.file_io.read(path, m.dds.MAX_BYTES)
     local data, w, h = m.dds.decode(bytes)
     if w == 3 and h == 1 and pattern_editor then
-        palettes = {}
-        palette_choices({ 'Import a material LUT...' })
+        local ok, changed = disable_matching()
+        assert(ok, changed)
+        if changed then
+            groups = {}
+        end
         edit.imported = nil
-        local result = pattern_editor.import({ data = data, width = w, height = h })
+        local imported = { data = data, width = w, height = h, source = path, resource = import_ids[path] }
+        source_tables[path] = imported
+        -- Keep archive choices so another Pattern table in this variant remains selectable.
+        local result = pattern_editor.import(imported)
         if api and handle then
             api.focus_page(handle.id, 'colors')
             pattern_editor.show()
@@ -399,7 +405,10 @@ local function apply(document, selected_kind)
         for _, b in ipairs(targets) do
             local variant = variants[b.original]
             if not variant then
-                variant = { document = m.original_luts.preserve(document, original_luts.get(b.original)), targets = {} }
+                variant = {
+                    document = m.original_luts.preserve(document, original_luts.get(b.original), document.height > 8),
+                    targets = {},
+                }
                 variants[b.original] = variant
             end
             variant.targets[#variant.targets + 1] = b
@@ -560,7 +569,7 @@ local function apply_matching()
         local document = p.document
         if handle.get('preserve_emissives') then
             assert(original_luts, 'Original snapshot reader unavailable')
-            document = m.original_luts.preserve(document, original_luts.get(p.targets[1].original))
+            document = m.original_luts.preserve(document, original_luts.get(p.targets[1].original), document.height > 8)
         end
         for _, b in ipairs(p.targets) do
             assert(present(b) and binding(b) == b.current, 'Gear bindings changed; load current gear again')
@@ -2175,6 +2184,7 @@ return {
     author = 'Goose',
     on_enable = function(context)
         ctx = context
+        ctx.log('Epic LUT build: ' .. (m.build_label or m.version or 'development'))
         paths = m.paths.new(m)
         operations.preset_files = m.lut_files.new(paths.presets, { dds = m.dds, read = m.file_io.read })
         operations.export_files = m.lut_files.new(paths.exports, { dds = m.dds, read = m.file_io.read })
@@ -2254,7 +2264,9 @@ return {
                 local remote_read = m.avatar.reader(memory)
                 return m.shared_appearance.new({
                     sync = m.lobby_sync,
-                    codec = m.shared_lut_codec.new(),
+                    codec = m.shared_lut_codec.new(nil, function(resource)
+                        return original_luts and original_luts.get_resource(resource)
+                    end),
                     memory = memory,
                     game = game,
                     note = function(text)
@@ -2273,7 +2285,11 @@ return {
                         local out = {}
                         for _, b in ipairs(bindings.owned) do
                             if b.document and b.current ~= b.original and present(b) and binding(b) == b.current then
-                                out[#out + 1] = { key = b.save_key, document = applied_document(b) }
+                                out[#out + 1] = {
+                                    key = b.save_key,
+                                    document = applied_document(b),
+                                    original = original_luts and original_luts.get(b.original),
+                                }
                             end
                         end
                         if operations.pattern_session then
@@ -2284,7 +2300,11 @@ return {
                                     and present(b)
                                     and binding(b) == b.current
                                 then
-                                    out[#out + 1] = { key = 'p:' .. b.save_key, document = applied_document(b) }
+                                    out[#out + 1] = {
+                                        key = 'p:' .. b.save_key,
+                                        document = applied_document(b),
+                                        original = original_luts and original_luts.get(b.original),
+                                    }
                                 end
                             end
                         end
@@ -2444,6 +2464,26 @@ return {
                 end,
             })
             pattern_editor = m.pattern_luts.new({
+                present = present,
+                gear_signature = function()
+                    local identity = m.avatar.resolve_live(memory, game)
+                    if not identity then
+                        return nil
+                    end
+                    return table.concat({ identity.body, identity.armor, identity.helmet, identity.unit }, ':')
+                end,
+                export_patch = function(name, document, original)
+                    assert(original, 'Original Pattern LUT snapshot is not ready')
+                    local exporter = m.patch_export.new(paths.exports, {
+                        available_name = m.lut_files.available_name,
+                        dds = m.dds,
+                        directory_exists = paths.directory_exists,
+                        mkdir_new = paths.mkdir_new,
+                        rmdir = paths.rmdir,
+                    })
+                    local output, resource, zip = exporter.save(name, document, original)
+                    return message('Exported Pattern LUT ' .. resource .. ' to ' .. (zip or output))
+                end,
                 indicator = pattern_indicator,
                 session = pattern_session,
                 key = material_key,
@@ -2487,22 +2527,8 @@ return {
                     return out
                 end,
                 export = function(name, document)
-                    local function write()
-                        operations.export_files.save(name, document)
-                        return message('Exported 3x1 Pattern DDS to files/exports')
-                    end
-                    if operations.export_files.exists(name) and frontend.menu then
-                        frontend.menu.outfit_dialog = {
-                            phase = 'delete',
-                            title = 'Overwrite Pattern DDS?',
-                            preset_name = name .. '.dds',
-                            description = 'Replace the existing Pattern DDS?',
-                            action_label = 'Overwrite DDS',
-                            on_save = write,
-                        }
-                        return message('Confirm Pattern DDS overwrite')
-                    end
-                    return write()
+                    local chosen = operations.export_files.save_unique(name, document)
+                    return message('Exported ' .. chosen .. '.dds to files/exports')
                 end,
             })
             operations.pattern_session = pattern_session
@@ -2517,25 +2543,10 @@ return {
                 function(name)
                     return action(function()
                         assert(edit.loaded, 'Import a palette first')
-                        assert(name:match('^[%w _-]+$') and #name <= 48 and #name > 0, 'Invalid DDS filename')
                         local d = edit.loaded
-                        local function write_export()
-                            operations.export_files.save(name, d)
-                            d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
-                            return message('Saved ' .. name .. '.dds in Epic LUT/files/exports')
-                        end
-                        if operations.export_files.exists(name) and frontend.menu then
-                            frontend.menu.outfit_dialog = {
-                                phase = 'delete',
-                                title = 'Overwrite DDS?',
-                                preset_name = name .. '.dds',
-                                description = 'Replace the existing export with this LUT?',
-                                action_label = 'Overwrite DDS',
-                                on_save = write_export,
-                            }
-                            return message('Confirm overwrite or cancel to keep the existing DDS.')
-                        end
-                        return write_export()
+                        local chosen = operations.export_files.save_unique(name, d)
+                        d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+                        return message('Saved ' .. chosen .. '.dds in Epic LUT/files/exports')
                     end)
                 end,
                 paths.presets,
@@ -2560,9 +2571,63 @@ return {
                     paths.open_exports()
                     return message('Opened Epic LUT export folder')
                 end,
-                function(name)
+                function(name, entire)
                     return action(function()
                         assert(m.patch_export, 'Patch exporter unavailable')
+                        if entire then
+                            assert(stop_identification(), 'Highlight restoration pending')
+                            if pattern_editor then
+                                assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+                            end
+                            refresh(true)
+                            local documents, resources = {}, {}
+                            local function collect(group)
+                                for _, b in ipairs(group.bindings) do
+                                    assert(
+                                        present(b) and binding(b) == b.current,
+                                        'Gear changed; load current gear before exporting'
+                                    )
+                                    local original = original_luts and original_luts.get(b.original)
+                                    assert(original, 'Original palette snapshot is not ready for one of the worn LUTs')
+                                    local document = b.current ~= b.original and applied_document(b) or original
+                                    assert(document, 'Applied LUT data unavailable; cannot export the entire palette')
+                                    local previous = resources[original.resource]
+                                    if previous then
+                                        assert(
+                                            previous.width == document.width
+                                                and previous.height == document.height
+                                                and ffi.string(previous.data, previous.width * previous.height * 16)
+                                                    == ffi.string(document.data, document.width * document.height * 16),
+                                            'Shared LUT has different applied values; cannot represent both in one patch'
+                                        )
+                                    else
+                                        resources[original.resource] = document
+                                        documents[#documents + 1] = { document = document, original = original }
+                                    end
+                                end
+                            end
+                            for _, group in ipairs(groups) do
+                                collect(group)
+                            end
+                            if pattern_editor then
+                                local patterns_found = pattern_editor.scan()
+                                if patterns_found > 0 then
+                                    pattern_editor.load()
+                                end
+                                for _, group in ipairs(pattern_editor.all_groups or {}) do
+                                    collect(group)
+                                end
+                            end
+                            local exporter = m.patch_export.new(paths.exports, {
+                                available_name = m.lut_files.available_name,
+                                dds = m.dds,
+                                directory_exists = paths.directory_exists,
+                                mkdir_new = paths.mkdir_new,
+                                rmdir = paths.rmdir,
+                            })
+                            local output, count, zip = exporter.save(name, documents)
+                            return message('Exported entire worn palette: ' .. count .. ' to ' .. (zip or output))
+                        end
                         assert(edit.loaded, 'Load or edit a LUT first')
                         refresh(true)
                         local selected = basic_selected or edit.editor_target
@@ -2592,6 +2657,7 @@ return {
                         end
                         assert(original, 'Original destination LUT snapshot is not ready')
                         local exporter = m.patch_export.new(paths.exports, {
+                            available_name = m.lut_files.available_name,
                             dds = m.dds,
                             directory_exists = paths.directory_exists,
                             mkdir_new = paths.mkdir_new,
@@ -2607,9 +2673,6 @@ return {
         message('Direct DDS editor ready; no archive discovery or Python')
     end,
     on_update = function(dt_context, dt)
-        local perf_started = os.clock()
-        edit.perf = edit.perf or { age = 0, frames = 0, total = 0, original = 0, frontend = 0, maximum = 0 }
-        local perf = edit.perf
         pcall(region_indicator.tick, dt, not frontend.menu or frontend.menu.visible)
         local myc = not not rawget(_G, 'MatchYourColorsInstalled')
         if frontend and frontend.menu then
@@ -2624,17 +2687,13 @@ return {
         if updates then
             pcall(updates.tick, dt)
         end
-        local perf_original = os.clock()
         if original_luts then
             local ok, why = pcall(original_luts.tick)
             if not ok then
                 message('Original snapshot error: ' .. tostring(why))
             end
         end
-        perf.original = perf.original + os.clock() - perf_original
-        local perf_frontend = os.clock()
         frontend.tick(dt)
-        perf.frontend = perf.frontend + os.clock() - perf_frontend
         local current = frontend.resolve()
         if current then
             register(current)
@@ -2771,26 +2830,6 @@ return {
             if label then
                 label.label = sharing.status
             end
-        end
-        local elapsed = os.clock() - perf_started
-        perf.age, perf.frames = perf.age + (dt or 0), perf.frames + 1
-        perf.total, perf.maximum = perf.total + elapsed, math.max(perf.maximum, elapsed)
-        if perf.age >= 5 then
-            if ctx.log then
-                ctx.log(
-                    string.format(
-                        'PERF update_avg=%.3fms max=%.3fms original_avg=%.3fms frontend_avg=%.3fms menu=%s resume_done=%s refresh_pending=%s',
-                        perf.total * 1000 / perf.frames,
-                        perf.maximum * 1000,
-                        perf.original * 1000 / perf.frames,
-                        perf.frontend * 1000 / perf.frames,
-                        tostring(frontend.menu and frontend.menu.visible),
-                        tostring(resume_done),
-                        tostring(refresh_needed)
-                    )
-                )
-            end
-            edit.perf = nil
         end
     end,
     on_disable = close,

@@ -31,3 +31,19 @@ assert(not coroutine.resume(failed) and not cache.bad, 'Malformed table poisoned
 print(
     'PASS table indexing: bounded reads, cooperative yielding, immutable queue, resource IDs and cache/failure isolation'
 )
+
+local patterns = I.new({
+    max_bytes = 100,
+    read = function(path)
+        return path
+    end,
+    decode = function()
+        return {}, 3, 1
+    end,
+})
+local cache3 = {}
+local pattern_job = patterns.start({ 'pattern' }, cache3, { pattern = '1234567890abcdef' })
+assert(
+    coroutine.resume(pattern_job) and cache3.pattern.width == 3 and cache3.pattern.resource == '1234567890abcdef',
+    'Archive Pattern LUT was discarded by indexer'
+)

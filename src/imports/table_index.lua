@@ -13,7 +13,7 @@ function I.new(deps)
                 if not documents[path] then
                     local bytes = deps.read(path, deps.max_bytes)
                     local data, width, height = deps.decode(bytes)
-                    if width == 23 then
+                    if width == 23 or (width == 3 and height == 1) then
                         documents[path] =
                             { data = data, width = width, height = height, source = path, resource = resources[path] }
                     end

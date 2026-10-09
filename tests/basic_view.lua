@@ -21,6 +21,7 @@ local state = {
 }
 state.raw = { basic = { armor = { document = state.editor }, helmet = { document = state.editor } } }
 local selected
+local export_hits = 0
 local view = dofile('src/editor/basic_view.lua').new(function()
     return state
 end, function(row)
@@ -35,6 +36,7 @@ local controls = {
         choices = { 'Choose saved outfit...', 'Example' },
         default = 1,
     },
+    { id = 'export_format', type = 'choice', label = 'Export format', choices = {'DDS','Selected LUT Patch','Entire Palette Patch'}, default = 1 },
     { id = 'basic_target', type = 'choice', label = 'Worn gear', choices = { 'Armor', 'Helmet' }, default = 1 },
     { id = 'cell_color', type = 'color', label = 'Primary color', default = '#808080' },
     { id = 'basic_preset_name', type = 'input', label = 'Preset name', default = 'test' },
@@ -65,12 +67,19 @@ for _, id in ipairs({
     'outfit_apply_armor',
     'outfit_apply_helmet',
     'save_setup',
+    'save_patch_all',
+    'save_dds',
+    'export_selected',
+    'open_export',
 }) do
     controls[#controls + 1] = {
         id = id,
         type = 'button',
         label = id,
         on_activate = function()
+            if id == 'export_selected' then
+                export_hits = export_hits + 1
+            end
             return true
         end,
     }
@@ -179,18 +188,63 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(matching, 'Basic matching-import action missing')
-local export_labels = {}
-for _, c in ipairs(menu.compose(1280, 720)) do
-    if c.full_text then
-        export_labels[c.full_text] = c
+-- Compact Basic keeps the actions above the footer and scrolls independently of regions.
+assert(view.action_maximum > 0, 'Loaded Basic actions need a scroll range at 780px window height')
+local region_scroll = view.scroll
+assert(view.wheel(view.action_bounds.x + 10, view.action_bounds.y + 10, -1200), 'Basic action pane ignored wheel input')
+assert(
+    view.action_scroll == view.action_maximum and view.scroll == region_scroll,
+    'Action scrolling moved primary regions'
+)
+for _, resolution in ipairs({ { 1920, 1080 }, { 1280, 720 } }) do
+    for _, font in ipairs({ 12, 20 }) do
+        menu.compact_fonts, menu.font_size = true, font
+        local export_labels = {}
+        for _, c in ipairs(menu.compose(unpack(resolution))) do
+            if c.full_text then
+                export_labels[c.full_text] = c
+            end
+        end
+        assert(
+            export_labels['Export']
+                and export_labels['Export...']
+                and export_labels['DDS']
+                and export_labels['Open Export Location'],
+            'Basic export section not reachable'
+        )
+        local bottom = menu.window_bounds.y + 110 * menu.window_bounds.scale
+        local status, restore = export_labels.Ready, export_labels['Restore Arrowhead LUT (Original)']
+        assert(
+            status and restore and status.y + status.size <= restore.y - 8 * menu.window_bounds.scale,
+            'Basic status overlaps restore control after font resizing'
+        )
+        for _, label in ipairs({ 'Export...', 'DDS', 'Open Export Location' }) do
+            assert(export_labels[label].y > bottom, 'Basic export overlapped window footer: ' .. label)
+        end
     end
 end
-assert(
-    export_labels['DDS Export - current selected table']
-        and export_labels['Export DDS']
-        and export_labels['Open Export Location'],
-    'Basic export section missing'
-)
+menu.font_size = 12
+local export_button
+for _, c in ipairs(menu.compose(1920, 1080)) do
+    if c.full_text == 'Export...' then
+        export_button = c
+    end
+end
+assert(export_button)
+for _, pressed in ipairs({ true, false }) do
+    menu.tick({
+        down = function(key)
+            return pressed and key == 1
+        end,
+        mouse = function()
+            return export_button.x + 2, export_button.y + 2
+        end,
+        wheel = function()
+            return 0
+        end,
+    })
+end
+assert(export_hits == 1, 'Scrolled Basic export button could not be clicked')
 
 menu.compose(1920, 1080)
 local x, y = row8.x + 85, row8.y + 2

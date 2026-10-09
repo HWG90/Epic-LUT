@@ -183,6 +183,9 @@ editor.on_enable = function(ctx)
         end
         return ok, why
     end
+    public.is_docked = function()
+        return docked and not dock_hidden and not floating_on_editor and controller.state == 'ready'
+    end
     public.dock = function(bounds)
         local front = package.loaded['dbf.epic_lut.frontend.v1']
         local window = front and front.menu.window_bounds

@@ -262,7 +262,7 @@ blocks[100024] = pack32(1) .. pack32(0) .. pack64(200000)
 E.Unit.resource_name = function()
     return 'leg-resource'
 end
-model.pieces[1].slot = 6
+model.pieces[1].slot = 5
 local diagnostic = a.material_masks(model)
 assert(#diagnostic == 1 and diagnostic[1].mode == 'original')
 local retained_probes = package.loaded['epic.preview.mask.probes.v1']
@@ -281,5 +281,59 @@ local own = model.pieces[1].unit
 model.pieces[1].unit = model.pieces[1].source
 assert(not pcall(a.set_material_mask, model, 1, 1, 123, 'black'), 'Live source unit accepted')
 model.pieces[1].unit = own
+retained_probes.black = nil
+-- Mixed clothing/gib sections must retain clothing and never clear source slots.
+blocks[101024] = blocks[100024]
+engine.unit_materials = function(_, id)
+    return {
+        { material = id == 1 and 100000 or 110000, mesh = 120000, mesh_index = 0, material_index = 0 },
+        { material = id == 1 and 101000 or 111000, mesh = 120000, mesh_index = 0, material_index = 1 },
+    }
+end
+E.Unit.mesh = function(unit, index)
+    assert(unit == piece.unit and index == 1)
+    return 'copied-mesh'
+end
+E.Unit.resource_name = function()
+    return 'mixed-garment'
+end
+E.Mesh = {
+    has_material = function(mesh, slot)
+        assert(mesh == 'copied-mesh' and slot == 'm_gibs')
+        return true
+    end,
+    material = function()
+        return ffi.cast('void *', 110000)
+    end,
+}
+local cleared = 0
+E.Unit.set_material = function(unit, slot, resource)
+    assert(
+        unit == piece.unit
+            and unit ~= piece.source
+            and slot == 'm_gibs'
+            and resource == 'content/ui/shared/material/gui_diffuse_map'
+    )
+    cleared = cleared + 1
+end
+E.Vector3 = setmetatable({
+    normalize = function(value)
+        return value
+    end,
+}, {
+    __call = function(_, x)
+        return x
+    end,
+})
+retained_probes.black = { object = 444444 }
+local mixed = a.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    cleared == 1 and #mixed.pieces[1].materials == 1 and mixed.pieces[1].materials[1].material == 111000,
+    'Gib slot removal discarded clothing or retained an invalid material handle'
+)
+assert(
+    writes[#writes][1] == 110000 and writes[#writes][2] == 0x3aa8b87e and writes[#writes][3] == 444444,
+    'Transparent texture was not assigned to copied gib material'
+)
 retained_probes.black = nil
 print('PASS native preview material copy, shared source refusal and bounded binding reads')

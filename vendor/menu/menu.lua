@@ -883,7 +883,7 @@ function M.new(api, measure)
     end
 
     function self.wheel(delta, x, y)
-        if not self.visible or self.capture or not wheel_bounds or not x or not y then
+        if not self.visible or self.capture or drag or window_drag or window_resize or not wheel_bounds or not x or not y then
             return
         end
 
@@ -895,6 +895,10 @@ function M.new(api, measure)
         end
 
         local current_mod, current_page = active()
+        -- A modal or floating popup owns the pointer; do not scroll the editor underneath.
+        if self.color_picker or self.outfit_dialog or self.preview_window then return end
+        local floating = self.floating_bounds
+        if floating and x >= floating.x and x <= floating.x + floating.w and y >= floating.y and y <= floating.y + floating.h then return end
         if current_page and current_page.on_wheel and self.window_bounds then
             local b = self.window_bounds
             if current_page.on_wheel((x - b.x) / b.scale, (y - b.y) / b.scale, delta) then
@@ -1654,7 +1658,7 @@ function M.new(api, measure)
                     end,
                     number = function(id, x, y, width, value, prepare, enabled, lo, hi, selected)
                         local control = assert(mod.controls[id])
-                        if drag and drag.control == control then value = drag.value end
+                        if drag and drag.control == control and drag.widget_x == x and drag.widget_y == y then value = drag.value end
                         local track = width - 92
                         value = tonumber(value) or tonumber(mod.handle.get(id)) or tonumber(control.default) or 0
                         lo = tonumber(lo) or control.min
@@ -1683,7 +1687,7 @@ function M.new(api, measure)
                                 return
                             end
                             prepare()
-                            local item = { mod = mod, control = control, value = value, live = true }
+                            local item = { mod = mod, control = control, value = value, live = true, widget_x = x, widget_y = y }
                             function item.move(px)
                                 local fraction = math.max(0, math.min(1, (px - (ox + x * s)) / (track * s)))
                                 item.value = math.min(

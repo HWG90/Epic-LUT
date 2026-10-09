@@ -351,11 +351,45 @@ function C.new(deps)
                         end,
                     },
                     {
+                        id = 'export_format',
+                        type = 'choice',
+                        label = 'Export format',
+                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch' },
+                        default = 1,
+                    },
+                    {
+                        id = 'export_selected',
+                        type = 'button',
+                        label = 'Export...',
+                        on_activate = function()
+                            local format = self.handle.get('export_format')
+                            if format == 1 then
+                                return save(self.handle.get('save_name'))
+                            end
+                            return assert(deps.save_patch, 'Patch exporter unavailable')(
+                                self.handle.get('save_name'),
+                                format == 3
+                            )
+                        end,
+                    },
+                    {
                         id = 'save_dds',
                         type = 'button',
                         label = 'Export DDS preset to share',
                         on_activate = function()
                             return save(self.handle.get('save_name'))
+                        end,
+                    },
+                    {
+                        id = 'save_patch_all',
+                        type = 'button',
+                        label = 'Export Entire Palette',
+                        description = 'Export all worn Armor, Helmet and Pattern LUTs into one patch ZIP, using their currently applied values.',
+                        on_activate = function()
+                            return assert(deps.save_patch, 'Patch exporter unavailable')(
+                                self.handle.get('save_name'),
+                                true
+                            )
                         end,
                     },
                     {

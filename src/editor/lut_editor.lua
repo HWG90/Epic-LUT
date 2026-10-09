@@ -121,6 +121,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.redo = {}
             self.open_row = nil
             self.value_scroll = 0
+            self.grid_first, self.grid_selected = 1, nil
             self.selection = nil
             if not d.original then
                 d.original = ffi.new('float[?]', d.width * d.height * 4)
@@ -328,7 +329,13 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         return note('Custom edits reset to the imported palette. Apply to update the live LUTs.')
     end
     function self.wheel(x, y, delta)
-        local b = self.value_bounds
+        local b = self.grid_bounds
+        if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+            self.grid_first = math.max(1, math.min((self.grid_max or 0) + 1, (self.grid_first or 1) - delta / 120 * 3))
+            self.grid_first = math.floor(self.grid_first)
+            return true
+        end
+        b = self.value_bounds
         if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
             self.value_scroll = math.max(0, math.min(self.value_max or 0, self.value_scroll - delta / 120 * 90))
             return true
