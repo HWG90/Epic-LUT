@@ -169,8 +169,13 @@ editor.attach(api, handle)
 pattern.attach(handle, api.mods[handle.id].controls)
 editor.pattern_editor = pattern
 api.mods[handle.id].tabs_top = true
+local glyph_width_ratio = 0.5
 local menu = dofile('vendor/menu/menu.lua').new(api, function(value, size)
-    return #value * size * 0.5
+    local width = size * glyph_width_ratio
+    if glyph_width_ratio ~= 0.5 then
+        width = math.floor(width * 10 + 0.5) / 10
+    end
+    return #value * width
 end)
 menu.visible, menu.selected, menu.page = true, 1, 2
 menu.window_width, menu.window_height = 1800, 1000
@@ -535,13 +540,36 @@ end
 menu.text_metrics = nil
 menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = 12, 1, 1800, 1000
 
+-- Fractional native glyph widths must not lose the final Brush glyph during scale conversion.
+glyph_width_ratio = 0.7
+for _, font in ipairs({ 10, 12, 20 }) do
+    for _, scale in ipairs({ 0.7, 0.85, 1, 1.3 }) do
+        menu.font_size, menu.ui_scale = font, scale
+        commands = compose()
+        local brush = assert(label(commands, 'Brush'), 'Brush footer label missing')
+        assert(brush.text == 'Brush', 'Brush footer label lost a glyph')
+        local ink_width = #'Brush' * math.floor(brush.size * glyph_width_ratio * 10 + 0.5) / 10
+        assert(brush.text_width - ink_width >= brush.size * 0.5, 'Brush viewport discarded its measured padding')
+        local chip
+        for _, command in ipairs(commands) do
+            if command.type == 'rect' and math.abs(command.x - (brush.x + brush.text_width)) < 0.01 then
+                chip = command
+                break
+            end
+        end
+        assert(chip and brush.x + ink_width < chip.x, 'Brush text overlaps its color chip')
+    end
+end
+glyph_width_ratio = 0.5
+menu.font_size, menu.ui_scale = 12, 1
+
 -- A custom table can reach its last row after the inspector is collapsed.
-document = { width = 23, height = 32, data = ffi.new('float[?]', 23 * 32 * 4) }
+document = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
 editor.sync()
 tap_label('Hide Values')
-editor.focus_cell(32, 23)
+editor.focus_cell(64, 23)
 commands = compose()
-assert(label(commands, 'Row 32') and editor.grid_first > 1, 'Expanded custom grid cannot reach its last row')
+assert(label(commands, 'Row 64') and editor.grid_first > 1, 'Expanded custom grid cannot reach its last row')
 assert(editor.grid_max > 0 and not editor.value_bounds, 'Custom grid scrolling revived the hidden inspector')
 
 -- Imported and Pattern tools remain reachable before a regular LUT is loaded.

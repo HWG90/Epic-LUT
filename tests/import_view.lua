@@ -417,7 +417,7 @@ local many_armor, many_helmet = {}, {}
 for _, kind in ipairs({ 'armor', 'helmet' }) do
     local entries = kind == 'armor' and many_armor or many_helmet
     for number = 1, (kind == 'armor' and 11 or 4) do
-        local height = number == 11 and 32 or 8
+        local height = number == 11 and 64 or 8
         local data = ffi.new('float[?]', 23 * height * 4)
         for i = 0, 23 * height * 4 - 1 do
             data[i] = i % 4 == 3 and 1 or number / 16
@@ -544,7 +544,7 @@ assert(
 view.selected = nil
 wheel_at('armor', -120000)
 commands = compose()
-assert(find_label(commands, 'Row 32'), '32-row table could not reach its final row')
+assert(find_label(commands, 'Row 64'), '64-row table could not reach its final row')
 local count = #commands
 assert(count < 700, 'Off-screen gear rows still generated draw commands')
 local armor_scroll = view.gear_scroll.armor
@@ -568,9 +568,9 @@ assert(
 )
 wheel_at('armor', -120000)
 commands = compose()
-assert(find_label(commands, 'Row 32') and #commands < 700, 'Large font cannot reach row32 or renders off-screen rows')
+assert(find_label(commands, 'Row 64') and #commands < 700, 'Large font cannot reach row64 or renders off-screen rows')
 state.palette_ready = false
-view.selected = { key = 'armor/577', row = 32, column = 1 }
+view.selected = { key = 'armor/577', row = 64, column = 1 }
 commands = compose()
 assert(not view.selected, 'Unloaded palette retained an editable Scratch target')
 assert(

@@ -5,10 +5,10 @@ import numpy as np
 from game_catalog import discover,lz4,UNIT,MATERIAL,TEXTURE,LUT
 from lut_files import encode_dds,load
 
-def fixture(folder):
+def fixture(folder,height=2):
  folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
  archive='aaaaaaaaaaaaaaaa';unit='1111111111111111';material='2222222222222222';texture='3333333333333333'
- values=np.arange(2*23*4,dtype=np.float32).reshape(2,23,4)/8-10;values[0,13]=[8.5,100000000,-12.5,-0.0]
+ values=np.arange(height*23*4,dtype=np.float32).reshape(height,23,4)/8-10;values[0,13]=[8.5,100000000,-12.5,-0.0]
  unit_bytes=bytearray(132);struct.pack_into('<I',unit_bytes,112,116);struct.pack_into('<I',unit_bytes,116,1);struct.pack_into('<Q',unit_bytes,124,int(material,16))
  material_bytes=bytearray(148);struct.pack_into('<I',material_bytes,64,1);struct.pack_into('<IQ',material_bytes,136,LUT,int(texture,16))
  dds=encode_dds(values);texture_bytes=bytes(192)+dds[:148];parts=[(unit,UNIT,bytes(unit_bytes)),(material,MATERIAL,bytes(material_bytes)),(texture,TEXTURE,texture_bytes)]
@@ -44,4 +44,7 @@ if __name__=='__main__':
   try:discover(root/'game',kit,1,'armor',out,'wrongbody')
   except ValueError:pass
   else:raise AssertionError('Wrong body discovered')
+  tallkit,tall=fixture(root/'tall-game',64);tallout=root/'tall-out';tallout.mkdir()
+  tallresult=discover(root/'tall-game',tallkit,0,'armor',tallout,'tall')
+  assert tallresult['luts'][0]['height']==64 and load(tallout/tallresult['luts'][0]['file']).tobytes()==tall.tobytes()
  print('PASS archive chunk/entry boundaries, resource/slot discovery, exact HDR/signed floats, body filtering and malformed LZ4 rejection')

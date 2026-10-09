@@ -34,7 +34,7 @@ local function metadata(original)
             and type(original.height) == 'number'
             and (original.width == 23 or original.width == 3)
             and original.height >= 1
-            and original.height <= 32
+            and original.height <= 64
             and original.height % 1 == 0
             and (original.width ~= 3 or original.height == 1),
         'Invalid original LUT dimensions'

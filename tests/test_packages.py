@@ -19,6 +19,11 @@ with tempfile.TemporaryDirectory(prefix='epic-package-tests-') as temp:
     packaged=root/'packaged.zip'
     with zipfile.ZipFile(packaged,'w')as z:z.writestr('9ba626afa44a3aa3.patch_0',patch);z.writestr('9ba626afa44a3aa3.patch_0.gpu_resources',raw[148:]);z.writestr('9ba626afa44a3aa3.patch_0.stream',b'')
     out=import_package(packaged,root/'patch-out');assert len(out)==1 and out[0]['resource']=='0000000000001234'and load(out[0]['output']).tobytes()==data.tobytes()
+    tall=np.arange(64*23*4,dtype=np.float32).reshape(64,23,4)/13-100;tall[63,13,3]=-0.0
+    tallraw=encode_dds(tall);tallpatch=bytearray(patch)
+    tallpatch[184+192:184+340]=tallraw[:148];struct.pack_into('<I',tallpatch,104+64,len(tallraw)-148)
+    with zipfile.ZipFile(root/'tall.zip','w')as z:z.writestr('9ba626afa44a3aa3.patch_0',tallpatch);z.writestr('9ba626afa44a3aa3.patch_0.gpu_resources',tallraw[148:])
+    tallout=import_package(root/'tall.zip',root/'tall-out');assert tallout[0]['height']==64 and load(tallout[0]['output']).tobytes()==tall.tobytes()
     unsafe=root/'unsafe.zip'
     with zipfile.ZipFile(unsafe,'w')as z:z.writestr('../escape.dds',raw)
     reject(lambda:import_package(unsafe,root/'unsafe-out'))

@@ -60,7 +60,7 @@ function C.new(compression, original)
         return ffi.string(ffi.new('uint32_t[1]', n), 4)
     end
     local function finite(doc)
-        assert(((doc.width == 23 and doc.height >= 1 and doc.height <= 32) or (doc.width == 3 and doc.height == 1)) and doc.height % 1 == 0, 'Unsupported shared table shape')
+        assert(((doc.width == 23 and doc.height >= 1 and doc.height <= 64) or (doc.width == 3 and doc.height == 1)) and doc.height % 1 == 0, 'Unsupported shared table shape')
         for i = 0, doc.width * doc.height * 4 - 1 do
             local n = tonumber(doc.data[i])
             assert(n == n and math.abs(n) <= 1e10, 'Invalid shared LUT float')
@@ -166,7 +166,7 @@ function C.new(compression, original)
             local mode = version ~= '1' and take(1):byte() or 0
             assert(mode == 0 or mode == 1 or (version == '3' and mode == 2), 'Invalid shared LUT representation')
             local width, height = take(2):byte(1,2)
-            assert((width == 23 and height >= 1 and height <= 32) or (width == 3 and height == 1), 'Invalid shared LUT shape')
+            assert((width == 23 and height >= 1 and height <= 64) or (width == 3 and height == 1), 'Invalid shared LUT shape')
             decoded_bytes = decoded_bytes + width * height * 16
             assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
             local data = ffi.new('float[?]', width * height * 4)

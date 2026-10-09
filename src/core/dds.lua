@@ -21,7 +21,7 @@ local function half(n)
     return sign * (1 + f / 1024) * 2 ^ (e - 15)
 end
 function D.validate(data, w, h)
-    assert(w >= 1 and w <= 64 and h >= 1 and h <= 32 and w % 1 == 0 and h % 1 == 0, 'Unsupported LUT dimensions')
+    assert(w >= 1 and w <= 64 and h >= 1 and h <= 64 and w % 1 == 0 and h % 1 == 0, 'Unsupported LUT dimensions')
     for i = 0, w * h * 4 - 1 do
         local v = tonumber(data[i])
         assert(v == v and math.abs(v) ~= math.huge, 'Nonfinite LUT value')
@@ -49,7 +49,7 @@ function D.decode(s, expected_w, expected_h)
         error('DDS requires RGBA16F or RGBA32F', 0)
     end
     assert(format == 2 or format == 10, 'DDS requires RGBA16F or RGBA32F')
-    assert(w >= 1 and w <= 64 and h >= 1 and h <= 32, 'DDS dimensions exceed LUT bounds')
+    assert(w >= 1 and w <= 64 and h >= 1 and h <= 64, 'DDS dimensions exceed LUT bounds')
     if expected_w then
         assert(w == expected_w and h == expected_h, 'DDS dimensions do not match selected LUT')
     end

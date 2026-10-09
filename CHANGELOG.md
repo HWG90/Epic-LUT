@@ -1,5 +1,12 @@
 # Changelog
 
+## R5.5.1 - 2026-10-09
+
+- Raised material LUT support to 64 rows across import, editing, copying and export.
+- Fixed the clipped Brush label at larger font sizes.
+- Corrected the thumbnail credit to [Lytatroan](https://www.nexusmods.com/profile/Lytatroan).
+- Shared Lobby LUT is in testing.
+
 ## R5.5 - 2026-10-09
 
 - Fixed custom Armor, Helmet and Pattern colors reverting across hellpod, mission and ship transitions.

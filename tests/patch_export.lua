@@ -183,14 +183,14 @@ print(
     'PASS patch export: exact 64-bit IDs, native wrapper, float pixel round trip, complete triplet, no overwrite, rollback and malformed-input rejection'
 )
 
-local custom_pixels = ffi.new('float[?]', 23 * 32 * 4)
-custom_pixels[31 * 23 * 4] = 0.75
+local custom_pixels = ffi.new('float[?]', 23 * 64 * 4)
+custom_pixels[63 * 23 * 4] = 0.75
 local custom_source = {
     width = 23,
     height = 8,
     resource = '1234567890abcdef',
     patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. D.encode(ffi.new('float[736]'), 23, 8):sub(1, 148),
 }
-local custom_patch = P.encode(D, { width = 23, height = 32, data = custom_pixels }, custom_source)
+local custom_patch = P.encode(D, { width = 23, height = 64, data = custom_pixels }, custom_source)
 local custom_data, cw, ch = D.decode(custom_patch.main:sub(377) .. custom_patch.gpu)
-assert(cw == 23 and ch == 32 and custom_data[31 * 23 * 4] == 0.75, 'Patch export truncated custom row count')
+assert(cw == 23 and ch == 64 and custom_data[63 * 23 * 4] == 0.75, 'Patch export truncated custom row count')

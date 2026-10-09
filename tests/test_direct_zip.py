@@ -53,6 +53,19 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert completed.returncode==0,completed.stderr
     assert (folder/'dds/lut001.dds').read_bytes()==data
 
+    # The complete custom-row range imports intact; row 65 remains unsupported.
+    tall_header=bytearray(data[:148]);struct.pack_into('<I',tall_header,12,64)
+    tall_pixels=struct.pack('<'+'e'*(23*64*4),*[(i%109-50)/9 for i in range(23*64*4)])
+    tall_dds=bytes(tall_header)+tall_pixels
+    with zipfile.ZipFile(package,'w')as archive:archive.writestr('tall.dds',tall_dds)
+    result=folder/'tall.txt';completed=run(package,folder/'tall',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert (folder/'tall/lut001.dds').read_bytes()==tall_dds
+    struct.pack_into('<I',tall_header,12,65)
+    with zipfile.ZipFile(package,'w')as archive:archive.writestr('too-tall.dds',bytes(tall_header)+tall_pixels)
+    result=folder/'too-tall.txt';completed=run(package,folder/'too-tall',result)
+    assert completed.returncode!=0 and result.read_text().startswith('error\n'), 'ZIP import accepted row 65'
+
     # Shared Armory bundles preserve exact manifest IDs, metadata and Pattern bytes.
     pattern_header=bytearray(data[:148])
     for offset,value in {12:1,16:3,20:48,128:2}.items():struct.pack_into('<I',pattern_header,offset,value)
@@ -69,6 +82,18 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert (folder/'preset/lut001.patch-source').read_bytes()==material_meta and len(list((folder/'preset').iterdir()))==5
     fixture=ROOT/'tests/tmp/files/armorytest.zip'
     fixture.write_bytes(package.read_bytes())
+    tall_manifest=manifest.replace('\t23\t8\t','\t23\t64\t')
+    tall_meta=b'0123456789abcdef\n'+bytes(192)+tall_dds[:148]
+    with zipfile.ZipFile(package,'w')as archive:
+        for name,payload in [('preset.tsv',tall_manifest.encode()),('lut001.dds',tall_dds),('lut002.dds',pattern_dds),('lut001.patch-source',tall_meta),('lut002.patch-source',pattern_meta)]:archive.writestr(name,payload)
+    result=folder/'tall-preset.txt';completed=run(package,folder/'tall-preset',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert (folder/'tall-preset/lut001.dds').read_bytes()==tall_dds and (folder/'tall-preset/lut001.patch-source').read_bytes()==tall_meta
+    invalid_tall_manifest=tall_manifest.replace('\t23\t64\t','\t23\t65\t')
+    with zipfile.ZipFile(package,'w')as archive:
+        for name,payload in [('preset.tsv',invalid_tall_manifest.encode()),('lut001.dds',tall_dds),('lut002.dds',pattern_dds),('lut001.patch-source',tall_meta),('lut002.patch-source',pattern_meta)]:archive.writestr(name,payload)
+    result=folder/'too-tall-preset.txt';completed=run(package,folder/'too-tall-preset',result)
+    assert completed.returncode!=0 and 'Invalid shared preset patch metadata' in result.read_text(), 'Preset import accepted row-65 metadata'
     for index,bad_manifest in enumerate((manifest.replace('lut001.dds','../outside.dds'),manifest.replace('0000000000000001','not-a-texture-id'),manifest+'\n'+manifest.splitlines()[1])):
         with zipfile.ZipFile(package,'w')as archive:
             for name,payload in [('preset.tsv',bad_manifest.encode()),('lut001.dds',data),('lut002.dds',pattern_dds),('lut001.patch-source',material_meta),('lut002.patch-source',pattern_meta)]:archive.writestr(name,payload)

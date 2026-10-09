@@ -114,3 +114,29 @@ assert(values.enabled and values.preserve_effects)
 print(
     'PASS: full-float HDR/negative DDS round trip, untouched emissive/mode preservation, default effect protection, malformed rejection, undo/redo and row copy/paste'
 )
+
+local custom = ffi.new('float[?]', 23 * 64 * 4)
+for i = 0, 23 * 64 * 4 - 1 do
+    custom[i] = (i % 107 - 50) / 13
+end
+ffi.cast('uint32_t *', custom)[63 * 23 * 4 + 3] = 0x80000000
+local custom_bytes = D.encode(custom, 23, 64)
+local custom_back, custom_w, custom_h = D.decode(custom_bytes)
+assert(custom_w == 23 and custom_h == 64 and ffi.string(custom_back, 23 * 64 * 16) == ffi.string(custom, 23 * 64 * 16))
+local recolored = P.copy(custom, 23, 64, { [63] = '#123456' }, function(count)
+    return ffi.new('float[?]', count)
+end, ffi.copy)
+assert(ffi.string(recolored, 63 * 23 * 16) == ffi.string(custom, 63 * 23 * 16), 'Last-row recolor changed earlier rows')
+assert(
+    ffi.string(recolored + 63 * 23 * 4 + 3, (23 * 4 - 3) * 4) == ffi.string(custom + 63 * 23 * 4 + 3, (23 * 4 - 3) * 4)
+)
+local too_tall = ffi.new('float[?]', 23 * 65 * 4)
+assert(not pcall(D.encode, too_tall, 23, 65), 'DDS encoder accepted row 65')
+assert(not pcall(D.decode, header_word(custom_bytes, 12, 65)), 'DDS decoder accepted row 65')
+assert(not pcall(P.copy, too_tall, 23, 65, {}, function(count)
+    return ffi.new('float[?]', count)
+end, ffi.copy), 'Palette accepted row 65')
+assert(not pcall(P.copy, custom, 23, 64, { [64] = '#123456' }, function(count)
+    return ffi.new('float[?]', count)
+end, ffi.copy), 'Palette accepted a row beyond its document')
+print('PASS 64-row LUT: exact DDS/signed-zero round trip, last-row RGB isolation and row-65 rejection')

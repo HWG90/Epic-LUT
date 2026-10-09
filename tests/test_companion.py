@@ -37,7 +37,14 @@ with tempfile.TemporaryDirectory(prefix='epic-lut-test-') as temp:
         if (root/'source.exr.converted.dds').exists():break
         time.sleep(.1)
     bridge.stopped.set();bridge.join(2);assert load(root/'source.exr.converted.dds').tobytes()==data.tobytes()
-    for width,height in [(16,5),(3,1)]:
+    for width,height in [(16,5),(3,1),(23,64)]:
         array=np.zeros((height,width,4),dtype=np.float32);save(root/f'type-{width}.exr',array);assert load(root/f'type-{width}.exr').tobytes()==array.tobytes()
+    tall=np.arange(64*23*4,dtype=np.float32).reshape(64,23,4)/13-100
+    tall[63,0,3]=-0.0;tall[63,13]=[100000000,-2.75,.125,-0.0]
+    assert decode_dds(encode_dds(tall)).tobytes()==tall.tobytes()
+    save(root/'tall.exr',tall);assert load(root/'tall.exr').tobytes()==tall.tobytes()
+    rejects(lambda:validate(np.zeros((65,23,4),dtype=np.float32)))
+    malformed=bytearray(encode_dds(tall));struct.pack_into('<I',malformed,12,65)
+    rejects(lambda:decode_dds(malformed))
     result=convert_directory(root,'dds');assert any(v['status']=='converted' for v in result)
 print('PASS: DDS/EXR HDR/signed bitwise round trips, untouched emissive data, undo/redo, rectangular clipboard, row presets, camo, debug, quick save, protected paths, live publish and EXR bridge')

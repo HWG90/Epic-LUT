@@ -511,38 +511,38 @@ assert(
 )
 
 -- Custom tables retain readable, bounded hit targets and all rows remain reachable.
-d = { width = 23, height = 32, data = ffi.new('float[?]', 23 * 32 * 4) }
-for i = 0, 23 * 32 * 4 - 1 do
+d = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
+for i = 0, 23 * 64 * 4 - 1 do
     d.data[i] = (i % 19) / 16
 end
 editor.sync()
-editor.focus_cell(32, 1)
+editor.focus_cell(64, 1)
 commands, hits = {}, {}
 editor.layout(ui)
-local row32, first_count = false, 0
+local row64, first_count = false, 0
 for _, c in ipairs(commands) do
-    if c.text == 'Row 32' then
-        row32 = true
+    if c.text == 'Row 64' then
+        row64 = true
     end
     if c.text and c.text:match('^Row %d+$') then
         first_count = first_count + 1
     end
 end
-assert(row32 and first_count < 32 and editor.grid_first > 1, 'Custom row selection is not scrolled into view')
-local before_custom = ffi.string(d.data, 23 * 32 * 16)
-local alpha32 = d.data[(31 * 23) * 4 + 3]
-editor.paint_rgb(32, 1, '#123456')
-assert(math.abs(d.data[(31 * 23) * 4] - 18 / 255) < 1e-6 and d.data[(31 * 23) * 4 + 3] == alpha32)
-assert(ffi.string(d.data, 31 * 23 * 16) == before_custom:sub(1, 31 * 23 * 16), 'Custom row edit changed another row')
+assert(row64 and first_count < 64 and editor.grid_first > 1, 'Custom row selection is not scrolled into view')
+local before_custom = ffi.string(d.data, 23 * 64 * 16)
+local alpha64 = d.data[(63 * 23) * 4 + 3]
+editor.paint_rgb(64, 1, '#123456')
+assert(math.abs(d.data[(63 * 23) * 4] - 18 / 255) < 1e-6 and d.data[(63 * 23) * 4 + 3] == alpha64)
+assert(ffi.string(d.data, 63 * 23 * 16) == before_custom:sub(1, 63 * 23 * 16), 'Custom row edit changed another row')
 local selected_first = editor.grid_first
 assert(editor.wheel(editor.grid_bounds.x + 5, editor.grid_bounds.y + 5, 120))
 commands, hits = {}, {}
 editor.layout(ui)
 assert(editor.grid_first < selected_first, 'Pixel grid wheel did not scroll custom rows')
-local encoded = m.dds.encode(d.data, 23, 32)
+local encoded = m.dds.encode(d.data, 23, 64)
 local back, w, h = m.dds.decode(encoded)
-assert(w == 23 and h == 32 and ffi.string(back, 23 * 32 * 16) == ffi.string(d.data, 23 * 32 * 16))
-print('PASS custom rows: 32-row viewport, last-row edit isolation, scrolling and exact DDS export')
+assert(w == 23 and h == 64 and ffi.string(back, 23 * 64 * 16) == ffi.string(d.data, 23 * 64 * 16))
+print('PASS custom rows: 64-row viewport, last-row edit isolation, scrolling and exact DDS export')
 
 local preview_before = package.loaded['epic.player_preview.v1']
 local docked_width, requests = true, 0

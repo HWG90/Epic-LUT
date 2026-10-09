@@ -38,7 +38,7 @@ def patch_luts(path,output):
         main=raw[main_at:main_at+main_size]
         if len(main)<192+148 or main[192:196]!=b'DDS ':continue
         header=main[192:192+148];width,height=struct.unpack_from('<I',header,16)[0],struct.unpack_from('<I',header,12)[0];format=struct.unpack_from('<I',header,128)[0]
-        if format not in (2,10) or not 1<=width<=64 or not 1<=height<=32:continue
+        if format not in (2,10) or not 1<=width<=64 or not 1<=height<=64:continue
         needed=width*height*4*(4 if format==2 else 2)
         if gpu_size>=needed:payload=gpu[gpu_at:gpu_at+needed]
         elif stream_size>=needed:payload=stream[stream_at:stream_at+needed]

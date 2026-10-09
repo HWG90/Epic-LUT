@@ -116,7 +116,7 @@ function N.new(folder,kind)
         metadata.rows,metadata.preview=raw:match('\npreview\t(%d+)\t([^\n]+)')
         metadata.applied,metadata.prefix=raw:match('\napplied\t([^\t\n]+)\t([^\n]+)')
         for row,r,g,b in raw:gmatch('\nswatch\t(%d+)\t(%d+)\t(%d+)\t(%d+)')do
-            if #metadata.swatches<32 then metadata.swatches[#metadata.swatches+1]={row=tonumber(row),rgb={tonumber(r),tonumber(g),tonumber(b)}}end
+            if #metadata.swatches<64 then metadata.swatches[#metadata.swatches+1]={row=tonumber(row),rgb={tonumber(r),tonumber(g),tonumber(b)}}end
         end
         self.metadata=metadata;self.last_message=message
         local exact

@@ -9,8 +9,8 @@ local api = core.new({
     end,
 })
 local function make_document(base)
-    local d = { width = 23, height = 32, data = ffi.new('float[2944]') }
-    for i = 0, 2943 do
+    local d = { width = 23, height = 64, data = ffi.new('float[5888]') }
+    for i = 0, 5887 do
         d.data[i] = base + (i % 97) / 8
     end
     ffi.cast('uint32_t *', d.data)[4 * 23 * 4 + 39] = 0x80000000
@@ -46,7 +46,7 @@ editor.attach(api, h)
 assert(h.set('unlock', true))
 local row_bytes = 23 * 16
 local function bytes()
-    return ffi.string(document.data, 32 * row_bytes)
+    return ffi.string(document.data, 64 * row_bytes)
 end
 local function selected_rows(first, last)
     editor.select_rows(first, last)
@@ -79,20 +79,20 @@ assert(h.activate('paste_selection'))
 expected = initial:sub(1, 14 * row_bytes) .. three_rows .. initial:sub(17 * row_bytes + 1)
 assert(bytes() == expected and #editor.undo == count + 1, 'Three rows pasted outside the destination set')
 assert(h.activate('undo') and bytes() == initial)
--- The immutable clipboard survives changing to another 32-row document.
+-- The immutable clipboard survives changing to another 64-row document.
 document = make_document(70)
 editor.sync()
 assert(not editor.paste_anchor and not editor.selection, 'New document retained an old selection anchor')
 local other = bytes()
-selected_rows(29, 31)
+selected_rows(62, 64)
 assert(h.activate('paste_selection'))
-expected = other:sub(1, 28 * row_bytes) .. three_rows .. other:sub(31 * row_bytes + 1)
+expected = other:sub(1, 61 * row_bytes) .. three_rows .. other:sub(64 * row_bytes + 1)
 assert(bytes() == expected and #editor.undo == 1, 'Cross-document paste lost rows or exact float bits')
 assert(h.activate('undo') and bytes() == other, 'Cross-document row paste undo failed')
 -- Validate the full destination before changing any pixel or undo history.
 local unchanged = bytes()
 count = #editor.undo
-selected_rows(31, 32)
+selected_rows(63, 64)
 assert(
     not pcall(editor.paste_selection) and bytes() == unchanged and #editor.undo == count,
     'Oversize row paste partially mutated data'
@@ -124,6 +124,14 @@ assert(h.set('edit_row', 10) and h.set('edit_column', 23))
 assert(h.activate('paste_selection'))
 expected = unchanged:sub(1, 7 * row_bytes) .. three_rows .. unchanged:sub(10 * row_bytes + 1)
 assert(bytes() == expected, 'Rectangle paste used the drag endpoint instead of the selection top-left')
+selected_rows(1, 64)
+assert(h.activate('copy_selection') and editor.clip.height == 64, 'Whole-table copy truncated custom rows')
+local full_table = bytes()
+document = make_document(120)
+editor.sync()
+selected_rows(1, 64)
+assert(h.activate('paste_selection') and bytes() == full_table, '64-row block paste lost float bits')
+assert(h.activate('undo') and bytes() ~= full_table, '64-row block paste cannot be undone')
 print(
-    'PASS row clipboard: 2/3 complete RGBA rows, reverse ranges, normalized destination anchor, cross-document 32-row paste, exact HDR/signed-zero bits and atomic locks/fit/undo'
+    'PASS row clipboard: 2/3 complete RGBA rows, reverse ranges, normalized destination anchor, cross-document 64-row paste, exact HDR/signed-zero bits and atomic locks/fit/undo'
 )

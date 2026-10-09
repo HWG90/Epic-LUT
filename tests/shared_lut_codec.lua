@@ -145,18 +145,30 @@ assert(not pcall(small.decode, dense_packet), 'XOR packet accepted mismatched ba
 dense_base.data[0] = saved_dense
 assert(small.decode(dense_packet))
 
-local tall_base = { width = 23, height = 32, data = ffi.new('float[?]', 23 * 32 * 4), resource = 'fedcba9876543210' }
-local tall_edit = { width = 23, height = 32, data = ffi.new('float[?]', 23 * 32 * 4) }
-for i = 0, 23 * 32 * 4 - 1 do
+local tall_base = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4), resource = 'fedcba9876546410' }
+local tall_edit = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
+for i = 0, 23 * 64 * 4 - 1 do
     tall_base.data[i] = (i % 23) * 0.125
 end
-ffi.copy(tall_edit.data, tall_base.data, 23 * 32 * 16)
-tall_edit.data[31 * 23 * 4 + 3] = 0.375
+ffi.copy(tall_edit.data, tall_base.data, 23 * 64 * 16)
+tall_edit.data[63 * 23 * 4 + 3] = 0.375
 originals[tall_base.resource] = tall_base
 local tall_packet = small.encode(identity, { { key = '0:1:0:0', document = tall_edit, original = tall_base } })
 local tall_decoded = small.decode(tall_packet).entries['0:1:0:0'].document
 assert(
-    tall_decoded.height == 32
-        and ffi.string(tall_decoded.data, 23 * 32 * 16) == ffi.string(tall_edit.data, 23 * 32 * 16),
+    tall_decoded.height == 64
+        and ffi.string(tall_decoded.data, 23 * 64 * 16) == ffi.string(tall_edit.data, 23 * 64 * 16),
     'Sharing truncated custom rows'
 )
+assert(
+    C.MAX_TEXT == 3600 and C.MAX_RAW == 65536 and #tall_packet <= C.MAX_TEXT,
+    'Custom rows widened lobby byte budgets'
+)
+local too_tall = { width = 23, height = 65, data = ffi.new('float[?]', 23 * 65 * 4) }
+assert(not pcall(small.encode, identity, { { key = '0:1:0:0', document = too_tall } }), 'Sharing accepted row 65')
+local malformed = C.new({
+    decompress = function()
+        return 'EL1' .. string.rep('\0', 12) .. string.char(1, 0, 23, 65)
+    end,
+})
+assert(not pcall(malformed.decode, '1|19|AAAA'), 'Shared decoder accepted row 65')

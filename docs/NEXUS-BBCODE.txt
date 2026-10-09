@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC LUT R5.5[/b][/size]
+[center][size=6][b]EPIC LUT R5.5.1[/b][/size]
 [size=5][b]STYLISH FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 
@@ -15,7 +15,7 @@ Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
 [size=4][b]YOUR FIELD KIT[/b][/size]
 [list]
 [*][b]Colors that stay with you.[/b] Armor, Helmet and Pattern LUTs follow matching gear through hellpods, missions and ship transitions.
-[*][b]Quick color. Full control.[/b] Basic for easy painting; F10 opens the full LUT grid, material controls and named bump maps. Custom tables support up to 32 rows.
+[*][b]Quick color. Full control.[/b] Basic for easy painting; F10 opens the full LUT grid, material controls and named bump maps. Custom tables support up to 64 rows.
 [*][b]Room to work.[/b] Movable Tools, independent Scratch and Pattern windows, plain dropdowns, clear selection borders and font-scaled padding.
 [*][b]Copy like you expect.[/b] Text selection, clipboard colors and held-key repeat. Ctrl+C/V, Undo/Redo, drag selection and full multi-row copy/paste in the grid.
 [*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or apply a table to one LUT, all Armor LUTs or all Helmet LUTs.
@@ -32,8 +32,8 @@ Shared Lobby LUT is in testing.
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5-BSL.zip[/b] and enable its BSL startup option.
-[*][b]Live Lua Loader / compatible API-2 MDL:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5-LLL.zip[/b] into your loader's Mods directory, then enable it.
+[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.1-BSL.zip[/b] and enable its BSL startup option.
+[*][b]Live Lua Loader / compatible API-2 MDL:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.1-LLL.zip[/b] into your loader's Mods directory, then enable it.
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].
 [/list]
 
@@ -55,10 +55,10 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [b]Plain Furniture[/b] — creator of the bundled [b]Debug LUT[/b].
 [b]Shikami[/b] — the [b]Region Indicator[/b] idea.
 [b]Kaiser & Amiba and the Helldivers modding Discord community[/b] — shared knowledge, experimentation and encouragement.
-[b]content/audio/wep_ar_risk[/b] — the stylish, human-made thumbnail.
+[url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5]Download R5.5[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.1]Download R5.5.1[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

@@ -12,7 +12,7 @@ try {
  try {$stamp=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')} finally {$stream.Dispose();$sha.Dispose()}
  $marker=Join-Path $Output $(if($IndexOnly){'index-complete.txt'}else{'complete.txt'})
  $versionFolder=Join-Path $Output $stamp
- $schema=Join-Path $versionFolder 'patch-source-v2.txt'
+ $schema=Join-Path $versionFolder 'patch-source-v3.txt'
  if($IndexOnly -and (Test-Path -LiteralPath $schema) -and (Test-Path -LiteralPath $marker) -and ([IO.File]::ReadAllLines($marker)[0] -eq $stamp) -and (Test-Path -LiteralPath (Join-Path $versionFolder 'catalog.txt'))){exit 0}
  if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
@@ -25,6 +25,6 @@ try {
  $count=[EpicOriginalReader]::Run($GameData,$versionFolder,$OwnerPID,(Join-Path $Output 'progress.txt'),$wantedPath)
  if($count -eq 0){throw 'No original material LUTs found'}
  [IO.File]::WriteAllText($marker,$stamp+"`n"+$count)
- if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23xN')}
+ if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23x1-64')}
 } catch { [IO.File]::WriteAllText((Join-Path $Output 'error.txt'),$_.Exception.Message);exit 1 }
 

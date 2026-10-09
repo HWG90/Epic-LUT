@@ -1,19 +1,19 @@
-# Epic LUT R5.5
+# Epic LUT R5.5.1
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.1 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
 
-[Download R5.5](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5.1](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5.1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.1-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.1: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
@@ -41,7 +41,7 @@ The active tools shortcut stays highlighted. Clicking it again keeps its window 
 
 ## Larger tables and custom rows
 
-Material LUTs with up to **32 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
+Material LUTs with up to **64 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
 
 Tables above eight rows retain their added rows when Preserve Original Emissives is enabled. Original values are preserved for the rows present in the game snapshot; extra rows keep the imported values. DDS and patch export retain the custom row count. The model must reference those rows for them to be visible.
 
@@ -166,4 +166,4 @@ Native adapters and foundational LUT research: [CowboyBingus / Match Your Colors
 
 [Paydex LUT Editor](https://github.com/paytonrog/paydex-lut-editor) inspired the semantic controls and layout. Epic LUT's implementation is independently authored.
 
-Thank you to **Shikami** for the **Region Indicator** idea.
+Thank you to **Shikami** for the **Region Indicator** idea, and [**Lytatroan**](https://www.nexusmods.com/profile/Lytatroan) for the human-made thumbnail.

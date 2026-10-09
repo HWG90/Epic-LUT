@@ -9,8 +9,8 @@ MAX_BYTES=8*1024*1024
 
 def validate(data):
     result=np.asarray(data,dtype=np.float32)
-    if result.ndim!=3 or result.shape[2]!=4 or not 1<=result.shape[0]<=32 or not 1<=result.shape[1]<=64:
-        raise ValueError('Expected a LUT of at most 64 columns, 32 rows and four channels')
+    if result.ndim!=3 or result.shape[2]!=4 or not 1<=result.shape[0]<=64 or not 1<=result.shape[1]<=64:
+        raise ValueError('Expected a LUT of at most 64 columns, 64 rows and four channels')
     if not np.isfinite(result).all():raise ValueError('Nonfinite LUT values are not supported')
     return np.ascontiguousarray(result)
 
@@ -26,7 +26,7 @@ def decode_dds(raw,*,base_level_only=False):
         if (dimension,misc,array_size)!=(3,0,1):raise ValueError('Unsupported DDS texture kind')
     elif format in (113,116):format={113:10,116:2}[format]
     else:raise ValueError('DDS must contain RGBA16F or RGBA32F')
-    if format not in (2,10) or not 1<=width<=64 or not 1<=height<=32:raise ValueError('Unsupported DDS LUT format or dimensions')
+    if format not in (2,10) or not 1<=width<=64 or not 1<=height<=64:raise ValueError('Unsupported DDS LUT format or dimensions')
     size=width*height*4*(4 if format==2 else 2)
     levels=max(1,words[6])
     if levels>max(width,height).bit_length():raise ValueError('DDS mip count exceeds texture dimensions')
@@ -53,7 +53,7 @@ def load(path):
     with exr.File(str(path),header_only=True) as header_file:
         if len(header_file.parts)!=1:raise ValueError('Multipart EXR is unsupported')
         header=header_file.header();lo,hi=header['dataWindow'];w,h=int(hi[0]-lo[0]+1),int(hi[1]-lo[1]+1)
-        if not 1<=w<=64 or not 1<=h<=32:raise ValueError('EXR is not a bounded LUT')
+        if not 1<=w<=64 or not 1<=h<=64:raise ValueError('EXR is not a bounded LUT')
         if header['type'] not in (exr.scanlineimage,exr.tiledimage):raise ValueError('Deep EXR is unsupported')
     with exr.File(str(path),separate_channels=True) as f:
         channels=f.channels()

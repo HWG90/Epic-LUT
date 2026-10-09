@@ -106,14 +106,15 @@ for row = 0, 4 do
 end
 assert(not pcall(O.preserve, five, eight), 'Missing imported rows were invented')
 
-local custom = { width = 23, height = 12, data = ffi.new('float[?]', 23 * 12 * 4) }
-for i = 0, 23 * 12 * 4 - 1 do
+local custom = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
+for i = 0, 23 * 64 * 4 - 1 do
     custom.data[i] = i / 101
 end
 local retained = O.preserve(custom, eight, true)
 assert(
-    retained.height == 12
-        and ffi.string(retained.data + 23 * 8 * 4, 23 * 4 * 16) == ffi.string(custom.data + 23 * 8 * 4, 23 * 4 * 16),
+    retained.height == 64
+        and ffi.string(retained.data + 23 * 8 * 4, 23 * 56 * 16)
+            == ffi.string(custom.data + 23 * 8 * 4, 23 * 56 * 16),
     'Preserving original emissives truncated custom rows'
 )
 assert(retained.data[13 * 4] == eight.data[13 * 4], 'Known original emissives changed for custom rows')

@@ -12,7 +12,7 @@ function P.hex(values, row, width)
     return string.format('#%02X%02X%02X', byte(values[at]), byte(values[at + 1]), byte(values[at + 2]))
 end
 function P.copy(original, width, height, overrides, allocate, copy)
-    assert(width >= 1 and width <= 64 and height >= 1 and height <= 32, 'Unsupported LUT dimensions')
+    assert(width >= 1 and width <= 64 and height >= 1 and height <= 64, 'Unsupported LUT dimensions')
     local out = allocate(width * height * 4)
     copy(out, original, width * height * 16)
     for row, hex in pairs(overrides) do

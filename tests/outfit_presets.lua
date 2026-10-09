@@ -88,3 +88,29 @@ assert(
 print(
     'PASS outfit presets: named full-float Armor/Helmet round trip, path rejection, failed history restoration retained'
 )
+
+local tall = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
+tall.data[63 * 23 * 4], tall.data[63 * 23 * 4 + 3] = 32.5, -2.75
+local tall_original = {
+    width = 23,
+    height = 64,
+    resource = '0123456789abcdef',
+    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. dds.encode(tall.data, 23, 64):sub(1, 148),
+}
+store.save('Tall Metadata', { { kind = 'armor', key = '0:1:0:0', document = tall, original = tall_original } })
+local saved_tall = store.load('Tall Metadata').entries[1]
+assert(saved_tall.original.height == 64 and saved_tall.original.patch_source == tall_original.patch_source)
+assert(
+    ffi.string(saved_tall.document.data, 23 * 64 * 16) == ffi.string(tall.data, 23 * 64 * 16),
+    'Preset truncated row 64'
+)
+tall_original.height = 65
+assert(
+    not pcall(
+        store.save,
+        'Too Tall Metadata',
+        { { kind = 'armor', key = '0:1:0:0', document = tall, original = tall_original } }
+    ),
+    'Preset accepted row-65 original metadata'
+)
+store.delete('Tall Metadata')

@@ -163,7 +163,7 @@ def discover(folder,kit,body,kind,destination,request_id):
     main=reader.part(archive,record,'main',0,size)
     if len(main)<340 or main[192:196]!=b'DDS 'or main[276:280]!=b'DX10':raise ValueError('Texture does not hold DX10 DDS')
     width,height=U32(main,208),U32(main,204);format=U32(main,320);layers=max(1,U32(main,332));mips=max(1,U32(main,220))
-    if format not in (2,10)or layers!=1 or not 1<=width<=64 or not 1<=height<=32 or mips>32:raise ValueError('Not a bounded single-layer float lookup')
+    if format not in (2,10)or layers!=1 or not 1<=width<=64 or not 1<=height<=64 or mips>32:raise ValueError('Not a bounded single-layer float lookup')
     per=16 if format==2 else 8;total=sum(max(1,width>>m)*max(1,height>>m)*per for m in range(mips))
     needed=width*height*per;stream,gpu=record['stream'][1],record['gpu'][1]
     if gpu>=total:raw=reader.part(archive,record,'gpu',0,needed)

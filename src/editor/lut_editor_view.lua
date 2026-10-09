@@ -195,7 +195,7 @@ function V.new(deps)
             'Brush',
             13,
             muted,
-            brush_label_width - brush_label_padding
+            brush_label_width
         )
         ui.rect(
             fx + brush_label_width,

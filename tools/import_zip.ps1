@@ -1,6 +1,6 @@
 param([string]$Package='',[switch]$Pick,[switch]$Navigate,[switch]$ListVariants,[string]$VariantFolder='',[Parameter(Mandatory=$true)][string]$Output,[Parameter(Mandatory=$true)][string]$Result,[int]$OwnerPID=0,[string]$SevenZip='')
 $ErrorActionPreference='Stop'
-function Test-LutShape($Width,$Height) { return (($Width -eq 23 -and $Height -ge 1 -and $Height -le 32) -or ($Width -eq 3 -and $Height -eq 1)) }
+function Test-LutShape($Width,$Height) { return (($Width -eq 23 -and $Height -ge 1 -and $Height -le 64) -or ($Width -eq 3 -and $Height -eq 1)) }
 # Data only: ZIP members are never installed or executed. All work is outside the game.
 $script:lastOwnerCheck=[DateTime]::MinValue
 function Check-Owner {
@@ -212,7 +212,7 @@ try {
             $presetFiles[$file]=Stage $file
             if($version -eq 2 -and $fields[3] -ne '-') {
                 $metadata=$fields[6]
-                if($fields[3] -notmatch '^[0-9a-fA-F]{16}$' -or $fields[4] -notmatch '^(3|23)$' -or $fields[5] -notmatch '^([1-9]|[12][0-9]|3[0-2])$' -or $metadata -notmatch '^[A-Za-z0-9 _-]+\.patch-source$' -or -not $members.ContainsKey($metadata) -or $members[$metadata].Length -ne 357) {throw 'Invalid shared preset patch metadata'}
+                if($fields[3] -notmatch '^[0-9a-fA-F]{16}$' -or $fields[4] -notmatch '^(3|23)$' -or $fields[5] -notmatch '^([1-9]|[1-5][0-9]|6[0-4])$' -or $metadata -notmatch '^[A-Za-z0-9 _-]+\.patch-source$' -or -not $members.ContainsKey($metadata) -or $members[$metadata].Length -ne 357) {throw 'Invalid shared preset patch metadata'}
                 $presetFiles[$metadata]=Stage $metadata
             } elseif($version -eq 2 -and ($fields[4] -ne '-' -or $fields[5] -ne '-' -or $fields[6] -ne '-')) {throw 'Incomplete shared preset patch metadata'}
             if($selectedBytes -gt 8MB){throw 'Shared preset extraction budget exceeded'}
