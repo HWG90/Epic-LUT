@@ -741,7 +741,15 @@ function P.new(deps)
                 end
                 local px = x + 12 + (col - 1) * (sw + 6)
                 label(px, y + h - 150, ({ '1: Accent color', '2: Material / opacity', '3: Unknown' })[col], sw)
-                ui.rect(px - 1, y + h - 211, sw + 2, 50, self.column == col and { 244, 202, 53 } or muted)
+                ui.rect(
+                    px - 1,
+                    y + h - 211,
+                    sw + 2,
+                    50,
+                    self.column == col and { 244, 202, 53 } or muted,
+                    nil,
+                    'swatch_border'
+                )
                 deps.swatch(ui, px, y + h - 210, sw, 48, color, d and d.data[index + 3] or 1, handle.get('show_alpha'))
                 local selected_column = col
                 ui.hit(

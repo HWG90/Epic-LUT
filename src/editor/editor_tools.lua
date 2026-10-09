@@ -124,24 +124,18 @@ function T.new(deps)
                 divider(top - step * 3 - 10)
                 if controls.editor_load_armor then
                     local gear = editor.gear or 'armor'
+                    local selector = controls['basic_' .. gear .. '_lut']
+                    local selected = selector and selector.choices[h.get('basic_' .. gear .. '_lut')]
+                    local target = selected and selected:match('^Cape') and selected
+                        or (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUT ' .. h.get('basic_' .. gear .. '_lut')
+                    action(top - step * 4.3, 'Apply to ' .. target, 'editor_apply_' .. gear, d ~= nil)
                     action(
-                        top - step * 4.3,
-                        'Apply to '
-                            .. (gear == 'cape' and 'Cape material' or gear == 'armor' and 'Armor' or 'Helmet')
-                            .. ' LUT '
-                            .. h.get('basic_' .. gear .. '_lut'),
-                        'editor_apply_' .. gear,
-                        d ~= nil
+                        top - step * 5.3,
+                        'Apply to All ' .. (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUTs',
+                        'editor_all_' .. gear,
+                        d ~= nil,
+                        'Apply the current editor table to every LUT on this gear. Send an imported LUT to the editor first.'
                     )
-                    if gear ~= 'cape' then
-                        action(
-                            top - step * 5.3,
-                            'Apply to All ' .. (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUTs',
-                            'editor_all_' .. gear,
-                            d ~= nil,
-                            'Apply the current editor table to every LUT on this gear. Send an imported LUT to the editor first.'
-                        )
-                    end
                 else
                     choice('lut', top - step * 4.3, half)
                     button(
@@ -195,6 +189,17 @@ function T.new(deps)
                 action(top - step * export_row, 'Export...', 'export_selected', d ~= nil or h.get('export_format') >= 3)
                 divider(top - step * export_row - 10)
                 action(top - step * (export_row + 1.3), 'Open Export Location', 'open_export', true)
+                if controls.include_capes_in_armor_exports then
+                    action(
+                        top - step * (export_row + 2.3),
+                        '[ '
+                            .. (h.get('include_capes_in_armor_exports') and 'x' or ' ')
+                            .. ' ] Include Capes in Armor Exports',
+                        'include_capes_in_armor_exports',
+                        true,
+                        controls.include_capes_in_armor_exports.description
+                    )
+                end
             else
                 label(top, 'Apply and restoration options for the current gear.', muted)
                 action(top - step, 'Load Debug LUT', 'load_debug_lut', true)

@@ -67,6 +67,14 @@ end)
 assert(presets.Delta, 'Delete occurred before confirmation')
 menu.outfit_dialog.on_save()
 assert(not presets.Delta and not collection.selected)
+presets.Cape = { name = 'Cape', armor = {}, helmet = {}, cape = { document }, entries = {} }
+collection.refresh()
+assert(
+    selector.choice_details[4] == 'Armor Only' and #selector.choice_previews[4].armor == 1,
+    'Cape-only Armory preset lost Armor grouping or preview'
+)
+presets.Cape = nil
+collection.refresh()
 print('PASS Armory collection: type previews, empty selection, save/select, rename and confirmed deletion')
 
 collection.filter('br', 1)

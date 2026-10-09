@@ -21,6 +21,31 @@ assert(
         and ffi.string(p.helmet[1].data, 2944) == ffi.string(h, 2944),
     'Paired preset lost full-float data'
 )
+local saved_manifest = modules.file_io.read('tests/tmp/presets/outfit-Roundtrip Outfit.tsv', 65536)
+local empty_ok, empty_error = pcall(store.save, 'Roundtrip Outfit', {})
+assert(not empty_ok and tostring(empty_error):find('No loaded LUTs to save', 1, true), 'Empty preset error is unclear')
+assert(
+    modules.file_io.read('tests/tmp/presets/outfit-Roundtrip Outfit.tsv', 65536) == saved_manifest,
+    'Empty save changed the existing preset'
+)
+local boundary_entries = {}
+for i = 1, 128 do
+    boundary_entries[i] = { kind = 'armor', key = i .. ':1:0:0', document = { data = a, width = 23, height = 1 } }
+end
+store.save('Binding Limit', boundary_entries)
+assert(#store.load('Binding Limit').entries == 128, 'Preset rejected the supported binding limit')
+local boundary_manifest = modules.file_io.read('tests/tmp/presets/outfit-Binding Limit.tsv', 65536)
+boundary_entries[129] = boundary_entries[128]
+local oversized_ok, oversized_error = pcall(store.save, 'Binding Limit', boundary_entries)
+assert(
+    not oversized_ok and tostring(oversized_error):find('Preset has 129 LUT bindings; the maximum is 128.', 1, true),
+    'Oversized preset reported the empty-preset error'
+)
+assert(
+    modules.file_io.read('tests/tmp/presets/outfit-Binding Limit.tsv', 65536) == boundary_manifest,
+    'Oversized save changed the existing preset'
+)
+store.delete('Binding Limit')
 store.save('Rename Source', p.entries)
 pcall(store.delete, 'Rename Destination')
 store.rename('Rename Source', 'Rename Destination')
@@ -61,6 +86,25 @@ assert(
         and ffi.string(saved_pattern.document.data, 48) == ffi.string(pattern, 48),
     'Pattern metadata or channels lost'
 )
+local cape_original = {
+    width = 23,
+    height = 8,
+    resource = '000000000000002a',
+    patch_source = '0123456789abcdef\n' .. string.rep('\0', 192) .. dds.encode(h, 23, 8):sub(1, 148),
+}
+store.save('Cape Metadata', {
+    { kind = 'cape', key = '0:2:1:0', document = { width = 23, height = 8, data = h }, original = cape_original },
+    { kind = 'armor', key = '0:2:1:0', document = { width = 23, height = 8, data = a } },
+})
+local cape_preset = store.load('Cape Metadata')
+assert(#cape_preset.cape == 1 and #cape_preset.armor == 1 and #cape_preset.helmet == 0)
+assert(cape_preset.entries[1].kind == 'cape' and cape_preset.entries[1].key == '0:2:1:0')
+assert(cape_preset.entries[1].original.resource == cape_original.resource)
+assert(
+    ffi.string(cape_preset.cape[1].data, 2944) == ffi.string(h, 2944),
+    'Cape preset lost its kind, pixels or metadata'
+)
+store.delete('Cape Metadata')
 modules.file_io.write(
     'tests/tmp/presets/unsafe-preset.tsv',
     'EPIC-OUTFIT\t2\nhelmet\tp:0:0:0:0\t../outside.dds\t-\t-\t-\t-'

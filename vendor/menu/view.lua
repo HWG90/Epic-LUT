@@ -58,11 +58,22 @@ function M.new(sr,preview_only,diagnostic_log)
         if item.bold_id then pcall(G.destroy_text,item.gui or gui,item.bold_id)end
         pcall(G['destroy_'..item.type],item.gui or gui,item.id);if item.extra_id then pcall(G.destroy_triangle,item.gui or gui,item.extra_id)end
     end
-    local swatch_depth={swatch_border=0,swatch_fill=.01,selection_outline=.02}
+    -- Each popup owns a bounded depth range. Roles stay inside that range even
+    -- when native GUI IDs are retained and only a background is recreated.
+    local surface_depth={window_background=0,control_border=.1,slider_track=.18,
+        swatch_border=.2,swatch_fill=.25,slider_fill=.25,control_accent=.35,
+        slider_thumb_border=.35,slider_thumb=.4,marker_border=.4,text_selection=.4,
+        marker_fill=.45,selection_outline=.45,text_caret=.7,window_frame=.9}
+    local content_depth={control_border=-.01,slider_track=.01,swatch_border=0,
+        swatch_fill=.01,slider_fill=.02,selection_outline=.02,control_accent=.03,
+        slider_thumb_border=.03,slider_thumb=.04,marker_border=.05,marker_fill=.06,
+        text_selection=.07,text_caret=1.02}
     local function command_depth(c)
-        -- Retained GUI IDs can outlive a changed border's ID. Stable role depth
-        -- keeps fills above borders without tying unrelated surfaces to counts.
-        return (c.layer or 100)+(c.type=='text'and 1 or 0)+(swatch_depth[c.ui_role]or 0)
+        if c.paint_plane and c.paint_span then
+            local local_depth=surface_depth[c.ui_role]or(c.type=='text'and .6 or .15)
+            return c.paint_plane+c.paint_span*local_depth
+        end
+        return (c.layer or 100)+(c.type=='text'and 1 or 0)+(content_depth[c.ui_role]or 0)
     end
     function self.clear()
         if not drawable()then return false end
@@ -166,12 +177,12 @@ function M.new(sr,preview_only,diagnostic_log)
                 value=G.triangle(target_gui,a,b,d,z,color,c.preview_material,ua,ub,ud)
                 extra_id=G.triangle(target_gui,a,d,e,z,color,c.preview_material,ua,ud,ue);primitive_type='triangle'
                 if diagnostic_log and not preview_materials[c.preview_material] then preview_materials[c.preview_material]=true;diagnostic_log('MCM_PREVIEW_SHADER material='..c.preview_material..' triangles='..tostring(value)..','..tostring(extra_id)..' bounds='..c.x..','..c.y..','..c.w..','..c.h)end
-            elseif c.type=='rect' then value=G.rect(gui,sr.Vector3(c.x,c.y,z),sr.Vector2(c.w,c.h),color)
+            elseif c.type=='rect' then value=G.rect(target_gui,sr.Vector3(c.x,c.y,z),sr.Vector2(c.w,c.h),color)
             else
                 local font,material='core/performance_hud/debug','core/performance_hud/debug'
                 if c.font_resource then font,material=c.font_resource,c.font_material end
-                value=G.text(gui,c.text,font,c.size,material,sr.Vector3(c.x,c.y,z),color)
-                if c.bold then bold_id=G.text(gui,c.text,font,c.size,material,sr.Vector3(c.x+.65,c.y,z),color)end
+                value=G.text(target_gui,c.text,font,c.size,material,sr.Vector3(c.x,c.y,z),color)
+                if c.bold then bold_id=G.text(target_gui,c.text,font,c.size,material,sr.Vector3(c.x+.65,c.y,z),color)end
             end
             if report_now and c.type=='text' and not c.diagnostic_console then report[#report]=report[#report]..' allocation='..tostring(value)end
             if value then ids[#ids+1]={type=primitive_type,id=value,extra_id=extra_id,bold_id=bold_id,signature=signature,gui=target_gui}else ids[#ids+1]={type=c.type,id=nil,signature=nil}end

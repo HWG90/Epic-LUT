@@ -136,8 +136,8 @@ function B.new(info, select_row, help)
                     half,
                     'Import '
                         .. filename
-                        .. ' into LUT '
-                        .. number
+                        .. ' into '
+                        .. (panel and panel.kind == 'cape' and panel.label or 'LUT ' .. number)
                         .. ' '
                         .. (panel and panel.resource or '[unavailable]'),
                     'apply_import_' .. kind,

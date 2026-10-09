@@ -20,38 +20,6 @@ function V.new(deps)
             and self.gear == state.gear
     end
     local function layout(ui)
-        if self.cape_panel then
-            local base = ui
-            ui = setmetatable({}, { __index = base })
-            ui.button = function(x, y, w, height, label, action, ...)
-                return base.button(x, y, w, height, label, function()
-                    self.cape_panel.active = false
-                    return action()
-                end, ...)
-            end
-            ui.hit = function(x, y, w, height, action, ...)
-                return base.hit(x, y, w, height, function()
-                    self.cape_panel.active = false
-                    return action()
-                end, ...)
-            end
-            ui.choice = function(id, x, y, w, prepare)
-                return base.choice(id, x, y, w, function()
-                    self.cape_panel.active = false
-                    if prepare then
-                        prepare()
-                    end
-                end)
-            end
-            ui.number = function(id, x, y, w, value, prepare, ...)
-                return base.number(id, x, y, w, value, function()
-                    self.cape_panel.active = false
-                    if prepare then
-                        prepare()
-                    end
-                end, ...)
-            end
-        end
         local d = document()
         local h = self.handle
         if selection_drag and (not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
@@ -100,10 +68,7 @@ function V.new(deps)
         if self.embedded then
             footer_band = 0
         end
-        local cape_budget = math.max(header_height + 8 * font_scale, ui.h - footer_band - extra_header - 170)
-        local cape_height = self.cape_panel and self.cape_panel.height(ui, cape_budget) or 0
-        local cape_y = ui.y + footer_band + 4 * font_scale
-        local content_bottom = footer_band + 4 * font_scale + cape_height + (cape_height > 0 and 6 * font_scale or 0)
+        local content_bottom = footer_band + 4 * font_scale
         local gridbottom = ui.y + content_bottom
         local portrait = not self.embedded and package.loaded['epic.player_preview.v1']
         local function panel(x, y, w, height, title, reserved)
@@ -116,10 +81,7 @@ function V.new(deps)
             if w < 20 then
                 return
             end
-            local loading = id == 'populate_worn'
-                or id == 'editor_load_armor'
-                or id == 'editor_load_helmet'
-                or id == 'editor_load_cape'
+            local loading = id == 'populate_worn' or id == 'editor_load_armor' or id == 'editor_load_helmet'
             local featured = loading
                 or id == 'export_selected'
                 or id == 'save_dds'
@@ -208,7 +170,9 @@ function V.new(deps)
             if not mod.controls[apply_id] then
                 apply_id = 'apply_editor'
             end
-            local apply_label = 'Apply ' .. (self.gear or 'palette')
+            local selector = mod.controls['basic_' .. (self.gear or 'armor') .. '_lut']
+            local selected = selector and selector.choices[h.get(selector.id)]
+            local apply_label = 'Apply ' .. (selected and selected:match('^Cape') and 'cape' or self.gear or 'palette')
             local values_label = show_values and 'Hide Values' or 'Show Values'
             local gap = 6 * font_scale
             local tools_width, scratch_width, values_width =
@@ -291,7 +255,7 @@ function V.new(deps)
                 local target = item.kind
                 local featured = target == 'load' or target == 'pattern'
                 local ready = target == 'load'
-                    or target == 'pattern' and self.gear ~= 'cape'
+                    or target == 'pattern'
                     or target ~= 'pattern' and (not self.can_select_gear or self.can_select_gear(target))
                 ui.button(
                     ui.x + item.x,
@@ -318,8 +282,7 @@ function V.new(deps)
                                 or { 244, 202, 53 }
                             ),
                         ink = featured and { 25, 28, 31 },
-                        help = target == 'cape'
-                                and 'Edit the cape material LUT. Tint and emblem tables remain separate.'
+                        help = target == 'armor' and 'Select Armor or Cape LUTs from the dropdown below.'
                             or target == 'pattern' and 'Edit separate 3x1 Armor and Helmet Pattern LUTs.',
                     }
                 )
@@ -327,12 +290,27 @@ function V.new(deps)
             local selector_x = ui.x + 28
             local selector_y = top - 32 - header_height - header_rows * (header_height + header_gap)
             local selector_width = math.min(220, left * 0.32)
-            ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus)
+            ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
             ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
             local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
             local resource = control.choice_details and control.choice_details[h.get('basic_' .. self.gear .. '_lut')]
+            local hash = control.choice_hashes and control.choice_hashes[h.get('basic_' .. self.gear .. '_lut')]
             local resource_width = ui.x + left - selector_x - selector_width - 30
             if resource and resource_width > 40 then
+                if hash and mod.controls.rename_lut then
+                    ui.hit(
+                        selector_x + 12 + selector_width,
+                        selector_y,
+                        resource_width,
+                        26,
+                        function()
+                            ui.activate('rename_lut')
+                        end,
+                        nil,
+                        nil,
+                        '[0x' .. hash .. ']\nClick to name this LUT. Clear its name to show the texture ID again.'
+                    )
+                end
                 ui.bounded(
                     selector_x + 12 + selector_width,
                     selector_y + 8,
@@ -374,14 +352,11 @@ function V.new(deps)
                     ui.x + 12,
                     top - 140,
                     left - 24,
-                    'Load Current ' .. (self.gear == 'cape' and 'Cape' or self.gear == 'armor' and 'Armor' or 'Helmet'),
+                    'Load Current ' .. (self.gear == 'armor' and 'Armor' or 'Helmet'),
                     'editor_load_' .. self.gear
                 )
                 button(ui.x + 12, top - 180, 180, 'Choose file...', 'browse')
                 ui.text(ui.x + 12, top - 206, 'Uses currently worn LUT values; a file import is optional.', 14, muted)
-                if self.cape_panel then
-                    self.cape_panel.draw(ui, cape_y)
-                end
                 overlays()
                 return
             end
@@ -432,9 +407,8 @@ function V.new(deps)
         )
         local grid_top = top - 129 - extra_header
         local grid_floor = gridbottom + 30
-        if self.cape_panel and grid_top <= grid_floor then
+        if grid_top <= grid_floor then
             self.grid_bounds = nil
-            self.cape_panel.draw(ui, cape_y)
             overlays()
             return
         end
@@ -872,7 +846,15 @@ function V.new(deps)
                                 )
                                 if true then
                                     local index = semantics.index(r, c, 1, d.width, d.height)
-                                    ui.rect(right + rightw - 40, cursor - 1, 24, 18, rgb(d.data, index))
+                                    ui.rect(
+                                        right + rightw - 40,
+                                        cursor - 1,
+                                        24,
+                                        18,
+                                        rgb(d.data, index),
+                                        nil,
+                                        'swatch_fill'
+                                    )
                                     ui.hit(right + rightw - 40, cursor - 1, 24, 18, function()
                                         prepare()
                                         ui.activate('cell_color')
@@ -940,19 +922,18 @@ function V.new(deps)
             self.value_scroll = math.min(self.value_scroll, self.value_max)
             if self.value_max > 0 then
                 local thumb = math.max(18, viewport * viewport / content)
-                ui.rect(right + rightw - 6, clip_bottom, 4, viewport, { 50, 55, 60 })
+                ui.rect(right + rightw - 6, clip_bottom, 4, viewport, { 50, 55, 60 }, nil, 'slider_track')
                 ui.rect(
                     right + rightw - 7,
                     clip_top - thumb - (viewport - thumb) * self.value_scroll / self.value_max,
                     6,
                     thumb,
-                    { 120, 135, 150 }
+                    { 120, 135, 150 },
+                    nil,
+                    'slider_thumb'
                 )
             end
         end -- optional Value Editor
-        if self.cape_panel then
-            self.cape_panel.draw(ui, cape_y)
-        end
         overlays()
     end
     return layout

@@ -24,6 +24,7 @@ local columns = {
             label = 'Gear and Player Preview',
             ids = { 'auto_populate_worn', 'disable_player_preview', 'resource_format' },
         },
+        { label = 'Exports', ids = { 'include_capes_in_armor_exports' } },
         { label = 'Squad sharing', ids = { 'share_appearance', 'sharing_status' } },
         { label = 'Updates', ids = { 'update_status', 'check_updates', 'auto_updates', 'open_updates' } },
         { label = 'Manual file fallback', fallback = true },

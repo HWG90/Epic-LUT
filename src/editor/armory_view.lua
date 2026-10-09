@@ -64,26 +64,27 @@ function A.new(info, preview)
         local function separator()
             local y, visible = position(12)
             if visible then
-                ui.rect(ui.x + 12, y + 4, left - 24, 1, theme.line)
+                ui.rect(ui.x + 12, y + 4, left - 24, 1, theme.line, nil, 'control_accent')
             end
         end
         ui.bounded(ui.x + 12, top - heading + 8, 'The Armory - saved palettes', 18, white, left - 24)
         button('Search: ' .. (state.armory_query or 'all presets'), 'armory_search')
         choice('armory_sort')
         choice('outfit_preset')
-        label('Saved outfit swatches: Armor | Helmet')
+        label('Saved outfit swatches: Armor / Cape | Helmet')
         button('Save Current Gear Preset', 'save_setup')
         local outfit = state.raw and state.raw.outfit
-        button('Apply Preset Armor LUTs', 'outfit_apply_armor', outfit ~= nil and #outfit.armor > 0)
+        local armor_count = outfit and (#outfit.armor + #(outfit.cape or {})) or 0
+        button('Apply Preset Armor LUTs', 'outfit_apply_armor', armor_count > 0)
         button('Apply Preset Helmet LUTs', 'outfit_apply_helmet', outfit ~= nil and #outfit.helmet > 0)
         separator()
         button('Rename Preset', 'outfit_rename', outfit ~= nil)
         button('Delete Preset', 'outfit_delete', outfit ~= nil)
         if outfit then
             label(
-                (#outfit.armor > 0 and (#outfit.helmet > 0 and 'Armor + Helmet' or 'Armor Only') or 'Helmet Only')
+                (armor_count > 0 and (#outfit.helmet > 0 and 'Armor + Helmet' or 'Armor Only') or 'Helmet Only')
                     .. ' / '
-                    .. (#outfit.armor + #outfit.helmet)
+                    .. (armor_count + #outfit.helmet)
                     .. ' LUTs'
             )
         end
@@ -113,19 +114,41 @@ function A.new(info, preview)
             ui.bounded(ui.x + 12, ui.y + line + 8, 'Scroll for more Armory controls', 12, muted, left - 24)
         end
         ui.bounded(ui.x + 12, ui.y + 8, state.status or '', 12, muted, left - 24)
-        ui.rect(x - 10, ui.y, 1, ui.h, theme.line)
+        ui.rect(x - 10, ui.y, 1, ui.h, theme.line, nil, 'control_accent')
         ui.bounded(x, top - 22, 'Palette Preview', 18, white, width)
         if outfit then
+            if
+                self.outfit ~= outfit
+                or self.armor ~= outfit.armor
+                or self.cape ~= outfit.cape
+                or self.helmet ~= outfit.helmet
+            then
+                self.outfit, self.armor, self.cape, self.helmet = outfit, outfit.armor, outfit.cape, outfit.helmet
+                self.preview_columns = { {}, {} }
+                for _, kind in ipairs({ 'armor', 'cape', 'helmet' }) do
+                    local column = self.preview_columns[kind == 'helmet' and 2 or 1]
+                    for index, doc in ipairs(outfit[kind] or {}) do
+                        column[#column + 1] = { document = doc, index = index, kind = kind }
+                    end
+                end
+            end
             local half = (width - 14) / 2
             local total = 0
             self.bounds = { x = x, y = ui.y, w = width, h = ui.h - 40 }
-            for n, kind in ipairs({ 'armor', 'helmet' }) do
+            for n, docs in ipairs(self.preview_columns) do
                 local px = x + (n - 1) * (half + 14)
                 local cursor = top - 80 + self.scroll
-                ui.bounded(px, top - 58, kind == 'armor' and 'Armor' or 'Helmet', 14, white, half)
-                local docs = outfit[kind] or {}
+                ui.bounded(
+                    px,
+                    top - 58,
+                    n == 1 and (#(outfit.cape or {}) > 0 and 'Armor / Cape' or 'Armor') or 'Helmet',
+                    14,
+                    white,
+                    half
+                )
                 local height = 0
-                for index, doc in ipairs(docs) do
+                for _, item in ipairs(docs) do
+                    local doc = item.document
                     local pattern = doc.width == 3
                     local columns = pattern and { 1, 2, 3 } or { 1, 3, 6, 7, 13, 15, 17, 18, 19, 20 }
                     local labels = pattern and { 'Accent', 'Material', 'Unknown' }
@@ -133,7 +156,16 @@ function A.new(info, preview)
                     local cell = math.min(32, (half - 58) / #columns)
                     local block = 48 + doc.height * cell
                     if cursor <= top - 80 and cursor >= ui.y + 16 then
-                        ui.bounded(px, cursor, (pattern and 'Pattern LUT ' or 'LUT ') .. index, 14, white, half)
+                        ui.bounded(
+                            px,
+                            cursor,
+                            (item.kind == 'cape' and 'Cape ' or '')
+                                .. (pattern and 'Pattern LUT ' or 'LUT ')
+                                .. item.index,
+                            14,
+                            white,
+                            half
+                        )
                     end
                     for c, label in ipairs(labels) do
                         if cursor - 22 <= top - 80 and cursor - 22 >= ui.y + 16 then
@@ -150,7 +182,7 @@ function A.new(info, preview)
                                 for ch = 0, 2 do
                                     rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, doc.data[at + ch])) * 255 + 0.5)
                                 end
-                                ui.rect(px + 58 + (c - 1) * cell, y, cell - 2, cell - 2, rgb)
+                                ui.rect(px + 58 + (c - 1) * cell, y, cell - 2, cell - 2, rgb, nil, 'swatch_fill')
                             end
                         end
                     end

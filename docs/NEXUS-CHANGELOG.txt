@@ -1,3 +1,13 @@
+# Epic LUT R5.5.3
+
+- Fixed window stacking, overlapping text and disappearing swatches or markers.
+- Cape LUTs now use the Armor dropdown and regular editor controls.
+- Added optional Cape exports and custom LUT names.
+- Clearer Armory preset save errors.
+- Shared Lobby LUT is in testing.
+
+---
+
 # Epic LUT R5.5.2
 
 - Fixed text caret and selection drifting ahead of typed text.

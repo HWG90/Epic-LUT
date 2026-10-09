@@ -54,7 +54,7 @@ function M.custom_ui(ui)
             math.max(0, w - pad * 2)
         )
         if enabled and (o.selected or hovered) then
-            ui.rect(x, y, 2, h, T.focus)
+            ui.rect(x, y, 2, h, T.focus, nil, 'control_accent')
         end
         ui.hit(x, y, w, h, function(...)
             if enabled and callback then
@@ -196,7 +196,7 @@ function M.choice(ui, control, value, x, y, width, change, open)
             or field
     end
     ui.rect(x, y, width, 26, disabled and T.panel or background)
-    ui.rect(x, y, 2, 26, disabled and T.line or T.focus)
+    ui.rect(x, y, 2, 26, disabled and T.line or T.focus, nil, 'control_accent')
     local presentation = control.presentation or 'combined'
     local dropdown, selector = presentation == 'dropdown', presentation == 'selector'
     local reserved = dropdown and 32 or (selector and 62 or 88)
@@ -1971,10 +1971,22 @@ function M.new(api, measure, Text)
                 { 'left', x, y + thickness, thickness, rh - thickness * 2 },
                 { 'right', x + rw - thickness, y + thickness, thickness, rh - thickness * 2 },
             }) do
-                rect(edge[2], edge[3], edge[4], edge[5], color or T.border)
+                rect(edge[2], edge[3], edge[4], edge[5], color or T.border, nil, 'window_frame')
                 local command = commands[#commands]
                 command.window_frame, command.frame_edge, command.frame_bounds = id, edge[1], bounds
                 command.layer = 105
+            end
+        end
+
+        -- Window order and content order are separate. Reserve a bounded range
+        -- for each surface; command counts and text offsets cannot escape it.
+        local function paint_surface(first, plane, span)
+            if commands[first] and commands[first].type == 'rect' then
+                commands[first].ui_role = 'window_background'
+            end
+            for i = first, #commands do
+                local command = commands[i]
+                command.layer, command.paint_plane, command.paint_span = plane, plane, span
             end
         end
 
@@ -2204,8 +2216,8 @@ function M.new(api, measure, Text)
             local travel, maximum = height - thumb, total - visible
             local progress = math.max(0, math.min(1, offset / maximum))
             local ty = y + travel * (1 - progress)
-            rect(x, y, 4, height, T.line)
-            rect(x - 1, ty, 6, thumb, hovering(x - 7, y, 18, height) and T.focus or T.border)
+            rect(x, y, 4, height, T.line, nil, 'slider_track')
+            rect(x - 1, ty, 6, thumb, hovering(x - 7, y, 18, height) and T.focus or T.border, nil, 'slider_thumb')
             commands[#commands].scrollbar = role
             local function set(value)
                 value = math.max(0, math.min(maximum, math.floor(value + 0.5)))
@@ -2408,7 +2420,7 @@ function M.new(api, measure, Text)
 
                     if entry.kind == 'category' then
                         rect(x - 4, y - 6, rail - 15 - x + 4, 30, { 53, 48, 32 })
-                        rect(x - 4, y - 6, 3, 30, accent)
+                        rect(x - 4, y - 6, 3, 30, accent, nil, 'control_accent')
                         text(x + 5, y, entry.open and 'v' or '>', 20, { 255, 225, 120 })
                         bounded(x + 29, y, entry.category.name, 20, { 255, 225, 120 }, math.max(0, rail - 44 - x))
 
@@ -2420,7 +2432,7 @@ function M.new(api, measure, Text)
                         local selected = entry.mod_index == self.selected and entry.index == self.page
 
                         rect(x - 4, y - 6, rail - 15 - x + 4, 30, selected and { 79, 62, 28 } or { 40, 39, 31 })
-                        rect(x - 4, y - 6, 3, 30, selected and { 255, 225, 120 } or accent)
+                        rect(x - 4, y - 6, 3, 30, selected and { 255, 225, 120 } or accent, nil, 'control_accent')
                         bounded(
                             x + 5,
                             y,
@@ -2666,14 +2678,32 @@ function M.new(api, measure, Text)
                                 and self.text_edit.mod == mod
                                 and self.text_edit.control == control
                             rect(x, y, width, height, T.panel)
-                            rect(x, y + height / 2 - 3.5, track, 7, enabled and { 31, 76, 84 } or T.line)
-                            rect(x, y + height / 2 - 2.5, track * ratio, 5, enabled and T.focus or T.disabled)
+                            rect(
+                                x,
+                                y + height / 2 - 3.5,
+                                track,
+                                7,
+                                enabled and { 31, 76, 84 } or T.line,
+                                nil,
+                                'slider_track'
+                            )
+                            rect(
+                                x,
+                                y + height / 2 - 2.5,
+                                track * ratio,
+                                5,
+                                enabled and T.focus or T.disabled,
+                                nil,
+                                'slider_fill'
+                            )
                             rect(
                                 x + track * ratio - 5,
                                 y + (height - 17) / 2,
                                 10,
                                 17,
-                                enabled and T.focus or T.disabled
+                                enabled and T.focus or T.disabled,
+                                nil,
+                                'slider_thumb'
                             )
                             rect(
                                 x + track,
@@ -2802,7 +2832,7 @@ function M.new(api, measure, Text)
                             }
                             choice.input_control = input
                             rect(x, y, width, 26, editing and T.field_hover or T.field)
-                            rect(x, y, 2, 26, T.focus)
+                            rect(x, y, 2, 26, T.focus, nil, 'control_accent')
                             bounded(
                                 x + 8,
                                 y + 5,
@@ -3028,7 +3058,7 @@ function M.new(api, measure, Text)
                                     end
                                     local sx = c.swatch_label and x + row_width - 100 + (slot - 1) * (size + 8)
                                         or x + (slot - 1) * (size + 8)
-                                    rect(sx, y - 4, size, size, rgb)
+                                    rect(sx, y - 4, size, size, rgb, nil, 'swatch_fill')
                                     text(sx + 3, y + 3, tostring(swatch.row or slot), 14, { 255, 255, 255 })
                                     if swatch.control and swatch.owner and swatch.prepare then
                                         local item = swatch
@@ -3097,23 +3127,33 @@ function M.new(api, measure, Text)
                                 local slider_fill = c.disabled and T.disabled or T.focus
                                 local slider_thumb = c.disabled and { 137, 148, 151 }
                                     or (c == selected and { 196, 251, 255 } or { 115, 231, 240 })
-                                rect(track, y + 4, width, 7, c.disabled and { 51, 59, 64 } or { 31, 76, 84 })
-                                rect(track, y + 5, width * fraction, 5, slider_fill)
+                                rect(
+                                    track,
+                                    y + 4,
+                                    width,
+                                    7,
+                                    c.disabled and { 51, 59, 64 } or { 31, 76, 84 },
+                                    nil,
+                                    'slider_track'
+                                )
+                                rect(track, y + 5, width * fraction, 5, slider_fill, nil, 'slider_fill')
                                 rect(
                                     track + width * fraction - 7,
                                     y - 3,
                                     14,
                                     21,
-                                    c.disabled and { 64, 74, 80 } or { 17, 56, 65 }
+                                    c.disabled and { 64, 74, 80 } or { 17, 56, 65 },
+                                    nil,
+                                    'slider_thumb_border'
                                 )
-                                rect(track + width * fraction - 5, y - 1, 10, 17, slider_thumb)
+                                rect(track + width * fraction - 5, y - 1, 10, 17, slider_thumb, nil, 'slider_thumb')
 
                                 local editing = self.text_edit
                                     and self.text_edit.mod == mod
                                     and self.text_edit.control == c
 
                                 rect(vx + 435, y - 5, 90, 29, editing and T.field_hover or T.field)
-                                rect(vx + 435, y - 5, 90, 1, editing and T.focus or T.border)
+                                rect(vx + 435, y - 5, 90, 1, editing and T.focus or T.border, nil, 'control_accent')
 
                                 local display = editing and self.text_edit.text .. '|'
                                     or string.format('%.3f', value):gsub('0+$', ''):gsub('%.$', '')
@@ -3180,7 +3220,7 @@ function M.new(api, measure, Text)
                                     230
                                 )
                             elseif c.type == 'color' then
-                                rect(vx + 300, y - 3, 34, 23, api.color_rgb(value))
+                                rect(vx + 300, y - 3, 34, 23, api.color_rgb(value), nil, 'swatch_fill')
                                 rect(vx + 350, y - 5, 175, 29, T.field)
                                 bounded(vx + 360, y, value, 18, c.disabled and T.disabled or white, 155)
 
@@ -3203,14 +3243,18 @@ function M.new(api, measure, Text)
                                     y - 1,
                                     36,
                                     21,
-                                    c.disabled and T.line or (value and { 42, 82, 72 } or T.border)
+                                    c.disabled and T.line or (value and { 42, 82, 72 } or T.border),
+                                    nil,
+                                    'slider_track'
                                 )
                                 rect(
                                     vx + (value and 374 or 356),
                                     y + 2,
                                     14,
                                     15,
-                                    c.disabled and T.disabled or (value and T.enabled or muted)
+                                    c.disabled and T.disabled or (value and T.enabled or muted),
+                                    nil,
+                                    'slider_thumb'
                                 )
                                 text(
                                     vx + 405,
@@ -3250,7 +3294,7 @@ function M.new(api, measure, Text)
                                 end
 
                                 if c == selected and not c.disabled then
-                                    rect(cx - 2, y - 7, cw + 4, 33, T.border)
+                                    rect(cx - 2, y - 7, cw + 4, 33, T.border, nil, 'control_border')
                                 end
                                 rect(cx, y - 5, cw, 29, value_bg)
 
@@ -3266,7 +3310,7 @@ function M.new(api, measure, Text)
                                 if presentation ~= 'selector' then
                                     -- Reserve an opaque indicator cell above the value text.
 
-                                    rect(cx + cw - 32, y - 5, 32, 29, arrow_bg)
+                                    rect(cx + cw - 32, y - 5, 32, 29, arrow_bg, nil, 'control_accent')
                                     text(cx + cw - 20, y, 'v', 18, symbol)
 
                                     hit(cx, y - 5, cw, 29, function()
@@ -3304,7 +3348,15 @@ function M.new(api, measure, Text)
                                     select()
                                     change(control, 0)
                                 end)
-                                rect(bx - 1, y - 6, bw + 2, 31, c == selected and not c.disabled and T.border or T.line)
+                                rect(
+                                    bx - 1,
+                                    y - 6,
+                                    bw + 2,
+                                    31,
+                                    c == selected and not c.disabled and T.border or T.line,
+                                    nil,
+                                    'control_border'
+                                )
                                 rect(
                                     bx,
                                     y - 5,
@@ -3556,9 +3608,9 @@ function M.new(api, measure, Text)
             end
             text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted)
             frame('preview', vx, vy, vw, vh)
+            paint_surface(first, 180, 20)
             for i = first, #commands do
                 commands[i].hud_preview = true
-                commands[i].layer = 110 + (i - first) * 0.01
             end
         end
 
@@ -3618,10 +3670,11 @@ function M.new(api, measure, Text)
                 f.close()
             end)
             floating_context = nil
+            local span = 20 / #floating_requests
+            paint_surface(first, 210 + (ordinal - 1) * span, span)
             for i = first, #commands do
                 commands[i].popup = true
                 commands[i].floating_id = f.id
-                commands[i].layer = 210 + (ordinal - 1) * 0.5 + (i - first) * 0.0001
             end
         end
         if self.dropdown then
@@ -3680,7 +3733,7 @@ function M.new(api, measure, Text)
                     30,
                     index == d.selected and T.selected or (hovering(x + 3, y - 4, dw - 16, 30) and T.hover or T.panel)
                 )
-                rect(x + 3, y - 4, 2, 30, index == d.selected and accent or T.panel)
+                rect(x + 3, y - 4, 2, 30, index == d.selected and accent or T.panel, nil, 'selection_outline')
                 text_focus = index == d.selected
 
                 local preview = d.control.choice_previews and d.control.choice_previews[index]
@@ -3708,14 +3761,14 @@ function M.new(api, measure, Text)
                         local colors = preview[kind] or {}
                         local sx = x + dw - 122 + (n - 1) * 54
                         if #colors == 0 then
-                            rect(sx, y, 48, 12, { 65, 76, 85 })
+                            rect(sx, y, 48, 12, { 65, 76, 85 }, nil, 'swatch_fill')
                         else
                             for i, color in ipairs(colors) do
-                                rect(sx + (i - 1) * 48 / #colors, y, 48 / #colors - 1, 12, color)
+                                rect(sx + (i - 1) * 48 / #colors, y, 48 / #colors - 1, 12, color, nil, 'swatch_fill')
                             end
                         end
                     end
-                    rect(x + dw - 70, y - 2, 1, 16, { 145, 156, 165 })
+                    rect(x + dw - 70, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
                 end
 
                 hit(x + 3, y - 4, dw - 16, 30, function()
@@ -3733,10 +3786,10 @@ function M.new(api, measure, Text)
             text_focus = false
             scrollbar('dropdown', x + dw - 7, top - height + 4, height - 8, #d.control.choices, count, d.scroll)
             frame('dropdown', x, top - height, dw, height)
+            paint_surface(overlay_start, 230, 20)
 
             for index = overlay_start, #commands do
                 commands[index].popup = true
-                commands[index].layer = 230
             end
         end
 
@@ -3819,17 +3872,33 @@ function M.new(api, measure, Text)
 
             for col = 0, 15 do
                 for row = 0, 11 do
-                    rect(px + 20 + col * 14, py + 160 + row * 17, 15, 18, api.hsv_rgb(col / 15, row / 11, p.brightness))
+                    rect(
+                        px + 20 + col * 14,
+                        py + 160 + row * 17,
+                        15,
+                        18,
+                        api.hsv_rgb(col / 15, row / 11, p.brightness),
+                        nil,
+                        'swatch_fill'
+                    )
                 end
             end
 
             for row = 0, 15 do
-                rect(px + 262, py + 160 + row * 12.75, 25, 13.75, api.hsv_rgb(p.hue, p.saturation, row / 15))
+                rect(
+                    px + 262,
+                    py + 160 + row * 12.75,
+                    25,
+                    13.75,
+                    api.hsv_rgb(p.hue, p.saturation, row / 15),
+                    nil,
+                    'swatch_fill'
+                )
             end
 
-            rect(px + 17 + p.hue * 224, py + 157 + p.saturation * 204, 6, 6, white)
+            rect(px + 17 + p.hue * 224, py + 157 + p.saturation * 204, 6, 6, white, nil, 'marker_fill')
 
-            rect(px + 259, py + 158 + p.brightness * 204, 31, 3, white)
+            rect(px + 259, py + 158 + p.brightness * 204, 31, 3, white, nil, 'marker_fill')
 
             local function spectrum(mx, my)
                 p.hue = math.max(0, math.min(1, ((mx - ox) / s - px - 20) / 224))
@@ -3866,12 +3935,12 @@ function M.new(api, measure, Text)
                         for ch = 1, 3 do
                             color[ch] = math.floor(background * (1 - opacity) + p.rgb[ch] * opacity + 0.5)
                         end
-                        rect(ax + col * 8, ay + row * ah / 20, 8, ah / 20 + 1, color)
+                        rect(ax + col * 8, ay + row * ah / 20, 8, ah / 20 + 1, color, nil, 'swatch_fill')
                     end
                 end
                 local marker = ay + math.max(0, math.min(1, p.alpha)) * ah
-                rect(ax - 2, marker - 2, 20, 4, { 15, 15, 15 })
-                rect(ax - 2, marker - 1, 20, 2, white)
+                rect(ax - 2, marker - 2, 20, 4, { 15, 15, 15 }, nil, 'marker_border')
+                rect(ax - 2, marker - 1, 20, 2, white, nil, 'marker_fill')
                 text(ax - 2, ay - 21, 'A', 16, white)
                 local function alpha_slider(mx, my)
                     p.alpha = math.floor(math.max(0, math.min(1, ((my - oy) / s - ay) / ah)) * 1000 + 0.5) / 1000
@@ -3897,7 +3966,7 @@ function M.new(api, measure, Text)
                 )
             end
 
-            rect(px + 595, py + 287, 85, 65, p.rgb)
+            rect(px + 595, py + 287, 85, 65, p.rgb, nil, 'swatch_fill')
 
             local fields = {
                 { key = 1, label = 'R', value = p.rgb[1] },
@@ -3953,10 +4022,10 @@ function M.new(api, measure, Text)
                 local sx = px + 20 + (index - 1) * 43
 
                 if p.selected_swatch == index then
-                    rect(sx - 3, py + 76, 41, 36, accent)
+                    rect(sx - 3, py + 76, 41, 36, accent, nil, 'swatch_border')
                 end
 
-                rect(sx, py + 79, 35, 30, api.color_rgb(hex))
+                rect(sx, py + 79, 35, 30, api.color_rgb(hex), nil, 'swatch_fill')
 
                 hit(sx, py + 79, 35, 30, function()
                     p.selected_swatch = index
@@ -4002,9 +4071,9 @@ function M.new(api, measure, Text)
             end)
 
             frame('color_picker', px, py, 700, 430, accent)
+            paint_surface(start, 300, 20)
             for index = start, #commands do
                 commands[index].popup = true
-                commands[index].layer = 300
             end
         end
 
@@ -4097,22 +4166,25 @@ function M.new(api, measure, Text)
                         accent,
                         412
                     )
+                elseif dialog.description then
+                    bounded(px + 14, py + 130, dialog.description, 12, muted, 412)
                 end
                 local editing = self.text_edit and self.text_edit.control == dialog.control
                 rect(px + 14, py + 89, 412, 30, { 24, 39, 52 })
                 bounded(
                     px + 22,
                     py + 98,
-                    editing and self.text_edit.text .. '|' or 'Click to enter a preset name',
+                    editing and self.text_edit.text .. '|' or dialog.placeholder or 'Click to enter a preset name',
                     14,
                     white,
                     396
                 )
                 hit(px + 14, py + 89, 412, 30, function()
-                    self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
+                    self.text_edit =
+                        { mod = dialog.mod, control = dialog.control, text = dialog.initial_text or '', replace = true }
                 end)
                 rect(px + 14, py + 22, 198, 30, T.field)
-                bounded(px + 22, py + 30, 'Save Preset', 14, white, 180)
+                bounded(px + 22, py + 30, dialog.action_label or 'Save Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     if self.text_edit then
                         self.key(13)
@@ -4123,9 +4195,9 @@ function M.new(api, measure, Text)
             bounded(px + 236, py + 30, dialog.phase == 'confirm' and 'No' or 'Cancel', 14, white, 180)
             hit(px + 228, py + 22, 198, 30, cancel)
             frame('outfit_dialog', px, py, 440, 190)
+            paint_surface(first, 400, 20)
             for i = first, #commands do
                 commands[i].popup = true
-                commands[i].layer = 400
             end
         end
         if
@@ -4198,14 +4270,14 @@ function M.new(api, measure, Text)
                 local y = math.max(12, math.min(wh - height - 12, (self.pointer_y - oy) / s - height - 12))
                 local first = #commands + 1
                 rect(x, y, width, height, T.panel, 0.98)
-                rect(x, y + height - 2, width, 2, accent)
+                rect(x, y + height - 2, width, 2, accent, nil, 'control_accent')
                 for i, line in ipairs(lines) do
                     bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20)
                 end
                 frame('tooltip', x, y, width, height, accent)
+                paint_surface(first, 450, 20)
                 for i = first, #commands do
                     commands[i].popup = true
-                    commands[i].layer = 450
                 end
             end
         else

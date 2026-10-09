@@ -201,8 +201,8 @@ pattern.show('helmet')
 local palette = dofile('src/core/palette.lua')
 local rects, labels = {}, {}
 local ui = Menu.custom_ui({
-    rect = function(x, y, w, h, c)
-        rects[#rects + 1] = { x = x, y = y, w = w, h = h, c = c }
+    rect = function(x, y, w, h, c, a, role)
+        rects[#rects + 1] = { x = x, y = y, w = w, h = h, c = c, role = role }
     end,
     bounded = function(x, y, text)
         labels[text] = true
@@ -217,6 +217,14 @@ local ui = Menu.custom_ui({
     end,
 })
 pattern.popup(ui)
+local borders = 0
+for _, rect in ipairs(rects) do
+    if rect.role == 'swatch_border' then
+        borders = borders + 1
+        assert(rect.h == 50, 'Pattern border role attached to an unrelated background')
+    end
+end
+assert(borders == 3, 'Pattern swatches do not distinguish borders from color fills')
 assert(
     labels['Pattern LUT Editor']
         and labels['1: Accent color']
@@ -229,7 +237,8 @@ pattern.popup(ui)
 assert(ffi.string(pattern.document.data, 48) == unchanged, 'Show Alpha changed LUT values')
 local samples = {}
 local display = {
-    rect = function(x, y, w, h, c)
+    rect = function(x, y, w, h, c, a, role)
+        assert(role == 'swatch_fill', 'Solid/checker palette primitive lost its fill role')
         samples[#samples + 1] = c
     end,
 }

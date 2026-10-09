@@ -141,7 +141,19 @@ local before_made, before_writes = made, writes
 local different = { width = 23, height = 8, data = ffi.new('float[736]') }
 ffi.copy(different.data, material.data, 2944)
 different.data[0] = 0.75
-local ok, why = pcall(export.save, 'Conflict', { resources[1], entry(different, 'helmet', 8, 'd3ce605892d5331b') }, 1)
+local cape_variants = {
+    resources[1],
+    entry(different, 'cape', 3, 'd3ce605892d5331b'),
+}
+local cape_names = { 'Cape Variants LUT3-d3ce605892d5331b-Armor.dds', 'Cape Variants LUT3-d3ce605892d5331b-Cape.dds' }
+folder = save('Cape Variants', cape_variants, 1, cape_names)
+assert_file(folder, cape_names[1], material)
+assert_file(folder, cape_names[2], different)
+local shared_ids =
+    save('Cape IDs', cape_variants, 4, { 'Cape IDs d3ce605892d5331b-Armor.dds', 'Cape IDs d3ce605892d5331b-Cape.dds' })
+assert_file(shared_ids, 'Cape IDs d3ce605892d5331b-Cape.dds', different)
+before_made, before_writes = made, writes
+local ok, why = pcall(export.save, 'Conflict', { resources[1], entry(different, 'armor', 3, 'd3ce605892d5331b') }, 1)
 assert(not ok and tostring(why):find('Conflicting LUT values', 1, true), 'Conflicting resource values were discarded')
 assert(
     not pcall(export.save, 'Unknown Conflict', { entry(material, 'armor', 6), entry(different, 'armor', 6) }, 1),

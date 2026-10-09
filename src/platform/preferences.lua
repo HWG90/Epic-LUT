@@ -69,6 +69,13 @@ function P.new(storage)
                             default = false,
                         },
                         {
+                            id = 'include_capes_in_armor_exports',
+                            type = 'toggle',
+                            label = 'Include Capes in Armor Exports',
+                            default = true,
+                            description = 'Include Cape LUTs in outgoing Armor collection exports. Saved Armory presets retain capes, and a selected Cape LUT can always be exported separately.',
+                        },
+                        {
                             id = 'window_width',
                             type = 'slider',
                             label = 'Window width',
@@ -133,6 +140,14 @@ function P.new(storage)
     function self.save_auto_updates(value)
         if self.handle then
             return self.handle.set('auto_updates', value)
+        end
+    end
+    function self.include_capes_in_armor_exports()
+        return not self.handle or self.handle.get('include_capes_in_armor_exports') ~= false
+    end
+    function self.save_include_capes_in_armor_exports(value)
+        if self.handle then
+            return self.handle.set('include_capes_in_armor_exports', value)
         end
     end
     function self.save_scale(value)

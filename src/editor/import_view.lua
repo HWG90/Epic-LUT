@@ -79,9 +79,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         ui.rect(ui.x, ui.y, lw, ui.h, theme.panel)
         ui.rect(rx, ui.y, rw, ui.h, theme.panel)
         local divider = theme.line
-        ui.rect(rx - 9, ui.y, 1, ui.h, divider)
+        ui.rect(rx - 9, ui.y, 1, ui.h, divider, nil, 'control_accent')
         for _, offset in ipairs({ 184 }) do
-            ui.rect(rx + 12, top - offset, rw - 24, 1, divider)
+            ui.rect(rx + 12, top - offset, rw - 24, 1, divider, nil, 'control_accent')
         end
         ui.rect(ui.x, top - 30, lw, 30, theme.header)
         ui.rect(rx, top - 30, rw, 30, theme.header)
@@ -128,12 +128,12 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     for ch = 0, 2 do
                         rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, document.data[at + ch])) * 255 + 0.5)
                     end
-                    ui.rect(sx + (row - 1) * size, selector_y, size - 2, 26, rgb)
+                    ui.rect(sx + (row - 1) * size, selector_y, size - 2, 26, rgb, nil, 'swatch_fill')
                 end
             end
         end
         local cliptop, clipbottom = header_bottom - row_height - 12, ui.y + 14
-        ui.rect(ui.x + lw / 2, clipbottom, 1, math.max(0, cliptop - clipbottom), divider)
+        ui.rect(ui.x + lw / 2, clipbottom, 1, math.max(0, cliptop - clipbottom), divider, nil, 'control_accent')
         local function paint()
             if self.selected and ui.set then
                 ui.set('quick_color', string.format('#%02X%02X%02X', self.scratch[1], self.scratch[2], self.scratch[3]))
@@ -145,7 +145,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             ui.rect(scratchx, sy, scratchw, sh, theme.panel)
             ui.rect(scratchx, scratchtop - 28, scratchw, 28, theme.header)
             text(scratchx + 8, scratchtop - 20, 'Quick Scratch')
-            ui.rect(scratchx + 10, scratchtop - 60, scratchw - 20, 22, self.scratch)
+            ui.rect(scratchx + 10, scratchtop - 60, scratchw - 20, 22, self.scratch, nil, 'swatch_fill')
             local gx, gy = scratchx + 10, sy + 110
             local gw, gh = scratchw - 40, sh - 180
             local function choose(key, color)
@@ -157,7 +157,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     for sat = 0, 19 do
                         local saturation, value = sat / 19, v / 19
                         local x, y = gx + sat * gw / 20, gy + v * gh / 20
-                        ui.rect(x, y, gw / 20 + 1, gh / 20 + 1, core.hsv_rgb(self.hue, saturation, value))
+                        ui.rect(
+                            x,
+                            y,
+                            gw / 20 + 1,
+                            gh / 20 + 1,
+                            core.hsv_rgb(self.hue, saturation, value),
+                            nil,
+                            'swatch_fill'
+                        )
                         ui.hit(x, y, gw / 20, gh / 20, function()
                             choose('sv:' .. sat .. ':' .. v, core.hsv_rgb(self.hue, saturation, value))
                         end)
@@ -166,7 +174,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 for i = 0, 19 do
                     local hue = i / 20
                     local y = gy + i * gh / 20
-                    ui.rect(gx + gw + 5, y, 12, gh / 20 + 1, core.hsv_rgb(hue, 1, 1))
+                    ui.rect(gx + gw + 5, y, 12, gh / 20 + 1, core.hsv_rgb(hue, 1, 1), nil, 'swatch_fill')
                     ui.hit(gx + gw + 5, y, 12, gh / 20, function()
                         self.hue = hue
                         local _, sat, val = core.rgb_hsv(self.scratch)
@@ -201,8 +209,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 local x = scratchx + 10 + ((i - 1) % 5) * slotw
                 local y = sy + 12 + (1 - math.floor((i - 1) / 5)) * 26
                 local color = self.swatches[i]
-                ui.rect(x, y, slotw - 4, 22, theme.border)
-                ui.rect(x + 2, y + 2, slotw - 8, 18, color or theme.panel)
+                ui.rect(x, y, slotw - 4, 22, theme.border, nil, 'swatch_border')
+                ui.rect(x + 2, y + 2, slotw - 8, 18, color or theme.panel, nil, 'swatch_fill')
                 if not color then
                     ui.bounded(x + 5, y + 7, 'Empty ' .. i, 10, muted, slotw - 14)
                 end
@@ -258,12 +266,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 local target = state[kind .. '_lut']
                     or (ui.input_value and ui.input_value('basic_' .. kind .. '_lut'))
                     or 1
+                local selected = state.raw and state.raw.basic and state.raw.basic[kind]
+                local target_label = selected and selected.kind == 'cape' and selected.label
+                    or title .. ' LUT ' .. target
                 ui.button(
                     x + 90,
                     cliptop - heading_height,
                     width - 90,
                     heading_height,
-                    'Apply to ' .. title .. ' LUT ' .. target,
+                    'Apply to ' .. target_label,
                     function()
                         ui.activate('apply_import_' .. kind)
                     end,
@@ -313,7 +324,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     ui.button(x + 2, cursor, width - 12, title_height, entry.name, choose_table, {
                         selected = selected,
                         size = 14,
-                        help = 'Select this ' .. kind .. ' LUT. Selecting does not apply or change its colors.',
+                        help = 'Select this '
+                            .. (entry.kind or kind)
+                            .. ' LUT. Selecting does not apply or change its colors.',
                     })
                 end
                 cursor = cursor - hash_height
@@ -323,7 +336,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                         field = false,
                         ink = theme.brass,
                         size = 12,
-                        help = 'Select this ' .. kind .. ' LUT by its texture resource ID.',
+                        help = 'Select this ' .. (entry.kind or kind) .. ' LUT by its texture resource ID.',
                     })
                 end
                 cursor = cursor - label_height
@@ -362,15 +375,23 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                                 rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, entry.data[at + ch])) * 255 + 0.5)
                             end
                             local sx = gx + (i - 1) * step
-                            ui.rect(sx, y, size, row_step - 2, rgb)
+                            ui.rect(sx, y, size, row_step - 2, rgb, nil, 'swatch_fill')
                             if
                                 self.selected
                                 and self.selected.key == selection_key
                                 and self.selected.row == row
                                 and self.selected.column == col
                             then
-                                ui.rect(sx - 2, y - 2, size + 4, 2, { 244, 202, 53 })
-                                ui.rect(sx - 2, y + row_step - 2, size + 4, 2, { 244, 202, 53 })
+                                ui.rect(sx - 2, y - 2, size + 4, 2, { 244, 202, 53 }, nil, 'selection_outline')
+                                ui.rect(
+                                    sx - 2,
+                                    y + row_step - 2,
+                                    size + 4,
+                                    2,
+                                    { 244, 202, 53 },
+                                    nil,
+                                    'selection_outline'
+                                )
                             end
                             local function select()
                                 choose_table()
@@ -444,7 +465,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     y + 8 + math.sin(angle) * 11,
                     4,
                     4,
-                    i == spin and { 244, 202, 53 } or { 75, 88, 100 }
+                    i == spin and { 244, 202, 53 } or { 75, 88, 100 },
+                    nil,
+                    'control_accent'
                 )
             end
             ui.text(
@@ -498,7 +521,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     for ch = 0, 2 do
                         rgb[#rgb + 1] = math.floor(math.max(0, math.min(1, entry.data[at + ch])) * 255 + 0.5)
                     end
-                    ui.rect(rx + 82 + (row - 1) * size, y, size - 2, 18, rgb)
+                    ui.rect(rx + 82 + (row - 1) * size, y, size - 2, 18, rgb, nil, 'swatch_fill')
                 end
                 local index = entry.index or i
                 ui.hit(rx + 12, y, rw - 24, 20, function()
@@ -511,7 +534,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         if self.import_max > 0 then
             ui.bounded(rx + 12, preview_bottom - 12, 'Scroll for more imported LUTs', 10, muted, rw - 24)
         end
-        ui.rect(rx + 12, preview_bottom - 18, rw - 24, 1, divider)
+        ui.rect(rx + 12, preview_bottom - 18, rw - 24, 1, divider, nil, 'control_accent')
         local actions = preview_bottom - 30
         text(rx + 12, actions, 'Apply Imported LUT ' .. (state.palette_index or 1))
         local apply_width = (rw - 30) / 2
@@ -576,7 +599,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             '[ ' .. (state.preserve_emissives and 'x' or ' ') .. ' ] Preserve Original Emissives',
             'preserve_emissives'
         )
-        ui.rect(rx + 12, actions - 109, rw - 24, 1, divider)
+        ui.rect(rx + 12, actions - 109, rw - 24, 1, divider, nil, 'control_accent')
         button(rx + 12, actions - 145, (rw - 30) / 2, 'Restore Arrowhead LUT (Original)', 'restore')
         button(
             rx + 18 + (rw - 30) / 2,

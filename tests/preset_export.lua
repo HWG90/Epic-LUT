@@ -97,6 +97,67 @@ assert(ffi.string(decoded, 2944) == ffi.string(document.data, 2944), 'Raw DDS ex
 local output = export.save('Shared Set', loaded, 1, 1)
 local output2 = export.save('Shared Set', loaded, 1, 1)
 assert(output ~= output2 and F.read(output, 65536) == F.read(output2, 65536), 'Preset ZIP overwrote prior export')
+local cape = { width = 23, height = 8, data = ffi.new('float[736]') }
+ffi.copy(cape.data, document.data, 2944)
+cape.data[0] = 0.875
+local cape_entry = { kind = 'cape', key = '0:2:1:0', document = cape, original = original(cape, 'fedcba9876543210') }
+local with_cape = { entries = { loaded.entries[1], loaded.entries[2], cape_entry } }
+assert(E.lut_choices(with_cape)[3]:find('Cape LUT 1', 1, true), 'Cape export choice mislabeled')
+local cape_bundle = E.bundle(m, with_cape)
+for _, file in ipairs(cape_bundle) do
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+local cape_roundtrip = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Cape Roundtrip')
+assert(#cape_roundtrip.cape == 1 and #cape_roundtrip.armor == 1 and #cape_roundtrip.entries == 3)
+assert(cape_roundtrip.entries[3].original.resource == cape_roundtrip.entries[1].original.resource)
+assert(ffi.string(cape_roundtrip.cape[1].data, 2944) == ffi.string(cape.data, 2944), 'Shared-ID Cape bytes lost')
+local include = false
+local filtered = E.new(m, {
+    exports = 'tests/tmp/presets',
+    directory_exists = function(path)
+        local f = io.open(path, 'rb')
+        if f then
+            f:close()
+            return true
+        end
+        return false
+    end,
+}, {
+    include_capes = function()
+        return include
+    end,
+})
+filtered.save('Without Cape', with_cape, 3, 1)
+assert(#calls[#calls][2] == 2 and calls[#calls][2][1] == loaded.entries[1], 'Full patch exclusion removed wrong LUT')
+filtered.save('Without Cape', with_cape, 5, 1, 1)
+assert(#bulk_entries == 2 and #with_cape.entries == 3, 'Collection export mutated the saved Cape preset')
+local filtered_bundle = E.bundle(m, with_cape, false)
+assert(#filtered_bundle == 5 and not filtered_bundle[#filtered_bundle][2]:find('\ncape\t', 1, true))
+local filtered_zip, filtered_label = filtered.save('Without Cape', with_cape, 1, 1)
+assert(filtered_label == '2 saved LUTs' and not F.read(filtered_zip, 65536):find('\ncape\t', 1, true))
+filtered.save('Selected Cape', with_cape, 2, 3)
+assert(calls[#calls][2] == cape and calls[#calls][3].resource == 'fedcba9876543210', 'Selected Cape patch was filtered')
+local _, _, cape_raw = filtered.save('Selected Cape', with_cape, 4, 3)
+assert(
+    ffi.string(D.decode(F.read(cape_raw, D.MAX_BYTES)), 2944) == ffi.string(cape.data, 2944),
+    'Selected Cape DDS was filtered'
+)
+include = true
+filtered.save('With Cape', with_cape, 5, 1, 1)
+assert(#bulk_entries == 3 and bulk_entries[3].kind == 'cape', 'Enabling Cape export did not include stored Cape')
+local ok_patch, patch_why = pcall(P.encode_set, D, with_cape.entries)
+assert(
+    not ok_patch and tostring(patch_why):find('Shared texture has conflicting applied palettes', 1, true),
+    'Conflicting shared-ID patch chose one appearance silently'
+)
+include = false
+local cape_only_ok, cape_only_why = pcall(filtered.save, 'Cape Only', { entries = { cape_entry } }, 1, 1)
+assert(
+    not cape_only_ok and tostring(cape_only_why):find('Enable Include Capes', 1, true),
+    'Empty filtered preset export lacked guidance'
+)
+os.remove(filtered_zip)
+os.remove(cape_raw)
 local legacy = { entries = { { kind = 'armor', key = '0:1:0:0', document = document } } }
 local bulk_output, bulk_description = export.save('Saved Set', loaded, 5, 1, 5)
 assert(bulk_output == 'tests/tmp/bulk-preset' and bulk_description == '2 saved LUT DDS files')

@@ -96,16 +96,20 @@ assert(position.x < before, 'Open dropdown blocked title-bar dragging')
 assert(menu.dropdown, 'Dragging title unexpectedly discarded dropdown')
 print('PASS floating dropdown: foreground layer, moving anchor and accessible title drag')
 
-local previous_layer
+-- Retained drawing uses semantic content depths inside a bounded window range,
+-- rather than command-index offsets that can escape it. Native overlap and
+-- partial-redraw behavior are exercised in window_render_order.lua.
+local bounded_window = false
 for _, c in ipairs(menu.compose(1920, 1080)) do
-    if c.popup and c.type == 'rect' and c.layer >= 210 and c.layer < 230 then
+    if c.floating_id == 'test_popup' then
         assert(
-            not previous_layer or c.layer > previous_layer,
-            'Floating rectangles share depth and can reorder after movement'
+            c.paint_plane >= 210 and c.paint_span > 0 and c.paint_plane + c.paint_span <= 230,
+            'Floating content escaped its reserved window range'
         )
-        previous_layer = c.layer
+        bounded_window = true
     end
 end
+assert(bounded_window, 'Floating window did not receive its draw range')
 
 local underlying = 0
 page.on_wheel = function()

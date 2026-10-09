@@ -1,5 +1,15 @@
 -- Persist applied DDS snapshots by local piece/mesh/material slot, never process pointers.
 local S = {}
+local function cape_identity(proof, resource)
+    assert(
+        type(proof) == 'string' and #proof <= 32 and proof:match('^%d+:%d+$'),
+        'Cape setup requires its captured body and cape kit'
+    )
+    assert(
+        type(resource) == 'string' and #resource == 16 and resource:match('^%x+$'),
+        'Cape setup requires its original texture ID'
+    )
+end
 local function target(key)
     assert(type(key) == 'string', 'Saved binding key unavailable')
     local pattern = key:sub(1, 2) == 'p:'
@@ -20,11 +30,26 @@ function S.new(m, paths)
         end
         local text = f:read(524289)
         f:close()
-        assert(#text <= 524288 and text:sub(1, 9) == 'setup-v1\n', 'Invalid saved LUT setup')
+        local version = text:sub(1, 9)
+        assert(#text <= 524288 and (version == 'setup-v1\n' or version == 'setup-v2\n'), 'Invalid saved LUT setup')
         local plan = {}
+        local capes = {}
         local count = 0
         for line in text:sub(10):gmatch('[^\r\n]+') do
             local key, file = line:match('^([^\t]+)\t(setup%-%d+%-%d+%-%d+%.dds)$')
+            if not key and version == 'setup-v2\n' then
+                local proof, resource
+                key, file, proof, resource =
+                    line:match('^([^\t]+)\t(setup%-%d+%-%d+%-%d+%.dds)\tcape\t([^\t]+)\t([^\t]+)$')
+                if key then
+                    assert(
+                        key ~= 'armor-all' and key ~= 'helmet-all',
+                        'A Cape setup cannot be a blanket Armor/Helmet default'
+                    )
+                    cape_identity(proof, resource)
+                    capes[key] = { proof = proof, resource = resource:lower() }
+                end
+            end
             assert(key and not plan[key], 'Invalid or duplicate saved binding')
             if key ~= 'armor-all' and key ~= 'helmet-all' then
                 target(key)
@@ -33,10 +58,17 @@ function S.new(m, paths)
             assert(count <= 4098, 'Saved setup exceeds binding budget')
             plan[key] = file
         end
-        return plan
+        return plan, capes
     end
     function self.save(bindings, defaults)
         assert(#bindings > 0 and #bindings <= 4096, 'Apply a palette before saving')
+        local version = 'setup-v1\n'
+        for _, b in ipairs(bindings) do
+            if b.cape then
+                cape_identity(b.cape_proof, b.resource)
+                version = 'setup-v2\n'
+            end
+        end
         local prefix
         repeat
             self.sequence = self.sequence + 1
@@ -74,11 +106,14 @@ function S.new(m, paths)
             )
             assert(not seen[b.save_key], 'Duplicate local binding key')
             seen[b.save_key] = true
-            rows[#rows + 1] = b.save_key .. '\t' .. save_texture(texture)
+            rows[#rows + 1] = b.save_key
+                .. '\t'
+                .. save_texture(texture)
+                .. (b.cape and ('\tcape\t' .. b.cape_proof .. '\t' .. b.resource:lower()) or '')
         end
         table.sort(rows)
         local f = assert(io.open(manifest .. '.pending', 'wb'))
-        assert(f:write('setup-v1\n', table.concat(rows, '\n'), '\n'))
+        assert(f:write(version, table.concat(rows, '\n'), '\n'))
         assert(f:close())
         local ffi = require('ffi')
         local _, kernel = m.native_import.verify_interface()

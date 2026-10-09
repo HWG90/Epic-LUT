@@ -16,8 +16,8 @@ os.environ.setdefault('MCM_SOURCE_DIR',str(ROOT.parent/'DBF-MCM'))
 from tools.lua_runner import LuaRunner
 
 TESTS = (
-    'sdk_catalog', 'ui_styling', 'window_frames',
-    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'native_text_metrics', 'font_padding',
+    'sdk_catalog', 'resource_labels', 'armory_dropdown_hover', 'ui_styling', 'window_frames',
+    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'window_render_order', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'native_text_metrics', 'font_padding',
     'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc',
     'frontend', 'frontend_suspension', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'appearance_state', 'appearance_persistence', 'direct_appearance_runtime', 'cape_editor', 'direct_editor', 'palette_editor', 'standalone_frontend',

@@ -147,6 +147,18 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(pattern_labels['Pattern LUT 1'], '3x1 Pattern preset missing safe preview')
+state.raw.outfit.armor = {}
+state.raw.outfit.cape = { document }
+view.scroll, view.sidebar_scroll = 0, 0
+local cape_labels = {}
+for _, c in ipairs(menu.compose(1920, 1080)) do
+    if c.full_text then
+        cape_labels[c.full_text] = true
+    end
+end
+assert(cape_labels['Cape LUT 1'] and cape_labels['Armor / Cape'], 'Cape LUT missing from paired Armory preview')
+assert(view.preview_columns[1][1].kind == 'cape' and view.preview_columns[1][1].document == document)
+state.raw.outfit.armor, state.raw.outfit.cape = { document }, nil
 
 local saved_kind
 menu.outfit_dialog = {

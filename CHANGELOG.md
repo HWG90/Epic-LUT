@@ -1,5 +1,17 @@
 # Changelog
 
+## R5.5.3 - 2026-10-09
+
+- Fixed drawing order across independent Pattern, Tools and Scratch windows, dropdowns, pickers and tooltips.
+- Keep swatches, selection outlines, picker markers, slider handles and text carets visible during partial redraws.
+- Give empty preset saves and the 128-binding limit distinct errors, with the actual binding count for oversized saves.
+- Identify unavailable Armor or Helmet LUTs before saving and log the collected binding counts.
+- Keep saved-preset swatches visible when the dropdown hover background updates.
+- Moved Cape LUTs into the Armor dropdown, labeled Cape, using the regular editor controls.
+- Removed the separate Cape panel to keep the editor compact.
+- Added Include Capes in Armor Exports in Export tools, Configuration and MCM settings.
+- Added persistent custom LUT names by texture ID; click the displayed hash or name to rename it.
+
 ## R5.5.2 - 2026-10-09
 
 - Corrected text caret, selection and mouse-position drift in long fields.

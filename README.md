@@ -1,19 +1,19 @@
-# Epic LUT R5.5.2
+# Epic LUT R5.5.3
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.2 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.3 fixes window stacking and retained drawing, folds Cape LUTs into the Armor selector, and adds custom LUT names and optional Cape exports.
 
-[Download R5.5.2](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.2) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5.3](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5.2-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.2-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5.3-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.3-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.2: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.3: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
@@ -87,7 +87,9 @@ Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. 
 
 The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Click or drag row labels in Select mode to select whole rows; Shift-click extends the row range. Copy, select the destination rows, and paste from their top-left row. Full-row paste includes every RGBA channel and requires Advanced editing. Selected swatches keep their colors inside an outline. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
 
-Open the collapsible **Cape Material** section beneath the main LUT table to load and edit the worn cape's 23-column material table. Its selector, edits, history and Load/Apply/Restore controls stay separate from Armor and Helmet.
+Choose **Armor LUT**, then select a **Cape LUT** entry from its dropdown to edit the worn cape's 23-column material table with the regular grid, value editor, tools and shortcuts. Turn off **Include Capes in Armor Exports** in Configuration or Export tools to leave capes out of Armor collection exports; exporting a selected Cape LUT still works.
+
+Click the texture ID beside the LUT dropdown to give it a custom name. Names are saved locally by the exact texture ID. Hover the name to see its original hash; save an empty name to show the hash again.
 
 The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
 

@@ -1,7 +1,7 @@
 -- Named preset collection and UI selection. No native writes or gear discovery.
 local A = {}
 local function type_label(preset)
-    if #preset.armor > 0 then
+    if #preset.armor > 0 or #(preset.cape or {}) > 0 then
         return #preset.helmet > 0 and 'Armor + Helmet' or 'Armor Only'
     end
     return 'Helmet Only'
@@ -42,7 +42,10 @@ function A.new(storage, control, handle)
             choices[#choices + 1] = name
             local ok, preset = pcall(storage.load, name)
             if ok then
-                previews[#choices] = { armor = first_strip(preset.armor), helmet = first_strip(preset.helmet) }
+                previews[#choices] = {
+                    armor = first_strip(#preset.armor > 0 and preset.armor or preset.cape or {}),
+                    helmet = first_strip(preset.helmet),
+                }
                 details[#choices] = type_label(preset)
             end
         end

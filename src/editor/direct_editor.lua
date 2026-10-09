@@ -35,6 +35,7 @@ local editor_pending
 local history
 local outfits, armory_collection
 local import_view
+local import_state
 local source_tables, editor_tables = {}, {}
 local import_ids = {}
 local index_job
@@ -144,17 +145,18 @@ local function refresh(silent)
                     basic_documents[key] = nil
                 end
             end
-            if edit.editor_target and edit.editor_target.kind == 'cape' then
+            if
+                (edit.editor_target and edit.editor_target.kind == 'cape')
+                or (basic_selected and basic_selected.kind == 'cape')
+            then
                 edit.loaded, edit.editor_target, edit.preview_document = nil, nil, nil
+                basic_selected = nil
                 edit.quick_selection = nil
                 identify_kind = nil
                 if palette_editor then
                     palette_editor.sync()
                 end
             end
-        end
-        if operations.cape_panel then
-            operations.cape_panel.invalidate()
         end
         edit.cape_proof = cape_proof
     end
@@ -440,7 +442,7 @@ local function recover_appearance(dt)
             appearance_pending[key] = nil
         end
     end
-    if appearance.count() == 0 and not (operations.cape_panel and operations.cape_panel.is_loaded()) then
+    if appearance.count() == 0 and not (edit.editor_target and edit.editor_target.kind == 'cape') then
         return
     end
     local proof = appearance_proof()
@@ -475,6 +477,7 @@ local function recover_appearance(dt)
     end
 end
 local function initialize_editor_state()
+    operations.appearance_proof = appearance_proof
     gear_catalog = m.gear_catalog.new({
         identity = function()
             return m.avatar.resolve_live(memory, game)
@@ -579,10 +582,22 @@ local function apply(document, selected_kind)
     if selected_kind == 'cape' then
         local proof = appearance_proof()
         assert(proof and proof.cape, 'Current Cape identity unavailable; load current gear again')
+        local selected = frontend.basic_mode and basic_selected or edit.editor_target
+        if selected and selected.kind == 'cape' then
+            assert(selected.cape_proof and selected.resource, 'Load current Cape colors with a known texture ID first')
+        end
         assert(
-            not edit.editor_target or not edit.editor_target.cape_proof or edit.editor_target.cape_proof == proof.cape,
+            not selected or not selected.cape_proof or selected.cape_proof == proof.cape,
             'Cape kit changed; load current Cape colors again before editing'
         )
+        if selected and selected.resource then
+            local matching = original_luts
+                and original_luts.get(groups[selected.group] and groups[selected.group].object)
+            assert(
+                matching and matching.resource == selected.resource,
+                'Cape resource changed; load current colors again'
+            )
+        end
     end
     document = document or edit.loaded or edit.imported
     assert(document, 'Load a DDS first')
@@ -661,13 +676,27 @@ local function save_setup()
     local active = {}
     for _, b in ipairs(bindings.owned) do
         if present(b) and binding(b) == b.current and b.texture and b.current == b.texture.object then
-            active[#active + 1] = b
+            active[#active + 1] = b.cape
+                    and {
+                        save_key = b.save_key,
+                        texture = b.texture,
+                        cape = true,
+                        cape_proof = b.applied_cape_proof,
+                        resource = appearance_resource(b),
+                    }
+                or b
         end
     end
     if operations.pattern_session then
         for _, b in ipairs(operations.pattern_session.owned) do
             if present(b) and binding(b) == b.current and b.texture and b.current == b.texture.object then
-                active[#active + 1] = { save_key = 'p:' .. b.save_key, texture = b.texture }
+                active[#active + 1] = {
+                    save_key = 'p:' .. b.save_key,
+                    texture = b.texture,
+                    cape = b.cape,
+                    cape_proof = b.applied_cape_proof,
+                    resource = b.cape and appearance_resource(b) or nil,
+                }
             end
         end
     end
@@ -731,37 +760,63 @@ local function load_debug_lut()
 end
 local function apply_checked(document)
     if basic_selected and frontend.basic_mode then
+        local selected = basic_selected
+        live_select_suppressed = true
         assert(handle.set('lut', basic_selected.group))
+        live_select_suppressed = false
         assert(handle.set('scope', 1))
-        return apply(document or edit.loaded)
+        return apply(document or edit.loaded, selected.kind)
     end
     local armor, helmet = handle.get('target_armor'), handle.get('target_helmet')
     assert(armor or helmet, 'Check Armor and/or Helmet first')
     assert(handle.set('scope', armor and (helmet and 4 or 2) or 3))
     return apply(assert(document or edit.imported, 'Import a LUT file first'))
 end
+local function current_choices(container)
+    local entries = {}
+    for _, kind in ipairs(container == 'armor' and { 'armor', 'cape' } or { 'helmet' }) do
+        local ordinal = 0
+        for index, group in ipairs(groups) do
+            for _, b in ipairs(group.bindings) do
+                if b[kind] then
+                    ordinal = ordinal + 1
+                    entries[#entries + 1] = {
+                        group = index,
+                        kind = kind,
+                        ordinal = ordinal,
+                        label = (kind == 'cape' and 'Cape LUT ' or 'LUT ') .. ordinal,
+                        key = kind .. ':' .. tostring(group.object),
+                        binding = b,
+                    }
+                    break
+                end
+            end
+        end
+    end
+    return entries
+end
 local function warm_worn_slots()
     refresh(true)
-    local selected, seen, complete, total = {}, {}, true, 0
-    local ordinals = { armor = 0, helmet = 0, cape = 0 }
-    for index, group in ipairs(groups) do
-        for _, b in ipairs(group.bindings) do
-            local kind = m.gear_catalog.kind(b)
-            local key = kind .. ':' .. tostring(b.original)
-            if not b.cape and not seen[key] then
-                seen[key] = true
-                total = total + 1
-                ordinals[kind] = ordinals[kind] + 1
-                local source = b.current ~= b.original and applied_document(b)
-                    or (original_luts and original_luts.get(b.original))
-                if source then
-                    basic_state.get(key, source, 'Worn ' .. kind)
-                    if not selected[kind] or ordinals[kind] == handle.get('basic_' .. kind .. '_lut') then
-                        selected[kind] = { document = source, group = index, object = group.object }
-                    end
-                else
-                    complete = false
+    local selected, complete, total = {}, true, 0
+    for _, container in ipairs({ 'armor', 'helmet' }) do
+        for choice, entry in ipairs(current_choices(container)) do
+            local b = entry.binding
+            local source = b.current ~= b.original and applied_document(b)
+                or (original_luts and original_luts.get(b.original))
+            total = total + 1
+            if source then
+                basic_state.get(entry.key, source, 'Worn ' .. entry.kind)
+                if not selected[container] or choice == handle.get('basic_' .. container .. '_lut') then
+                    selected[container] = {
+                        document = source,
+                        group = entry.group,
+                        object = b.original,
+                        kind = entry.kind,
+                        label = entry.label,
+                    }
                 end
+            else
+                complete = false
             end
         end
     end
@@ -772,31 +827,38 @@ local function populate_worn()
     if not complete then
         return false
     end
-    local kind = palette_editor and palette_editor.gear == 'helmet' and 'helmet' or 'armor'
-    if not selected[kind] then
-        kind = selected.armor and 'armor' or 'helmet'
+    local container = palette_editor and palette_editor.gear == 'helmet' and 'helmet' or 'armor'
+    if not selected[container] then
+        container = selected.armor and 'armor' or 'helmet'
     end
-    local target = selected[kind]
+    local target = selected[container]
     if not target then
         return false
     end
-    edit.loaded = m.basic_state.clone(target.document, 'Worn ' .. kind)
+    edit.loaded = m.basic_state.clone(
+        target.document,
+        target.kind == 'cape' and target.label .. ' (worn)' or 'Worn ' .. target.kind
+    )
     edit.loaded.resource_object = target.object
+    local original = original_luts and original_luts.get(target.object)
     edit.editor_target = {
-        kind = kind,
+        kind = target.kind,
         group = target.group,
         object = target.object,
-        cape_proof = kind == 'cape' and edit.cape_proof or nil,
+        resource = original and original.resource,
+        cape_proof = target.kind == 'cape' and edit.cape_proof or nil,
     }
     edit.preview_document, edit.preview_revision = edit.loaded, 0
     edit.quick_selection = nil
+    identify_kind = target.kind
     basic_imported = edit.imported
     if palette_editor then
-        palette_editor.gear = kind
+        palette_editor.gear = container
         palette_editor.sync()
     end
+    import_state()
     populate_request = nil
-    message('Loaded every current Armor and Helmet LUT slot. Select a table to edit.')
+    message('Loaded every current Armor, Cape and Helmet LUT slot. Select a table to edit.')
     return true
 end
 local function mark_current_load()
@@ -808,6 +870,10 @@ end
 local function resource_id(object)
     local original = original_luts and original_luts.get(object)
     local hash = original and original.resource
+    local label = operations.lut_names and hash and operations.lut_names.get(hash)
+    if label then
+        return label
+    end
     return m.resource_ids.describe(hash, handle.get('resource_format') == 2, m.sdk_catalog)
 end
 local function matching_plan()
@@ -872,7 +938,7 @@ local function apply_matching()
             .. ' bindings; unmatched and ambiguous LUTs left untouched.'
     )
 end
-local function import_state()
+import_state = function()
     local palette_ready = edit.loaded ~= nil or edit.imported ~= nil
     local previews = { armor = {}, helmet = {}, cape = {} }
     for index, group in ipairs(groups) do
@@ -919,57 +985,49 @@ local function import_state()
         outfit = armory_collection and armory_collection.selected,
         matching = matching_plan(),
     }
+    local choice_maps = {}
     if m.basic_view then
-        for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-            local choices, indices, details = {}, {}, {}
-            for index, group in ipairs(groups) do
-                for _, b in ipairs(group.bindings) do
-                    if b[kind] then
-                        choices[#choices + 1] = 'LUT ' .. (#choices + 1)
-                        details[#choices] = resource_id(group.object)
-                        indices[#indices + 1] = index
-                        break
-                    end
-                end
+        for _, container in ipairs({ 'armor', 'helmet' }) do
+            local entries, choices, details, hashes, help = current_choices(container), {}, {}, {}, {}
+            choice_maps[container] = entries
+            for index, entry in ipairs(entries) do
+                choices[index], details[index] = entry.label, resource_id(groups[entry.group].object)
+                local original = original_luts and original_luts.get(groups[entry.group].object)
+                hashes[index] = original and original.resource
+                help[index] = m.resource_ids.describe(hashes[index], handle.get('resource_format') == 2, m.sdk_catalog)
             end
-            local control = api.mods[handle.id].controls['basic_' .. kind .. '_lut']
-            if control then
-                control.choices = #choices > 0 and choices or { 'Waiting for gear...' }
-                control.choice_details = details
-                control.dropdown_width = 280
-                control.disabled = (kind ~= 'cape' and not palette_ready) or #choices == 0
+            local control = api.mods[handle.id].controls['basic_' .. container .. '_lut']
+            control.choices = #choices > 0 and choices or { 'Waiting for gear...' }
+            control.choice_details, control.choice_targets = details, entries
+            control.choice_hashes, control.choice_help = hashes, help
+            control.dropdown_width = 280
+            control.disabled = not palette_ready or #choices == 0
+            local selected = entries[handle.get('basic_' .. container .. '_lut')]
+            local group = selected and groups[selected.group]
+            local doc, key = nil, selected and selected.key
+            if selected then
+                local b = selected.binding
+                local source = b.document or (original_luts and original_luts.get(b.original))
+                doc = basic_documents[key] or basic_state.get(key, source, 'Worn ' .. selected.kind)
             end
-            local index = indices[handle.get('basic_' .. kind .. '_lut')]
-            local group = index and groups[index]
-            local doc, key
-            if group and palette_ready then
-                for _, b in ipairs(group.bindings) do
-                    if b[kind] then
-                        key = kind .. ':' .. tostring(b.original)
-                        doc = basic_documents[key]
-                        if not doc then
-                            local source = b.document or (original_luts and original_luts.get(b.original))
-                            doc = kind == 'cape' and source or basic_state.get(key, source, 'Worn ' .. kind)
-                        end
-                        break
-                    end
-                end
-            end
-            raw.basic[kind] = {
+            raw.basic[container] = {
                 document = doc,
                 key = key,
-                group = index,
+                group = selected and selected.group,
+                kind = selected and selected.kind or container,
+                label = selected and selected.label,
+                ordinal = selected and selected.ordinal,
                 resource = group and resource_id(group.object) or 'unavailable',
                 unavailable = not doc and original_luts and original_luts.loaded and key ~= nil,
             }
             if doc then
-                previews[kind] = {
+                previews[container] = {
                     {
-                        name = m.gear_catalog.label(kind) .. ' LUT ' .. tostring(
-                            handle.get('basic_' .. kind .. '_lut')
-                        ),
+                        name = selected.kind == 'cape' and selected.label
+                            or m.gear_catalog.label(selected.kind) .. ' LUT ' .. selected.ordinal,
+                        kind = selected.kind,
                         resource = resource_id(group.object),
-                        index = index,
+                        index = selected.group,
                         width = doc.width,
                         height = doc.height,
                         data = doc.data,
@@ -977,18 +1035,14 @@ local function import_state()
                     },
                 }
             end
-            if raw.basic[kind].unavailable and not basic_missing_reported[key] then
+            if raw.basic[container].unavailable and not basic_missing_reported[key] then
                 basic_missing_reported[key] = true
                 if ctx.log then
                     ctx.log(
                         'BASIC_SNAPSHOT_MISSING target='
-                            .. kind
-                            .. ' group='
-                            .. tostring(index)
+                            .. raw.basic[container].kind
                             .. ' original_object='
                             .. tostring(group.object)
-                            .. ' reader='
-                            .. tostring(original_luts.status)
                     )
                 end
             end
@@ -1001,37 +1055,31 @@ local function import_state()
     end
     -- The Import workspace lists every loaded table, including game snapshots.
     raw.pending_luts = {}
-    for _, kind in ipairs({ 'armor', 'helmet' }) do
-        local entries, ordinal = {}, 0
-        for index, group in ipairs(groups) do
-            for _, b in ipairs(group.bindings) do
-                if b[kind] then
-                    ordinal = ordinal + 1
-                    local doc = basic_documents[kind .. ':' .. tostring(b.original)]
-                        or b.document
-                        or (original_luts and original_luts.get(b.original))
-                    if doc then
-                        entries[#entries + 1] = {
-                            name = m.gear_catalog.label(kind)
-                                .. ' LUT '
-                                .. ordinal
-                                .. (b.resource_name and (' / ' .. b.resource_name) or ''),
-                            resource = resource_id(group.object),
-                            lut = ordinal,
-                            selected = ordinal == handle.get('basic_' .. kind .. '_lut'),
-                            index = index,
-                            width = doc.width,
-                            height = doc.height,
-                            data = doc.data,
-                            revision = doc.revision,
-                        }
-                    end
-                    break
-                end
+    for _, container in ipairs({ 'armor', 'helmet' }) do
+        local entries, choices = {}, choice_maps[container] or current_choices(container)
+        for choice, entry in ipairs(choices) do
+            local b, group = entry.binding, groups[entry.group]
+            local doc = basic_documents[entry.key] or b.document or (original_luts and original_luts.get(b.original))
+            if doc then
+                entries[#entries + 1] = {
+                    name = entry.kind == 'cape' and entry.label
+                        or m.gear_catalog.label(entry.kind)
+                            .. ' LUT '
+                            .. entry.ordinal
+                            .. (b.resource_name and (' / ' .. b.resource_name) or ''),
+                    kind = entry.kind,
+                    resource = resource_id(group.object),
+                    lut = choice,
+                    selected = choice == handle.get('basic_' .. container .. '_lut'),
+                    index = entry.group,
+                    width = doc.width,
+                    height = doc.height,
+                    data = doc.data,
+                    revision = doc.revision,
+                }
             end
         end
-        raw[kind] = entries
-        raw.pending_luts[kind] = ordinal - #entries
+        raw[container], raw.pending_luts[container] = entries, #choices - #entries
     end
     local phase = pending and pending.phase or ''
     local labels = {
@@ -1086,16 +1134,41 @@ local function import_state()
         preserve_emissives = handle.get('preserve_emissives'),
     }
 end
-local function load_editor_target(kind)
+local function checked_editor_target(target)
+    assert(target, 'Load current gear again')
+    if target.kind ~= 'cape' then
+        assert(
+            groups[target.group] and groups[target.group].object == target.object,
+            'Worn gear changed; load current colors again'
+        )
+        return target.group
+    end
+    local proof = appearance_proof()
+    assert(proof and proof.cape == target.cape_proof, 'Cape kit changed; load current Cape colors again')
+    assert(target.resource, 'Cape resource identity unavailable; load current colors again')
+    refresh(true)
+    for index, group in ipairs(groups) do
+        for _, b in ipairs(group.bindings) do
+            local original = b.cape and original_luts and original_luts.get(b.original)
+            if original and original.resource == target.resource then
+                target.group, target.object = index, group.object
+                return index
+            end
+        end
+    end
+    error('Cape material changed; load current Cape colors again')
+end
+local function load_editor_target(container)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
-    local panel = import_state().raw.basic[kind]
+    local panel = import_state().raw.basic[container]
+    local kind = panel and panel.kind or container
     local source
     local group = panel and panel.group and groups[panel.group]
     if group then
         for _, b in ipairs(group.bindings) do
             if b[kind] then
-                source = b.document or (original_luts and original_luts.get(b.original))
+                source = applied_document(b) or (original_luts and original_luts.get(b.original))
                 if source then
                     break
                 end
@@ -1105,57 +1178,66 @@ local function load_editor_target(kind)
     if not source then
         return false
     end
+    assert(source.width == 23, 'Expected a 23-column material LUT')
+    local original = original_luts and original_luts.get(group.object)
+    local proof = appearance_proof()
+    if kind == 'cape' then
+        assert(original and original.resource and proof and proof.cape, 'Current Cape identity unavailable')
+    end
     edit.loaded = m.basic_state.clone(
         source,
-        m.gear_catalog.label(kind) .. ' LUT ' .. handle.get('basic_' .. kind .. '_lut') .. ' (worn)'
+        kind == 'cape' and panel.label .. ' (worn)'
+            or m.gear_catalog.label(kind) .. ' LUT ' .. panel.ordinal .. ' (worn)'
     )
-    edit.loaded.resource = resource_id(group.object)
-    edit.loaded.resource_object = group.object
+    edit.loaded.resource, edit.loaded.resource_object = resource_id(group.object), group.object
     edit.editor_target = {
         kind = kind,
         group = panel.group,
         object = group.object,
-        cape_proof = kind == 'cape' and edit.cape_proof or nil,
+        resource = original and original.resource,
+        cape_proof = kind == 'cape' and proof.cape or nil,
     }
-    identify_kind = kind
-    basic_selected = nil
-    basic_imported = edit.imported
-    edit.quick_selection = nil
+    identify_kind, basic_selected, basic_imported, edit.quick_selection = kind, nil, edit.imported, nil
     live_select_suppressed = true
     local ok, why = handle.set('lut', panel.group)
     live_select_suppressed = false
     assert(ok, why)
-    edit.preview_document = edit.loaded
-    edit.preview_revision = 0
-    editor_pending = nil
+    edit.preview_document, edit.preview_revision, editor_pending = edit.loaded, 0, nil
     if palette_editor then
-        palette_editor.gear = kind
+        palette_editor.gear = container
         palette_editor.sync()
     end
     return message('Editor populated from ' .. edit.loaded.source .. '. Edits affect this LUT only.')
 end
-local function apply_editor_target(kind, all)
+local function apply_editor_target(container, all)
+    assert(edit.loaded, 'Load current colors or send an imported LUT to the editor first')
+    if all then
+        assert(handle.set('scope', container == 'armor' and 2 or container == 'helmet' and 3 or 4))
+        return apply(edit.loaded, container)
+    end
+    local panel = import_state().raw.basic[container]
+    assert(panel and panel.group, 'Selected LUT unavailable')
+    local kind = panel.kind or container
     if kind == 'cape' then
         assert(stop_identification(), 'Highlight restoration pending')
         refresh(true)
+        assert(edit.loaded, 'Cape changed; load current colors again')
+        panel = import_state().raw.basic[container]
     end
-    assert(edit.loaded, 'Load current colors or send an imported LUT to the editor first')
-    if all then
-        assert(handle.set('scope', kind == 'armor' and 2 or kind == 'helmet' and 3 or 4))
-        return apply(edit.loaded, kind)
-    end
-    local p = import_state().raw.basic[kind]
-    assert(p and p.group, 'Selected LUT unavailable')
+    local group = groups[panel.group]
+    local original = original_luts and original_luts.get(group.object)
+    local proof = appearance_proof()
     live_select_suppressed = true
-    local ok, why = handle.set('lut', p.group)
+    local ok, why = handle.set('lut', panel.group)
     live_select_suppressed = false
     assert(ok, why)
     assert(handle.set('scope', 1))
     edit.editor_target = {
         kind = kind,
-        group = p.group,
-        object = groups[p.group].object,
-        cape_proof = kind == 'cape' and edit.cape_proof or nil,
+        group = panel.group,
+        object = group.object,
+        resource = original and original.resource,
+        cape_proof = kind == 'cape' and proof and proof.cape or nil,
     }
     return apply(edit.loaded, kind)
 end
@@ -1164,6 +1246,7 @@ local function apply_import_to(kind)
     refresh(true)
     local panel = import_state().raw.basic[kind]
     assert(panel and panel.group, 'Select a ' .. kind .. ' LUT first')
+    kind = panel.kind or kind
     assert(edit.imported, 'Import a LUT file first')
     local group = groups[panel.group]
     live_select_suppressed = true
@@ -1191,8 +1274,23 @@ local function copy_basic_palette(destination, source_kind)
     assert(target and target.document and source and source.document, 'Load both gear palettes before copying')
     local d, s = target.document, source.document
     assert(d.width == s.width, 'Palette columns differ')
+    local proof = appearance_proof()
+    local original = original_luts and original_luts.get(groups[target.group].object)
+    if target.kind == 'cape' then
+        assert(
+            proof and proof.cape and original and original.resource,
+            'Current Cape identity is still loading; load current colors again'
+        )
+    end
     edit.loaded = d
-    basic_selected = { kind = destination, key = target.key, group = target.group }
+    basic_selected = {
+        kind = target.kind or destination,
+        container = destination,
+        key = target.key,
+        group = target.group,
+        cape_proof = target.kind == 'cape' and proof and proof.cape or nil,
+        resource = original and original.resource,
+    }
     basic_imported = edit.imported
     if palette_editor then
         palette_editor.sync()
@@ -1281,9 +1379,6 @@ local function remove_lut()
     if appearance then
         appearance.clear()
     end
-    if operations.cape_panel then
-        operations.cape_panel.invalidate()
-    end
     appearance_pending = {}
     if setup then
         setup.clear()
@@ -1300,7 +1395,7 @@ local function resume_setup()
         if not identity then
             return
         end
-        local valid, plan = pcall(setup.read)
+        local valid, plan, capes = pcall(setup.read)
         if not valid then
             resume_done = true
             return message('Saved setup is invalid: ' .. tostring(plan))
@@ -1308,6 +1403,28 @@ local function resume_setup()
         if not next(plan) then
             resume_done = true
             return
+        end
+        capes = capes or {}
+        local function matches(key, b)
+            local captured = capes[key]
+            if not b.cape then
+                return captured == nil
+            end
+            if not captured then
+                return false
+            end
+            local proof = appearance_proof()
+            if not proof or not proof.cape then
+                return nil
+            end
+            if proof.cape ~= captured.proof then
+                return false
+            end
+            local original = original_luts and original_luts.get(b.original)
+            if not original then
+                return nil
+            end
+            return original.resource == captured.resource
         end
         resume_job = coroutine.create(function()
             local documents = {}
@@ -1388,11 +1505,12 @@ local function resume_setup()
                     if scanned then
                         for _, group in ipairs(groups) do
                             for _, b in ipairs(group.bindings) do
-                                if plan[b.save_key] and not seen[b.save_key] then
+                                local accepted = matches(b.save_key, b)
+                                if plan[b.save_key] and accepted ~= nil and not seen[b.save_key] then
                                     matched = matched + 1
                                     seen[b.save_key] = true
                                 end
-                                local file = plan[b.save_key]
+                                local file = accepted and plan[b.save_key]
                                     or (b.armor and plan['armor-all'])
                                     or (b.helmet and plan['helmet-all'])
                                 if file then
@@ -1407,7 +1525,12 @@ local function resume_setup()
                         for _, group in ipairs(pattern_editor.all_groups or {}) do
                             for _, b in ipairs(group.bindings) do
                                 local key = 'p:' .. b.save_key
-                                local file = plan[key]
+                                local accepted = matches(key, b)
+                                local file = accepted and plan[key]
+                                if plan[key] and accepted == false and not seen[key] then
+                                    matched = matched + 1
+                                    seen[key] = true
+                                end
                                 if file then
                                     if not seen[key] then
                                         matched = matched + 1
@@ -1428,7 +1551,16 @@ local function resume_setup()
             until false
             local applied = 0
             for file, targets in pairs(by_file) do
-                local count, texture = apply_bindings(documents[file], targets)
+                local checked = {}
+                for _, b in ipairs(targets) do
+                    if matches(b.save_key, b) then
+                        checked[#checked + 1] = b
+                    end
+                end
+                local count, texture = 0
+                if #checked > 0 then
+                    count, texture = apply_bindings(documents[file], checked)
+                end
                 applied = applied + count
                 if file == plan['armor-all'] then
                     set_default('armor', texture)
@@ -1445,8 +1577,16 @@ local function resume_setup()
                 coroutine.yield()
             end
             for file, targets in pairs(pattern_files) do
-                applied = applied + operations.pattern_session.apply(documents[file], targets)
-                remember_appearance(targets, true)
+                local checked = {}
+                for _, b in ipairs(targets) do
+                    if matches('p:' .. b.save_key, b) then
+                        checked[#checked + 1] = b
+                    end
+                end
+                if #checked > 0 then
+                    applied = applied + operations.pattern_session.apply(documents[file], checked)
+                    remember_appearance(checked, true)
+                end
                 coroutine.yield()
             end
             edit.remember_application = applied > 0
@@ -1480,13 +1620,19 @@ local function capture_action()
         imported = edit.imported,
         scope = handle.get('scope'),
         palette_index = handle.get('palette'),
-        appearance = {},
+        appearance = appearance and appearance.entries() or {},
         appearance_pending = {},
         remember_application = edit.remember_application,
     }
     local copier = m.basic_state.copier()
     local document = copier.copy
     snapshot.loaded = document(edit.loaded)
+    if edit.editor_target then
+        snapshot.editor_target = {}
+        for k, v in pairs(edit.editor_target) do
+            snapshot.editor_target[k] = v
+        end
+    end
     for key, d in pairs(basic_documents) do
         snapshot.basic[key] = document(d)
     end
@@ -1499,17 +1645,17 @@ local function capture_action()
         edit.loaded and edit.loaded.source or '',
     }
     for _, b in ipairs(bindings.owned) do
-        if not b.cape then
-            snapshot.owned[#snapshot.owned + 1] = {
-                binding = b,
-                key = material_key(b),
-                current = b.current,
-                texture = b.texture,
-                cape_proof = b.applied_cape_proof,
-                document = document(b.document),
-            }
-            signature[#signature + 1] = material_key(b) .. ':' .. tostring(b.current)
-        end
+        snapshot.owned[#snapshot.owned + 1] = {
+            binding = b,
+            key = material_key(b),
+            current = b.current,
+            texture = b.texture,
+            cape_proof = b.applied_cape_proof,
+            cape_resource = b.cape and appearance_resource(b) or nil,
+            save_key = b.save_key,
+            document = document(b.document),
+        }
+        signature[#signature + 1] = material_key(b) .. ':' .. tostring(b.current)
     end
     for k, v in pairs(defaults) do
         snapshot.defaults[k] = v
@@ -1517,11 +1663,6 @@ local function capture_action()
     end
     for i, v in ipairs(palettes) do
         snapshot.palettes[i] = v
-    end
-    for _, entry in ipairs(appearance and appearance.entries() or {}) do
-        if entry.kind ~= 'cape' then
-            snapshot.appearance[#snapshot.appearance + 1] = entry
-        end
     end
     for _, entry in ipairs(snapshot.appearance) do
         signature[#signature + 1] = 'appearance:'
@@ -1539,14 +1680,12 @@ local function capture_action()
     end
     local pending_keys = {}
     for key, entry in pairs(appearance_pending) do
-        if entry.kind ~= 'cape' then
-            local copy = {}
-            for k, v in pairs(entry) do
-                copy[k] = v
-            end
-            snapshot.appearance_pending[key] = copy
-            pending_keys[#pending_keys + 1] = key
+        local copy = {}
+        for k, v in pairs(entry) do
+            copy[k] = v
         end
+        snapshot.appearance_pending[key] = copy
+        pending_keys[#pending_keys + 1] = key
     end
     table.sort(pending_keys)
     for _, key in ipairs(pending_keys) do
@@ -1565,6 +1704,12 @@ local function restore_action(snapshot, expected)
     end
     local clone = m.basic_state.copier().copy
     snapshot.loaded = clone(saved.loaded)
+    if saved.editor_target then
+        snapshot.editor_target = {}
+        for k, v in pairs(saved.editor_target) do
+            snapshot.editor_target[k] = v
+        end
+    end
     snapshot.basic = {}
     snapshot.editor_tables = {}
     snapshot.defaults = {}
@@ -1600,6 +1745,15 @@ local function restore_action(snapshot, expected)
                 not entry.cape_proof or (proof and proof.cape == entry.cape_proof),
                 'Cape kit changed; cannot safely undo or redo its old material colors'
             )
+            assert(
+                not entry.cape_resource
+                    or (
+                        entry.binding.cape
+                        and entry.binding.save_key == entry.save_key
+                        and appearance_resource(entry.binding) == entry.cape_resource
+                    ),
+                'Cape resource changed; cannot safely undo or redo its old colors'
+            )
         end
     end
     local desired, expected_bindings = {}, {}
@@ -1610,20 +1764,12 @@ local function restore_action(snapshot, expected)
         expected_bindings[entry.key] = entry
     end
     local plans = {}
-    local cape_owned = {}
     for _, b in ipairs(bindings.owned) do
-        if b.cape then
-            cape_owned[#cape_owned + 1] = b
-        else
-            local key = material_key(b)
-            local e = expected_bindings[key]
-            assert(
-                e and present(b) and binding(b) == e.current,
-                'Gear bindings changed; cannot safely undo this action'
-            )
-            local d = desired[key]
-            plans[#plans + 1] = { binding = b, old = b.current, object = d and d.current or b.original, desired = d }
-        end
+        local key = material_key(b)
+        local e = expected_bindings[key]
+        assert(e and present(b) and binding(b) == e.current, 'Gear bindings changed; cannot safely undo this action')
+        local d = desired[key]
+        plans[#plans + 1] = { binding = b, old = b.current, object = d and d.current or b.original, desired = d }
     end
     for key, d in pairs(desired) do
         if not expected_bindings[key] then
@@ -1653,7 +1799,7 @@ local function restore_action(snapshot, expected)
         end
         error(why, 0)
     end
-    bindings.owned = cape_owned
+    bindings.owned = {}
     for _, plan in ipairs(plans) do
         local b, d = plan.binding, plan.desired
         b.current = plan.object
@@ -1667,22 +1813,9 @@ local function restore_action(snapshot, expected)
     end
     edit.imported = snapshot.imported
     if appearance then
-        local combined = {}
-        for _, entry in ipairs(appearance.entries()) do
-            if entry.kind == 'cape' then
-                combined[#combined + 1] = entry
-            end
-        end
-        for _, entry in ipairs(snapshot.appearance) do
-            combined[#combined + 1] = entry
-        end
-        appearance.replace(combined)
+        appearance.replace(snapshot.appearance)
     end
-    for key, entry in pairs(appearance_pending) do
-        if entry.kind ~= 'cape' then
-            appearance_pending[key] = nil
-        end
-    end
+    appearance_pending = {}
     for key, entry in pairs(snapshot.appearance_pending) do
         local copy = {}
         for k, v in pairs(entry) do
@@ -1750,19 +1883,33 @@ local function keep_outfit(name, save_kind)
         assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
     end
     refresh(true)
+    assert(
+        save_kind == nil or save_kind == 'armor' or save_kind == 'helmet' or save_kind == 'both',
+        'Choose Armor Only, Helmet Only or Both'
+    )
     local entries, seen = {}, {}
+    local counts = { armor = 0, helmet = 0, cape = 0 }
     local function collect(targets, pattern)
         for _, group in ipairs(targets) do
             for _, b in ipairs(group.bindings) do
                 local kind = m.gear_catalog.kind(b)
                 local saved_key = (pattern and 'p:' or '') .. b.save_key
                 local key = kind .. ':' .. saved_key
-                if not b.cape and not seen[key] and (not save_kind or save_kind == 'both' or save_kind == kind) then
+                if
+                    not seen[key]
+                    and (
+                        not save_kind
+                        or save_kind == 'both'
+                        or save_kind == kind
+                        or (save_kind == 'armor' and kind == 'cape')
+                    )
+                then
                     local original = original_luts and original_luts.get(b.original)
                     local source = applied_document(b) or original
                     if not pattern or (source and source.width == 3 and source.height == 1) then
                         assert(source, 'Current ' .. kind .. ' LUT unavailable; load current gear before saving')
                         entries[#entries + 1] = { kind = kind, key = saved_key, document = source, original = original }
+                        counts[kind] = counts[kind] + 1
                         seen[key] = true
                     end
                 end
@@ -1773,6 +1920,30 @@ local function keep_outfit(name, save_kind)
     if pattern_editor then
         pattern_editor.scan()
         collect(pattern_editor.all_groups or {}, true)
+    end
+    local wants_armor = save_kind == nil or save_kind == 'both' or save_kind == 'armor'
+    local wants_helmet = save_kind == nil or save_kind == 'both' or save_kind == 'helmet'
+    assert(
+        not wants_armor or counts.armor + counts.cape > 0,
+        'Current Armor/Cape LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
+    )
+    assert(
+        not wants_helmet or counts.helmet > 0,
+        'Current Helmet LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
+    )
+    if ctx.log then
+        ctx.log(
+            'ARMORY_SAVE scope='
+                .. tostring(save_kind or 'both')
+                .. ' armor='
+                .. counts.armor
+                .. ' cape='
+                .. counts.cape
+                .. ' helmet='
+                .. counts.helmet
+                .. ' total='
+                .. #entries
+        )
     end
     if api.mods[handle.id].controls.armory_search then
         assert(handle.set('armory_search', ''))
@@ -1804,8 +1975,8 @@ local function apply_outfit(kind)
     local exact = {}
     local has_saved = false
     for _, entry in ipairs(selected_outfit.entries) do
-        if entry.kind == kind then
-            exact[entry.key] = entry.document
+        if entry.kind == kind or (kind == 'armor' and entry.kind == 'cape') then
+            exact[entry.kind .. ':' .. entry.key] = entry.document
             has_saved = true
         end
     end
@@ -1813,9 +1984,9 @@ local function apply_outfit(kind)
     local batches, skipped = {}, 0
     for _, group in ipairs(groups) do
         for _, b in ipairs(group.bindings) do
-            if b[kind] then
+            if b[kind] or (kind == 'armor' and b.cape) then
                 assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear again')
-                local d = exact[b.save_key]
+                local d = exact[m.gear_catalog.kind(b) .. ':' .. b.save_key]
                 if d then
                     batches[d] = batches[d] or {}
                     table.insert(batches[d], b)
@@ -1852,7 +2023,8 @@ local function apply_outfit(kind)
         pattern_editor.scan()
         for _, group in ipairs(pattern_editor.all_groups or {}) do
             for _, b in ipairs(group.bindings) do
-                local d = b[kind] and exact['p:' .. b.save_key]
+                local d = (b[kind] or (kind == 'armor' and b.cape))
+                    and exact[m.gear_catalog.kind(b) .. ':p:' .. b.save_key]
                 if d then
                     assert(present(b) and binding(b) == b.current, 'Pattern gear changed; load current gear again')
                     patterns[d] = patterns[d] or {}
@@ -1872,7 +2044,7 @@ local function apply_outfit(kind)
     for d, targets in pairs(batches) do
         count = count + apply_bindings(d, targets)
         for _, b in ipairs(targets) do
-            basic_documents[kind .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
+            basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
         end
     end
     for d, targets in pairs(patterns) do
@@ -1909,21 +2081,28 @@ local function sync_armory_export()
     assert(handle.set('armory_export_lut', math.min(handle.get('armory_export_lut'), #lut.choices)))
     lut.disabled = disabled
 end
+local function include_capes_in_exports()
+    if preferences and preferences.include_capes_in_armor_exports then
+        return preferences.include_capes_in_armor_exports() ~= false
+    end
+    local control = handle and api.mods[handle.id].controls.include_capes_in_armor_exports
+    return not control or handle.get('include_capes_in_armor_exports') ~= false
+end
 local function export_custom_dds(name, naming)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
     local entries = {}
     local function collect(collection)
-        local counts = { armor = 0, helmet = 0 }
+        local counts = { armor = 0, helmet = 0, cape = 0 }
         for _, group in ipairs(collection) do
             local ordinals = {}
             for _, b in ipairs(group.bindings) do
                 local kind = m.gear_catalog.kind(b)
-                if not b.cape and not ordinals[kind] then
+                if (not b.cape or include_capes_in_exports()) and not ordinals[kind] then
                     counts[kind] = counts[kind] + 1
                     ordinals[kind] = counts[kind]
                 end
-                if not b.cape and b.current ~= b.original then
+                if (not b.cape or include_capes_in_exports()) and b.current ~= b.original then
                     assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear before exporting')
                     local document = assert(applied_document(b), 'Custom LUT data is unavailable')
                     entries[#entries + 1] = {
@@ -1990,6 +2169,7 @@ local function paint_quick(q, hex)
     end)
 end
 local function select_import_cell(entry, row, column, identify, kind)
+    kind = entry.kind or kind
     if entry.index then
         basic_selected = nil
         edit.editor_target =
@@ -2036,92 +2216,6 @@ local function select_import_cell(entry, row, column, identify, kind)
     )
     edit.quick_selection = { row = row, column = column, document = edit.loaded }
 end
-local function initialize_cape_panel()
-    if not m.cape_panel then
-        return
-    end
-    operations.cape_action = function(fn)
-        local ok, result = pcall(fn)
-        return ok and result or message(tostring(result))
-    end
-    operations.cape_panel = m.cape_panel.new(m, {
-        note = message,
-        presets = paths.presets,
-        load = function()
-            assert(stop_identification(), 'Highlight restoration pending')
-            refresh(true)
-            local panel = import_state().raw.basic.cape
-            local group = assert(panel and panel.group and groups[panel.group], 'No current Cape material LUT')
-            for _, b in ipairs(group.bindings) do
-                if b.cape then
-                    local source = applied_document(b) or (original_luts and original_luts.get(b.original))
-                    local original = original_luts and original_luts.get(b.original)
-                    local proof = appearance_proof()
-                    assert(
-                        source and source.width == 23 and original and original.resource and proof and proof.cape,
-                        'Current Cape material colors are unavailable'
-                    )
-                    local keys = {}
-                    for _, member in ipairs(group.bindings) do
-                        if member.cape then
-                            keys[member.save_key] = true
-                        end
-                    end
-                    return source, { resource = original.resource, proof = proof.cape, keys = keys }
-                end
-            end
-        end,
-        apply = function(document, target)
-            local proof = appearance_proof()
-            assert(proof and proof.cape == target.proof, 'Cape kit changed; load current Cape colors again')
-            assert(document.width == 23 and not document.stale, 'Load current Cape material again')
-            assert(stop_identification(), 'Highlight restoration pending')
-            refresh(true)
-            local targets = {}
-            for _, group in ipairs(groups) do
-                for _, b in ipairs(group.bindings) do
-                    local original = b.cape and original_luts and original_luts.get(b.original)
-                    if original and original.resource == target.resource and target.keys[b.save_key] then
-                        targets[#targets + 1] = b
-                    end
-                end
-            end
-            assert(#targets > 0, 'Cape material changed; load current Cape colors again')
-            if handle.get('preserve_emissives') then
-                document =
-                    m.original_luts.preserve(document, original_luts.get(targets[1].original), document.height > 8)
-            end
-            apply_bindings(document, targets)
-        end,
-        restore = function()
-            assert(stop_identification(), 'Highlight restoration pending')
-            local kept = {}
-            for _, b in ipairs(bindings.owned) do
-                if b.cape then
-                    local current = present(b) and binding(b)
-                    if current and current ~= b.original and (current == b.current or current == b.previous) then
-                        m.engine.bind(native, b.material, m.engine.LUT_SLOT, b.original)
-                        native.commit(b.mesh)
-                        assert(binding(b) == b.original, 'Cape material restoration pending')
-                    end
-                else
-                    kept[#kept + 1] = b
-                end
-            end
-            bindings.owned = kept
-            if appearance then
-                appearance.clear('cape')
-            end
-            for key, entry in pairs(appearance_pending) do
-                if entry.kind == 'cape' then
-                    appearance_pending[key] = nil
-                end
-            end
-            edit.remember_application = true
-            refresh(true)
-        end,
-    })
-end
 local function register(current)
     if api == current and handle then
         return
@@ -2131,6 +2225,36 @@ local function register(current)
     end
     api = current
     local callbacks = {
+        rename_lut_activate = function()
+            local panel = import_state().raw.basic[palette_editor and palette_editor.gear or 'armor']
+            local original = panel and panel.group and original_luts and original_luts.get(groups[panel.group].object)
+            local hash = assert(original and original.resource, 'Load a current LUT with a known texture ID first')
+            local labels = assert(operations.lut_names, 'Local LUT naming is unavailable')
+            local menu = assert(frontend.menu, 'Open the LUT Editor first')
+            local name = labels.get(hash) or ''
+            assert(handle.set('lut_label', name))
+            local mod = api.mods[handle.id]
+            menu.outfit_dialog = {
+                phase = 'name',
+                title = 'Name This LUT',
+                mod = mod,
+                control = mod.controls.lut_label,
+                action_label = 'Save Name',
+                initial_text = name,
+                placeholder = 'Click to enter a LUT name',
+                description = 'Clear the name to show the texture ID again.',
+                on_save = function(value)
+                    labels.set(hash, value)
+                    import_state()
+                    menu.outfit_dialog, menu.text_edit = nil, nil
+                    return message(
+                        not labels.get(hash) and 'LUT name cleared; texture ID restored.' or 'LUT name saved locally.'
+                    )
+                end,
+            }
+            menu.text_edit = { mod = mod, control = mod.controls.lut_label, text = name, replace = true }
+            return true
+        end,
         browse_activate = function()
             return action(function()
                 return load(true)
@@ -2190,7 +2314,11 @@ local function register(current)
             return action(function()
                 local preset =
                     assert(armory_collection and armory_collection.selected, 'Choose a saved Armory preset first')
-                local exporter = assert(m.preset_export, 'Armory exporter unavailable').new(m, paths)
+                local exporter = assert(m.preset_export, 'Armory exporter unavailable').new(m, paths, {
+                    include_capes = function()
+                        return operations.include_capes_in_exports()
+                    end,
+                })
                 local output, description, sharefile = exporter.save(
                     handle.get('armory_export_name'),
                     preset,
@@ -2236,21 +2364,6 @@ local function register(current)
                     return load_editor_target('helmet')
                 end)
             end
-        end,
-        basic_cape_lut_change = function()
-            if operations.cape_panel and operations.cape_panel.open then
-                return operations.cape_action(operations.cape_panel.load)
-            end
-        end,
-        editor_load_cape_activate = function()
-            mark_current_load()
-            return operations.cape_action(assert(operations.cape_panel).load)
-        end,
-        editor_apply_cape_activate = function()
-            return operations.cape_action(assert(operations.cape_panel).apply)
-        end,
-        editor_restore_cape_activate = function()
-            return operations.cape_action(assert(operations.cape_panel).restore)
         end,
         editor_load_armor_activate = function()
             mark_current_load()
@@ -2554,6 +2667,7 @@ local function register(current)
         restore_activate = function()
             return action(function()
                 local selected = basic_selected
+                local selected_kind = (edit.editor_target and edit.editor_target.kind) or (selected and selected.kind)
                 remove_lut()
                 basic_state.clear()
                 basic_missing_reported = {}
@@ -2561,16 +2675,39 @@ local function register(current)
                 edit.loaded = nil
                 refresh(true)
                 local panels = import_state().raw.basic
-                if frontend.basic_mode and selected and panels[selected.kind] then
-                    local p = panels[selected.kind]
+                if
+                    frontend.basic_mode
+                    and selected
+                    and panels[selected.container or (selected.kind == 'cape' and 'armor' or selected.kind)]
+                then
+                    local p = panels[selected.container or (selected.kind == 'cape' and 'armor' or selected.kind)]
+                    local proof = operations.appearance_proof()
+                    local original = p.group and original_luts and original_luts.get(groups[p.group].object)
                     edit.loaded = p.document
-                    basic_selected = p.document and { kind = selected.kind, key = p.key, group = p.group } or nil
+                    basic_selected = p.document
+                            and {
+                                kind = p.kind,
+                                key = p.key,
+                                group = p.group,
+                                container = selected.container,
+                                cape_proof = p.kind == 'cape' and proof and proof.cape or nil,
+                                resource = original and original.resource,
+                            }
+                        or nil
+                    if
+                        p.kind == 'cape'
+                        and not (basic_selected and basic_selected.cape_proof and basic_selected.resource)
+                    then
+                        edit.loaded, basic_selected = nil, nil
+                    end
                 else
                     basic_selected = nil
                     local group = groups[handle.get('lut')]
                     if group then
                         for _, b in ipairs(group.bindings) do
-                            local source = original_luts and original_luts.get(b.original)
+                            local source = (not selected_kind or b[selected_kind])
+                                and original_luts
+                                and original_luts.get(b.original)
                             if source then
                                 local data = ffi.new('float[?]', source.width * source.height * 4)
                                 ffi.copy(data, source.data, source.width * source.height * 16)
@@ -2718,11 +2855,6 @@ local function register(current)
             end
         end
     end
-    if operations.cape_panel and colors_page then
-        for _, control in ipairs(operations.cape_panel.controls()) do
-            colors_page.controls[#colors_page.controls + 1] = control
-        end
-    end
     handle = api.register({ id = 'epic_direct_lut', name = 'Epic LUT', pages = pages })
     if m.configuration.attach then
         m.configuration.attach(api, handle, m.configuration_view, m.ui_menu and m.ui_menu.key_name)
@@ -2753,22 +2885,6 @@ local function register(current)
             return edit.load_seen or (preferences and preferences.load_seen and preferences.load_seen(false)) or false
         end
         palette_editor.attach(api, handle)
-        if operations.cape_panel then
-            local cape = operations.cape_panel
-            cape.attach(api, handle)
-            palette_editor.cape_panel = cape
-            for _, page in ipairs(api.mods[handle.id].pages) do
-                if page.id == 'colors' then
-                    local key, wheel = page.on_key, page.on_wheel
-                    page.on_key = function(...)
-                        return cape.key(...) or key(...)
-                    end
-                    page.on_wheel = function(...)
-                        return cape.wheel(...) or wheel(...)
-                    end
-                end
-            end
-        end
         local quick = api.mods[handle.id].controls.quick_color
         local cell = api.mods[handle.id].controls.cell_color
         if quick and cell then
@@ -2825,7 +2941,23 @@ local function register(current)
                     message('Reading worn ' .. kind .. ' colors; try again when ready.')
                     return false
                 end
-                basic_selected = { kind = kind, key = panel.key, group = panel.group }
+                local proof = operations.appearance_proof()
+                local original = original_luts and original_luts.get(groups[panel.group].object)
+                if panel.kind == 'cape' then
+                    assert(
+                        proof and proof.cape and original and original.resource,
+                        'Current Cape identity is still loading; load current colors again'
+                    )
+                end
+                edit.editor_target = nil
+                basic_selected = {
+                    kind = panel.kind or kind,
+                    container = kind,
+                    key = panel.key,
+                    group = panel.group,
+                    cape_proof = panel.kind == 'cape' and proof and proof.cape or nil,
+                    resource = original and original.resource,
+                }
                 edit.loaded = panel.document
                 basic_imported = edit.imported
                 edit.preview_document = edit.loaded
@@ -2944,6 +3076,9 @@ return {
         ctx = context
         ctx.log('Epic LUT build: ' .. (m.build_label or m.version or 'development'))
         paths = m.paths.new(m)
+        if m.resource_ids.labels and paths.storage then
+            operations.lut_names = m.resource_ids.labels(paths.storage)
+        end
         operations.preset_files = m.lut_files.new(paths.presets, { dds = m.dds, read = m.file_io.read })
         operations.export_files = m.lut_files.new(paths.exports, { dds = m.dds, read = m.file_io.read })
         ctx.settings_dir = paths.settings
@@ -3150,6 +3285,7 @@ return {
         operations.apply_matching = apply_matching
         operations.load_debug_lut = load_debug_lut
         operations.export_custom_dds = export_custom_dds
+        operations.include_capes_in_exports = include_capes_in_exports
         operations.manage_outfit = manage_outfit
         operations.paint_quick = paint_quick
         operations.select_import_cell = select_import_cell
@@ -3333,13 +3469,17 @@ return {
                     local out = {}
                     for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
                         for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
+                            local cape_object = m.engine.CAPE_LUT_SLOT
+                                and m.engine.binding(read, material.material, m.engine.CAPE_LUT_SLOT, small, big)
+                            local is_cape = cape_object ~= nil and cape_object ~= 0
                             local b = {
                                 unit = unit.unit,
                                 mesh = material.mesh,
                                 material = material.material,
                                 slot = m.engine.PATTERN_SLOT,
                                 helmet = unit.slot == 0,
-                                armor = unit.slot ~= 0,
+                                armor = unit.slot ~= 0 and not is_cape,
+                                cape = is_cape,
                                 save_key = (unit.type or 0)
                                     .. ':'
                                     .. unit.slot
@@ -3412,26 +3552,40 @@ return {
                             local documents, resources = {}, {}
                             local function collect(group)
                                 for _, b in ipairs(group.bindings) do
-                                    assert(
-                                        present(b) and binding(b) == b.current,
-                                        'Gear changed; load current gear before exporting'
-                                    )
-                                    local original = original_luts and original_luts.get(b.original)
-                                    assert(original, 'Original palette snapshot is not ready for one of the worn LUTs')
-                                    local document = b.current ~= b.original and applied_document(b) or original
-                                    assert(document, 'Applied LUT data unavailable; cannot export the entire palette')
-                                    local previous = resources[original.resource]
-                                    if previous then
+                                    if not b.cape or include_capes_in_exports() then
                                         assert(
-                                            previous.width == document.width
-                                                and previous.height == document.height
-                                                and ffi.string(previous.data, previous.width * previous.height * 16)
-                                                    == ffi.string(document.data, document.width * document.height * 16),
-                                            'Shared LUT has different applied values; cannot represent both in one patch'
+                                            present(b) and binding(b) == b.current,
+                                            'Gear changed; load current gear before exporting'
                                         )
-                                    else
-                                        resources[original.resource] = document
-                                        documents[#documents + 1] = { document = document, original = original }
+                                        local original = original_luts and original_luts.get(b.original)
+                                        assert(
+                                            original,
+                                            'Original palette snapshot is not ready for one of the worn LUTs'
+                                        )
+                                        local document = b.current ~= b.original and applied_document(b) or original
+                                        assert(
+                                            document,
+                                            'Applied LUT data unavailable; cannot export the entire palette'
+                                        )
+                                        local previous = resources[original.resource]
+                                        if previous then
+                                            assert(
+                                                previous.width == document.width
+                                                    and previous.height == document.height
+                                                    and ffi.string(
+                                                            previous.data,
+                                                            previous.width * previous.height * 16
+                                                        )
+                                                        == ffi.string(
+                                                            document.data,
+                                                            document.width * document.height * 16
+                                                        ),
+                                                'Shared LUT has different applied values; cannot represent both in one patch'
+                                            )
+                                        else
+                                            resources[original.resource] = document
+                                            documents[#documents + 1] = { document = document, original = original }
+                                        end
                                     end
                                 end
                             end
@@ -3503,7 +3657,6 @@ return {
                 end
             )
         end
-        initialize_cape_panel()
         local owner = frontend
         ctx.on_cleanup(function()
             return frontend ~= owner or close()
@@ -3581,6 +3734,12 @@ return {
                 local identity = m.avatar.resolve_live(memory, game)
                 if identity then
                     local parts = { tostring(identity.unit or 0) }
+                    local proof = appearance_proof()
+                    if proof then
+                        parts[#parts + 1] = proof.armor
+                        parts[#parts + 1] = proof.helmet
+                        parts[#parts + 1] = proof.cape or ''
+                    end
                     for _, piece in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
                         parts[#parts + 1] = tostring(piece.unit)
                     end
@@ -3627,11 +3786,7 @@ return {
                 edit.preview_revision = edit.loaded.revision or 0
                 if not frontend.basic_mode and edit.editor_target then
                     action(function()
-                        assert(
-                            groups[edit.editor_target.group]
-                                and groups[edit.editor_target.group].object == edit.editor_target.object,
-                            'Worn gear changed; populate the editor again before editing'
-                        )
+                        checked_editor_target(edit.editor_target)
                         live_select_suppressed = true
                         local ok, why = handle.set('lut', edit.editor_target.group)
                         live_select_suppressed = false
@@ -3647,9 +3802,6 @@ return {
                         return apply_checked(edit.loaded)
                     end)
                 end
-            end
-            if operations.cape_panel then
-                operations.cape_panel.tick()
             end
             if index_job then
                 local ok, why = coroutine.resume(index_job)

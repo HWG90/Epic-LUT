@@ -40,6 +40,12 @@ local prefs = own.register({
                 },
                 { id = 'auto_updates', type = 'toggle', label = 'Check for updates at launch', default = true },
                 {
+                    id = 'include_capes_in_armor_exports',
+                    type = 'toggle',
+                    label = 'Include Capes in Armor Exports',
+                    default = true,
+                },
+                {
                     id = 'reset_key',
                     type = 'button',
                     label = 'Reset shortcut',
@@ -138,6 +144,14 @@ local function register_source()
                         label = 'Turn off Player Preview',
                         default = false,
                     },
+                    {
+                        id = 'include_capes_in_armor_exports',
+                        source_mod_id = 'preferences',
+                        source_control_id = 'include_capes_in_armor_exports',
+                        type = 'toggle',
+                        label = 'Include Capes in Armor Exports',
+                        default = true,
+                    },
                     { id = 'share_appearance', type = 'toggle', label = 'Share full LUT appearance', default = true },
                     { id = 'sharing_status', type = 'text', label = share_status },
                     {
@@ -204,6 +218,13 @@ assert(handle.get('configuration_menu_key') == 121, 'MCM loaded a competing save
 assert(handle.edit('configuration_menu_key', 45))
 assert(prefs.get('menu_key') == 45 and external.get('epic_lut_settings', 'configuration_menu_key') == 45)
 assert(writes == 1 and external_writes == 0, 'A setting must persist exactly once through Epic LUT')
+assert(handle.get('include_capes_in_armor_exports') == true)
+assert(handle.edit('include_capes_in_armor_exports', false))
+assert(
+    prefs.get('include_capes_in_armor_exports') == false and original.get('include_capes_in_armor_exports') == false,
+    'Cape export setting did not share its authoritative owner'
+)
+assert(handle.edit('include_capes_in_armor_exports', true))
 local automatic_writes = writes
 assert(handle.get('auto_updates') == true and original.get('auto_updates') == true)
 assert(handle.edit('auto_updates', false))

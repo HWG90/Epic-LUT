@@ -8,11 +8,29 @@ local E = {
         'Raw DDS (entire preset)',
     },
 }
+local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
+local function collection(preset, include_capes)
+    local entries = assert(preset and preset.entries, 'Choose a saved Armory preset first')
+    if include_capes ~= false then
+        return entries
+    end
+    local selected = {}
+    for _, entry in ipairs(entries) do
+        if entry.kind ~= 'cape' then
+            selected[#selected + 1] = entry
+        end
+    end
+    assert(
+        #selected > 0,
+        'No LUTs remain to export. Enable Include Capes in Armor Exports or export a selected Cape LUT.'
+    )
+    return selected
+end
 function E.lut_choices(preset)
     local choices, counts = {}, {}
     for _, entry in ipairs(preset and preset.entries or {}) do
         local pattern = entry.document.width == 3
-        local kind = entry.kind == 'armor' and 'Armor' or 'Helmet'
+        local kind = assert(kind_labels[entry.kind], 'Invalid saved LUT gear kind')
         local label = kind .. (pattern and ' Pattern LUT ' or ' LUT ')
         counts[label] = (counts[label] or 0) + 1
         choices[#choices + 1] = label
@@ -21,13 +39,14 @@ function E.lut_choices(preset)
     end
     return #choices > 0 and choices or { 'Choose a saved preset first' }
 end
-function E.bundle(m, preset)
+function E.bundle(m, preset, include_capes)
     assert(
         preset and preset.entries and #preset.entries > 0 and #preset.entries <= 128,
         'Choose a saved Armory preset first'
     )
+    local entries = collection(preset, include_capes)
     local manifest, files = { 'EPIC-OUTFIT\t2' }, {}
-    for i, entry in ipairs(preset.entries) do
+    for i, entry in ipairs(entries) do
         local file = string.format('lut%03d.dds', i)
         files[#files + 1] = { file, m.dds.encode(entry.document.data, entry.document.width, entry.document.height) }
         local fields = { entry.kind, entry.key, file, '-', '-', '-', '-' }
@@ -42,7 +61,8 @@ function E.bundle(m, preset)
     files[#files + 1] = { 'preset.tsv', table.concat(manifest, '\n') }
     return files
 end
-function E.new(m, paths)
+function E.new(m, paths, options)
+    options = options or {}
     local self = {}
     local raw = m.lut_files.new(paths.exports, { dds = m.dds })
     local patch = m.patch_export.new(paths.exports, {
@@ -57,9 +77,14 @@ function E.new(m, paths)
         assert(format >= 1 and format <= #E.formats and format % 1 == 0, 'Choose an Armory export format')
         index = index or 1
         assert(type(index) == 'number' and index % 1 == 0 and preset.entries[index], 'Choose a saved preset LUT')
+        local include_capes = options.include_capes
+        if type(include_capes) == 'function' then
+            include_capes = include_capes()
+        end
+        local saved_entries = (format == 1 or format == 3 or format == 5) and collection(preset, include_capes)
         if format == 5 then
             local entries, counts = {}, {}
-            for _, entry in ipairs(preset.entries) do
+            for _, entry in ipairs(saved_entries) do
                 local key = entry.kind .. ':' .. entry.document.width
                 counts[key] = (counts[key] or 0) + 1
                 entries[#entries + 1] = {
@@ -77,7 +102,7 @@ function E.new(m, paths)
             local file = paths.exports .. '/' .. chosen .. '.dds'
             return file, E.lut_choices(preset)[index], file
         elseif format == 2 or format == 3 then
-            local entries = format == 2 and { preset.entries[index] } or preset.entries
+            local entries = format == 2 and { preset.entries[index] } or saved_entries
             for _, entry in ipairs(entries) do
                 assert(
                     entry.original and entry.original.resource and entry.original.patch_source,
@@ -95,7 +120,7 @@ function E.new(m, paths)
         end)
         local output = paths.exports .. '/' .. chosen .. '.zip'
         local staging = output .. '.pending'
-        local bytes = m.patch_export.zip_entries(E.bundle(m, preset))
+        local bytes = m.patch_export.zip_entries(E.bundle(m, { entries = saved_entries }))
         local ok, why = pcall(function()
             m.file_io.write(staging, bytes)
             assert(os.rename(staging, output), 'Could not publish preset export')
@@ -104,7 +129,7 @@ function E.new(m, paths)
             os.remove(staging)
             error(why, 0)
         end
-        return output, tostring(#preset.entries) .. ' saved LUTs', output
+        return output, tostring(#saved_entries) .. ' saved LUTs', output
     end
     return self
 end

@@ -1,5 +1,6 @@
 -- Transactional raw DDS export; all pixels and names validate before creating a folder.
 local B = { formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
+local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
 function B.new(m, paths)
     local self = {}
     function self.save(prefix, entries, naming)
@@ -10,9 +11,9 @@ function B.new(m, paths)
         m.lut_files.available_name(prefix, function()
             return false
         end)
-        local files, resources, stems = {}, {}, {}
+        local files, resources, targets, stems = {}, {}, {}, {}
         for _, entry in ipairs(entries) do
-            assert(entry.kind == 'armor' or entry.kind == 'helmet', 'Invalid LUT gear kind')
+            assert(kind_labels[entry.kind], 'Invalid LUT gear kind')
             assert(
                 type(entry.ordinal) == 'number' and entry.ordinal >= 1 and entry.ordinal % 1 == 0,
                 'Invalid LUT ordinal'
@@ -31,10 +32,12 @@ function B.new(m, paths)
                 .. string.format('%.0f', entry.ordinal)
             local key = resource or (entry.kind .. ':' .. ordinal)
             local identity = resource and ('resource ID ' .. resource) or (entry.kind .. ' ' .. ordinal)
-            if resources[key] then
-                assert(resources[key] == bytes, 'Conflicting LUT values for ' .. identity)
-            else
-                resources[key] = bytes
+            local target = key .. ':' .. entry.kind .. ':' .. ordinal
+            assert(not targets[target] or targets[target] == bytes, 'Conflicting LUT values for ' .. identity)
+            targets[target] = bytes
+            resources[key] = resources[key] or {}
+            if not resources[key][bytes] then
+                resources[key][bytes] = true
                 local id = resource
                 if resource and (naming == 2 or naming == 5) then
                     id = m.resource_ids.format(resource, true):match('^%[(%d+)%]$')
@@ -55,7 +58,7 @@ function B.new(m, paths)
         for _, file in ipairs(files) do
             local stem = file.stem
             if stems[stem:lower()] > 1 then
-                stem = stem .. (file.kind == 'armor' and '-Armor' or '-Helmet')
+                stem = stem .. '-' .. kind_labels[file.kind]
             end
             local chosen, counter = stem, 1
             while used[chosen:lower()] do

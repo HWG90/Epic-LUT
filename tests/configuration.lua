@@ -1,11 +1,17 @@
 local C = dofile('src/editor/configuration.lua')
-local stored = { menu_key = 121, font_size = 12 }
+local stored = { menu_key = 121, font_size = 12, include_capes_in_armor_exports = true }
 local saved
 local owner = {
     id = 'preferences',
     controls = {
         menu_key = { id = 'menu_key', type = 'keybind', label = 'Open Advanced' },
         font_size = { id = 'font_size', type = 'slider', label = 'Font size' },
+        include_capes_in_armor_exports = {
+            id = 'include_capes_in_armor_exports',
+            type = 'toggle',
+            label = 'Include Capes in Armor Exports',
+            default = true,
+        },
     },
     handle = {
         get = function(id)
@@ -66,6 +72,12 @@ controls.configuration_menu_key.on_change(45)
 controls.configuration_font_size.on_change(14)
 assert(stored.menu_key == 45 and stored.font_size == 14, 'Configuration writes missed authoritative preference store')
 assert(owner.controls.menu_key.id == 'menu_key', 'Preference definition mutated by aliasing')
+assert(controls.include_capes_in_armor_exports.default == true)
+controls.include_capes_in_armor_exports.on_change(false)
+assert(
+    stored.include_capes_in_armor_exports == false
+        and controls.include_capes_in_armor_exports.source_control_id == 'include_capes_in_armor_exports'
+)
 assert(controls.manual_fallback.children[1].id == 'load', 'Manual fallback lost')
 assert(controls.check_updates.on_activate() == 'Checked' and action_calls == 1)
 controls.resource_format.on_change()
@@ -214,6 +226,14 @@ end
 assert(label('Appearance') and label('Gear and Player Preview'), 'Configuration groups did not render')
 local left, right = view.bounds[1], view.bounds[2]
 assert(left.x + left.w < right.x and left.h == right.h, 'Settings columns overlap')
+assert(label('Exports'), 'Export settings group did not render')
+tap('[ x ] Include Capes in Armor Exports')
+assert(
+    not preferences.include_capes_in_armor_exports()
+        and disk.epic_lut_preferences.include_capes_in_armor_exports == false,
+    'Cape export checkbox missed its persisted owner'
+)
+assert(preferences.save_include_capes_in_armor_exports(true))
 assert(
     label('Squad sharing') and label('Sharing: waiting for a compatible squadmate'),
     'Late sharing controls disappeared'
@@ -310,6 +330,9 @@ assert(
     'Owner change did not refresh footer geometry'
 )
 
+if not label('> Manual file fallback') then
+    assert(view.maximum[2] > 0 and view.wheel(right.x + 10, right.y + 10, -1200))
+end
 tap('> Manual file fallback')
 compose()
 if not label('Import local file') then
@@ -342,6 +365,13 @@ assert(view.maximum[1] >= 0 and view.maximum[2] >= 0)
 local controls = api.mods[handle.id].controls
 assert(controls.auto_updates.source_mod_id == 'epic_lut_preferences')
 assert(handle.get('configuration_font_bold') == true and handle.get('auto_updates') == false)
+assert(preferences.include_capes_in_armor_exports() and handle.get('include_capes_in_armor_exports') == true)
+assert(handle.set('include_capes_in_armor_exports', false) and not preferences.include_capes_in_armor_exports())
+assert(
+    preferences.handle.set('include_capes_in_armor_exports', true)
+        and handle.get('include_capes_in_armor_exports') == true
+)
+assert(api.mods[handle.id].values.include_capes_in_armor_exports == nil, 'Cape export setting created competing state')
 assert(api.mods[handle.id].values.configuration_font_bold == nil, 'Alias retained a competing saved value')
 local count = #writes
 assert(handle.edit('configuration_font_bold', false))

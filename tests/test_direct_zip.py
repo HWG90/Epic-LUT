@@ -82,6 +82,15 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert (folder/'preset/lut001.patch-source').read_bytes()==material_meta and len(list((folder/'preset').iterdir()))==5
     fixture=ROOT/'tests/tmp/files/armorytest.zip'
     fixture.write_bytes(package.read_bytes())
+    cape_dds=bytearray(data)
+    struct.pack_into('<f',cape_dds,148,.875)
+    cape_manifest=manifest+'\ncape\t0:2:1:0\tlut003.dds\t0000000000000001\t23\t8\tlut003.patch-source'
+    with zipfile.ZipFile(package,'w')as archive:
+        for name,payload in [('preset.tsv',cape_manifest.encode()),('lut001.dds',data),('lut002.dds',pattern_dds),('lut003.dds',cape_dds),('lut001.patch-source',material_meta),('lut002.patch-source',pattern_meta),('lut003.patch-source',material_meta)]:archive.writestr(name,payload)
+    result=folder/'cape-preset.txt';completed=run(package,folder/'cape-preset',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert (folder/'cape-preset/preset.tsv').read_text()==cape_manifest and (folder/'cape-preset/lut003.dds').read_bytes()==cape_dds
+    assert len(list((folder/'cape-preset').iterdir()))==7,'Cape bundle lost shared-ID variant or metadata'
     tall_manifest=manifest.replace('\t23\t8\t','\t23\t64\t')
     tall_meta=b'0123456789abcdef\n'+bytes(192)+tall_dds[:148]
     with zipfile.ZipFile(package,'w')as archive:

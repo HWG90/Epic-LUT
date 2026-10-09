@@ -1,6 +1,7 @@
-[center][size=6][b]EPIC LUT R5.5.2[/b][/size]
+[center][size=6][b]EPIC LUT R5.5.3[/b][/size]
 [size=5][b]STYLISH FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
+[center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
 
 Super Earth gave you the armor. [b]Give it some personality.[/b]
 
@@ -12,13 +13,20 @@ Tactical pink. Pastel menace. A helmet that finally matches. Paint your Helldive
 Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
 [b]Make freedom look good.[/b]
 
+[size=4][b]R5.5.3 - EDITOR HOTFIX[/b][/size]
+[list]
+[*]Fixed overlapping windows, text drawing through Tools, and disappearing swatches, markers and carets.
+[*]Cape LUTs now use the Armor dropdown and regular editor controls; Cape exports are optional.
+[*]Click a LUT hash or name to give it a persistent custom label. Clearer Armory save errors.
+[/list]
+
 [size=4][b]YOUR FIELD KIT[/b][/size]
 [list]
 [*][b]Colors that stay with you.[/b] Armor, Helmet and Pattern LUTs follow matching gear through hellpods, missions and ship transitions.
 [*][b]Quick color. Full control.[/b] Basic for easy painting; F10 opens the full LUT grid, material controls and named bump maps. Custom tables support up to 64 rows.
 [*][b]Room to work.[/b] Movable Tools, independent Scratch and Pattern windows, plain dropdowns, clear selection borders and font-scaled padding.
 [*][b]Copy like you expect.[/b] Text selection, clipboard colors and held-key repeat. Ctrl+C/V, Undo/Redo, drag selection and full multi-row copy/paste in the grid.
-[*][b]Cape materials are back.[/b] Open Cape Material below the main table for separate cape editing and Load/Apply/Restore. Armor-wide changes leave capes alone.
+[*][b]Cape materials, without the clutter.[/b] Cape LUTs are labeled in the Armor dropdown and use the regular editor controls. Choose whether to include them in Armor exports.
 [*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or apply a table to one LUT, all Armor LUTs or all Helmet LUTs.
 [*][b]Build your Armory.[/b] Save named looks, mix Armor and Helmet presets, and share importable preset ZIPs.
 [*][b]Export your work.[/b] LUT patches, complete palette patches and raw DDS. Export every custom LUT in one click, with five naming formats and timestamped folders.
@@ -33,8 +41,8 @@ Shared Lobby LUT is in testing.
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.2-BSL.zip[/b] and enable its BSL startup option.
-[*][b]Live Lua Loader / compatible API-2 MDL:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.2-LLL.zip[/b] into your loader's Mods directory, then enable it.
+[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.3-BSL.zip[/b] and enable its BSL startup option.
+[*][b]Live Lua Loader / compatible API-2 MDL:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.3-LLL.zip[/b] into your loader's Mods directory, then enable it.
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].
 [/list]
 
@@ -59,7 +67,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.2]Download R5.5.2[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3]Download R5.5.3[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

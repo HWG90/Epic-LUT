@@ -21,6 +21,7 @@ local groups = {
         },
     },
     { 'gear', 'Gear and Player Preview', 2, { 'auto_populate_worn', 'disable_player_preview', 'resource_format' } },
+    { 'exports', 'Exports', 2, { 'include_capes_in_armor_exports' } },
     { 'sharing', 'Squad sharing', 2, { 'share_appearance', 'sharing_status' } },
     { 'updates', 'Updates', 2, { 'update_status', 'check_updates', 'auto_updates', 'open_updates' } },
 }

@@ -203,7 +203,7 @@ try {
         $presetFiles=@{'preset.tsv'=$manifest};$targets=@{}
         foreach($line in $lines[1..($lines.Count-1)]) {
             $fields=$line.Split("`t")
-            if($fields.Count -ne $(if($version -eq 1){3}else{7}) -or $fields[0] -notin @('armor','helmet') -or $fields[1] -notmatch '^(p:)?[0-9:]+$' -or ($version -eq 1 -and $fields[1].StartsWith('p:'))) {throw 'Invalid shared preset target'}
+            if($fields.Count -ne $(if($version -eq 1){3}else{7}) -or $fields[0] -notin @('armor','helmet','cape') -or $fields[1] -notmatch '^(p:)?[0-9:]+$' -or ($version -eq 1 -and ($fields[1].StartsWith('p:') -or $fields[0] -eq 'cape'))) {throw 'Invalid shared preset target'}
             $key=$fields[0]+':'+$fields[1];if($targets.ContainsKey($key)){throw 'Duplicate shared preset target'};$targets[$key]=$true
             $file=$fields[2]
             if($file -notmatch '^[A-Za-z0-9 _-]+\.dds$' -or -not $members.ContainsKey($file) -or $members[$file].Length -gt 1MB) {throw 'Invalid shared preset DDS filename or size'}

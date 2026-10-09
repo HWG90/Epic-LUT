@@ -1,4 +1,4 @@
--- Named Armor/Helmet collections: validated manifest plus ordinary DDS files.
+-- Named gear collections: validated manifest plus ordinary DDS files.
 local O = {}
 local function valid_name(value)
     assert(
@@ -51,7 +51,7 @@ function O.read(m, path, label)
     end
     local version = lines[1] == 'EPIC-OUTFIT\t1' and 1 or lines[1] == 'EPIC-OUTFIT\t2' and 2
     assert(version and #lines > 1 and #lines <= 129, 'Invalid outfit preset')
-    local result = { name = label, armor = {}, helmet = {}, entries = {} }
+    local result = { name = label, armor = {}, helmet = {}, cape = {}, entries = {} }
     local bytes, seen = 0, {}
     for i = 2, #lines do
         local fields = {}
@@ -61,7 +61,7 @@ function O.read(m, path, label)
         assert(#fields == (version == 1 and 3 or 7), 'Invalid preset entry')
         local kind, key, file = fields[1], fields[2], fields[3]
         assert(
-            (kind == 'armor' or kind == 'helmet')
+            (kind == 'armor' or kind == 'helmet' or (version == 2 and kind == 'cape'))
                 and (key:match('^[%d:]+$') or (version == 2 and key:match('^p:[%d:]+$'))),
             'Invalid preset target'
         )
@@ -107,11 +107,13 @@ function O.new(m, folder)
     end
     function self.save(label, entries)
         name(label)
-        assert(#entries > 0 and #entries <= 128, 'No attached LUTs to save')
+        assert(#entries > 0, 'No loaded LUTs to save. Load Current Gear, then try saving again.')
+        assert(#entries <= 128, ('Preset has %d LUT bindings; the maximum is 128.'):format(#entries))
         local rows = { 'EPIC-OUTFIT\t2' }
         for i, e in ipairs(entries) do
             assert(
-                (e.kind == 'armor' or e.kind == 'helmet') and (e.key:match('^[%d:]+$') or e.key:match('^p:[%d:]+$')),
+                (e.kind == 'armor' or e.kind == 'helmet' or e.kind == 'cape')
+                    and (e.key:match('^[%d:]+$') or e.key:match('^p:[%d:]+$')),
                 'Invalid target'
             )
             assert(

@@ -39,4 +39,54 @@ function R.describe(hash, decimal, catalog)
     local name = catalog and catalog.resource_name(hash)
     return name and (name .. ' ' .. formatted) or formatted
 end
+-- Local display names share the existing bounded, transactional settings store.
+function R.labels(storage)
+    local self, names = {}, {}
+    local function valid_hash(hash)
+        return type(hash) == 'string' and #hash == 16 and hash:match('^%x+$')
+    end
+    local function valid_name(name)
+        return type(name) == 'string' and #name > 0 and #name <= 48 and name:match('^[%w _-]+$')
+    end
+    local count = 0
+    for hash, name in pairs(storage.load('epic_lut_labels')) do
+        if valid_hash(hash) and valid_name(name) and count < 512 then
+            hash, name = hash:lower(), name:match('^%s*(.-)%s*$')
+            if name ~= '' then
+                if not names[hash] then
+                    count = count + 1
+                end
+                names[hash] = name
+            end
+        end
+    end
+    function self.get(hash)
+        return valid_hash(hash) and names[hash:lower()] or nil
+    end
+    function self.set(hash, name)
+        assert(valid_hash(hash), 'Load a LUT with a known texture ID first')
+        assert(type(name) == 'string', 'Enter a LUT name')
+        hash, name = hash:lower(), name:match('^%s*(.-)%s*$')
+        assert(name == '' or valid_name(name), 'Use up to 48 letters, numbers, spaces, _ or -')
+        if names[hash] == (name ~= '' and name or nil) then
+            return true
+        end
+        assert(names[hash] or name == '' or count < 512, 'Local LUT name limit reached')
+        local next_names = {}
+        for key, value in pairs(names) do
+            next_names[key] = value
+        end
+        next_names[hash] = name ~= '' and name or nil
+        local ok, why = storage.save('epic_lut_labels', next_names)
+        assert(ok, why or 'Could not save LUT name')
+        if not names[hash] and name ~= '' then
+            count = count + 1
+        elseif names[hash] and name == '' then
+            count = count - 1
+        end
+        names = next_names
+        return true
+    end
+    return self
+end
 return R

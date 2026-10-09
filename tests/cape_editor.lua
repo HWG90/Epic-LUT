@@ -1,11 +1,13 @@
 -- Production controller, discovery and ownership with a cape sharing Armor's original LUT.
 local ffi = require('ffi')
 local Core, DDS = dofile('vendor/menu/core.lua'), dofile('src/core/dds.lua')
+local saved_settings = {}
 local store = {
-    load = function()
-        return {}
+    load = function(id)
+        return saved_settings[id] or {}
     end,
-    save = function()
+    save = function(id, values)
+        saved_settings[id] = values
         return true
     end,
 }
@@ -13,6 +15,8 @@ local api = Core.new(store)
 local kits = { body = 7, armor = 11, helmet = 12, cape = 13 }
 local units, materials, bound, originals, live = {}, {}, {}, {}, {}
 local created, frontend, saved_outfit, bulk_entries, mirror_entries, shared_entries = 0
+local include_capes, gear_ready, proof_ready, basic_select = true, true, true
+local after_write
 local stock = { width = 23, height = 8, data = ffi.new('float[736]'), resource = '1111111111111111' }
 stock.data[0] = 0.125
 local function actor(generation)
@@ -55,7 +59,6 @@ local native = {
 }
 local fixture = assert(os.getenv('EPIC_LUT_TEST_ROOT')) .. '/tests/tmp/presets'
 local m = {
-    cape_panel = dofile('src/editor/cape_panel.lua'),
     appearance_state = dofile('src/gear/appearance_state.lua'),
     binding_session = dofile('src/gear/binding_session.lua'),
     gear_catalog = dofile('src/gear/gear_catalog.lua'),
@@ -108,7 +111,7 @@ local m = {
             return { units_at = 1 }
         end,
         resolve = function()
-            return kits
+            return proof_ready and kits or nil
         end,
         reader = function()
             return function()
@@ -116,7 +119,10 @@ local m = {
             end
         end,
         units = function()
-            return units
+            if gear_ready then
+                return units
+            end
+            return { units[3] }
         end,
     },
     engine = {
@@ -139,6 +145,9 @@ local m = {
         bind = function(_, material, slot, object)
             assert(slot == 1, 'Cape tint/emblem binding was overwritten')
             bound[material][slot] = object
+            if after_write then
+                after_write(material)
+            end
         end,
     },
     original_luts = {
@@ -158,7 +167,12 @@ local m = {
     },
     preferences = {
         new = function()
-            return { close = function() end }
+            return {
+                close = function() end,
+                include_capes_in_armor_exports = function()
+                    return include_capes
+                end,
+            }
         end,
     },
     provider_menu = {
@@ -167,7 +181,8 @@ local m = {
         end,
     },
     basic_view = {
-        new = function()
+        new = function(info, select)
+            basic_select = select
             return { draw = function() end, wheel = function() end }
         end,
     },
@@ -216,7 +231,7 @@ local m = {
                     return saved_outfit
                 end,
                 save = function(_, entries)
-                    saved_outfit = { name = 'Cape fixture', entries = entries, armor = {}, helmet = {} }
+                    saved_outfit = { name = 'Cape fixture', entries = entries, armor = {}, helmet = {}, cape = {} }
                     for _, entry in ipairs(entries) do
                         saved_outfit[entry.kind][#saved_outfit[entry.kind] + 1] = entry.document
                     end
@@ -275,6 +290,15 @@ m.lut_editor = {
         return model
     end,
 }
+api.focus_page = function(id, page_id)
+    for index, page in ipairs(api.mods[id].pages) do
+        if page.id == page_id then
+            frontend.menu.page = index
+            return true
+        end
+    end
+    return false
+end
 local f = assert(io.open('src/editor/direct_editor.lua', 'rb'))
 local source = f:read('*a')
 f:close()
@@ -291,133 +315,234 @@ local function activate(id)
 end
 assert(h.set('preserve_emissives', false))
 activate('populate_worn')
+api.focus_page(h.id, 'colors')
+local control = api.mods[h.id].controls.basic_armor_lut
+assert(
+    #control.choices == 2 and control.choices[1] == 'LUT 1' and control.choices[2] == 'Cape LUT 1',
+    'Armor/Cape shared resource did not yield separate named choices'
+)
+assert(
+    control.choice_targets[1].kind == 'armor' and control.choice_targets[2].kind == 'cape',
+    'Combined choice lost actual native kind'
+)
+assert(not api.mods[h.id].controls.basic_cape_lut and #models == 1, 'Separate Cape controls/editor still registered')
 assert(h.set('cell_r', 0.375))
 runtime.on_update(ctx, 0)
 local armor, cape, helmet = current()
 local armor_custom = bound[armor][1]
-local main = models[1]
-main.focus_cell(2, 3)
-local main_pixels = ffi.string(main.document.data, main.document.width * main.document.height * 16)
-local main_selection, main_undo = main.selection, #main.undo
-assert(activate('editor_load_cape'):find('Cape material loaded', 1, true), 'Cape cannot be loaded into its own section')
-assert(h.get('cape_cell_r') == 0.125, 'Cape current load missed the original snapshot')
-assert(
-    ffi.string(main.document.data, #main_pixels) == main_pixels
-        and main.selection == main_selection
-        and #main.undo == main_undo,
-    'Cape load replaced main document/selection/history'
-)
-assert(h.set('cape_cell_r', 0.75))
+assert(h.set('basic_armor_lut', 2))
+assert(h.get('cell_r') == 0.125 and models[1].gear == 'armor', 'Cape choice does not use the shared Armor grid')
+assert(h.set('cell_r', 0.75))
 runtime.on_update(ctx, 0)
 local custom = bound[cape][1]
 assert(
     custom ~= 1001 and bound[armor][1] == armor_custom and bound[helmet][1] == 1002,
-    'Cape edit repainted shared Armor/Helmet'
+    'Cape edit spilled into shared-hash Armor/Helmet'
 )
-assert(bound[cape][3] == 999, 'Material edit affected separate cape tint/emblem LUT')
-assert(
-    ffi.string(main.document.data, #main_pixels) == main_pixels
-        and main.selection == main_selection
-        and #main.undo == main_undo,
-    'Cape edit replaced main document/selection/history'
-)
-activate('editor_apply_cape')
--- Main action Undo/Redo preserves current independently edited Cape bindings and intent.
+assert(bound[cape][3] == 999, 'Cape material edit overwrote its separate tint/emblem slot')
 activate('global_undo')
-assert(bound[armor][1] == 1001 and bound[cape][1] == custom, 'Main Undo also changed Cape')
+assert(bound[cape][1] == 1001 and bound[armor][1] == armor_custom, 'Shared Undo did not isolate Cape')
 activate('global_redo')
-assert(bound[armor][1] == armor_custom and bound[cape][1] == custom, 'Main Redo also changed Cape')
-local allocated = created
+assert(bound[cape][1] == custom and bound[armor][1] == armor_custom, 'Shared Redo did not restore Cape intent')
+activate('reset_custom')
+runtime.on_update(ctx, 0)
+assert(bound[armor][1] == armor_custom, 'Selected Cape Reset repainted Armor')
+assert(h.set('cell_r', 0.75))
+runtime.on_update(ctx, 0)
+custom = bound[cape][1]
 activate('editor_all_armor')
 activate('editor_all_both')
-assert(bound[cape][1] == custom, 'Armor/Both wide action includes Cape')
+assert(bound[cape][1] == custom, 'Armor/Both wide application includes Cape')
 runtime.on_update(ctx, 0)
-assert(not mirror_entries['0:1:0:0'], 'Cape escaped into Armor Armory mirror entries')
+assert(not mirror_entries['0:1:0:0'], 'Cape escaped into Armory mirror')
 for _, entry in ipairs(shared_entries) do
-    assert(entry.key ~= '0:1:0:0', 'Cape escaped into lobby packet')
+    assert(entry.key ~= '0:1:0:0', 'Cape escaped into lobby payload')
 end
+-- The include flag filters outgoing exports, never local named presets.
 assert(h.set('export_format', 4))
+include_capes = false
 activate('export_selected')
 for _, entry in ipairs(bulk_entries) do
-    assert(entry.kind ~= 'cape', 'Armor/Helmet bulk export includes Cape')
+    assert(entry.kind ~= 'cape', 'Outgoing exclude flag leaked Cape')
 end
-activate('save_setup')
-assert(frontend.menu.outfit_dialog and frontend.menu.outfit_dialog.on_save('Cape fixture', 'both'))
-for _, entry in ipairs(saved_outfit.entries) do
-    assert(entry.key ~= '0:1:0:0', 'Cape was saved inside Armor preset')
+include_capes = true
+activate('export_selected')
+local exported_cape = false
+for _, entry in ipairs(bulk_entries) do
+    exported_cape = exported_cape or entry.kind == 'cape'
 end
-activate('editor_restore_cape')
-assert(bound[cape][1] == 1001 and bound[armor][1] ~= 1001, 'Cape Restore affected Armor')
-assert(h.set('cape_cell_r', 0.75))
-runtime.on_update(ctx, 0)
+assert(exported_cape, 'Outgoing include flag discarded Cape')
+local function save(scope)
+    activate('save_setup')
+    assert(frontend.menu.outfit_dialog)
+    frontend.menu.outfit_dialog.on_save('Cape fixture', scope)
+    return saved_outfit
+end
+include_capes = false
+local local_armor = save('armor')
+assert(
+    #local_armor.armor > 0 and #local_armor.cape > 0 and #local_armor.helmet == 0,
+    'Armor Only save lost Cape or included Helmet'
+)
+local local_helmet = save('helmet')
+assert(
+    #local_helmet.helmet > 0 and #local_helmet.armor == 0 and #local_helmet.cape == 0,
+    'Helmet Only save includes Armor/Cape'
+)
+local both = save('both')
+assert(#both.armor > 0 and #both.cape > 0 and #both.helmet > 0, 'Both save omitted a gear kind')
 activate('restore')
-assert(bound[cape][1] == 1001 and bound[armor][1] == 1001 and bound[helmet][1] == 1002, 'Main Restore missed Cape')
-activate('editor_load_cape')
-assert(h.set('cape_cell_r', 0.75))
+activate('outfit_apply_armor')
+assert(
+    bound[armor][1] ~= 1001 and bound[cape][1] == custom and bound[helmet][1] == 1002,
+    'Saved Armor+Cape preset did not apply separate same-hash destinations'
+)
+local before = saved_outfit
+gear_ready = false
+activate('save_setup')
+local saved, why = pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', 'both')
+assert(
+    not saved and why:find('Armor/Cape LUTs', 1, true) and saved_outfit == before,
+    'Loading Armor silently saved a partial Both preset'
+)
+gear_ready = true
+-- Alias writes retain raw texture IDs and the modal refocus seed.
+activate('populate_worn')
+assert(h.set('basic_armor_lut', 2))
+activate('editor_load_armor')
+activate('rename_lut')
+assert(frontend.menu.outfit_dialog.initial_text == '' and frontend.menu.outfit_dialog.action_label == 'Save Name')
+frontend.menu.outfit_dialog.on_save('Cape Pink')
+assert(
+    control.choice_details[2] == 'Cape Pink'
+        and control.choice_hashes[2] == '1111111111111111'
+        and control.choice_help[2]:find('1111111111111111', 1, true),
+    'Alias replaced raw hash metadata'
+)
+activate('rename_lut')
+assert(frontend.menu.outfit_dialog.initial_text == 'Cape Pink', 'Rename refocus lost existing label')
+frontend.menu.outfit_dialog.on_save('   ')
+assert(control.choice_details[2] ~= 'Cape Pink', 'Whitespace clear did not restore texture ID')
+activate('restore')
+activate('editor_load_armor')
+assert(h.set('cell_r', 0.75))
 runtime.on_update(ctx, 0)
 custom = bound[cape][1]
 actor(2)
 runtime.on_update(ctx, 0.5)
 armor, cape, helmet = current()
-assert(bound[cape][1] == custom and bound[armor][1] == 2001, 'Matching Cape did not recover or repainted Armor')
--- Cape's own model Undo/Redo changes only its captured kit and history.
-activate('cape_undo')
-runtime.on_update(ctx, 0)
-local undone = bound[cape][1]
-assert(undone ~= custom and bound[armor][1] == 2001, 'Cape Undo changed Armor or failed to apply')
-kits.cape = 97
-activate('cape_redo')
-runtime.on_update(ctx, 0)
-assert(bound[cape][1] == undone, 'Cape Redo repainted a different kit on the same mount')
-runtime.on_update(ctx, 0.5)
-assert(bound[cape][1] == 2001, 'Changed Cape retained the previous kit appearance')
-kits.cape = 13
-runtime.on_update(ctx, 0.5)
-activate('editor_load_cape')
-assert(h.set('cape_cell_r', 0.75))
+assert(bound[cape][1] == custom and bound[armor][1] == 2001, 'Same Cape actor recovery repainted Armor or lost colors')
+assert(h.set('cell_r', 0.625))
 runtime.on_update(ctx, 0)
 custom = bound[cape][1]
--- Changing cape kit can reuse every native unit/material/resource pointer.
+assert(custom ~= 2001 and bound[armor][1] == 2001, 'Loaded Cape draft could not resolve its rebuilt actor')
+activate('global_undo')
 kits.cape = 99
 runtime.on_update(ctx, 0.5)
-assert(bound[cape][1] == 2001, 'Previous Cape colors stayed on a changed kit with the same mount')
-activate('editor_load_cape')
-assert(h.get('cape_cell_r') == 0.125, 'Cape editor retained stale custom cache after kit changed')
-runtime.on_update(ctx, 0.5)
-assert(bound[cape][1] == 2001, 'Old Cape intent was replayed onto a new Cape kit')
-kits.cape = 13
-runtime.on_update(ctx, 0.5)
-assert(bound[cape][1] == custom, 'Returning to the exact prior Cape lost its intent')
-bound[cape][1] = 777777
+local redone, refusal = h.activate('global_redo')
+assert(
+    not redone and refusal:find('Cape kit changed', 1, true) and bound[cape][1] == 2001,
+    'Old Cape Redo painted a different kit on the same mount'
+)
+activate('editor_load_armor')
+assert(h.get('cell_r') == 0.125, 'Cape swap retained stale editor cache')
+-- Basic swatch/copy/picker targets also require captured kit+resource proof.
+frontend.basic_mode = true
+api.focus_page(h.id, 'basic')
+assert(basic_select(1, 'armor'))
+assert(h.set('cell_color', '#FF0000'))
 kits.cape = 98
+runtime.on_update(ctx, 0)
+assert(bound[cape][1] == 2001, 'Basic Cape edit repainted a changed kit while refresh was deferred')
 runtime.on_update(ctx, 0.5)
-assert(bound[cape][1] == 777777, 'Cape-kit change overwrote a foreign writer')
+proof_ready = false
+assert(not pcall(basic_select, 1, 'armor'), 'Basic Cape selection accepted unavailable identity')
+proof_ready = true
+frontend.basic_mode = false
+api.focus_page(h.id, 'colors')
 activate('restore')
-assert(bound[cape][1] == 777777, 'Main Restore overwrote a foreign Cape writer')
+bound[cape][1] = 777777
+kits.cape = 97
+runtime.on_update(ctx, 0.5)
+assert(bound[cape][1] == 777777, 'Cape kit swap overwrote a foreign writer')
+activate('restore')
+assert(bound[cape][1] == 777777, 'Restore overwrote a foreign Cape writer')
 runtime.on_disable(ctx)
--- The legacy manifest's Helmet blanket default must not fall through to a Cape destination.
-local filename = 'cape-fixture-helmet.dds'
-DDS.write(fixture .. '/' .. filename, stock.data, stock.width, stock.height)
-m.direct_setup.new = function()
-    return {
-        read = function()
-            return { ['helmet-all'] = filename }
-        end,
-        clear = function() end,
-        save = function()
-            return 1
-        end,
-    }
+-- Cross-launch restoration requires Cape proof and checks it at each write.
+local filename = 'setup-1-1-1.dds'
+local pixels = ffi.new('float[736]')
+pixels[0] = 0.875
+DDS.write(fixture .. '/' .. filename, pixels, 23, 8)
+local function startup(plan, proof, kit)
+    kits.cape = kit
+    actor(3)
+    m.direct_setup.new = function()
+        return {
+            read = function()
+                return plan, proof
+            end,
+            clear = function() end,
+            save = function()
+                return 1
+            end,
+        }
+    end
+    runtime.on_enable(ctx)
+    for _ = 1, 14 do
+        runtime.on_update(ctx, 0.25)
+    end
+    armor, cape, helmet = current()
 end
-actor(3)
-runtime.on_enable(ctx)
-for _ = 1, 14 do
-    runtime.on_update(ctx, 0.25)
-end
-armor, cape, helmet = current()
-assert(bound[cape][1] == 3001 and bound[helmet][1] ~= 3002, 'Helmet startup default fell through into Cape')
+startup({ ['0:1:0:0'] = filename }, nil, 13)
+assert(bound[cape][1] == 3001, 'Legacy unproved Cape slot resumed onto current kit')
 runtime.on_disable(ctx)
+startup({ ['0:1:0:0'] = filename }, { ['0:1:0:0'] = { proof = '7:13', resource = '1111111111111111' } }, 99)
+assert(bound[cape][1] == 3001, 'Saved old Cape proof resumed onto another kit')
+runtime.on_disable(ctx)
+startup({ ['0:1:0:0'] = filename }, { ['0:1:0:0'] = { proof = '7:13', resource = '1111111111111111' } }, 13)
+assert(bound[cape][1] ~= 3001, 'Exact saved Cape proof failed to resume')
+runtime.on_disable(ctx)
+-- A same-mount kit switch after scan but before the later Cape batch cannot adopt old colors.
+local armor_file = 'setup-1-1-2.dds'
+DDS.write(fixture .. '/' .. armor_file, pixels, 23, 8)
+local original_pairs = pairs
+pairs = function(value)
+    if
+        type(value) == 'table'
+        and type(value[filename]) == 'table'
+        and value[filename][1]
+        and value[filename][1].cape
+        and value[armor_file]
+    then
+        local keys, index = { armor_file, filename }, 0
+        return function()
+            index = index + 1
+            local key = keys[index]
+            if key then
+                return key, value[key]
+            end
+        end
+    end
+    return original_pairs(value)
+end
+after_write = function(material)
+    if material == 301 then
+        kits.cape = 99
+    end
+end
+startup(
+    { ['0:2:0:0'] = armor_file, ['0:1:0:0'] = filename },
+    { ['0:1:0:0'] = { proof = '7:13', resource = '1111111111111111' } },
+    13
+)
+pairs, after_write = original_pairs, nil
+assert(
+    bound[armor][1] ~= 3001 and bound[cape][1] == 3001,
+    'Cape startup batch applied after the kit changed following scan'
+)
+runtime.on_disable(ctx)
+os.remove(fixture .. '/' .. armor_file)
 os.remove(fixture .. '/' .. filename)
 print(
-    'PASS independent Cape material section: scoped model/current load/edit/picker/history/Restore, narrow native targets, main document/selection/history preservation, exact kit recovery and unchanged-mount kit/foreign/startup isolation'
+    'PASS folded Cape controller: same-hash selector/single editor, scoped edits/reset/history/recovery, Basic kit guards, three local save scopes/loading rejection, export flag, alias modal/raw IDs and legacy/new startup proof'
 )

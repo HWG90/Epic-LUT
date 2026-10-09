@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 VERSION = (ROOT/'VERSION').read_text(encoding='utf-8').strip()
 DISPLAY_VERSION = VERSION.replace('-alpha',' Alpha').replace('-rc',' RC')
 STATUS = 'release candidate' if '-rc' in VERSION else ('alpha prerelease' if '-alpha' in VERSION else 'full release')
-DESCRIPTION = DISPLAY_VERSION + ' - ' + STATUS + '. Basic and Advanced Armor/Helmet LUT editing, separate Cape material editing, Pattern LUT editor, live Player Preview, DDS/ZIP/RAR import, named Armory presets, DDS and patch export, and optional squad appearance sharing. F9: Basic; F10: Advanced. Optional MCM settings integration. RAR requires 7-Zip.'
+DESCRIPTION = DISPLAY_VERSION + ' - ' + STATUS + '. Basic and Advanced Armor/Helmet/Cape material LUT editing, Pattern LUT editor, live Player Preview, DDS/ZIP/RAR import, named Armory presets, DDS and patch export, and optional squad appearance sharing. F9: Basic; F10: Advanced. Optional MCM settings integration. RAR requires 7-Zip.'
 CREDITS = 'CowboyBingus: native adapters and LUT discovery; Scarpheon: bump-map mapping, vital testing and Export to Patch assistance; Plain Furniture: Debug LUT'
 parser = argparse.ArgumentParser()
 parser.add_argument('--loader', choices=('bsl','loose'), default='bsl')
@@ -100,7 +100,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL-LLL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/RELEASE-R5.5-RC1.md','docs/RELEASE-R5.5.md','docs/RELEASE-R5.5.1.md','docs/RELEASE-R5.5.2.md','CHANGELOG.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/PREVIEW-RENDER-PATH.md','docs/SDK-INTEGRATION.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/RELEASE-R5.5-RC1.md','docs/RELEASE-R5.5.md','docs/RELEASE-R5.5.1.md','docs/RELEASE-R5.5.2.md','docs/RELEASE-R5.5.3.md','CHANGELOG.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/PREVIEW-RENDER-PATH.md','docs/SDK-INTEGRATION.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
         package.write(ROOT/name,name)
 (ROOT/'BUILD-RECEIPT.json').write_text(json.dumps({'name':'Epic LUT '+DISPLAY_VERSION,'version':VERSION,'author':'Goose','input_runtime_sha256':NATIVE_SHA,'mod_sha256':hashlib.sha256(model.encode()).hexdigest(),'python_required':False,'player_preview':args.player_preview,'modules':VENDOR+OWN},indent=2))
 print(ROOT/'dist'/args.output)

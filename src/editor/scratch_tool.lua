@@ -47,7 +47,7 @@ function S.new(deps)
             end)
             local color = editor.scratch or { 255, 255, 255 }
             local alpha = h.get('scratch_alpha')
-            ui.rect(bx, top - 48, width, 30, color)
+            ui.rect(bx, top - 48, width, 30, color, nil, 'swatch_fill')
             ui.hit(bx, top - 48, width, 30, function()
                 ui.activate('scratch_color')
             end)
@@ -66,7 +66,7 @@ function S.new(deps)
                 for sx = 0, 19 do
                     local rgb = scratch_colors[vy * 20 + sx + 1]
                     local px, py = gx + sx * gw / 20, gy + vy * gh / 20
-                    ui.rect(px, py, gw / 20 + 1, gh / 20 + 1, rgb)
+                    ui.rect(px, py, gw / 20 + 1, gh / 20 + 1, rgb, nil, 'swatch_fill')
                     ui.hit(px, py, gw / 20, gh / 20, function()
                         assert(h.set('scratch_color', string.format('#%02X%02X%02X', rgb[1], rgb[2], rgb[3])))
                     end)
@@ -74,7 +74,7 @@ function S.new(deps)
             end
             for i = 0, 19 do
                 local chosen, py = i / 20, gy + i * gh / 20
-                ui.rect(gx + gw + 5, py, 12, gh / 20 + 1, core.hsv_rgb(chosen, 1, 1))
+                ui.rect(gx + gw + 5, py, 12, gh / 20 + 1, core.hsv_rgb(chosen, 1, 1), nil, 'swatch_fill')
                 ui.hit(gx + gw + 5, py, 12, gh / 20, function()
                     local rgb = core.hsv_rgb(chosen, 1, 1)
                     assert(h.set('scratch_color', string.format('#%02X%02X%02X', rgb[1], rgb[2], rgb[3])))
@@ -92,7 +92,7 @@ function S.new(deps)
                     for channel = 1, 3 do
                         rgba[channel] = math.floor(background * (1 - opacity) + color[channel] * opacity + 0.5)
                     end
-                    ui.rect(ax + col * 8, gy + row * gh / 20, 8, gh / 20 + 1, rgba)
+                    ui.rect(ax + col * 8, gy + row * gh / 20, 8, gh / 20 + 1, rgba, nil, 'swatch_fill')
                 end
                 if not ui.vertical then
                     local chosen = opacity
@@ -101,8 +101,8 @@ function S.new(deps)
                     end)
                 end
             end
-            ui.rect(ax - 2, gy + alpha * gh - 2, 20, 4, { 15, 15, 15 })
-            ui.rect(ax - 2, gy + alpha * gh - 1, 20, 2, white)
+            ui.rect(ax - 2, gy + alpha * gh - 2, 20, 4, { 15, 15, 15 }, nil, 'marker_border')
+            ui.rect(ax - 2, gy + alpha * gh - 1, 20, 2, white, nil, 'marker_fill')
             label(y + 73, string.format('A: %.2f', alpha))
             action(y + 28, 'Paint selected RGB', 'paint_scratch', d ~= nil)
         end
