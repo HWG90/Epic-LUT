@@ -62,7 +62,9 @@ function P.new(deps)
         assert(ok, why)
     end
     function self.scan()
-        if deps.indicator then assert(deps.indicator.stop(), 'Pattern highlight restoration pending') end
+        if deps.indicator then
+            assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
+        end
         local existing = {}
         for _, b in ipairs(deps.session.owned) do
             existing[deps.key(b)] = b
@@ -123,7 +125,11 @@ function P.new(deps)
             controls.pattern_lut.choices = #choices > 0 and choices or { 'No bound Pattern LUTs' }
             controls.pattern_lut.choice_details = details
             local selected_index = 1
-            for i,group in ipairs(ordered) do if group.object == self.selections[kind] then selected_index = i end end
+            for i, group in ipairs(ordered) do
+                if group.object == self.selections[kind] then
+                    selected_index = i
+                end
+            end
             self.busy = true
             assert(handle.set('pattern_lut', selected_index))
             self.busy = false
@@ -131,29 +137,42 @@ function P.new(deps)
         return #ordered
     end
     function self.load(force)
-        if deps.indicator then assert(deps.indicator.stop(), 'Pattern highlight restoration pending') end
+        if deps.indicator then
+            assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
+        end
         local group = selected()
         self.selections[self.gear or 'armor'] = group.object
         local key = (self.gear or 'armor') .. ':' .. group.object
         local bound = deps.binding(group.bindings[1])
         local cached = not force and self.documents[key]
-        if cached and cached.object ~= bound then cached = nil end
-        if cached then self.document,self.undo,self.redo = cached.document,cached.undo,cached.redo; self.waiting=nil; sync(); return note('Loaded cached current Pattern LUT values.') end
+        if cached and cached.object ~= bound then
+            cached = nil
+        end
+        if cached then
+            self.document, self.undo, self.redo = cached.document, cached.undo, cached.redo
+            self.waiting = nil
+            sync()
+            return note('Loaded cached current Pattern LUT values.')
+        end
         local first = group.bindings[1]
-        local source = bound ~= first.original and bound == first.current and first.document or deps.original(group.object)
+        local source = bound ~= first.original and bound == first.current and first.document
+            or deps.original(group.object)
         if not source then
             self.document = nil
             sync()
-            self.waiting = self.waiting or {age=0,elapsed=0}
+            self.waiting = self.waiting or { age = 0, elapsed = 0 }
             return note('Loading current Pattern LUT values automatically...')
         end
-        assert(source.width == 3 and source.height == 1,'Bound pattern snapshot is not 3x1')
+        assert(source.width == 3 and source.height == 1, 'Bound pattern snapshot is not 3x1')
         self.waiting = nil
         local data = ffi.new('float[12]')
         ffi.copy(data, source.data, 48)
         self.document = { data = data, width = 3, height = 1, original = pixels(source) }
         self.undo, self.redo = {}, {}
-        self.documents[key] = {document=self.document,undo=self.undo,redo=self.redo,object=deps.binding(selected().bindings[1])}
+        self.documents[key] =
+            { document = self.document, undo = self.undo, redo = self.redo, object = deps.binding(
+                selected().bindings[1]
+            ) }
         sync()
         return note('Loaded selected 3x1 Pattern LUT. Unknown channels are retained.')
     end
@@ -172,7 +191,18 @@ function P.new(deps)
             if current == b.original then
                 b.current = current -- The game reset an owned table; reclaim only its known original.
             elseif current ~= b.current then
-                if deps.log then deps.log('PATTERN_STALE target=' .. deps.key(b) .. ' expected=' .. tostring(b.current) .. ' actual=' .. tostring(current) .. ' original=' .. tostring(b.original)) end
+                if deps.log then
+                    deps.log(
+                        'PATTERN_STALE target='
+                            .. deps.key(b)
+                            .. ' expected='
+                            .. tostring(b.current)
+                            .. ' actual='
+                            .. tostring(current)
+                            .. ' original='
+                            .. tostring(b.original)
+                    )
+                end
                 error('Pattern changed; click Load Current Patterns to reload it.', 0)
             end
         end
@@ -180,7 +210,9 @@ function P.new(deps)
         sync()
     end
     local function edit(fn)
-        if deps.indicator then assert(deps.indicator.stop(), 'Pattern highlight restoration pending') end
+        if deps.indicator then
+            assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
+        end
         if self.busy then
             return
         end
@@ -199,11 +231,16 @@ function P.new(deps)
         end
         self.redo = {}
         local key = (self.gear or 'armor') .. ':' .. selected().object
-        self.documents[key] = {document=self.document,undo=self.undo,redo=self.redo,object=deps.binding(selected().bindings[1])}
+        self.documents[key] =
+            { document = self.document, undo = self.undo, redo = self.redo, object = deps.binding(
+                selected().bindings[1]
+            ) }
         return note('Selected Pattern LUT updated live.')
     end
     local function history(from, to)
-        if deps.indicator then assert(deps.indicator.stop(), 'Pattern highlight restoration pending') end
+        if deps.indicator then
+            assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
+        end
         local d = assert(self.document, 'Load a Pattern LUT first')
         local value = from[#from]
         if not value then
@@ -223,14 +260,21 @@ function P.new(deps)
     end
     function self.controls()
         local out = {
-            {id='pattern_flash',type='button',label='Flash Pattern',on_activate=self.flash},
-            {id='pattern_stop_flash',type='button',label='Stop Pattern Flash',on_activate=self.stop_flash},
-            {id = 'pattern_picker',type = 'color',label = 'Pattern RGBA',default = '#FFFFFF',on_change = function(hex)
-                return edit(function(data)
-                    local at = ((self.column or 1)-1)*4
-                    local r,g,b = deps.rgb(hex); data[at],data[at+1],data[at+2] = r,g,b
-                end)
-            end},
+            { id = 'pattern_flash', type = 'button', label = 'Flash Pattern', on_activate = self.flash },
+            { id = 'pattern_stop_flash', type = 'button', label = 'Stop Pattern Flash', on_activate = self.stop_flash },
+            {
+                id = 'pattern_picker',
+                type = 'color',
+                label = 'Pattern RGBA',
+                default = '#FFFFFF',
+                on_change = function(hex)
+                    return edit(function(data)
+                        local at = ((self.column or 1) - 1) * 4
+                        local r, g, b = deps.rgb(hex)
+                        data[at], data[at + 1], data[at + 2] = r, g, b
+                    end)
+                end,
+            },
             {
                 id = 'pattern_open',
                 type = 'button',
@@ -352,7 +396,9 @@ function P.new(deps)
             type = 'button',
             label = 'Restore Original Pattern LUTs',
             on_activate = function()
-                if deps.indicator then assert(deps.indicator.stop(), 'Pattern highlight restoration pending') end
+                if deps.indicator then
+                    assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
+                end
                 assert(deps.session.restore(), 'Pattern restoration pending')
                 self.document = nil
                 self.documents = {}
@@ -406,14 +452,20 @@ function P.new(deps)
     end
     function self.switch(kind)
         assert(kind == 'armor' or kind == 'helmet')
-        if self.gear == kind and self.document then return true end
+        if self.gear == kind and self.document then
+            return true
+        end
         self.waiting = nil
         self.gear = kind
         local ok, why = pcall(function()
             assert(self.scan() > 0, 'No bound Pattern LUTs for ' .. kind)
             self.load()
         end)
-        if not ok then self.document=nil; sync(); note(tostring(why)) end
+        if not ok then
+            self.document = nil
+            sync()
+            note(tostring(why))
+        end
         return ok
     end
     function self.flash()
@@ -424,25 +476,43 @@ function P.new(deps)
         for _, b in ipairs(selected().bindings) do
             local object = deps.binding(b)
             assert(object == b.current or object == b.original, 'Pattern changed; load current patterns again')
-            if object == b.original then b.current=object end
+            if object == b.original then
+                b.current = object
+            end
             local source = b.texture and b.texture.object == object and b.texture or d
-            items[#items+1] = {binding=b, source=source, object=object, texture=b.texture, document=b.document}
+            items[#items + 1] =
+                { binding = b, source = source, object = object, texture = b.texture, document = b.document }
         end
-        deps.indicator.start(items,1)
+        deps.indicator.start(items, 1)
         return note('Flashing the selected pattern accent for four seconds. An unused pattern may not show.')
     end
-    function self.stop_flash() return not deps.indicator or deps.indicator.stop() end
-    function self.flashing() return deps.indicator and deps.indicator.job ~= nil or false end
+    function self.stop_flash()
+        return not deps.indicator or deps.indicator.stop()
+    end
+    function self.flashing()
+        return deps.indicator and deps.indicator.job ~= nil or false
+    end
     function self.tick(dt)
-        if deps.indicator then deps.indicator.tick(dt,self.open == true) end
+        if deps.indicator then
+            deps.indicator.tick(dt, self.open == true)
+        end
         local pending = self.waiting
-        if not pending then return end
-        pending.age,pending.elapsed = pending.age+(dt or 0),pending.elapsed+(dt or 0)
-        if pending.age>120 then self.waiting=nil; note('Pattern snapshot unavailable; Load Current Patterns to retry'); return end
-        if pending.elapsed>=.25 then
-            pending.elapsed=0
-            local ok,why=pcall(self.load)
-            if not ok then self.waiting=nil; note(tostring(why)) end
+        if not pending then
+            return
+        end
+        pending.age, pending.elapsed = pending.age + (dt or 0), pending.elapsed + (dt or 0)
+        if pending.age > 120 then
+            self.waiting = nil
+            note('Pattern snapshot unavailable; Load Current Patterns to retry')
+            return
+        end
+        if pending.elapsed >= 0.25 then
+            pending.elapsed = 0
+            local ok, why = pcall(self.load)
+            if not ok then
+                self.waiting = nil
+                note(tostring(why))
+            end
         end
     end
     function self.show(kind)
@@ -468,8 +538,15 @@ function P.new(deps)
             end
             local function button(px, py, width, text, id, enabled, callback, active)
                 local featured = enabled ~= false and id == 'pattern_export'
-                ui.rect(px, py, width, 26, enabled == false and {35,39,43} or (featured and {244,202,53} or (active and {49,82,115} or blue)))
-                ui.bounded(px + 6, py + 6, text, 13, featured and {25,28,31} or white, width - 12)
+                ui.rect(
+                    px,
+                    py,
+                    width,
+                    26,
+                    enabled == false and { 35, 39, 43 }
+                        or (featured and { 244, 202, 53 } or (active and { 49, 82, 115 } or blue))
+                )
+                ui.bounded(px + 6, py + 6, text, 13, featured and { 25, 28, 31 } or white, width - 12)
                 ui.hit(px, py, width, 26, function()
                     if enabled ~= false then
                         if callback then
@@ -520,11 +597,24 @@ function P.new(deps)
             local moving = self.last_popup_x ~= nil and (self.last_popup_x ~= x or self.last_popup_y ~= y)
             if moving and not self.move_logged and deps.log then
                 local values = {}
-                if d then for i=0,11 do values[#values+1]=string.format('%.7g',tonumber(d.data[i])) end end
-                deps.log('PATTERN_MOVE gear=' .. tostring(self.gear) .. ' lut=' .. handle.get('pattern_lut') .. ' values=' .. table.concat(values,','))
+                if d then
+                    for i = 0, 11 do
+                        values[#values + 1] = string.format('%.7g', tonumber(d.data[i]))
+                    end
+                end
+                deps.log(
+                    'PATTERN_MOVE gear='
+                        .. tostring(self.gear)
+                        .. ' lut='
+                        .. handle.get('pattern_lut')
+                        .. ' values='
+                        .. table.concat(values, ',')
+                )
                 self.move_logged = true
-            elseif not moving then self.move_logged = false end
-            self.last_popup_x,self.last_popup_y = x,y
+            elseif not moving then
+                self.move_logged = false
+            end
+            self.last_popup_x, self.last_popup_y = x, y
             local sw = (w - 36) / 3
             for col = 1, 3 do
                 local index = (col - 1) * 4
@@ -539,19 +629,37 @@ function P.new(deps)
                 ui.rect(px - 1, y + h - 211, sw + 2, 50, self.column == col and { 244, 202, 53 } or muted)
                 deps.swatch(ui, px, y + h - 210, sw, 48, color, d and d.data[index + 3] or 1, handle.get('show_alpha'))
                 local selected_column = col
-                ui.hit(px, y + h - 210, sw, 48, function()
-                    self.column = selected_column
-                end, nil, nil, 'Double-click to edit this Pattern LUT swatch.', function()
-                    if not self.document then note('Load a Pattern LUT first'); return end
-                    self.column = selected_column
-                    local at = (selected_column-1)*4
-                    self.busy = true
-                    local color = {}
-                    for ch=1,3 do color[ch]=math.floor(math.max(0,math.min(1,self.document.data[at+ch-1]))*255+.5) end
-                    assert(handle.set('pattern_picker',string.format('#%02X%02X%02X',color[1],color[2],color[3])))
-                    self.busy = false
-                    ui.activate('pattern_picker')
-                end)
+                ui.hit(
+                    px,
+                    y + h - 210,
+                    sw,
+                    48,
+                    function()
+                        self.column = selected_column
+                    end,
+                    nil,
+                    nil,
+                    'Double-click to edit this Pattern LUT swatch.',
+                    function()
+                        if not self.document then
+                            note('Load a Pattern LUT first')
+                            return
+                        end
+                        self.column = selected_column
+                        local at = (selected_column - 1) * 4
+                        self.busy = true
+                        local color = {}
+                        for ch = 1, 3 do
+                            color[ch] =
+                                math.floor(math.max(0, math.min(1, self.document.data[at + ch - 1])) * 255 + 0.5)
+                        end
+                        assert(
+                            handle.set('pattern_picker', string.format('#%02X%02X%02X', color[1], color[2], color[3]))
+                        )
+                        self.busy = false
+                        ui.activate('pattern_picker')
+                    end
+                )
             end
             self.column = self.column or 1
             local cursor = y + h - 249
@@ -617,8 +725,8 @@ function P.new(deps)
             else
                 label(x + 12, cursor, 'Load current patterns to edit. Snapshots may still be loading.')
             end
-            button(x+12,y+254,(w-30)/2,'Flash Pattern','pattern_flash',d ~= nil)
-            button(x+18+(w-30)/2,y+254,(w-30)/2,'Stop Flash','pattern_stop_flash')
+            button(x + 12, y + 254, (w - 30) / 2, 'Flash Pattern', 'pattern_flash', d ~= nil)
+            button(x + 18 + (w - 30) / 2, y + 254, (w - 30) / 2, 'Stop Flash', 'pattern_stop_flash')
             local bw = (w - 36) / 3
             button(x + 12, y + 216, bw, 'Undo', 'pattern_undo', d ~= nil)
             button(x + 18 + bw, y + 216, bw, 'Redo', 'pattern_redo', d ~= nil)
@@ -645,7 +753,14 @@ function P.new(deps)
                     )
                 end
             end
-            button(x + 12, y + 114, w - 24, 'Name: ' .. handle.get('pattern_export_name'), 'pattern_export_name')
+            button(
+                x + 12,
+                y + 114,
+                w - 24,
+                'Name: '
+                    .. (ui.input_value and ui.input_value('pattern_export_name') or handle.get('pattern_export_name')),
+                'pattern_export_name'
+            )
             button(x + 12, y + 78, bw, 'Import', 'browse')
             button(x + 18 + bw, y + 78, bw, 'Export DDS', 'pattern_export', d ~= nil)
             button(x + 24 + bw * 2, y + 78, bw, 'Open Export Location', 'open_export')
@@ -667,48 +782,67 @@ function P.new(deps)
     end
     function self.attach(h, c)
         handle, controls = h, c
-        controls.pattern_picker.picker_begin=function()
-            self.color_session={before=pixels(assert(self.document)),column=self.column or 1}
+        controls.pattern_picker.picker_begin = function()
+            self.color_session = { before = pixels(assert(self.document)), column = self.column or 1 }
         end
-        controls.pattern_picker.picker_preview=function(color,alpha)
-            local session=assert(self.color_session)
-            local current_pixels=pixels(self.document)
-            local at=(session.column-1)*4
-            local original=ffi.new('float[12]');ffi.copy(original,session.before,48)
-            for ch=1,3 do
-                local displayed=math.floor(math.max(0,math.min(1,original[at+ch-1]))*255+.5)
-                self.document.data[at+ch-1]=color[ch]==displayed and original[at+ch-1] or color[ch]/255
+        controls.pattern_picker.picker_preview = function(color, alpha)
+            local session = assert(self.color_session)
+            local current_pixels = pixels(self.document)
+            local at = (session.column - 1) * 4
+            local original = ffi.new('float[12]')
+            ffi.copy(original, session.before, 48)
+            for ch = 1, 3 do
+                local displayed = math.floor(math.max(0, math.min(1, original[at + ch - 1])) * 255 + 0.5)
+                self.document.data[at + ch - 1] = color[ch] == displayed and original[at + ch - 1] or color[ch] / 255
             end
-            self.document.data[at+3]=alpha
-            if pixels(self.document)~=current_pixels then session.changed=true; apply() end
+            self.document.data[at + 3] = alpha
+            if pixels(self.document) ~= current_pixels then
+                session.changed = true
+                apply()
+            end
         end
-        controls.pattern_picker.picker_end=function(commit)
-            local session=self.color_session;self.color_session=nil
-            if not session then return end
-            if commit and pixels(self.document)~=session.before then self.undo[#self.undo+1]=session.before;self.redo={}
-            elseif not commit and session.changed then ffi.copy(self.document.data,session.before,48);apply() end
+        controls.pattern_picker.picker_end = function(commit)
+            local session = self.color_session
+            self.color_session = nil
+            if not session then
+                return
+            end
+            if commit and pixels(self.document) ~= session.before then
+                self.undo[#self.undo + 1] = session.before
+                self.redo = {}
+            elseif not commit and session.changed then
+                ffi.copy(self.document.data, session.before, 48)
+                apply()
+            end
         end
         controls.pattern_picker.picker_alpha = function()
-            return self.document and tonumber(self.document.data[((self.column or 1)-1)*4+3]) or 1
+            return self.document and tonumber(self.document.data[((self.column or 1) - 1) * 4 + 3]) or 1
         end
         controls.pattern_picker.picker_commit = function(color, alpha)
-            if self.color_session then controls.pattern_picker.picker_preview(color,alpha);return true end
+            if self.color_session then
+                controls.pattern_picker.picker_preview(color, alpha)
+                return true
+            end
             return edit(function(data)
-                local at = ((self.column or 1)-1)*4
-                for ch=1,3 do
-                    local before = math.floor(math.max(0,math.min(1,data[at+ch-1]))*255+.5)
-                    if color[ch] ~= before then data[at+ch-1] = color[ch]/255 end
+                local at = ((self.column or 1) - 1) * 4
+                for ch = 1, 3 do
+                    local before = math.floor(math.max(0, math.min(1, data[at + ch - 1])) * 255 + 0.5)
+                    if color[ch] ~= before then
+                        data[at + ch - 1] = color[ch] / 255
+                    end
                 end
-                data[at+3] = alpha
+                data[at + 3] = alpha
             end)
         end
-        for _, name in ipairs({'picker_begin','picker_preview','picker_end','picker_alpha','picker_commit'}) do
-            controls.pattern_color[name]=controls.pattern_picker[name]
+        for _, name in ipairs({ 'picker_begin', 'picker_preview', 'picker_end', 'picker_alpha', 'picker_commit' }) do
+            controls.pattern_color[name] = controls.pattern_picker[name]
         end
         sync()
     end
     function self.close()
-        if not self.stop_flash() then return false end
+        if not self.stop_flash() then
+            return false
+        end
         return deps.session.restore()
     end
     return self

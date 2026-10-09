@@ -19,7 +19,20 @@ local original = {
         .. D.encode(document.data, 23, 2):sub(1, 148),
 }
 local p = P.encode(D, document, original)
-assert(p.archive == '0123456789abcdef' and p.resource == original.resource)
+assert(p.archive == '9ba626afa44a3aa3' and p.resource == original.resource)
+assert(p.source_archive == '0123456789abcdef', 'Source archive provenance lost')
+-- Duplicate texture occurrences must not redirect the output to a prop/tutorial package.
+local other = {}
+for key, value in pairs(original) do
+    other[key] = value
+end
+other.patch_source = '09985dc611a3a8b6' .. original.patch_source:sub(17)
+local alternate = P.encode(D, document, other)
+assert(alternate.archive == p.archive and alternate.source_archive == '09985dc611a3a8b6')
+assert(
+    alternate.main == p.main and alternate.gpu == p.gpu and P.zip(alternate) == P.zip(p),
+    'Snapshot discovery order changed exported patch destination or payload'
+)
 assert(#p.main == 524 and #p.gpu == 23 * 2 * 16 and p.stream == '')
 assert(u(p.main, 0) == 0xf0000011 and u(p.main, 4) == 1 and u(p.main, 8) == 1)
 assert(p.main:sub(105, 112) == '\x10\x32\x54\x76\x98\xba\xdc\xfe', '64-bit resource ID lost precision')

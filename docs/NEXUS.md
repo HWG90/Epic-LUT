@@ -45,6 +45,8 @@ Quick Load remembers the imported filename and cached extracted palette. It does
 
 ## Credits
 
+Thank you to **Scarpheon** for his inexhaustible effort helping me test Epic LUT, track down bugs, and make it better.
+
 LUT discovery and native adapters: CowboyBingus / Match Your Colors, under the included Zero-Clause BSD license. Semantic research references: Paydex LUT Editor. Editor and mapping code are independently authored; third-party palettes are not included.
 
 A successful import switches the original Match Your Colors setting Off through its own provider. Cancel and invalid files leave that setting unchanged. The game-launched file service exits when the game closes or crashes. Manual browser-editor startup remains independent of game lifetime.

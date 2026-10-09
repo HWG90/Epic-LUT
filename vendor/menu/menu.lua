@@ -1628,6 +1628,12 @@ function M.new(api, measure)
                     shift = function()
                         return self.shift
                     end,
+                    input_value = function(id)
+                        local control = mod.controls[id]
+                        if not control then return nil end
+                        local editing = self.text_edit and self.text_edit.mod == mod and self.text_edit.control == control
+                        return editing and (self.text_edit.text .. '|') or mod.handle.get(id)
+                    end,
                     activate = function(id, direction)
                         change(assert(mod.controls[id]), direction or 0)
                     end,

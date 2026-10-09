@@ -59,3 +59,5 @@ Thank you to [b]Shikami[/b] for the [b]Region Indicator[/b] idea, and [b]content
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with or endorsed by Arrowhead, Sony or Nexus Mods. Promotional artwork is not gameplay proof or proof of multiplayer color sharing. No third-party palettes or game textures are packaged.[/i][/size]
+
+[b]Scarpheon[/b] - thank you for your inexhaustible effort helping me test Epic LUT, track down bugs, and make it better.

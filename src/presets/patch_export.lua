@@ -1,6 +1,10 @@
 -- Internal, texture-only Stingray patch writer. No converter or subprocess.
 -- Layout reference: HD2SDK Community Edition, TocEntry/StreamToc and StingrayTexture.
 local P = {}
+-- The original LUT can occur in unrelated tutorial/prop archives. Its source
+-- archive is provenance, not a reliable loaded patch destination. Match the
+-- SDK's PatchBaseArchiveOnly default so one resource replacement is global.
+P.BASE_ARCHIVE = '9ba626afa44a3aa3'
 local bit = require('bit')
 local function short(n)
     return string.char(n % 256, math.floor(n / 256) % 256)
@@ -27,8 +31,9 @@ function P.encode(dds, document, original)
     assert(original and original.patch_source, 'Original patch metadata unavailable; refresh original LUT snapshots')
     local source = original.patch_source
     assert(#source == 357 and source:sub(17, 17) == '\n', 'Invalid original patch metadata')
-    local archive, template = source:sub(1, 16):lower(), source:sub(18)
-    hash(archive)
+    local source_archive, template = source:sub(1, 16):lower(), source:sub(18)
+    hash(source_archive)
+    local archive = P.BASE_ARCHIVE
     local id = hash(original.resource)
     assert(template:sub(193, 196) == 'DDS ' and template:sub(277, 280) == 'DX10', 'Invalid native texture template')
     assert(uint(template, 320) == 2 or uint(template, 320) == 10, 'Original texture is not a supported float LUT')
@@ -72,7 +77,14 @@ function P.encode(dds, document, original)
         .. descriptor
         .. entry
         .. body
-    return { archive = archive, resource = original.resource:lower(), main = main, gpu = pixels, stream = '' }
+    return {
+        archive = archive,
+        source_archive = source_archive,
+        resource = original.resource:lower(),
+        main = main,
+        gpu = pixels,
+        stream = '',
+    }
 end
 function P.new(folder, deps)
     local self = {}

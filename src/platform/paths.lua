@@ -43,6 +43,22 @@ function P.new(m)
     function self.rmdir(path)
         return kernel.epic_paths3_rmdir(wide(path)) ~= 0
     end
+    function self.open_exports()
+        local shell = ffi.load('shell32')
+        if not pcall(function()
+            return shell.epic_paths_open
+        end) then
+            ffi.cdef(
+                'void *epic_paths_open(void *,const uint16_t *,const uint16_t *,const uint16_t *,const uint16_t *,int) __asm__("ShellExecuteW");'
+            )
+        end
+        -- Explorer expects a native Windows path. Avoid a hidden PowerShell
+        -- intermediary whose failure is lost when its handle closes.
+        local result = shell.epic_paths_open(nil, wide('open'), wide(self.exports:gsub('/', '\\')), nil, nil, 1)
+        local code = tonumber(ffi.cast('intptr_t', result))
+        assert(code > 32, 'Could not open export folder (Windows error ' .. tostring(code) .. '): ' .. self.exports)
+        return true
+    end
     self.storage = m.ui_store.new(self.settings)
     return self
 end

@@ -256,7 +256,13 @@ function B.new(info, select_row, help)
         end
         ui.rect(right, saved_top - 471, width, 1, { 65, 76, 85 })
         text(right, saved_top - 495, 'DDS Export - current selected table')
-        button(right, saved_top - 533, width, 'Name: ' .. (state.export_name or 'Epic-LUT-edited'), 'save_name')
+        button(
+            right,
+            saved_top - 533,
+            width,
+            'Name: ' .. (ui.input_value and ui.input_value('save_name') or state.export_name or 'Epic-LUT-edited'),
+            'save_name'
+        )
         button(
             right,
             saved_top - 567,

@@ -504,7 +504,13 @@ function V.new(deps)
             button(ui.x + 10, optionsy - step * 4, (optionw - 5) / 2, 'Undo', 'undo')
             button(ui.x + 15 + (optionw - 5) / 2, optionsy - step * 4, (optionw - 5) / 2, 'Redo', 'redo')
             ui.rect(ui.x + 10, optionsy - step * 4 - 7, optionw, 1, { 90, 103, 110 })
-            button(ui.x + 10, optionsy - step * 5 - 5, optionw, 'Export Name: ' .. h.get('save_name'), 'save_name')
+            button(
+                ui.x + 10,
+                optionsy - step * 5 - 5,
+                optionw,
+                'Export Name: ' .. (ui.input_value and ui.input_value('save_name') or h.get('save_name')),
+                'save_name'
+            )
             button(ui.x + 10, optionsy - step * 6 - 5, (optionw - 5) / 2, 'Export DDS', 'save_dds')
             button(
                 ui.x + 15 + (optionw - 5) / 2,
@@ -540,7 +546,7 @@ function V.new(deps)
                 if portrait and portrait.meshes then
                     local my = optionsy - step * 12 - 5
                     ui.rect(ui.x + 10, my, optionw, 26, blue)
-                    ui.bounded(ui.x + 16, my + 5, 'Preview Meshes', 14, white, optionw - 12)
+                    ui.bounded(ui.x + 16, my + 5, 'Preview Meshes / Masks', 14, white, optionw - 12)
                     ui.hit(ui.x + 10, my, optionw, 26, function()
                         self.mesh_popup = true
                         self.mesh_page = 1
@@ -672,17 +678,24 @@ function V.new(deps)
             ui.floating(
                 'preview_meshes',
                 function(x, y, w, ht)
-                    local rows = portrait.meshes()
+                    local masks = self.mesh_masks == true and portrait.material_masks ~= nil
+                    local rows = masks and portrait.material_masks() or portrait.meshes()
+                    ui.rect(x + 12, y + ht - 63, 185, 24, blue)
+                    ui.bounded(x + 18, y + ht - 58, masks and 'Leg Material Masks' or 'Mesh Visibility', 13, white, 173)
+                    ui.hit(x + 12, y + ht - 63, 185, 24, function()
+                        self.mesh_masks = not masks
+                        self.mesh_page = 1
+                    end)
                     local per = 16
                     local pages = math.max(1, math.ceil(#rows / per))
                     self.mesh_page = math.min(self.mesh_page or 1, pages)
                     ui.bounded(
-                        x + 12,
-                        y + ht - 62,
-                        'Toggle preview meshes to identify the caps. Equipped gear is unchanged.',
+                        x + 205,
+                        y + ht - 58,
+                        masks and 'Click: Original > Black > White' or 'Click to hide/show a preview mesh.',
                         12,
                         white,
-                        w - 24
+                        w - 217
                     )
                     if #rows == 0 then
                         ui.bounded(x + 12, y + ht - 100, 'Open Player Preview first.', 14, white, w - 24)
@@ -694,19 +707,52 @@ function V.new(deps)
                         ui.bounded(
                             x + 18,
                             ry + 4,
-                            (row.visible and '[ x ] ' or '[   ] ') .. row.label,
+                            (masks and ('[' .. row.mode .. '] ') or (row.visible and '[ x ] ' or '[   ] ')) .. row.label,
                             12,
                             white,
                             w - 36
                         )
                         ui.hit(x + 12, ry, w - 24, 23, function()
-                            portrait.set_mesh(row.piece, row.mesh, not row.visible)
+                            if masks then
+                                local mode = row.mode == 'original' and 'black'
+                                    or row.mode == 'black' and 'white'
+                                    or 'original'
+                                portrait.set_material_mask(row.piece, row.material, row.slot, mode)
+                            else
+                                portrait.set_mesh(row.piece, row.mesh, not row.visible)
+                            end
                         end)
                     end
                     local function action(bx, bw, label, fn)
                         ui.rect(bx, y + 12, bw, 28, blue)
                         ui.bounded(bx + 6, y + 18, label, 13, white, bw - 12)
                         ui.hit(bx, y + 12, bw, 28, fn)
+                    end
+                    local first_row = (self.mesh_page - 1) * per + 1
+                    local last_row = math.min(#rows, self.mesh_page * per)
+                    local function page_action(index, label, mode)
+                        local bw = (w - 34) / 3
+                        local bx = x + 12 + (index - 1) * (bw + 5)
+                        ui.rect(bx, y + 46, bw, 27, blue)
+                        ui.bounded(bx + 6, y + 52, label, 13, white, bw - 12)
+                        ui.hit(bx, y + 46, bw, 27, function()
+                            for i = first_row, last_row do
+                                local row = rows[i]
+                                if masks then
+                                    portrait.set_material_mask(row.piece, row.material, row.slot, mode)
+                                else
+                                    portrait.set_mesh(row.piece, row.mesh, mode == 'show')
+                                end
+                            end
+                        end)
+                    end
+                    if masks then
+                        page_action(1, 'Page: Black', 'black')
+                        page_action(2, 'Page: White', 'white')
+                        page_action(3, 'Page: Original', 'original')
+                    else
+                        page_action(1, 'Show Page', 'show')
+                        page_action(2, 'Hide Page', 'hide')
                     end
                     action(x + 12, 90, '< Previous', function()
                         self.mesh_page = math.max(1, self.mesh_page - 1)
@@ -715,7 +761,12 @@ function V.new(deps)
                     action(x + 195, 80, 'Next >', function()
                         self.mesh_page = math.min(pages, self.mesh_page + 1)
                     end)
-                    action(x + 290, w - 302, 'Reset Visibility', portrait.reset_meshes)
+                    action(
+                        x + 290,
+                        w - 302,
+                        masks and 'Reset All Masks' or 'Reset Visibility',
+                        masks and portrait.reset_material_masks or portrait.reset_meshes
+                    )
                 end,
                 620,
                 550,

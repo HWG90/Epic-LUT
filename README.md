@@ -1,19 +1,19 @@
-# Epic LUT R5.3
+# Epic LUT R5.4
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.3 brings live character preview, named gear presets and fast per-LUT editing into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.4 brings live character preview, named gear presets and fast per-LUT editing into one package.
 
-**Still extremely alpha and work in progress.** [Download R5.3](https://github.com/HWG90/Epic-LUT/releases/tag/R5.3) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+**Still extremely alpha and work in progress.** [Download R5.4](https://github.com/HWG90/Epic-LUT/releases/tag/R5.4) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.3-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.3-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.4-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.4-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.3: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.4: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
@@ -100,6 +100,8 @@ Supports 23-column 2D RGBA16F/RGBA32F DDS, valid mip chains, and ZIP/RAR contain
 Native adapters target Steam build **25480438**; game updates may require changes. This alpha does not certify every loader, screen transition, multiplayer scenario or long session. Packages contain no user settings, presets, logs, snapshots or game textures.
 
 ## Credits
+
+Thank you to **Scarpheon** for his inexhaustible effort helping me test Epic LUT, track down bugs, and make it better.
 
 Made by **Goose**. Thanks to everyone testing this extremely alpha paint job.
 

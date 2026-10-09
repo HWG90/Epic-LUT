@@ -193,6 +193,26 @@ editor.on_enable = function(ctx)
         dock_request = { x = window.x + bounds.x * s, y = window.y + bounds.y * s, w = bounds.w * s, h = bounds.h * s }
         dock_age = 0
     end
+    public.material_masks = function()
+        if controller.state ~= 'ready' or not controller.model then
+            return {}
+        end
+        return adapter.material_masks(controller.model)
+    end
+    public.set_material_mask = function(pi, ai, slot, mode)
+        if controller.state ~= 'ready' or not controller.model then
+            return
+        end
+        adapter.set_material_mask(controller.model, pi, ai, slot, mode)
+        due = true
+    end
+    public.reset_material_masks = function()
+        if controller.state ~= 'ready' or not controller.model then
+            return
+        end
+        adapter.reset_material_masks(controller.model)
+        due = true
+    end
     public.meshes = function()
         if controller.state ~= 'ready' or not controller.model then
             return {}

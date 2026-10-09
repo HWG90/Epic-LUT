@@ -20,7 +20,7 @@ TESTS = (
     'frontend', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'direct_editor', 'palette_editor', 'standalone_frontend',
     'import_view', 'table_groups', 'original_luts', 'basic_view', 'update_check',
-    'editor_state', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'floating_dropdown', 'slider_preview', 'armory_mirror', 'limb_caps',
+    'editor_state', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'floating_dropdown', 'slider_preview', 'input_preview', 'armory_mirror', 'limb_caps',
 )
 runner = LuaRunner()
 for path in sorted([*ROOT.glob('src/**/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):

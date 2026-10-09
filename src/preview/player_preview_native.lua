@@ -64,7 +64,15 @@ function Native.new(E, m, host)
                 source.mesh_index == dest.mesh_index and source.material_index == dest.material_index,
                 'Preview material ordering differs'
             )
-            local kept = { source = source.material, material = dest.material, mesh = dest.mesh, objects = {} }
+            local kept = {
+                source = source.material,
+                material = dest.material,
+                mesh = dest.mesh,
+                mesh_index = dest.mesh_index,
+                material_index = dest.material_index,
+                objects = {},
+                probes = {},
+            }
             piece.materials[#piece.materials + 1] = kept
             for _, resource in ipairs(bindings(source.material)) do
                 m.engine.bind(native, dest.material, resource.slot, resource.object)
@@ -118,6 +126,7 @@ function Native.new(E, m, host)
             for _, resource in ipairs(bindings(material.source)) do
                 if
                     (resource.slot == m.engine.LUT_SLOT or resource.slot == m.engine.PATTERN_SLOT)
+                    and not material.probes[resource.slot]
                     and material.objects[resource.slot] ~= resource.object
                 then
                     m.engine.bind(native, material.material, resource.slot, resource.object)
@@ -375,6 +384,95 @@ function Native.new(E, m, host)
             error(why, 0)
         end
         return result
+    end
+    -- Keep diagnostic textures alive across reloads: queued renderer reads may
+    -- outlive this adapter. Only two immutable one-pixel textures are allocated.
+    local probe_key = 'epic.preview.mask.probes.v1'
+    local probes = package.loaded[probe_key] or {}
+    package.loaded[probe_key] = probes
+    local function probe_texture(mode)
+        if probes[mode] then
+            return probes[mode].object
+        end
+        local v = mode == 'white' and 1 or 0
+        local data = ffi.new('float[4]', { v, v, v, v })
+        local texture, why = m.engine.create_texture(native, 1, 1, data, function(at, n, buffer)
+            return memory.read_into(ffi.cast('const uint8_t *', at), n, buffer)
+        end, ffi.new('uint8_t[16]'))
+        assert(texture, why)
+        probes[mode] = texture
+        return texture.object
+    end
+    function adapter.material_masks(value)
+        local rows = {}
+        for pi, piece in ipairs(value.pieces) do
+            if piece.slot == 6 or piece.slot == 7 then
+                local resource = tostring(U.resource_name(piece.unit))
+                resource = resource:match('#ID%[(%x+)%]') or resource
+                for ai, material in ipairs(piece.materials or {}) do
+                    for _, binding in ipairs(bindings(material.source)) do
+                        rows[#rows + 1] = {
+                            piece = pi,
+                            material = ai,
+                            slot = binding.slot,
+                            mode = material.probes[binding.slot] or 'original',
+                            label = string.format(
+                                'slot %s / mesh %d / material %d / texture %08x',
+                                tostring(piece.slot),
+                                material.mesh_index + 1,
+                                material.material_index + 1,
+                                binding.slot
+                            ),
+                            resource = resource,
+                        }
+                    end
+                end
+            end
+        end
+        return rows
+    end
+    function adapter.set_material_mask(value, pi, ai, slot, mode)
+        assert(mode == 'original' or mode == 'black' or mode == 'white', 'Invalid mask probe')
+        local piece = assert(value.pieces[pi], 'Preview piece unavailable')
+        assert(piece.unit ~= piece.source and U.alive(piece.unit), 'Preview copy unavailable')
+        local material = assert(piece.materials[ai], 'Preview material unavailable')
+        assert(
+            material.material ~= material.source and not source_materials[material.material],
+            'Shared material refused'
+        )
+        local object
+        for _, binding in ipairs(bindings(material.source)) do
+            if binding.slot == slot then
+                object = binding.object
+                break
+            end
+        end
+        assert(object, 'Texture slot unavailable')
+        if mode ~= 'original' then
+            object = probe_texture(mode)
+        end
+        m.engine.bind(native, material.material, slot, object)
+        native.commit(material.mesh)
+        material.objects[slot] = object
+        material.probes[slot] = mode ~= 'original' and mode or nil
+        host.log(
+            string.format(
+                'preview: mask probe slot=%s resource=%s mesh=%d material=%d texture=%08x mode=%s',
+                tostring(piece.slot),
+                tostring(U.resource_name(piece.unit)),
+                material.mesh_index + 1,
+                material.material_index + 1,
+                slot,
+                mode
+            )
+        )
+    end
+    function adapter.reset_material_masks(value)
+        for _, row in ipairs(adapter.material_masks(value)) do
+            if row.mode ~= 'original' then
+                adapter.set_material_mask(value, row.piece, row.material, row.slot, 'original')
+            end
+        end
     end
     function adapter.meshes(value)
         local rows = {}

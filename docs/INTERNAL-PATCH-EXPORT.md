@@ -7,12 +7,12 @@ Load the worn Armor or Helmet LUT, edit it, enter an **Export Name**, and choose
 ```text
 %LOCALAPPDATA%/Epic LUT/files/exports/<name>/
     <name>.zip
-    <original_archive_id>.patch_0
-    <original_archive_id>.patch_0.gpu_resources
-    <original_archive_id>.patch_0.stream
+    9ba626afa44a3aa3.patch_0
+    9ba626afa44a3aa3.patch_0.gpu_resources
+    9ba626afa44a3aa3.patch_0.stream
 ```
 
-The archive and texture IDs come from the selected live destination's original snapshot. Imported DDS names and resource IDs do not select the replacement target. One export replaces one selected material LUT resource, including every material sharing that resource. It does not bundle all Armor/Helmet tables, materials, meshes, or runtime scripts. Existing export folders are refused; choose another name. Exporting does not install the patch or change saved application settings.
+The texture ID and native texture metadata come from the selected live destination's original snapshot. The patch always targets the shared base archive `9ba626afa44a3aa3`, matching the SDK's default. A texture can appear in multiple helmet, tutorial and prop archives; the first archive encountered during extraction does not identify the equipped gear's loaded package. Imported DDS names and resource IDs do not select the replacement target. One export replaces one selected material LUT resource, including every material sharing that resource. It does not bundle all Armor/Helmet tables, materials, meshes, or runtime scripts. Existing export folders are refused; choose another name. Exporting does not install the patch or change saved application settings.
 
 The texture writer retains the original native texture `UnkID`, clears streaming/mip descriptors, and writes one RGBA32F DDS header with all edited float channels in GPU storage. The stream sidecar is empty. LUT dimensions must exactly match the destination. No mip filtering or half-float quantization changes discrete row parameters. Nonfinite values, unsupported layouts, missing metadata, and stale gear selections are rejected. The complete triplet is staged in a sibling `.pending` directory and published by directory rename.
 

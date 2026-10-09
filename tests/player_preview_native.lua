@@ -258,4 +258,28 @@ leased.destroy_camera({ world = ui, unit = 'stale' })
 leased.destroy_world(ui)
 leased.destroy_target('retired portrait')
 assert(package.loaded['epic.preview.retired.targets'][1] == 'retired portrait')
+blocks[100024] = pack32(1) .. pack32(0) .. pack64(200000)
+E.Unit.resource_name = function()
+    return 'leg-resource'
+end
+model.pieces[1].slot = 6
+local diagnostic = a.material_masks(model)
+assert(#diagnostic == 1 and diagnostic[1].mode == 'original')
+local retained_probes = package.loaded['epic.preview.mask.probes.v1']
+retained_probes.black = { object = 444444 }
+a.set_material_mask(model, 1, 1, 123, 'black')
+assert(writes[#writes][1] == 110000 and writes[#writes][3] == 444444, 'Probe wrote outside copied material')
+local before = #writes
+blocks[200000] = pack32(123) .. pack32(0) .. pack64(300008)
+a.apply_luts(model, { helmet = true })
+assert(#writes == before, 'Live sync overwrote diagnostic mask')
+a.reset_material_masks(model)
+assert(writes[#writes][3] == 300008, 'Reset failed to restore current source binding')
+assert(a.material_masks(model)[1].mode == 'original')
+assert(not pcall(a.set_material_mask, model, 1, 1, 999, 'black'), 'Unknown texture slot accepted')
+local own = model.pieces[1].unit
+model.pieces[1].unit = model.pieces[1].source
+assert(not pcall(a.set_material_mask, model, 1, 1, 123, 'black'), 'Live source unit accepted')
+model.pieces[1].unit = own
+retained_probes.black = nil
 print('PASS native preview material copy, shared source refusal and bounded binding reads')
