@@ -6,15 +6,23 @@ function M.new(sr,preview_only,diagnostic_log)
     local preview_materials={}
     local preview_view=not preview_only and M.new(sr,true,diagnostic_log) or nil
     local popup_view=not preview_only and M.new(sr,true) or nil
+    local function positive(value)return type(value)=='number'and value>0 and value<math.huge end
+    local function drawable()
+        if self.suspended then return false end
+        if type(G.resolution)~='function'then return true end
+        local ok,w,h=pcall(G.resolution)
+        return ok and positive(w)and positive(h)
+    end
     local function live()for _,w in pairs(sr.Application.worlds() or {})do if w==world then return true end end;return false end
-    local metrics={}
+    local metrics={};local metric_bases={}
     local vertical_metrics={};local vertical_count=0
     function self.text_metrics(size,label)
+        if not positive(size)then return {min_y=0,max_y=0,height=0}end
         label=label or 'Ag0#'
         local key=tostring(size)..'|'..label
         if vertical_metrics[key]then return vertical_metrics[key]end
         local result={min_y=0,max_y=size,height=size}
-        if gui and live()and type(G.text_extents)=='function' and label~=''then
+        if drawable()and gui and live()and type(G.text_extents)=='function' and label~=''then
             local ok,lo,hi=pcall(G.text_extents,gui,label,'core/performance_hud/debug',size)
             if ok and lo and hi and type(lo.y)=='number' and type(hi.y)=='number'
                 and lo.y==lo.y and hi.y==hi.y and hi.y>lo.y and hi.y-lo.y<size*3 then
@@ -26,17 +34,23 @@ function M.new(sr,preview_only,diagnostic_log)
         return result
     end
     function self.measure(glyph,size)
-        if glyph==''then return 0 end
+        if glyph==''or not positive(size)then return 0 end
         local key=glyph..'|'..size;if metrics[key]then return metrics[key]end
         local width=size*.62
-        if gui and live() and type(G.text_extents)=='function' then
+        if drawable()and gui and live() and type(G.text_extents)=='function' then
             local ok,value=pcall(function()
-                local lo,hi=G.text_extents(gui,'M'..glyph,'core/performance_hud/debug',size)
-                local base_lo,base_hi=G.text_extents(gui,'M','core/performance_hud/debug',size)
-                return (hi.x-lo.x)-(base_hi.x-base_lo.x)
+                local base=metric_bases[size]
+                if not base then
+                    local lo,hi=G.text_extents(gui,'MM','core/performance_hud/debug',size)
+                    base=hi.x-lo.x
+                    assert(positive(base)and base<2000,'Invalid native font metric')
+                    metric_bases[size]=base
+                end
+                -- Keep both terminal glyphs constant so ink bearings cancel.
+                local lo,hi=G.text_extents(gui,'M'..glyph..'M','core/performance_hud/debug',size)
+                return (hi.x-lo.x)-base
             end)
-            if ok and type(value)=='number' and value>0 and value<1000 then width=math.max(width,value)end
-            metrics[key]=width
+            if ok and positive(value)and value<1000 then width=value;metrics[key]=width end
         end
         return width
     end
@@ -51,13 +65,34 @@ function M.new(sr,preview_only,diagnostic_log)
         return (c.layer or 100)+(c.type=='text'and 1 or 0)+(swatch_depth[c.ui_role]or 0)
     end
     function self.clear()
+        if not drawable()then return false end
         if gui and live()then for _,item in ipairs(ids)do destroy_item(item)end end;ids={}
+        return true
     end
     function self.invalidate()
+        if not drawable()then return false end
         self.clear();if preview_view then preview_view.clear()end;if popup_view then popup_view.clear()end
     end
-    function self.release()if preview_view then preview_view.release()end;if popup_view then popup_view.release()end;reported=false;if gui and live()then self.clear();for _,g in pairs(preview_guis)do sr.World.destroy_gui(world,g)end;preview_guis={};sr.World.destroy_gui(world,gui)end;gui,world=nil,nil end
+    function self.release()
+        if not drawable()then return false end
+        if preview_view then preview_view.release()end;if popup_view then popup_view.release()end
+        reported=false
+        if gui and live()then
+            self.clear();for _,g in pairs(preview_guis)do sr.World.destroy_gui(world,g)end
+            preview_guis={};sr.World.destroy_gui(world,gui)
+        end
+        gui,world=nil,nil
+        return true
+    end
     function self.draw(commands)
+        if not drawable()then return false end
+        local valid
+        for index,c in ipairs(commands)do
+            if c.type=='text'and not positive(c.size)then
+                if not valid then valid={};for i=1,index-1 do valid[#valid+1]=commands[i]end end
+            elseif valid then valid[#valid+1]=c end
+        end
+        commands=valid or commands
         if preview_view then
             local menu,preview,popup={},{},{}
             for _,c in ipairs(commands)do

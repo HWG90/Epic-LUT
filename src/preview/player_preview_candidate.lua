@@ -20,8 +20,21 @@ local controls = m.player_preview_controls.new()
 local source_signature
 local source_elapsed = 0
 local recovery_elapsed = 0
+local close_pending = false
+local suspended = false
+local function render_ready()
+    local front = package.loaded['dbf.epic_lut.frontend.v1']
+    if not front or not front.input.focused() then
+        return false
+    end
+    if front.render_ready then
+        return front.render_ready()
+    end
+    local w, h = stingray.Gui.resolution()
+    return type(w) == 'number' and type(h) == 'number' and w > 0 and h > 0 and w < math.huge and h < math.huge
+end
 local function signature(identity)
-    local parts = { identity.unit, identity.body, identity.armor, identity.helmet }
+    local parts = { identity.unit, identity.body, identity.armor, identity.helmet, identity.cape or 0 }
     for _, piece in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
         parts[#parts + 1] = piece.unit
     end
@@ -81,7 +94,12 @@ local function close()
     unhook()
     due = false
     capture_requested, debug_requested = false, false
+    if controller and #controller.resources > 0 and not render_ready() then
+        close_pending = true
+        return false
+    end
     local done = not controller or controller.close()
+    close_pending = not done
     write_state(render_fault or (not done and controller and controller.error) or '')
     return done
 end
@@ -94,6 +112,8 @@ local function reset_transients()
     capture_requested, debug_requested, single_frame = false, false, false
     recovering, render_fault, retry_at, recovery_attempts = false, nil, 0, 0
     source_signature = nil
+    close_pending = false
+    suspended = false
     preview_disabled = false
     dock_request, dock_age, docked = nil, 1, false
     floating_geometry, dock_hidden, floating_on_editor = nil, false, false
@@ -109,6 +129,7 @@ local function discard_request()
     end
 end
 local function open()
+    assert(render_ready(), 'Player Preview waits for game focus and valid display dimensions')
     assert(public.is_enabled(), 'Player Preview is turned off in Configuration')
     local front = package.loaded['dbf.epic_lut.frontend.v1']
     assert(
@@ -135,6 +156,10 @@ local function open()
         -- A foreign wrapper may retain this function after we detach. It must
         -- not submit a later activation's controller or consume its captures.
         if not activated or controller ~= render_owner then
+            return
+        end
+        if not render_ready() then
+            due = false
             return
         end
         local front = package.loaded['dbf.epic_lut.frontend.v1']
@@ -286,6 +311,9 @@ editor.on_enable = function(ctx)
     local cleanup_owner = controller
     ctx.on_cleanup(function()
         if controller ~= cleanup_owner then
+            if #cleanup_owner.resources > 0 and not render_ready() then
+                return false
+            end
             return cleanup_owner.close()
         end
         return close()
@@ -312,6 +340,17 @@ end
 editor.on_update = function(ctx, dt)
     update(ctx, dt)
     if not activated then
+        return
+    end
+    if not render_ready() then
+        due = false
+        controls.cancel()
+        suspended = true
+        return
+    end
+    local resumed = suspended
+    suspended = false
+    if close_pending and not close() then
         return
     end
     dock_age = dock_age + (dt or 0)
@@ -417,6 +456,9 @@ editor.on_update = function(ctx, dt)
             and front.input.down(preview_key)
         or false
     local request = read_request(dt)
+    if resumed then
+        pressed = key
+    end
     if request == 'close' then
         close()
     end

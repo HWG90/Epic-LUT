@@ -40,7 +40,7 @@ found = catalog.refresh({ binding }, 10)
 assert(#found.owned == 0 and found.groups[1].object == 55, 'Foreign replacement retained stale ownership')
 print('PASS gear catalog: selected/shared scopes, gear-wide targets and original/foreign identity refresh')
 
-local cape_object, restored = 99, false
+local cape_object = 99
 local cape_catalog = G.new({
     identity = function()
         return {}
@@ -63,14 +63,27 @@ local cape_catalog = G.new({
     is_cape = function(b)
         return b.material == 3
     end,
-    restore_excluded = function(b)
-        cape_object = b.original
-        restored = true
-    end,
 })
 local result = cape_catalog.refresh({ { unit = 1, mesh = 2, material = 3, original = 10, current = 99 } }, nil)
-assert(restored and cape_object == 10 and #result.owned == 0, 'Prior owned cape binding was not restored')
-assert(#result.groups == 1 and result.groups[1].bindings[1].material == 6, 'Cape material included in Armor targets')
+assert(cape_object == 99 and #result.owned == 1, 'Refresh removed a deliberately applied Cape material LUT')
+local cape = result.groups[1].bindings[1]
+assert(cape.cape and not cape.armor and not cape.helmet, 'Cape was classified as Armor/Helmet')
+assert(#result.groups == 2 and result.labels[1]:find('Cape material', 1, true), 'Cape material selector vanished')
+assert(
+    #G.targets(result.groups, 2, 1) == 1 and #G.targets(result.groups, 4, 1) == 1,
+    'Armor/Both wide scopes include Cape'
+)
+assert(G.targets(result.groups, 1, 1, 'cape')[1] == cape, 'Explicit Cape selection has no application targets')
+cape_object = 20
+result = cape_catalog.refresh({}, nil)
+assert(
+    #result.groups == 1 and result.groups[1].cape and result.groups[1].armor,
+    'Shared Armor/Cape resource split incorrectly'
+)
+assert(
+    #G.targets(result.groups, 1, 1, 'cape') == 1 and #G.targets(result.groups, 2, 1) == 1,
+    'Shared resource selection spills across gear kinds'
+)
 
 local calls = 0
 local names = G.new({

@@ -1,5 +1,12 @@
 # Changelog
 
+## R5.5.2 - 2026-10-09
+
+- Corrected text caret, selection and mouse-position drift in long fields.
+- Fixed region-identification magenta being copied into editor tables when switching tabs.
+- Restored cape material LUT editing through an explicit Cape target, separate from Armor-wide application.
+- Paused menu and Player Preview native rendering during Alt-Tab and minimization; resume waits for valid dimensions.
+
 ## R5.5.1 - 2026-10-09
 
 - Raised material LUT support to 64 rows across import, editing, copying and export.

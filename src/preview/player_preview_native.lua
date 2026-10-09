@@ -177,6 +177,15 @@ function Native.new(E, m, host)
     end
     local function sync_materials(piece)
         assert(U.alive(piece.source), 'Equipped source changed; rebuild preview')
+        local live = {}
+        for _, material in ipairs(m.engine.unit_materials(native, token(piece.source))) do
+            live[material.material] = true
+        end
+        -- An equipped unit can survive while its materials are replaced. Check
+        -- every cached source before reading pointers or updating the copy.
+        for _, material in ipairs(piece.materials) do
+            assert(live[material.source], 'Equipped source changed; rebuild preview')
+        end
         for _, material in ipairs(piece.materials) do
             local changed = false
             for _, resource in ipairs(bindings(material.source)) do

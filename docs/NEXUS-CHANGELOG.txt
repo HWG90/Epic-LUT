@@ -1,3 +1,13 @@
+# Epic LUT R5.5.2
+
+- Fixed text caret and selection drifting ahead of typed text.
+- Fixed region flashes leaking into editor colors or getting stuck after tab changes.
+- Restored separate Cape material LUT editing.
+- Menu and Preview rendering now pause during Alt-Tab or minimization.
+- Shared Lobby LUT is in testing.
+
+---
+
 # Epic LUT R5.5.1
 
 - Material LUTs now support up to 64 rows.

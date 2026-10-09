@@ -32,7 +32,13 @@ function R.new(deps)
     function self.start(items, row)
         assert(self.stop(), 'Previous highlight restoration pending')
         assert(#items > 0, 'No live target for this region')
-        self.job = { items = items, remaining = 4, elapsed = 0, on = true }
+        self.job = {
+            items = items,
+            remaining = 4,
+            elapsed = 0,
+            on = true,
+            context = deps.context and deps.context(),
+        }
         local ok, why = pcall(function()
             for _, item in ipairs(items) do
                 local source = item.source
@@ -43,11 +49,18 @@ function R.new(deps)
                 data[at] = 1
                 data[at + 1] = 0
                 data[at + 2] = 1
-                local _, texture = deps.apply(
-                    { data = data, width = source.width, height = source.height },
-                    { item.binding }
-                )
-                item.highlight = texture.object
+                local b = item.binding
+                local applied, texture = pcall(function()
+                    local _, result = deps.apply({ data = data, width = source.width, height = source.height }, { b })
+                    return result
+                end)
+                -- Binding sessions normally publish applied pixels to these
+                -- fields. A flash owns only the temporary native object;
+                -- reads, edits, exports and appearance snapshots must keep
+                -- seeing the prior document even during its off phase.
+                item.highlight = applied and texture.object or b.current
+                b.texture, b.document = item.texture, item.document
+                assert(applied, texture)
             end
         end)
         if not ok then
@@ -63,7 +76,7 @@ function R.new(deps)
         local delta = math.max(0, tonumber(dt) or 0)
         job.remaining = job.remaining - delta
         job.elapsed = job.elapsed + delta
-        if job.remaining <= 0 or not visible then
+        if job.remaining <= 0 or not visible or (deps.context and deps.context() ~= job.context) then
             self.stop()
             return
         end

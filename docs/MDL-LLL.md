@@ -1,4 +1,4 @@
-# Epic LUT R5.5.1 — MDL / LLL package
+# Epic LUT R5.5.2 — MDL / LLL package
 
 Same Python-free editor as the BSL release, packaged as an API-2 folder mod. This ZIP contains no BSL startup archive and does not require BSL for activation.
 

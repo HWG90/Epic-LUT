@@ -1,7 +1,7 @@
 -- Exercise the actual sidecar callbacks without a game or native renderer.
 local identity = { unit = 1, body = 2, armor = 3, helmet = 4 }
 local opens, renders, layouts, zooms = 0, 0, 0, 0
-local resources, captures, updates, destroyed = 0, 0, 0, 0
+local resources, captures, updates, destroyed, syncs = 0, 0, 0, 0, 0
 local quiesced = true
 local disabled = false
 local request
@@ -40,6 +40,7 @@ a.render = function()
     assert(not render_failure, 'UI preview Camera.projection unavailable')
 end
 a.apply_luts = function()
+    syncs = syncs + 1
     assert(not sync_failure, 'Preview garment disappeared')
 end
 a.zoom = function()
@@ -53,6 +54,7 @@ a.debug_target = function()
     debug_saves = debug_saves + 1
 end
 local x, y, down, focused = 0, 0, false, true
+local display_width, display_height = 1920, 1080
 local original = function()
     return x, y
 end
@@ -162,7 +164,7 @@ local env = setmetatable({
         },
         Gui = {
             resolution = function()
-                return 1920, 1080
+                return display_width, display_height
             end,
         },
     },
@@ -243,9 +245,28 @@ input.mouse()
 assert(layouts == 1)
 input.mouse()
 assert(layouts == 1, 'Stationary pointer rebuilt GUI')
+local rendered_before, synced_before, destroyed_before = renders, syncs, destroyed
 focused = false
 editor.on_update(ctx, 0.1)
+env.render()
+assert(
+    renders == rendered_before and syncs == synced_before and destroyed == destroyed_before,
+    'Blur submitted, synchronized or destroyed native preview resources'
+)
 focused = true
+for _, dimensions in ipairs({ { 0, 0 }, { 1920, 0 }, { 0, 1080 }, { 0 / 0, 1080 } }) do
+    display_width, display_height = dimensions[1], dimensions[2]
+    editor.on_update(ctx, 0.1)
+    env.render()
+    assert(
+        renders == rendered_before and syncs == synced_before and destroyed == destroyed_before,
+        'Invalid display reached native preview work'
+    )
+end
+display_width, display_height = 1920, 1080
+editor.on_update(ctx, 0.1)
+env.render()
+assert(renders > rendered_before and syncs > synced_before, 'Valid foreground failed to resume preview')
 x, y = 100, 720
 input.mouse()
 assert(layouts == 1, 'Drag resumed after focus/menu loss')
@@ -420,7 +441,24 @@ assert(held_mouse() == x, 'A retained old input wrapper consumed the new activat
 down = false
 env.render()
 assert(renders == draw_count + 1)
+local cape_opens, existing_unit = opens, identity.unit
+identity.cape = 17
+editor.on_update(ctx, 1)
+editor.on_update(ctx, 1.1)
+assert(
+    identity.unit == existing_unit and opens == cape_opens + 1,
+    'Cape kit changed on the same mount unit without rebuilding preview'
+)
+local cleanup_before = destroyed
+focused = false
+assert(editor.on_disable() == false and destroyed == cleanup_before, 'Blur destroyed preview resources')
+assert(editor.on_cleanup_poll() == false and destroyed == cleanup_before, 'Blur cleanup poll touched renderer')
+focused = true
+display_width, display_height = 0, 0
+assert(editor.on_cleanup_poll() == false and destroyed == cleanup_before, 'Minimized cleanup poll touched renderer')
+display_width, display_height = 1920, 1080
 assert(editor.on_disable())
+assert(destroyed == cleanup_before + 6, 'Foreground failed to finish deferred preview cleanup')
 -- A second owner is neither stopped nor overwritten, including failed-enable
 -- cleanup. Its request belongs to that active owner too.
 local foreign = {

@@ -546,7 +546,7 @@ function M.new(api, measure, Text)
     local function selectable(page)
         local rows = {}
         for _, c in ipairs(visible_controls(page)) do
-            if c.collapsible or (c.type ~= 'text' and c.type ~= 'section') then
+            if c.tab_stop ~= false and (c.collapsible or (c.type ~= 'text' and c.type ~= 'section')) then
                 rows[#rows + 1] = c
             end
         end
@@ -1830,6 +1830,9 @@ function M.new(api, measure, Text)
         end
     end
     function self.compose(w, h)
+        if type(w) ~= 'number' or type(h) ~= 'number' or not (w > 0 and h > 0 and w < math.huge and h < math.huge) then
+            return {}
+        end
         if not self.visible then
             text_repeat = nil
             cancel_custom_drag('menu closed')

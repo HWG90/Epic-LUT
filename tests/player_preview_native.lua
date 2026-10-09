@@ -12,14 +12,22 @@ local blocks =
     { [100024] = pack32(1) .. pack32(0) .. pack64(200000), [200000] = pack32(123) .. pack32(0) .. pack64(300000) }
 local writes = {}
 local shared = false
+local source_remapped = false
+local material_scans = 0
 local commits = 0
 local piece = { source = ffi.cast('void *', 4), unit = ffi.cast('void *', 8), kind = 'helmet' }
 local engine = {
     LUT_SLOT = 123,
     PATTERN_SLOT = 456,
     unit_materials = function(_, id)
+        material_scans = material_scans + 1
         return {
-            { material = (id == 1 or shared) and 100000 or 110000, mesh = 120000, mesh_index = 0, material_index = 0 },
+            {
+                material = id == 1 and (source_remapped and 100004 or 100000) or shared and 100000 or 110000,
+                mesh = 120000,
+                mesh_index = 0,
+                material_index = 0,
+            },
         }
     end,
     bind = function(_, material, slot, object)
@@ -126,11 +134,25 @@ local a = N.new(E, m, {
 })
 local model = a.create_model('owned', { plan = { pieces = { piece } } })
 assert(#writes == 1 and writes[1][1] == 110000 and writes[1][2] == 123 and writes[1][3] == 300000 and commits == 1)
+local scans_before = material_scans
 a.apply_luts(model, { helmet = true })
+assert(material_scans == scans_before + 1, 'Preview rescanned source materials more than once per piece')
 assert(#writes == 1 and commits == 1, 'Unchanged palettes generated material commits')
 blocks[200000] = pack32(123) .. pack32(0) .. pack64(300004)
 a.apply_luts(model, { helmet = true })
 assert(#writes == 2 and commits == 2 and writes[2][3] == 300004, 'Changed live LUT was not copied')
+local reads_before, commits_before = reads, commits
+source_remapped = true
+local synced, why = pcall(a.apply_luts, model, { helmet = true })
+assert(
+    not synced and tostring(why):find('Equipped source changed', 1, true),
+    'Same-unit material replacement did not request preview rebuild'
+)
+assert(
+    reads == reads_before and #writes == 2 and commits == commits_before,
+    'Retired source material was read or copied after replacement'
+)
+source_remapped = false
 shared = true
 assert(
     not pcall(a.create_model, 'owned', { plan = { pieces = { piece } } }) and #writes == 2,

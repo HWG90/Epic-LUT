@@ -16,6 +16,8 @@ for i = 0, 23 * 8 * 4 - 1 do
 end
 local m = {
     lut_files = dofile('src/presets/lut_files.lua'),
+    lut_editor = dofile('src/editor/lut_editor.lua'),
+    basic_state = dofile('src/core/basic_state.lua'),
     file_io = dofile('src/core/file_io.lua'),
     lut_editor_controls = dofile('src/editor/lut_editor_controls.lua'),
     lut_editor_view = dofile('src/editor/lut_editor_view.lua'),
@@ -52,10 +54,22 @@ local editor = dofile('src/editor/lut_editor.lua').new(
     end
 )
 local calls = {}
+local cape
 local callbacks = setmetatable({}, {
     __index = function(_, key)
         return function(value)
             calls[key] = (calls[key] or 0) + 1
+            if cape then
+                if key == 'editor_load_cape_activate' or key == 'basic_cape_lut_change' then
+                    return cape.load()
+                end
+                if key == 'editor_apply_cape_activate' then
+                    return cape.apply()
+                end
+                if key == 'editor_restore_cape_activate' then
+                    return cape.restore()
+                end
+            end
             return true
         end
     end,
@@ -97,10 +111,34 @@ for _, c in ipairs(pattern.controls()) do
     editor_pages[1].controls[#editor_pages[1].controls + 1] = c
 end
 dofile('src/editor/configuration.lua').append(pages, editor_pages, { api = api })
+cape = dofile('src/editor/cape_panel.lua').new(m, {
+    note = function(value)
+        return value
+    end,
+    presets = 'tests/tmp/hierarchy-presets',
+    load = function()
+        return doc, { proof = 'cape fixture' }
+    end,
+    apply = function()
+        calls.cape_apply = (calls.cape_apply or 0) + 1
+    end,
+    restore = function()
+        calls.cape_restore = (calls.cape_restore or 0) + 1
+    end,
+})
+for _, page in ipairs(pages) do
+    if page.id == 'colors' then
+        for _, control in ipairs(cape.controls()) do
+            page.controls[#page.controls + 1] = control
+        end
+    end
+end
 local handle = api.register({ id = 'hierarchy', name = 'Epic LUT', pages = pages })
 local mod = api.mods[handle.id]
 mod.tabs_top = true
 editor.attach(api, handle)
+cape.attach(api, handle)
+editor.cape_panel = cape
 pattern.attach(handle, mod.controls)
 editor.pattern_editor = pattern
 editor.can_select_gear = function()
@@ -109,7 +147,7 @@ end
 editor.load_seen = function()
     return true
 end
-for _, kind in ipairs({ 'armor', 'helmet' }) do
+for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
     mod.controls['basic_' .. kind .. '_lut'].choices = { 'LUT 1', 'LUT 2' }
 end
 local menu = Menu.new(api, function(value, size)
@@ -185,11 +223,12 @@ end
 local function tap_label(value)
     tap(control(compose(), value))
 end
-for _, width in ipairs({ 1100, 1800 }) do
+for _, width in ipairs({ 860, 1100, 1600 }) do
     for _, font in ipairs({ 12, 20 }) do
         for _, scale in ipairs({ 0.85, 1 }) do
             menu.window_width, menu.font_size, menu.ui_scale = width, font, scale
             editor.gear = 'armor'
+            cape.open, cape.active = false, false
             editor.tools.close()
             editor.tools.tab = 'import'
             editor.scratch_tool.close()
@@ -203,23 +242,25 @@ for _, width in ipairs({ 1100, 1800 }) do
             local selector, selector_text = control(commands, 'LUT 1')
             local tool = control(commands, 'Select')
             local channel = control(commands, 'RGB')
+            assert(math.abs(helmet.y - armor.y) < 0.1, 'Helmet/Armor are not adjacent on the main gear header row')
             assert(
-                math.abs(helmet.y - armor.y) < 0.1
-                    and math.abs(armor.y - pattern_button.y) < 0.1
-                    and math.abs(load.y - armor.y) < 0.1,
-                'Gear/Pattern/Load are not on the same header row'
+                pattern_button.y < armor.y or pattern_button.x > armor.x + armor.w,
+                'Pattern control does not follow the gear tabs'
             )
             assert(
-                pattern_button.x > armor.x + armor.w and pattern_button.x + pattern_button.w < load.x,
-                'Pattern control is not adjacent to the gear tabs'
-            )
-            assert(
-                selector.y + selector.h < helmet.y and selector.x > helmet.x + 10 * menu.window_bounds.scale,
+                selector.y + selector.h < math.min(helmet.y, pattern_button.y, load.y)
+                    and selector.x > helmet.x + 10 * menu.window_bounds.scale,
                 'LUT selector is not visibly below and indented from its gear tabs'
             )
             assert(
                 tool.y + tool.h < selector.y and math.abs(tool.y - channel.y) < 0.1,
                 'Grid tool/channel row was not moved below the gear selector'
+            )
+            local first_row = label(commands, 'Row 1', false)
+            local column = label(commands, 'Base', false)
+            assert(
+                first_row.y + first_row.size < tool.y and column.y + column.size < tool.y,
+                'Wrapped header or selector overlaps the grid'
             )
             local bounds = { helmet, armor, pattern_button, load, selector, tool, channel }
             for i, a in ipairs(bounds) do
@@ -275,6 +316,58 @@ for _, width in ipairs({ 1100, 1800 }) do
             menu.key(27)
             tap_label('Armor LUT')
             assert(editor.gear == 'armor' and calls.editor_load_armor_activate, 'Armor tab did not switch back')
+            local main_selection, main_undo = editor.selection, #editor.undo
+            local collapsed = control(compose(), '> Cape Material')
+            local main_grid_height = editor.grid_bounds.h
+            tap(collapsed)
+            local expanded = compose()
+            assert(
+                cape.open and editor.grid_bounds.h < main_grid_height,
+                'Cape section does not expand below the main table'
+            )
+            tap_label('Load Current Cape')
+            expanded = compose()
+            assert(
+                cape.is_loaded()
+                    and editor.gear == 'armor'
+                    and editor.selection == main_selection
+                    and #editor.undo == main_undo,
+                'Cape load overwrites main selection/history'
+            )
+            local caption = control(expanded, 'v Cape Material')
+            assert(caption.y + caption.h < tool.y, 'Cape section was placed beside the main gear selector')
+            local cape_buttons = {
+                (control(expanded, 'Load Current Cape')),
+                (control(expanded, 'Apply Cape')),
+                (control(expanded, 'Restore Cape')),
+            }
+            for i, a in ipairs(cape_buttons) do
+                for j = i + 1, #cape_buttons do
+                    assert(not overlaps(a, cape_buttons[j]), 'Cape section buttons overlap')
+                end
+            end
+            local before, first = cape.scroll or 0, cape.editor.grid_first or 1
+            local cb = cape.scroll_max > 0 and cape.viewport or cape.editor.grid_bounds
+            assert(cb and cape.wheel(cb.x + 20, cb.y + cb.h / 2, -120), 'Cape section/grid cannot scroll independently')
+            assert(
+                cape.scroll_max == 0 and cape.editor.grid_max == 0
+                    or (cape.scroll or 0) > before
+                    or (cape.editor.grid_first or 1) > first,
+                'Cape wheel did not move its own scrollable section/grid'
+            )
+            assert(editor.value_scroll == 0, 'Cape scroll moved the main inspector')
+            local main_pixels = ffi.string(doc.data, doc.width * doc.height * 16)
+            local color = mod.controls.cape_cell_color
+            color.picker_begin(1)
+            color.picker_preview({ 200, 50, 20 }, 1)
+            color.picker_end(true)
+            cape.tick()
+            assert(
+                calls.cape_apply and ffi.string(doc.data, #main_pixels) == main_pixels,
+                'Cape picker modified the main document'
+            )
+            tap(control(compose(), 'v Cape Material'))
+            assert(not cape.open and cape.is_loaded(), 'Collapsing Cape discarded its document')
             tap_label('Pattern LUT Editor')
             assert(pattern.open and pattern.gear == 'armor', 'Pattern header control did not use the current gear')
             pattern.open = false
@@ -329,6 +422,74 @@ for _, width in ipairs({ 1100, 1800 }) do
         end
     end
 end
+-- Bound shared renderer calls and keyboard visibility in small viewports.
+local original_draw = cape.draw
+cape.draw = function(ui, y)
+    local bottom, top = y, y + cape.height(ui)
+    local function fits(x, py, w, h)
+        assert(
+            py >= bottom - 0.01 and py + h <= top + 0.01 and x >= ui.x - 0.01 and x + w <= ui.x + ui.w + 0.01,
+            'Cape primitive/hit escaped its section'
+        )
+    end
+    local observed = setmetatable({}, { __index = ui })
+    for _, name in ipairs({ 'rect', 'button', 'hit' }) do
+        local method = name
+        observed[method] = function(x, py, w, h, ...)
+            fits(x, py, w, h)
+            return ui[method](x, py, w, h, ...)
+        end
+    end
+    for _, name in ipairs({ 'choice', 'number' }) do
+        local method = name
+        observed[method] = function(id, x, py, w, ...)
+            fits(x, py, w, 26)
+            return ui[method](id, x, py, w, ...)
+        end
+    end
+    original_draw(observed, y)
+end
+for _, height in ipairs({ 600, 780 }) do
+    menu.window_height, menu.window_width, menu.font_size, menu.ui_scale = height, 860, 20, 1
+    cape.open, cape.scroll = false, 0
+    compose()
+    for id, c in pairs(mod.controls) do
+        if id:sub(1, 5) == 'cape_' then
+            assert(c.tab_stop == false, 'Collapsed Cape retained an invisible Tab stop')
+        end
+    end
+    cape.open = true
+    cape.load()
+    compose()
+    assert(cape.scroll_max > 0, 'Small Cape viewport has no section scroll range')
+    local b = cape.viewport
+    assert(
+        cape.wheel(b.x + 20, b.y + b.h / 2, -120) and cape.scroll > 0,
+        'Cape section scroll does not reveal clipped content'
+    )
+    compose()
+    cape.scroll = cape.scroll_max
+    compose()
+    local visible = 0
+    for _, name in ipairs({ 'r', 'g', 'b' }) do
+        if mod.controls['cape_cell_' .. name].tab_stop then
+            visible = visible + 1
+        end
+    end
+    assert(visible > 0, 'Visible Cape numeric fields are excluded from Tab')
+    cape.active = true
+    compose()
+    if editor.grid_bounds then
+        local mainrow = label(compose(), 'Row 1', false)
+        input(mainrow.x + 10, mainrow.y + 3, true)
+        input(mainrow.x + 10, mainrow.y + 3, false)
+    else
+        tap_label('Armor LUT')
+    end
+    assert(not cape.active, 'Main grid/control click did not restore Armor/Helmet shortcut focus')
+end
+cape.draw = original_draw
+
 print(
-    'PASS LUT editor hierarchy: production registry, two fonts/scales/widths, ordered gear/Pattern/teal LUT/tool rows, plain dropdowns, gear callbacks, gold Tools and hovered value opacity'
+    'PASS LUT editor hierarchy: production registry, fonts12/20 widths860/1100/1600, independent collapsible Cape/grid/scroll/picker, ordered gear/Pattern/teal LUT/tool rows, plain dropdowns, gear callbacks, gold Tools and hovered value opacity'
 )

@@ -419,6 +419,34 @@ assert(
     'Show All omitted stock snapshots before any palette was applied'
 )
 local old_object = bound[3]
+for _, off_phase in ipairs({ false, true }) do
+    activate('identify_region')
+    if off_phase then
+        stock_editor.on_update(ctx, 0.26)
+    end
+    activate('editor_load_armor')
+    assert(
+        bound[3] == old_object and handle.get('cell_r') == 0.25,
+        'Loading the editor during a flash captured magenta or failed to restore its native binding'
+    )
+    assert(handle.set('save_name', 'flash-clean'))
+    activate('save_patch')
+    assert(
+        patch_saved and ffi.string(patch_saved.document.data, 23 * 8 * 16) == ffi.string(stock, 23 * 8 * 16),
+        'Exporting after a region flash retained transient identification pixels'
+    )
+    stock_editor.on_update(ctx, 4.1)
+    assert(bound[3] == old_object, 'Ending a flash reapplied transient editor pixels')
+end
+test_frontend.menu = { page = 1, visible = true }
+activate('identify_region')
+test_frontend.menu.page = 2
+stock_editor.on_update(ctx, 0)
+assert(
+    bound[3] == old_object and handle.get('cell_r') == 0.25,
+    'Switching tabs retained a region flash or changed editor colors'
+)
+test_frontend.menu = nil
 activate('identify_region')
 assert(
     bound[3] ~= old_object and gpu_data[0] == 1 and gpu_data[1] == 0 and gpu_data[2] == 1,

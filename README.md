@@ -1,19 +1,19 @@
-# Epic LUT R5.5.1
+# Epic LUT R5.5.2
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.1 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.2 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
 
-[Download R5.5.1](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5.2](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.2) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5.1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.1-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5.2-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.2-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.1: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.2: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
@@ -66,7 +66,7 @@ Press **F10**, then **Import / Apply** for full table previews. Every loaded Arm
 
 Matching uses texture IDs, not armor names or table order. Archives can contain gear you are not wearing; use manual targeting when no IDs match.
 
-Applied material and Pattern LUTs are retained during loading gaps and automatically restored to matching worn gear when the game recreates its materials. Recovery reuses the applied texture without changing its values. Different gear and bindings owned by another writer are left untouched; Restore clears the retained appearance.
+Applied Armor, Helmet and Cape material LUTs, plus Pattern LUTs, are retained during loading gaps and automatically restored to matching worn gear when the game recreates its materials. Recovery reuses the applied texture without changing its values. Different gear and bindings owned by another writer are left untouched; Restore clears the retained appearance.
 
 ## Pick, paint, copy
 
@@ -87,6 +87,8 @@ Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. 
 
 The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Click or drag row labels in Select mode to select whole rows; Shift-click extends the row range. Copy, select the destination rows, and paste from their top-left row. Full-row paste includes every RGBA channel and requires Advanced editing. Selected swatches keep their colors inside an outline. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
 
+Open the collapsible **Cape Material** section beneath the main LUT table to load and edit the worn cape's 23-column material table. Its selector, edits, history and Load/Apply/Restore controls stay separate from Armor and Helmet.
+
 The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
 
 Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.
@@ -101,7 +103,7 @@ Use **Player Preview** or **F6** to see your worn character while editing. It do
 - Drag the title to move a floating panel; drag its corner to resize.
 - **Pop Out / Dock** changes placement.
 
-Close the preview or editor before switching game screens.
+Menu and Player Preview native rendering pause when the game loses focus or its display dimensions are invalid, and resume when foreground rendering is ready. Close the preview or editor before switching game screens.
 
 SDK names come from a compact, pinned Community Edition catalog. Unknown resources and shader parents remain unknown. [SDK integration details](docs/SDK-INTEGRATION.md).
 

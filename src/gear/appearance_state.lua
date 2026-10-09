@@ -5,8 +5,11 @@ local function token(value)
     return type(value) == 'string' and value ~= '' and #value <= 192 and not value:find('%z') and value or nil
 end
 local function kind(binding)
-    if binding.kind == 'armor' or binding.kind == 'helmet' then
+    if binding.kind == 'armor' or binding.kind == 'helmet' or binding.kind == 'cape' then
         return binding.kind
+    end
+    if binding.cape and not binding.armor and not binding.helmet then
+        return 'cape'
     end
     if binding.armor and not binding.helmet then
         return 'armor'
@@ -47,6 +50,7 @@ local function snapshot(b, pattern, proof)
         kind = target,
         armor = target == 'armor',
         helmet = target == 'helmet',
+        cape = target == 'cape',
         pattern = pattern,
         proof = gear,
     }
@@ -149,7 +153,10 @@ function S.new()
         return batches
     end
     function self.clear(target, pattern)
-        assert(target == nil or target == 'armor' or target == 'helmet', 'Invalid appearance target')
+        assert(
+            target == nil or target == 'armor' or target == 'helmet' or target == 'cape',
+            'Invalid appearance target'
+        )
         assert(pattern == nil or type(pattern) == 'boolean', 'Invalid appearance type')
         local removed = 0
         for key, record in pairs(records) do
@@ -192,7 +199,7 @@ function S.new()
         for _, entry in ipairs(entries) do
             assert(
                 type(entry) == 'table'
-                    and (entry.kind == 'armor' or entry.kind == 'helmet')
+                    and (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
                     and type(entry.pattern) == 'boolean',
                 'Invalid appearance history identity'
             )

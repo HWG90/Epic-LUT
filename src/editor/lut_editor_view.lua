@@ -20,6 +20,38 @@ function V.new(deps)
             and self.gear == state.gear
     end
     local function layout(ui)
+        if self.cape_panel then
+            local base = ui
+            ui = setmetatable({}, { __index = base })
+            ui.button = function(x, y, w, height, label, action, ...)
+                return base.button(x, y, w, height, label, function()
+                    self.cape_panel.active = false
+                    return action()
+                end, ...)
+            end
+            ui.hit = function(x, y, w, height, action, ...)
+                return base.hit(x, y, w, height, function()
+                    self.cape_panel.active = false
+                    return action()
+                end, ...)
+            end
+            ui.choice = function(id, x, y, w, prepare)
+                return base.choice(id, x, y, w, function()
+                    self.cape_panel.active = false
+                    if prepare then
+                        prepare()
+                    end
+                end)
+            end
+            ui.number = function(id, x, y, w, value, prepare, ...)
+                return base.number(id, x, y, w, value, function()
+                    self.cape_panel.active = false
+                    if prepare then
+                        prepare()
+                    end
+                end, ...)
+            end
+        end
         local d = document()
         local h = self.handle
         if selection_drag and (not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
@@ -38,14 +70,42 @@ function V.new(deps)
         local rightw = ui.w - left - 12
         local top = ui.y + ui.h
         local gear_controls = mod.controls.editor_load_armor
-        local extra_header = gear_controls and 36 or 0
         local font_scale = (ui.text_size and ui.text_size(14) or 12) / 12
+        local header_height = math.max(26, ui.control_height and ui.control_height(14, 5) or 0)
+        local header_gap = 10 * font_scale
+        local header_items, header_rows, header_x = {}, 1, 10
+        local function header_item(label, kind)
+            local width =
+                math.min(left - 20, (ui.text_width and ui.text_width(label, 14) or #label * 8) + 18 * font_scale)
+            if header_x > 10 and header_x + width > left - 10 then
+                header_rows, header_x = header_rows + 1, 10
+            end
+            header_items[#header_items + 1] =
+                { label = label, kind = kind, x = header_x, width = width, row = header_rows }
+            header_x = header_x + width + 6 * font_scale
+        end
+        if gear_controls then
+            header_item('Helmet LUT', 'helmet')
+            header_item('Armor LUT', 'armor')
+            if self.pattern_editor then
+                header_item('Pattern LUT Editor', 'pattern')
+            end
+            header_item('Load Current Gear', 'load')
+        end
+        local extra_header = gear_controls and (header_height + header_rows * (header_height + header_gap) - 26)
+            or (self.embedded and -34 or 0)
         local footer_inset = 6 * font_scale
         local footer_height = math.max(26 * font_scale, ui.control_height and ui.control_height(14, 5) or 0)
         local footer_band = footer_height + footer_inset * 2
-        local content_bottom = footer_band + 4 * font_scale
+        if self.embedded then
+            footer_band = 0
+        end
+        local cape_budget = math.max(header_height + 8 * font_scale, ui.h - footer_band - extra_header - 170)
+        local cape_height = self.cape_panel and self.cape_panel.height(ui, cape_budget) or 0
+        local cape_y = ui.y + footer_band + 4 * font_scale
+        local content_bottom = footer_band + 4 * font_scale + cape_height + (cape_height > 0 and 6 * font_scale or 0)
         local gridbottom = ui.y + content_bottom
-        local portrait = package.loaded['epic.player_preview.v1']
+        local portrait = not self.embedded and package.loaded['epic.player_preview.v1']
         local function panel(x, y, w, height, title, reserved)
             ui.rect(x, y, w, height, dark)
             ui.rect(x, y + height - 27, w, 27, blue)
@@ -56,7 +116,10 @@ function V.new(deps)
             if w < 20 then
                 return
             end
-            local loading = id == 'populate_worn' or id == 'editor_load_armor' or id == 'editor_load_helmet'
+            local loading = id == 'populate_worn'
+                or id == 'editor_load_armor'
+                or id == 'editor_load_helmet'
+                or id == 'editor_load_cape'
             local featured = loading
                 or id == 'export_selected'
                 or id == 'save_dds'
@@ -125,138 +188,159 @@ function V.new(deps)
                 self.scratch_tool.popup(ui)
             end
         end
-        ui.rect(ui.x, ui.y, ui.w, footer_band, dark)
-        local function shortcut(x, width, label, action, selected, enabled)
-            ui.button(x, ui.y + footer_inset, width, footer_height, label, action, {
-                selected = selected,
-                enabled = enabled,
-                accent = label == 'Tools' and { 244, 202, 53 },
-                ink = label == 'Tools' and { 25, 28, 31 },
-            })
-        end
-        local function measured(label, minimum)
-            return math.max(
-                minimum,
-                (ui.text_width and ui.text_width(label, 14) or #label * 14 * 0.62) + 18 * font_scale
-            )
-        end
-        local apply_id = 'editor_apply_' .. (self.gear or 'armor')
-        if not mod.controls[apply_id] then
-            apply_id = 'apply_editor'
-        end
-        local apply_label = 'Apply ' .. (self.gear or 'palette')
-        local values_label = show_values and 'Hide Values' or 'Show Values'
-        local gap = 6 * font_scale
-        local tools_width, scratch_width, values_width =
-            measured('Tools', 62), measured('Scratch', 76), measured(values_label, 108)
-        local brush_label_padding = 8 * font_scale
-        local brush_label_width = (ui.text_width and ui.text_width('Brush', 13) or 45) + brush_label_padding
-        local brush_chip_width = 36 * font_scale
-        local brush_width = brush_label_width + brush_chip_width
-        local apply_width = d and mod.controls[apply_id] and measured(apply_label, 132) or 0
-        local stop_width = mod.controls.stop_identify and measured('Stop Highlight', 124) or 0
-        local fixed_width = scratch_width + values_width + brush_width + gap * 2
-        if apply_width > 0 then
-            fixed_width = fixed_width + gap + apply_width
-        end
-        if stop_width > 0 then
-            fixed_width = fixed_width + gap + stop_width
-        end
-        local fixed_x = ui.x + ui.w - 8 * font_scale - fixed_width
-        shortcut(ui.x + 8 * font_scale, tools_width, 'Tools', function()
-            open_tools()
-        end, self.tools and self.tools.is_open(), self.tools ~= nil)
-        if self.tools and self.tools.is_open() then
-            local children =
-                { { 'Import', 'import' }, { 'Rows', 'rows' }, { 'Export', 'export' }, { 'Options', 'options' } }
-            local begin = ui.x + 8 * font_scale + tools_width + gap
-            local width = math.max(20, (fixed_x - begin - gap * #children) / #children)
-            for i, child in ipairs(children) do
-                local tab = child[2]
-                shortcut(begin + (i - 1) * (width + gap), width, child[1], function()
-                    open_tools(tab)
-                end, self.tools.tab == tab)
+        if not self.embedded then
+            ui.rect(ui.x, ui.y, ui.w, footer_band, dark)
+            local function shortcut(x, width, label, action, selected, enabled)
+                ui.button(x, ui.y + footer_inset, width, footer_height, label, action, {
+                    selected = selected,
+                    enabled = enabled,
+                    accent = label == 'Tools' and { 244, 202, 53 },
+                    ink = label == 'Tools' and { 25, 28, 31 },
+                })
             end
-        end
-        shortcut(fixed_x, scratch_width, 'Scratch', function()
-            if self.scratch_tool then
-                self.scratch_tool.open()
-            end
-        end, self.scratch_tool and self.scratch_tool.is_open(), self.scratch_tool ~= nil)
-        local fx = fixed_x + scratch_width + gap
-        shortcut(fx, values_width, values_label, function()
-            ui.activate('value_editor_visible')
-        end, show_values)
-        fx = fx + values_width + gap
-        ui.bounded(
-            fx,
-            ui.text_y and ui.text_y(ui.y + footer_inset, footer_height, 13, 'Brush')
-                or (ui.y + footer_inset + (footer_height - (ui.text_size and ui.text_size(13) or 13)) / 2),
-            'Brush',
-            13,
-            muted,
-            brush_label_width
-        )
-        ui.rect(
-            fx + brush_label_width,
-            ui.y + footer_inset,
-            brush_chip_width,
-            footer_height,
-            self.scratch or { 255, 255, 255 }
-        )
-        ui.hit(fx + brush_label_width, ui.y + footer_inset, brush_chip_width, footer_height, function()
-            ui.activate('scratch_color')
-        end, nil, nil, 'Edit the current brush color. The Scratch window also includes alpha.')
-        fx = fx + brush_width
-        if apply_width > 0 then
-            fx = fx + gap
-            shortcut(fx, apply_width, apply_label, function()
-                ui.activate(apply_id)
-            end, nil, not mod.controls[apply_id].disabled)
-            fx = fx + apply_width
-        end
-        if stop_width > 0 then
-            shortcut(fx + gap, stop_width, 'Stop Highlight', function()
-                ui.activate('stop_identify')
-            end)
-        end
-        if gear_controls then
-            self.gear = self.gear or 'armor'
-            local tab_width = math.min(136, math.max(62, left * 0.17))
-            local load_width = math.min(190, left * 0.24)
-            local selector_x = ui.x + 28
-            local load_x = ui.x + left - load_width - 10
-            for n, kind in ipairs({ 'helmet', 'armor' }) do
-                local x = ui.x + 10 + (n - 1) * (tab_width + 6)
-                local target = kind
-                local ready = not self.can_select_gear or self.can_select_gear(kind)
-                ui.button(x, top - 58, tab_width, 26, kind == 'helmet' and 'Helmet LUT' or 'Armor LUT', function()
-                    self.gear = target
-                    ui.activate('editor_load_' .. target)
-                end, { enabled = ready, selected = self.gear == kind })
-            end
-            if self.pattern_editor then
-                ui.button(
-                    ui.x + 10 + (tab_width + 6) * 2,
-                    top - 58,
-                    math.min(142, left * 0.21),
-                    26,
-                    'Pattern LUT Editor',
-                    function()
-                        ui.activate('pattern_open')
-                    end,
-                    { accent = { 244, 202, 53 }, ink = { 25, 28, 31 }, help = 'Edit separate 3x1 Pattern LUTs.' }
+            local function measured(label, minimum)
+                return math.max(
+                    minimum,
+                    (ui.text_width and ui.text_width(label, 14) or #label * 14 * 0.62) + 18 * font_scale
                 )
             end
-            button(load_x, top - 58, load_width, 'Load Current Gear', 'populate_worn')
+            local apply_id = 'editor_apply_' .. (self.gear or 'armor')
+            if not mod.controls[apply_id] then
+                apply_id = 'apply_editor'
+            end
+            local apply_label = 'Apply ' .. (self.gear or 'palette')
+            local values_label = show_values and 'Hide Values' or 'Show Values'
+            local gap = 6 * font_scale
+            local tools_width, scratch_width, values_width =
+                measured('Tools', 62), measured('Scratch', 76), measured(values_label, 108)
+            local brush_label_padding = 8 * font_scale
+            local brush_label_width = (ui.text_width and ui.text_width('Brush', 13) or 45) + brush_label_padding
+            local brush_chip_width = 36 * font_scale
+            local brush_width = brush_label_width + brush_chip_width
+            local apply_width = d and mod.controls[apply_id] and measured(apply_label, 132) or 0
+            local stop_width = mod.controls.stop_identify and measured('Stop Highlight', 124) or 0
+            local fixed_width = scratch_width + values_width + brush_width + gap * 2
+            if apply_width > 0 then
+                fixed_width = fixed_width + gap + apply_width
+            end
+            if stop_width > 0 then
+                fixed_width = fixed_width + gap + stop_width
+            end
+            local fixed_x = ui.x + ui.w - 8 * font_scale - fixed_width
+            shortcut(ui.x + 8 * font_scale, tools_width, 'Tools', function()
+                open_tools()
+            end, self.tools and self.tools.is_open(), self.tools ~= nil)
+            if self.tools and self.tools.is_open() then
+                local children =
+                    { { 'Import', 'import' }, { 'Rows', 'rows' }, { 'Export', 'export' }, { 'Options', 'options' } }
+                local begin = ui.x + 8 * font_scale + tools_width + gap
+                local width = math.max(20, (fixed_x - begin - gap * #children) / #children)
+                for i, child in ipairs(children) do
+                    local tab = child[2]
+                    shortcut(begin + (i - 1) * (width + gap), width, child[1], function()
+                        open_tools(tab)
+                    end, self.tools.tab == tab)
+                end
+            end
+            shortcut(fixed_x, scratch_width, 'Scratch', function()
+                if self.scratch_tool then
+                    self.scratch_tool.open()
+                end
+            end, self.scratch_tool and self.scratch_tool.is_open(), self.scratch_tool ~= nil)
+            local fx = fixed_x + scratch_width + gap
+            shortcut(fx, values_width, values_label, function()
+                ui.activate('value_editor_visible')
+            end, show_values)
+            fx = fx + values_width + gap
+            ui.bounded(
+                fx,
+                ui.text_y and ui.text_y(ui.y + footer_inset, footer_height, 13, 'Brush')
+                    or (ui.y + footer_inset + (footer_height - (ui.text_size and ui.text_size(13) or 13)) / 2),
+                'Brush',
+                13,
+                muted,
+                brush_label_width
+            )
+            ui.rect(
+                fx + brush_label_width,
+                ui.y + footer_inset,
+                brush_chip_width,
+                footer_height,
+                self.scratch or { 255, 255, 255 }
+            )
+            ui.hit(fx + brush_label_width, ui.y + footer_inset, brush_chip_width, footer_height, function()
+                ui.activate('scratch_color')
+            end, nil, nil, 'Edit the current brush color. The Scratch window also includes alpha.')
+            fx = fx + brush_width
+            if apply_width > 0 then
+                fx = fx + gap
+                shortcut(fx, apply_width, apply_label, function()
+                    ui.activate(apply_id)
+                end, nil, not mod.controls[apply_id].disabled)
+                fx = fx + apply_width
+            end
+            if stop_width > 0 then
+                shortcut(fx + gap, stop_width, 'Stop Highlight', function()
+                    ui.activate('stop_identify')
+                end)
+            end
+        end -- main footer
+        if gear_controls then
+            self.gear = self.gear == 'helmet' and 'helmet' or 'armor'
+            for _, item in ipairs(header_items) do
+                local target = item.kind
+                local featured = target == 'load' or target == 'pattern'
+                local ready = target == 'load'
+                    or target == 'pattern' and self.gear ~= 'cape'
+                    or target ~= 'pattern' and (not self.can_select_gear or self.can_select_gear(target))
+                ui.button(
+                    ui.x + item.x,
+                    top - 32 - header_height - (item.row - 1) * (header_height + header_gap),
+                    item.width,
+                    header_height,
+                    item.label,
+                    function()
+                        if target == 'load' then
+                            ui.activate('populate_worn')
+                        elseif target == 'pattern' then
+                            ui.activate('pattern_open')
+                        else
+                            self.gear = target
+                            ui.activate('editor_load_' .. target)
+                        end
+                    end,
+                    {
+                        enabled = ready,
+                        selected = self.gear == target,
+                        accent = featured
+                            and (
+                                target == 'load' and ui.load_color(self.load_seen and self.load_seen())
+                                or { 244, 202, 53 }
+                            ),
+                        ink = featured and { 25, 28, 31 },
+                        help = target == 'cape'
+                                and 'Edit the cape material LUT. Tint and emblem tables remain separate.'
+                            or target == 'pattern' and 'Edit separate 3x1 Armor and Helmet Pattern LUTs.',
+                    }
+                )
+            end
+            local selector_x = ui.x + 28
+            local selector_y = top - 32 - header_height - header_rows * (header_height + header_gap)
             local selector_width = math.min(220, left * 0.32)
-            ui.rect(ui.x + 16, top - 94, 2, 26, theme.focus)
-            ui.choice('basic_' .. self.gear .. '_lut', selector_x, top - 94, selector_width)
+            ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus)
+            ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
             local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
             local resource = control.choice_details and control.choice_details[h.get('basic_' .. self.gear .. '_lut')]
             local resource_width = ui.x + left - selector_x - selector_width - 30
             if resource and resource_width > 40 then
-                ui.bounded(selector_x + 12 + selector_width, top - 86, resource, 12, { 244, 202, 53 }, resource_width)
+                ui.bounded(
+                    selector_x + 12 + selector_width,
+                    selector_y + 8,
+                    resource,
+                    12,
+                    { 244, 202, 53 },
+                    resource_width
+                )
             end
         elseif d and mod.controls.lut and ui.choice then
             ui.choice('lut', ui.x + 10, top - 58, math.min(360, left - 24))
@@ -290,11 +374,14 @@ function V.new(deps)
                     ui.x + 12,
                     top - 140,
                     left - 24,
-                    'Load Current ' .. (self.gear == 'armor' and 'Armor' or 'Helmet'),
+                    'Load Current ' .. (self.gear == 'cape' and 'Cape' or self.gear == 'armor' and 'Armor' or 'Helmet'),
                     'editor_load_' .. self.gear
                 )
                 button(ui.x + 12, top - 180, 180, 'Choose file...', 'browse')
                 ui.text(ui.x + 12, top - 206, 'Uses currently worn LUT values; a file import is optional.', 14, muted)
+                if self.cape_panel then
+                    self.cape_panel.draw(ui, cape_y)
+                end
                 overlays()
                 return
             end
@@ -345,6 +432,12 @@ function V.new(deps)
         )
         local grid_top = top - 129 - extra_header
         local grid_floor = gridbottom + 30
+        if self.cape_panel and grid_top <= grid_floor then
+            self.grid_bounds = nil
+            self.cape_panel.draw(ui, cape_y)
+            overlays()
+            return
+        end
         local width_cell = (left - 98) / d.width
         if portrait_width then
             width_cell = math.min(width_cell, (left - portrait_width - 112) / d.width)
@@ -857,6 +950,9 @@ function V.new(deps)
                 )
             end
         end -- optional Value Editor
+        if self.cape_panel then
+            self.cape_panel.draw(ui, cape_y)
+        end
         overlays()
     end
     return layout

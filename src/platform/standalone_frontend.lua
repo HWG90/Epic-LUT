@@ -63,6 +63,12 @@ function F.new(m,ctx,deps)
     self.menu.open_basic=self.open_basic
     self.menu.open_advanced=self.open_advanced
     self.menu.font_size=12;self.menu.font_bold=true
+    function self.render_ready()
+        if self.closed or not self.input.focused()then return false end
+        local w,h=self.resolution()
+        local valid=type(w)=='number'and type(h)=='number'and w>0 and h>0 and w<math.huge and h<math.huge
+        return valid,w,h
+    end
     self.api.focus_page=function(id,page_id)
         for index,mod in ipairs(self.api.list())do if mod.id==id then
             for at,page in ipairs(mod.pages)do if page.id==page_id then self.menu.selected=index;self.menu.page=at;self.menu.focus='settings';return true end end
@@ -88,7 +94,14 @@ function F.new(m,ctx,deps)
             end
             if self.mcm_settings then self.mcm_settings.tick() end
             self.input.poll();local focused=self.input.focused()
-            local process_input=self.menu.input_focus(focused,self.input)
+            local can_draw,w,h=self.render_ready();self.view.suspended=not can_draw
+            local process_input=self.menu.input_focus(focused and can_draw,self.input)
+            if not can_draw then
+                -- Keep the open page and retained GUI intact while Windows is
+                -- switching/minimizing. Native text and renderer cleanup wait.
+                self.capture.sync(self.menu.visible,false,self.input.window())
+                return
+            end
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
             local basic_down=self.input.down(basic_key)
             if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit and not self.menu.capture then
@@ -137,16 +150,20 @@ function F.new(m,ctx,deps)
             self.was_visible=self.menu.visible
             local key=self.menu.toggle_key;self.menu.menu_key_label=m.ui_menu.key_name(key)
             self.menu.advance(dt)
-            local w,h=self.resolution();self.view.draw(self.menu.compose(w,h))
+            self.view.draw(self.menu.compose(w,h))
         end)
-        if not ok then self.menu.recover();self.capture.release();self.view.release();ctx.log('Epic LUT menu closed safely: '..tostring(why))end
+        if not ok then self.menu.recover();self.capture.release();if self.render_ready()then self.view.release()end;ctx.log('Epic LUT menu closed safely: '..tostring(why))end
     end
     function self.close()
+        if self.closed then return true end
         if self.mcm_settings then self.mcm_settings.close() end
         if self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
         self.menu.visible=false
         local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
-        self.view.release();self.closed=true
+        if not self.render_ready()then return false end
+        self.view.suspended=false
+        if self.view.release()==false then return false end
+        self.closed=true
         if package.loaded['dbf.epic_lut.frontend.v1']==self then package.loaded['dbf.epic_lut.frontend.v1']=nil end
         return true
     end
