@@ -9,20 +9,20 @@ function V.new(deps)
     local rgb, editable, color_columns = deps.rgb, deps.editable, deps.color_columns
     local ffi = require('ffi')
     local selection_drag
+    local function same_source(state)
+        local current = document()
+        return current == state.document
+            and current
+            and current.data == state.data
+            and current.width == state.width
+            and current.height == state.height
+            and current.source == state.source
+            and self.gear == state.gear
+    end
     local function layout(ui)
         local d = document()
         local h = self.handle
-        if
-            selection_drag
-            and (
-                d ~= selection_drag.document
-                or not d
-                or d.data ~= selection_drag.data
-                or d.width ~= selection_drag.width
-                or d.height ~= selection_drag.height
-                or h.get('grid_tool') ~= 1
-            )
-        then
+        if selection_drag and (not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
             selection_drag.cancel()
         end
         local mod = self.api.mods[h.id]
@@ -39,7 +39,12 @@ function V.new(deps)
         local top = ui.y + ui.h
         local gear_controls = mod.controls.editor_load_armor
         local extra_header = gear_controls and 36 or 0
-        local gridbottom = ui.y + 42
+        local font_scale = (ui.text_size and ui.text_size(14) or 12) / 12
+        local footer_inset = 6 * font_scale
+        local footer_height = math.max(26 * font_scale, ui.control_height and ui.control_height(14, 5) or 0)
+        local footer_band = footer_height + footer_inset * 2
+        local content_bottom = footer_band + 4 * font_scale
+        local gridbottom = ui.y + content_bottom
         local portrait = package.loaded['epic.player_preview.v1']
         local function panel(x, y, w, height, title, reserved)
             ui.rect(x, y, w, height, dark)
@@ -75,7 +80,7 @@ function V.new(deps)
             ui.x,
             gridbottom,
             left,
-            ui.h - 42,
+            ui.h - content_bottom,
             (self.is_dirty() and 'Pixel Grid - unsaved edits' or 'Pixel Grid')
                 .. (
                     d
@@ -91,7 +96,7 @@ function V.new(deps)
             local copy_label, paste_label = compact and 'Copy' or 'Copy Value', compact and 'Paste' or 'Paste Value'
             local action_width = math.min(110, math.max(46, (rightw - 110) / 2))
             local reserved = actions and action_width * 2 + 10 or 0
-            panel(right, gridbottom, rightw, ui.h - 42, 'Value Editor', reserved)
+            panel(right, gridbottom, rightw, ui.h - content_bottom, 'Value Editor', reserved)
             if actions then
                 local function value_action(id, label, x)
                     local control = mod.controls[id]
@@ -107,28 +112,22 @@ function V.new(deps)
             if not self.tools then
                 return
             end
-            if self.pattern_editor then
-                self.pattern_editor.open = false
-            end
             self.tools.open(tab)
         end
         local function overlays()
-            if self.tools and self.pattern_editor and self.pattern_editor.open then
-                self.tools.close()
-            end
             if self.tools and self.tools.is_open() then
                 self.tools.popup(ui)
-            elseif self.pattern_editor then
+            end
+            if self.pattern_editor then
                 self.pattern_editor.popup(ui)
             end
             if self.scratch_tool then
                 self.scratch_tool.popup(ui)
             end
         end
-        local footer_height = math.max(26, (ui.text_size and ui.text_size(14) or 14) + 10)
-        ui.rect(ui.x, ui.y, ui.w, footer_height + 12, dark)
+        ui.rect(ui.x, ui.y, ui.w, footer_band, dark)
         local function shortcut(x, width, label, action, selected, enabled)
-            ui.button(x, ui.y + 6, width, footer_height, label, action, {
+            ui.button(x, ui.y + footer_inset, width, footer_height, label, action, {
                 selected = selected,
                 enabled = enabled,
                 accent = label == 'Tools' and { 244, 202, 53 },
@@ -136,7 +135,10 @@ function V.new(deps)
             })
         end
         local function measured(label, minimum)
-            return math.max(minimum, (ui.text_width and ui.text_width(label, 14) or #label * 14 * 0.62) + 18)
+            return math.max(
+                minimum,
+                (ui.text_width and ui.text_width(label, 14) or #label * 14 * 0.62) + 18 * font_scale
+            )
         end
         local apply_id = 'editor_apply_' .. (self.gear or 'armor')
         if not mod.controls[apply_id] then
@@ -144,11 +146,13 @@ function V.new(deps)
         end
         local apply_label = 'Apply ' .. (self.gear or 'palette')
         local values_label = show_values and 'Hide Values' or 'Show Values'
-        local gap = 6
+        local gap = 6 * font_scale
         local tools_width, scratch_width, values_width =
             measured('Tools', 62), measured('Scratch', 76), measured(values_label, 108)
-        local brush_label_width = (ui.text_width and ui.text_width('Brush', 13) or 45) + 8
-        local brush_width = brush_label_width + 36
+        local brush_label_padding = 8 * font_scale
+        local brush_label_width = (ui.text_width and ui.text_width('Brush', 13) or 45) + brush_label_padding
+        local brush_chip_width = 36 * font_scale
+        local brush_width = brush_label_width + brush_chip_width
         local apply_width = d and mod.controls[apply_id] and measured(apply_label, 132) or 0
         local stop_width = mod.controls.stop_identify and measured('Stop Highlight', 124) or 0
         local fixed_width = scratch_width + values_width + brush_width + gap * 2
@@ -158,14 +162,14 @@ function V.new(deps)
         if stop_width > 0 then
             fixed_width = fixed_width + gap + stop_width
         end
-        local fixed_x = ui.x + ui.w - 8 - fixed_width
-        shortcut(ui.x + 8, tools_width, 'Tools', function()
+        local fixed_x = ui.x + ui.w - 8 * font_scale - fixed_width
+        shortcut(ui.x + 8 * font_scale, tools_width, 'Tools', function()
             open_tools()
         end, self.tools and self.tools.is_open(), self.tools ~= nil)
         if self.tools and self.tools.is_open() then
             local children =
                 { { 'Import', 'import' }, { 'Rows', 'rows' }, { 'Export', 'export' }, { 'Options', 'options' } }
-            local begin = ui.x + 8 + tools_width + gap
+            local begin = ui.x + 8 * font_scale + tools_width + gap
             local width = math.max(20, (fixed_x - begin - gap * #children) / #children)
             for i, child in ipairs(children) do
                 local tab = child[2]
@@ -186,14 +190,21 @@ function V.new(deps)
         fx = fx + values_width + gap
         ui.bounded(
             fx,
-            ui.y + 6 + (footer_height - (ui.text_size and ui.text_size(13) or 13)) / 2,
+            ui.text_y and ui.text_y(ui.y + footer_inset, footer_height, 13, 'Brush')
+                or (ui.y + footer_inset + (footer_height - (ui.text_size and ui.text_size(13) or 13)) / 2),
             'Brush',
             13,
             muted,
-            brush_label_width - 8
+            brush_label_width - brush_label_padding
         )
-        ui.rect(fx + brush_label_width, ui.y + 6, 36, footer_height, self.scratch or { 255, 255, 255 })
-        ui.hit(fx + brush_label_width, ui.y + 6, 36, footer_height, function()
+        ui.rect(
+            fx + brush_label_width,
+            ui.y + footer_inset,
+            brush_chip_width,
+            footer_height,
+            self.scratch or { 255, 255, 255 }
+        )
+        ui.hit(fx + brush_label_width, ui.y + footer_inset, brush_chip_width, footer_height, function()
             ui.activate('scratch_color')
         end, nil, nil, 'Edit the current brush color. The Scratch window also includes alpha.')
         fx = fx + brush_width
@@ -232,9 +243,6 @@ function V.new(deps)
                     26,
                     'Pattern LUT Editor',
                     function()
-                        if self.tools then
-                            self.tools.close()
-                        end
                         ui.activate('pattern_open')
                     end,
                     { accent = { 244, 202, 53 }, ink = { 25, 28, 31 }, help = 'Edit separate 3x1 Pattern LUTs.' }
@@ -321,9 +329,6 @@ function V.new(deps)
         button(tool_x(446), top - 92 - extra_header, 56 * toolbar_scale, 'Redo', 'redo')
         if toolbar_pattern then
             ui.button(tool_x(508), top - 92 - extra_header, 142 * toolbar_scale, 26, 'Pattern LUT Editor', function()
-                if self.tools then
-                    self.tools.close()
-                end
                 ui.activate('pattern_open')
             end, {
                 accent = { 244, 202, 53 },
@@ -389,18 +394,6 @@ function V.new(deps)
                 cell - 2
             )
         end
-        for r = first_row, last_row do
-            local y = grid_top - (r - first_row + 1) * cell
-            local selected_row = r
-            ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, { 244, 202, 53 }, 68)
-            if self.api and self.api.mods[self.handle.id].controls.identify_region then
-                ui.hit(ui.x + 8, y, 70, cell, function()
-                    assert(h.set('edit_row', selected_row))
-                    self.sync()
-                    ui.activate('identify_region')
-                end)
-            end
-        end
         local row = h.get('edit_row')
         local column = h.get('edit_column')
         local function select_cell(selected_row, selected_col)
@@ -422,7 +415,7 @@ function V.new(deps)
             end
             self.sync()
         end
-        local function begin_selection_drag(selected_row, selected_col)
+        local function begin_selection_drag(selected_row, selected_col, rows_only)
             if not ui.begin_drag or not self.selection then
                 return
             end
@@ -438,14 +431,11 @@ function V.new(deps)
                 anchor_row = self.selection.anchor_row or self.selection.r1,
                 anchor_col = self.selection.anchor_col or self.selection.c1,
                 selection = self.selection,
+                rows_only = rows_only,
             }
             selection_drag = state
             local function cancel()
-                local current = document()
-                if
-                    (current ~= d or not current or current.data ~= state.data)
-                    and self.selection == state.selection
-                then
+                if not same_source(state) and self.selection == state.selection then
                     self.selection = nil
                 end
                 if selection_drag == state then
@@ -453,19 +443,10 @@ function V.new(deps)
                 end
             end
             local function move(x, y)
-                local current = document()
                 if selection_drag ~= state then
                     return
                 end
-                if
-                    current ~= d
-                    or current.data ~= state.data
-                    or current.width ~= state.width
-                    or current.height ~= state.height
-                    or current.source ~= state.source
-                    or self.gear ~= state.gear
-                    or h.get('grid_tool') ~= 1
-                then
+                if not same_source(state) or h.get('grid_tool') ~= 1 then
                     if state.cancel then
                         state.cancel()
                     else
@@ -476,28 +457,82 @@ function V.new(deps)
                 if not x or not y then
                     return
                 end
-                local selected_col = math.max(1, math.min(d.width, math.floor((x - ui.x - 82) / cell) + 1))
+                local selected_col = rows_only and 1
+                    or math.max(1, math.min(d.width, math.floor((x - ui.x - 82) / cell) + 1))
                 local selected_row =
                     math.max(first_row, math.min(last_row, first_row + math.floor((grid_top - y) / cell)))
                 if selected_row == state.row and selected_col == state.column then
                     return
                 end
                 state.row, state.column = selected_row, selected_col
-                self.selection = {
-                    anchor_row = state.anchor_row,
-                    anchor_col = state.anchor_col,
-                    r1 = math.min(state.anchor_row, selected_row),
-                    r2 = math.max(state.anchor_row, selected_row),
-                    c1 = math.min(state.anchor_col, selected_col),
-                    c2 = math.max(state.anchor_col, selected_col),
-                }
+                if rows_only then
+                    self.select_rows(state.anchor_row, selected_row)
+                else
+                    self.selection = {
+                        anchor_row = state.anchor_row,
+                        anchor_col = state.anchor_col,
+                        r1 = math.min(state.anchor_row, selected_row),
+                        r2 = math.max(state.anchor_row, selected_row),
+                        c1 = math.min(state.anchor_col, selected_col),
+                        c2 = math.max(state.anchor_col, selected_col),
+                    }
+                end
                 state.selection = self.selection
                 select_cell(selected_row, selected_col)
+                if self.set_paste_anchor then
+                    self.set_paste_anchor(self.selection.r1, self.selection.c1)
+                end
             end
             state.cancel = ui.begin_drag(move, function(x, y)
                 move(x, y)
                 cancel()
             end, cancel)
+        end
+        local can_identify = mod.controls.identify_region
+        local fill_ui = setmetatable({
+            rect = function(x, y, width, height, color, alpha)
+                ui.rect(x, y, width, height, color, alpha, 'swatch_fill')
+            end,
+        }, { __index = ui })
+        for r = first_row, last_row do
+            local y = grid_top - (r - first_row + 1) * cell
+            local selected_row = r
+            ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, { 244, 202, 53 }, 68)
+            ui.hit(
+                ui.x + 8,
+                y,
+                70,
+                cell,
+                function()
+                    local ok, why = pcall(function()
+                        if h.get('grid_tool') ~= 1 then
+                            assert(h.set('grid_tool', 1))
+                        end
+                        local anchor = ui.shift
+                                and ui.shift()
+                                and self.selection
+                                and (self.selection.anchor_row or self.selection.r1)
+                            or selected_row
+                        self.select_rows(anchor, selected_row)
+                        select_cell(selected_row, 1)
+                        self.set_paste_anchor(self.selection.r1, 1)
+                        begin_selection_drag(selected_row, 1, true)
+                    end)
+                    if not ok then
+                        note(tostring(why))
+                    end
+                end,
+                can_identify
+                        and function()
+                            assert(h.set('edit_row', selected_row))
+                            self.sync()
+                            ui.activate('identify_region')
+                        end
+                    or nil,
+                nil,
+                'Click or drag to select whole rows. Shift-click extends the row range.'
+                    .. (can_identify and ' Right-click to flash this region.' or '')
+            )
         end
         for r = first_row, last_row do
             for c = 1, d.width do
@@ -505,24 +540,16 @@ function V.new(deps)
                 local index = semantics.index(r, c, 1, d.width, d.height)
                 local x = ui.x + 82 + (c - 1) * cell
                 local y = grid_top - (r - first_row + 1) * cell
-                local s = self.selection
-                local selected = s and r >= s.r1 and r <= s.r2 and c >= s.c1 and c <= s.c2
                 local color = rgb(d.data, index)
                 local channel = h.get('grid_channel')
                 if channel >= 3 then
                     local value = math.floor(math.max(0, math.min(1, d.data[index + channel - 3])) * 255 + 0.5)
                     color = { value, value, value }
                 end
-                ui.rect(
-                    x,
-                    y,
-                    cell,
-                    cell,
-                    (selected or (r == row and c == column)) and { 244, 202, 53 } or { 75, 78, 82 }
-                )
+                ui.rect(x, y, cell, cell, { 75, 78, 82 }, nil, 'swatch_border')
                 if deps.swatch then
                     deps.swatch(
-                        ui,
+                        fill_ui,
                         x + 1,
                         y + 1,
                         cell - 2,
@@ -532,7 +559,7 @@ function V.new(deps)
                         h.get('show_alpha') and channel < 3
                     )
                 else
-                    ui.rect(x + 1, y + 1, cell - 2, cell - 2, color)
+                    fill_ui.rect(x + 1, y + 1, cell - 2, cell - 2, color)
                 end
                 ui.hit(
                     x,
@@ -572,6 +599,9 @@ function V.new(deps)
                                 }
                             end
                             select_cell(selected_row, selected_col)
+                            if self.selection and self.set_paste_anchor then
+                                self.set_paste_anchor(self.selection.r1, self.selection.c1)
+                            end
                             if tool == 1 then
                                 begin_selection_drag(selected_row, selected_col)
                             end
@@ -592,7 +622,10 @@ function V.new(deps)
                         assert(h.set('scratch_alpha', math.max(0, math.min(1, tonumber(d.data[at + 3])))))
                         note('Swatch copied to scratch and pixel clipboard.')
                     end,
-                    'Double-click to edit RGBA. Raw shader columns use numeric values; unchanged channels retain their exact values.',
+                    function()
+                        local values = deps.swatch_tooltip and deps.swatch_tooltip(d, selected_row, selected_col)
+                        return values and (values .. '\nDouble-click edits. Middle-click copies.') or nil
+                    end,
                     function()
                         self.focus_cell(selected_row, selected_col)
                         ui.activate('cell_color')
@@ -600,7 +633,25 @@ function V.new(deps)
                 )
             end
         end
-        local can_identify = self.api and self.handle and self.api.mods[self.handle.id].controls.identify_region
+        -- Stroke every selected cell boundary without painting a filled gold
+        -- surface. Shared edges are drawn once; RGB/checkers keep their bounds.
+        local selected = self.selection or { r1 = row, r2 = row, c1 = column, c2 = column }
+        local selected_first, selected_last = math.max(first_row, selected.r1), math.min(last_row, selected.r2)
+        if selected_first <= selected_last then
+            local x = ui.x + 82 + (selected.c1 - 1) * cell
+            local y = grid_top - (selected_last - first_row + 1) * cell
+            local width = (selected.c2 - selected.c1 + 1) * cell
+            local height = (selected_last - selected_first + 1) * cell
+            local gold, border = { 244, 202, 53 }, 2
+            for c = selected.c1, selected.c2 + 1 do
+                local edge = ui.x + 82 + (c - 1) * cell
+                ui.rect(edge - border / 2, y, border, height, gold, nil, 'selection_outline')
+            end
+            for r = selected_first, selected_last + 1 do
+                local edge = grid_top - (r - first_row) * cell
+                ui.rect(x - border / 2, edge - border / 2, width + border, border, gold, nil, 'selection_outline')
+            end
+        end
         if show_values then
             if ui.choice then
                 ui.choice('edit_row', right + 8, top - 57, rightw - 16)
@@ -623,7 +674,7 @@ function V.new(deps)
                 'unlock'
             )
             local clip_top, clip_bottom = top - 96, gridbottom + 12
-            self.value_bounds = { x = right, y = gridbottom, w = rightw, h = ui.h - 42 }
+            self.value_bounds = { x = right, y = gridbottom, w = rightw, h = ui.h - content_bottom }
             local scroll = self.value_scroll
             local cursor = clip_top + scroll
             local function visible(y, height)

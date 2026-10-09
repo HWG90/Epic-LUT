@@ -471,10 +471,50 @@ assert(
 )
 core.hsv_rgb = original_hsv
 -- Flyout targets fit between Tools and the stable right-side footer controls.
+menu.text_metrics = function(size, text)
+    local descends = text and text:find('[gjpqy]')
+    return {
+        min_y = descends and -size * 0.25 or 0,
+        max_y = size * 0.75,
+        height = descends and size or size * 0.75,
+    }
+end
+local footer_padding_ratio
 for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 1100 } }) do
     menu.font_size, menu.ui_scale, menu.window_width = settings[1], settings[2], settings[3]
     editor.tools.open('rows')
     commands = compose()
+    local tools_label = assert(label(commands, 'Tools'))
+    local ink = menu.text_metrics(tools_label.size, 'Tools')
+    local body
+    for i = #commands, 1, -1 do
+        local command = commands[i]
+        if
+            command.type == 'rect'
+            and command.c[1] == 244
+            and command.c[2] == 202
+            and command.w > 40
+            and command.h >= ink.height
+            and command.x <= tools_label.x
+            and command.x + command.w >= tools_label.x
+            and command.y <= tools_label.y + ink.min_y
+            and command.y + command.h >= tools_label.y + ink.max_y
+        then
+            body = command
+            break
+        end
+    end
+    assert(body, 'Footer control body missing')
+    local bottom = tools_label.y + ink.min_y - body.y
+    local upper = body.y + body.h - tools_label.y - ink.max_y
+    assert(math.abs(bottom - upper) < 0.01, 'Footer visible ink is not vertically centered')
+    local ratio = bottom / tools_label.size
+    assert(
+        not footer_padding_ratio or math.abs(ratio - footer_padding_ratio) < 0.01,
+        'Font resizing lost footer padding'
+    )
+    footer_padding_ratio = ratio
+    assert(editor.grid_bounds.y >= body.y + body.h, 'Growing footer overlaps the pixel grid')
     local previous = assert(label(commands, 'Tools'))
     for _, child in ipairs({ 'Import', 'Rows', 'Export', 'Options', 'Scratch', 'Hide Values' }) do
         local current = assert(label(commands, child), 'Footer child missing at scale: ' .. child)
@@ -492,6 +532,7 @@ for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 110
         'Closed flyout retained children or removed Scratch'
     )
 end
+menu.text_metrics = nil
 menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = 12, 1, 1800, 1000
 
 -- A custom table can reach its last row after the inspector is collapsed.
@@ -521,8 +562,12 @@ assert(
 pattern.show('armor')
 commands = compose()
 assert(
-    not editor.tools.is_open() and menu.floating_bounds and label(commands, 'Pattern LUT Editor'),
-    'Empty editor failed to compose Pattern popup or left two tool windows open'
+    editor.tools.is_open()
+        and pattern.open
+        and menu.floating_bounds
+        and label(commands, 'Pattern LUT Editor')
+        and label(commands, 'LUT Editor Tools'),
+    'Opening Pattern closed or replaced the independent Toolbox'
 )
 tap_label('Helmet')
 compose()
@@ -537,6 +582,25 @@ assert(pattern.import({ width = 3, height = 1, data = ffi.new('float[12]') }))
 tap_label('Helmet')
 compose()
 assert(pattern.gear == 'helmet', 'A valid imported Pattern failed to enable gear selection')
+assert(editor.tools.is_open() and pattern.open, 'Pattern interaction closed the independent Toolbox')
+editor.tools.close()
+compose()
+assert(pattern.open, 'Closing Toolbox closed Pattern')
+tap_label('Tools')
+commands = compose()
+assert(
+    editor.tools.is_open()
+        and pattern.open
+        and label(commands, 'Pattern LUT Editor')
+        and label(commands, 'LUT Editor Tools'),
+    'Opening Toolbox closed the independent Pattern window'
+)
+editor.scratch_tool.open()
+commands = compose()
+assert(
+    editor.tools.is_open() and pattern.open and editor.scratch_tool.is_open() and #menu.floating_windows == 3,
+    'Pattern, Toolbox and Scratch could not coexist'
+)
 print(
     'PASS editor layout: expandable Toolbox shortcuts, independent Scratch/alpha, popup ownership, lazy palette cache, roomy grid and preserved exports'
 )

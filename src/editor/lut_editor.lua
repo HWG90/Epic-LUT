@@ -110,6 +110,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         self.open_row = row
         self.focus_column = column
         self.selection = { r1 = row, r2 = row, c1 = column, c2 = column }
+        self.paste_anchor = nil
         self.sync()
     end
     function self.paint_rgb(row, column, hex)
@@ -300,6 +301,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.value_scroll = 0
             self.grid_first, self.grid_selected = 1, nil
             self.selection = nil
+            self.paste_anchor = nil
             self.value_target = nil
             if not d.original then
                 d.original = ffi.new('float[?]', d.width * d.height * 4)
@@ -563,6 +565,27 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         self.sync()
         return note('Pixel painted. Live preview updates automatically.')
     end
+    function self.set_paste_anchor(row, column)
+        local d = assert(document(), 'Load a LUT first')
+        m.semantics.index(row, column, 1, d.width, d.height)
+        self.paste_anchor = { document = d, row = row, column = column }
+    end
+    function self.select_rows(anchor_row, endpoint)
+        local d = assert(document(), 'Load a LUT first')
+        m.semantics.index(anchor_row, 1, 1, d.width, d.height)
+        m.semantics.index(endpoint, 1, 1, d.width, d.height)
+        self.selection = {
+            rows = true,
+            anchor_row = anchor_row,
+            anchor_col = 1,
+            r1 = math.min(anchor_row, endpoint),
+            r2 = math.max(anchor_row, endpoint),
+            c1 = 1,
+            c2 = d.width,
+        }
+        self.set_paste_anchor(self.selection.r1, 1)
+        self.value_target = nil
+    end
     function self.copy_selection()
         local d = assert(document(), 'Import first')
         local s = self.selection
@@ -572,36 +595,77 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
                 c1 = self.handle.get('edit_column'),
                 c2 = self.handle.get('edit_column'),
             }
+        m.semantics.index(s.r1, s.c1, 1, d.width, d.height)
+        m.semantics.index(s.r2, s.c2, 4, d.width, d.height)
         local w, h = s.c2 - s.c1 + 1, s.r2 - s.r1 + 1
+        assert(w > 0 and h > 0, 'Invalid selection bounds')
         local data = ffi.new('float[?]', w * h * 4)
         for r = 0, h - 1 do
             ffi.copy(data + r * w * 4, d.data + m.semantics.index(s.r1 + r, s.c1, 1, d.width, d.height), w * 16)
         end
-        self.clip = { width = w, height = h, data = data }
+        self.clip = {
+            width = w,
+            height = h,
+            data = data,
+            rows = s.rows,
+            source_selection = self.selection,
+            cursor_row = self.handle.get('edit_row'),
+            cursor_column = self.handle.get('edit_column'),
+        }
         return note('Copied rows ' .. s.r1 .. '-' .. s.r2 .. ', columns ' .. s.c1 .. '-' .. s.c2 .. ' (full RGBA)')
     end
     function self.paste_selection()
         local d = assert(document(), 'Import first')
+        assert(not d.read_only and not d.stale, 'Load an editable current LUT first')
         local clip = assert(self.clip, 'Copy a selection first')
+        m.dds.validate(clip.data, clip.width, clip.height)
         local row, column = self.handle.get('edit_row'), self.handle.get('edit_column')
+        local anchor, selection = self.paste_anchor, self.selection
+        if anchor then
+            assert(anchor.document == d, 'Paste target changed; select a destination again')
+            row, column = anchor.row, anchor.column
+        elseif
+            selection
+            and (selection ~= clip.source_selection or (row == clip.cursor_row and column == clip.cursor_column))
+        then
+            row, column = selection.r1, selection.c1
+        end
+        m.semantics.index(row, column, 1, d.width, d.height)
         assert(row + clip.height - 1 <= d.height and column + clip.width - 1 <= d.width, 'Clipboard does not fit here')
-        local selected = channels[2] -- Clipboard paste restores full RGBA, independent of paint channel.
         for c = column, column + clip.width - 1 do
-            for _, ch in ipairs(selected) do
-                assert(editable(d, c, ch), 'Unlock advanced edits to paste non-color channels')
+            for channel = 1, 4 do
+                assert(editable(d, c, channel), 'Unlock advanced edits to paste full RGBA into these channels')
             end
         end
+        -- Pixel bytes are copied only after the entire destination passes validation.
         d = remember()
         for r = 0, clip.height - 1 do
-            for c = 0, clip.width - 1 do
-                for _, ch in ipairs(selected) do
-                    d.data[m.semantics.index(row + r, column + c, ch, d.width, d.height)] =
-                        clip.data[(r * clip.width + c) * 4 + ch - 1]
-                end
-            end
+            local target = m.semantics.index(row + r, column, 1, d.width, d.height)
+            ffi.copy(d.data + target, clip.data + r * clip.width * 4, clip.width * 16)
         end
+        self.selection = {
+            rows = clip.rows,
+            anchor_row = row,
+            anchor_col = column,
+            r1 = row,
+            r2 = row + clip.height - 1,
+            c1 = column,
+            c2 = column + clip.width - 1,
+        }
+        self.paste_anchor = { document = d, row = row, column = column }
+        self.value_target = nil
         self.sync()
-        return note('Pasted ' .. clip.width .. ' columns into row ' .. row .. ', column ' .. column .. ' (full RGBA)')
+        return note(
+            'Pasted '
+                .. clip.height
+                .. ' rows x '
+                .. clip.width
+                .. ' columns at row '
+                .. row
+                .. ', column '
+                .. column
+                .. ' (full RGBA)'
+        )
     end
     function self.reset_part(full_row)
         local d = assert(document(), 'Load a LUT first')
@@ -743,6 +807,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         paint = paint,
         rgb = rgb,
         swatch = m.palette.swatch,
+        swatch_tooltip = m.palette.value_tooltip,
         editable = editable,
         color_columns = color_columns,
     })

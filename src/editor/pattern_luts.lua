@@ -91,13 +91,24 @@ function P.new(deps)
         self.busy = false
         assert(ok, why)
     end
-    function self.scan()
+    function self.scan(background)
         if deps.indicator then
             assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
         end
         local existing = {}
+        local kept = {}
         for _, b in ipairs(deps.session.owned) do
-            existing[deps.key(b)] = b
+            if (not deps.present or deps.present(b)) and deps.binding(b) == b.current then
+                existing[deps.key(b)] = b
+                kept[#kept + 1] = b
+            end
+        end
+        deps.session.owned = kept
+        local editable = {}
+        for _, group in ipairs(self.groups) do
+            for _, b in ipairs(group.bindings) do
+                editable[deps.key(b)] = b
+            end
         end
         local groups, ordered, seen = {}, {}, {}
         for _, b in ipairs(deps.discover()) do
@@ -105,6 +116,11 @@ function P.new(deps)
             local prior = existing[key]
             if prior and deps.binding(b) == prior.current then
                 b = prior
+            elseif editable[key] and deps.binding(b) == editable[key].original then
+                -- Keep the active editor and session on the same record when
+                -- the game resets this material to its verified original.
+                b = editable[key]
+                b.current, b.previous, b.texture, b.document = b.original, nil, nil, nil
             end
             local object = b.original or deps.binding(b)
             if object and object ~= 0 and not seen[key] then
@@ -123,6 +139,9 @@ function P.new(deps)
         table.sort(ordered, function(a, b)
             return a.object < b.object
         end)
+        if background then
+            return ordered
+        end
         self.all_groups = ordered
         return self.filter(self.gear or 'armor')
     end
@@ -243,6 +262,9 @@ function P.new(deps)
             end
         end
         deps.session.apply(self.document, group.bindings)
+        if deps.applied then
+            deps.applied(group.bindings)
+        end
         remember()
         sync()
     end
@@ -439,6 +461,9 @@ function P.new(deps)
                     assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
                 end
                 assert(deps.session.restore(), 'Pattern restoration pending')
+                if deps.restored then
+                    deps.restored()
+                end
                 self.document = nil
                 self.documents, self.undo, self.redo, self.waiting = {}, {}, {}, nil
                 sync()

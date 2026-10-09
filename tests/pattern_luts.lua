@@ -92,6 +92,92 @@ assert(handle.activate('pattern_undo'))
 assert(pattern.document.data[7] == source.data[7])
 assert(handle.activate('pattern_redo'))
 assert(math.abs(pattern.document.data[7] - 0.4) < 0.00001)
+local active_document, active_undo, active_redo, active_groups =
+    pattern.document, pattern.undo, pattern.redo, pattern.groups
+local background_groups = pattern.scan(true)
+assert(#background_groups == 1 and background_groups[1].object == 100)
+assert(
+    pattern.document == active_document
+        and pattern.undo == active_undo
+        and pattern.redo == active_redo
+        and pattern.groups == active_groups,
+    'Appearance recovery changed Pattern editor state'
+)
+-- Real discovery returns fresh binding tables. Background recovery of a
+-- still-live material must preserve the popup's ownership reference.
+local reset_current, reset_created = 100, 1000
+local reset_deps = {
+    present = function()
+        return true
+    end,
+    binding = function()
+        return reset_current
+    end,
+    key = function(b)
+        return b.unit .. ':' .. b.mesh .. ':' .. b.material
+    end,
+    retain = { records = {}, cache = {}, bytes = 0 },
+    create_texture = function()
+        reset_created = reset_created + 1
+        return { object = reset_created }
+    end,
+    bind = function(_, object)
+        reset_current = object
+    end,
+}
+local reset_session = dofile('src/gear/binding_session.lua').new(reset_deps)
+local reset_pattern = dofile('src/editor/pattern_luts.lua').new({
+    session = reset_session,
+    present = reset_deps.present,
+    binding = reset_deps.binding,
+    key = reset_deps.key,
+    discover = function()
+        return { { unit = 10, mesh = 20, material = 30, slot = 987, helmet = true, save_key = '0:0:0:0' } }
+    end,
+    original = function(object)
+        assert(object == 100)
+        return source
+    end,
+    rgb = dofile('src/core/palette.lua').rgb,
+    note = function(text)
+        return text
+    end,
+    resource_id = tostring,
+})
+local reset_api = core.new({
+    load = function()
+        return {}
+    end,
+    save = function()
+        return true
+    end,
+})
+local reset_controls = reset_pattern.controls()
+reset_controls[#reset_controls + 1] = { id = 'show_alpha', type = 'toggle', label = 'Show Alpha', default = false }
+local reset_handle = reset_api.register({
+    id = 'reset_pattern',
+    name = 'Pattern reset',
+    pages = { { id = 'advanced', name = 'Pattern', controls = reset_controls } },
+})
+reset_pattern.attach(reset_handle, reset_api.mods[reset_handle.id].controls)
+reset_pattern.gear = 'helmet'
+assert(reset_handle.activate('pattern_load') and reset_handle.set('pattern_color', '#FF0000'))
+local popup_binding = reset_pattern.groups[1].bindings[1]
+local remembered_texture = popup_binding.texture
+reset_current = 100
+local reset_groups = reset_pattern.scan(true)
+assert(reset_groups[1].bindings[1] == popup_binding, 'Background reset replaced the active popup binding')
+assert(popup_binding.current == 100 and popup_binding.texture == nil and popup_binding.document == nil)
+reset_session.apply(remembered_texture, reset_groups[1].bindings)
+assert(reset_handle.set('pattern_color', '#00FF00'))
+assert(
+    reset_session.owned[1] == popup_binding and reset_session.owned[1].current == reset_current,
+    'Editing after background replay lost native Pattern ownership'
+)
+assert(
+    reset_pattern.close() and reset_current == 100,
+    'Pattern close falsely reported restoration after recovered popup edits'
+)
 local imported = { width = 3, height = 1, data = ffi.new('float[12]') }
 imported.data[0], imported.data[7] = 0.25, 0.8
 local before_import = current

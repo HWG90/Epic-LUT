@@ -11,8 +11,9 @@ local api = Core.new({
 local handle =
     api.register({ id = 'tooltip_wrap', name = 'Epic LUT', pages = { { id = 'test', name = 'Test', controls = {} } } })
 local guidance = 'Edit the current brush color. Scratch tools also include alpha.'
+local help = guidance
 api.mods[handle.id].pages[1].render_layout = function(ui)
-    ui.button(ui.x + 20, ui.y + 30, 150, 30, 'Brush', function() end, { help = guidance })
+    ui.button(ui.x + 20, ui.y + 30, 150, 30, 'Brush', function() end, { help = help })
 end
 -- The real view's fallback is a per-glyph metric, not a string-width API.
 local menu = Menu.new(api, function(_, size)
@@ -57,4 +58,34 @@ for _, font in ipairs({ 12, 20 }) do
     end
     assert(table.concat(full, ' ') == guidance, 'Tooltip dropped a letter or word')
 end
+for _, empty in ipairs({
+    '',
+    '   \t\r\n',
+    function()
+        return ''
+    end,
+    function()
+        return nil
+    end,
+    function()
+        error('Unavailable optional tooltip')
+    end,
+}) do
+    help = empty
+    menu.compose(1920, 1080)
+    menu.advance(0.6)
+    for _, command in ipairs(menu.compose(1920, 1080)) do
+        assert(command.layer ~= 450 and command.window_frame ~= 'tooltip', 'Empty tooltip rendered a blank panel')
+    end
+end
+help = function()
+    return guidance
+end
+menu.compose(1920, 1080)
+menu.advance(0.6)
+local callback_text = false
+for _, command in ipairs(menu.compose(1920, 1080)) do
+    callback_text = callback_text or (command.layer == 450 and command.text ~= nil)
+end
+assert(callback_text, 'Nonempty callback tooltip was suppressed')
 print('PASS tooltip wrapping: per-glyph fallback, complete words and resized line spacing')

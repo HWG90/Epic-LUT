@@ -16,6 +16,7 @@ local handle = api.register({
                     presentation = 'dropdown',
                     label = 'Choice',
                     choices = { 'One', 'Two' },
+                    description = 'Choose the active item.',
                     default = 1,
                 },
                 { id = 'color', type = 'color', label = 'Color', default = '#FFFFFF' },

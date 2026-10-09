@@ -37,7 +37,8 @@ function F.new(m,ctx,deps)
             self.resolution=sr.Gui.resolution
     end
     self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
-    self.menu=m.ui_menu.new(self.api,self.view.measure)
+    self.menu=m.ui_menu.new(self.api,self.view.measure,m.text_editor)
+    self.menu.text_metrics=self.view.text_metrics
     self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({window=function()return self.input.window()end}))
     self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
@@ -118,7 +119,7 @@ function F.new(m,ctx,deps)
                 error(text,0)
             end
             if self.preview_close_pending then self.menu.visible=false end
-            if process_input then self.menu.tick(self.input)end
+            if process_input then self.menu.tick(self.input,dt)end
             if self.rendered_revision~=self.menu.redraw_revision then
                 if self.view.invalidate then self.view.invalidate()else self.view.clear()end
                 self.rendered_revision=self.menu.redraw_revision;self.draw_elapsed=1

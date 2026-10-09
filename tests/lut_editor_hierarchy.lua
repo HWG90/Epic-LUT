@@ -150,7 +150,7 @@ local function control(commands, value)
         if
             c.type == 'rect'
             and c.h >= 26 * s - 0.1
-            and c.h <= 38 * s + 0.1
+            and c.h <= 60 * s + 0.1
             and c.w > 40 * s
             and c.x <= text.x
             and c.x + c.w >= text.x + text.text_width - 0.1

@@ -258,7 +258,7 @@ local function custom_choice_row()
     local caret, steps
     steps = 0
     for _, c in ipairs(commands) do
-        if c.type == 'text' and math.abs(c.y - label.y) < 0.1 then
+        if c.type == 'text' and math.abs(c.y - label.y) < 1 * menu.window_bounds.scale + 0.1 then
             if c.text == '<' or c.text == '>' then
                 steps = steps + 1
             end
@@ -318,7 +318,7 @@ local function custom_choice_surface()
     assert(label)
     local s = menu.window_bounds.scale
     for _, c in ipairs(commands) do
-        if c.type == 'rect' and math.abs(c.w - 300 * s) < 0.1 and math.abs(c.y + 5 * s - label.y) < 0.1 then
+        if c.type == 'rect' and math.abs(c.w - 300 * s) < 0.1 and label.y >= c.y and label.y <= c.y + c.h then
             return c, label
         end
     end

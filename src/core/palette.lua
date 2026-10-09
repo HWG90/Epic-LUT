@@ -23,6 +23,28 @@ function P.copy(original, width, height, overrides, allocate, copy)
     end
     return out
 end
+function P.value_tooltip(document, row, column)
+    if
+        not document
+        or not document.data
+        or row < 1
+        or row > document.height
+        or column < 1
+        or column > document.width
+    then
+        return nil
+    end
+    local at = ((row - 1) * document.width + column - 1) * 4
+    return string.format(
+        'Row %d / Col %d\nR: %.6g\nG: %.6g\nB: %.6g\nA: %.6g',
+        row,
+        column,
+        tonumber(document.data[at]),
+        tonumber(document.data[at + 1]),
+        tonumber(document.data[at + 2]),
+        tonumber(document.data[at + 3])
+    )
+end
 function P.swatch(ui, x, y, w, h, color, alpha, show_alpha)
     alpha = math.max(0, math.min(1, tonumber(alpha) or 1))
     if not show_alpha or alpha == 1 then

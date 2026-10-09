@@ -14,6 +14,7 @@ M.palette = {
     focus = { 119, 185, 205 },
     hover = { 35, 46, 55 },
     selected = { 38, 53, 63 },
+    text_selection = { 48, 117, 158 },
     field = { 29, 39, 47 },
     field_hover = { 40, 55, 65 },
     enabled = { 118, 207, 177 },
@@ -35,15 +36,18 @@ function M.custom_ui(ui)
     end
     function ui.button(x, y, w, h, label, callback, options)
         local o, T = options or {}, M.palette
+        if ui.text_button and ui.text_button(x, y, w, h, label, callback, o) then
+            return
+        end
         local enabled = o.enabled ~= false
         local color = ui.surface_color(x, y, w, h, o)
         local hovered = enabled and ui.hovering and ui.hovering(x, y, w, h)
         local size, pad = o.size or 14, o.padding or 8
-        local text_height = ui.text_size and ui.text_size(size) or size
         ui.rect(x, y, w, h, color)
         ui.bounded(
             x + pad,
-            y + math.max(2, (h - text_height) / 2),
+            ui.text_y and ui.text_y(y, h, size, label)
+                or y + math.max(2, (h - (ui.text_size and ui.text_size(size) or size)) / 2),
             label,
             size,
             enabled and (o.ink or T.white) or T.disabled,
@@ -196,9 +200,12 @@ function M.choice(ui, control, value, x, y, width, change, open)
     local presentation = control.presentation or 'combined'
     local dropdown, selector = presentation == 'dropdown', presentation == 'selector'
     local reserved = dropdown and 32 or (selector and 62 or 88)
+    local function baseline(size, label)
+        return ui.text_y and ui.text_y(y, 26, size, label) or y + 5
+    end
     if not dropdown then
-        ui.text(x + width - 43, y + 5, '<', 16, color)
-        ui.text(x + width - 17, y + 5, '>', 16, color)
+        ui.text(x + width - 43, baseline(16, '<'), '<', 16, color)
+        ui.text(x + width - 17, baseline(16, '>'), '>', 16, color)
         ui.hit(x + width - 50, y, 24, 26, function()
             if not control.disabled then
                 change(-1)
@@ -211,9 +218,10 @@ function M.choice(ui, control, value, x, y, width, change, open)
         end)
     end
     if not selector then
-        ui.text(x + width - (dropdown and 18 or 70), y + 5, 'v', 16, color)
+        ui.text(x + width - (dropdown and 18 or 70), baseline(16, 'v'), 'v', 16, color)
     end
-    ui.bounded(x + 8, y + 5, tostring(control.choices[value] or ''), 15, color, math.max(0, width - reserved))
+    local label = tostring(control.choices[value] or '')
+    ui.bounded(x + 8, baseline(15, label), label, 15, color, math.max(0, width - reserved))
     ui.hit(
         x,
         y,
@@ -389,7 +397,7 @@ function M.rich(value, width, size, measure)
     return lines
 end
 
-function M.new(api, measure)
+function M.new(api, measure, Text)
     local self = {
         visible = false,
         focus = 'mods',
@@ -423,6 +431,7 @@ function M.new(api, measure)
     local manual_scroll = false
 
     local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag, scroll_drag, custom_drag
+    local text_repeat
     local function cancel_custom_drag(reason)
         local item = custom_drag
         custom_drag = nil
@@ -467,6 +476,7 @@ function M.new(api, measure)
     end
 
     function self.recover()
+        text_repeat = nil
         cancel_custom_drag('recovery')
         self.release_console()
 
@@ -788,6 +798,7 @@ function M.new(api, measure)
 
         local toggle = code == (self.toggle_key or 121) and not self.text_edit and not self.color_picker
         if toggle then
+            text_repeat = nil
             cancel_custom_drag('menu closed')
             drag = nil
             window_drag = nil
@@ -810,6 +821,141 @@ function M.new(api, measure)
 
         if self.text_edit then
             local e = self.text_edit
+            if Text then
+                Text.ensure(e)
+                if code == 27 then
+                    self.text_edit = nil
+                    text_repeat = nil
+                    cancel_custom_drag('text cancelled')
+                    return
+                end
+                if ctrl and code == 65 then
+                    Text.all(e)
+                    return
+                end
+                if ctrl and (code == 67 or code == 88) then
+                    local value = Text.selected(e)
+                    if value == '' then
+                        return
+                    end
+                    if not self.clipboard then
+                        self.notice = 'Clipboard unavailable.'
+                        return
+                    end
+                    local called, ok, why = pcall(self.clipboard.set, value)
+                    self.notice = called and ok and 'Copied text' or tostring(called and why or ok)
+                    if code == 88 and called and ok then
+                        Text.delete(e, true)
+                    end
+                    return
+                end
+                if ctrl and code == 86 then
+                    if not self.clipboard then
+                        self.notice = 'Clipboard unavailable.'
+                        return
+                    end
+                    local called, value, why = pcall(self.clipboard.get)
+                    if not called or type(value) ~= 'string' then
+                        self.notice = tostring(called and why or value)
+                        return
+                    end
+                    Text.insert(e, value:gsub('[\r\n\t]+', ' '), e.control and e.control.type == 'input' and 48 or 24)
+                    if e.color_channel then
+                        self.finish_color_field()
+                        self.text_edit = e
+                    elseif e.control and e.control.type ~= 'input' then
+                        local number = tonumber(e.text)
+                        if
+                            numeric_allowed(e.control, number)
+                            and not e.control.disabled
+                            and not e.control.read_only
+                        then
+                            local saved, ok, reason = pcall(e.mod.handle.edit or e.mod.handle.set, e.control.id, number)
+                            self.notice = saved and ok and 'Value pasted' or tostring(saved and reason or ok)
+                        else
+                            self.notice = 'Paste a valid number'
+                        end
+                    end
+                    return
+                end
+                if ctrl and (code == 90 or code == 89) then
+                    Text.history(e, code == 89 or not not (shift == nil and self.shift or shift))
+                    return
+                end
+                if Text.move(e, code, shift == nil and self.shift or shift, ctrl) then
+                    if not ctrl and not self.repeating_text then
+                        text_repeat = {
+                            editor = e,
+                            code = code,
+                            age = 0,
+                            next = 0.4,
+                            picker = self.color_picker,
+                            dialog = self.outfit_dialog,
+                            dropdown = self.dropdown,
+                        }
+                    end
+                    return
+                end
+                if code == 8 or code == 46 then
+                    Text.delete(e, code == 8)
+                    if not ctrl and not self.repeating_text then
+                        text_repeat = {
+                            editor = e,
+                            code = code,
+                            age = 0,
+                            next = 0.4,
+                            picker = self.color_picker,
+                            dialog = self.outfit_dialog,
+                            dropdown = self.dropdown,
+                        }
+                    end
+                    return
+                end
+                local char
+                if code >= 48 and code <= 57 then
+                    char = string.char(code)
+                elseif code >= 96 and code <= 105 then
+                    char = tostring(code - 96)
+                elseif code == 189 or code == 109 then
+                    char = '-'
+                elseif code == 190 or code == 110 then
+                    char = '.'
+                elseif e.control and e.control.type == 'input' then
+                    if code >= 65 and code <= 90 then
+                        char = string.char(code)
+                    elseif code == 32 then
+                        char = ' '
+                    end
+                elseif e.color_channel == 'hex' and code >= 65 and code <= 70 then
+                    char = string.char(code)
+                elseif e.control and (e.control.raw_numeric or e.control.allow_out_of_range) then
+                    if code == 69 then
+                        char = 'e'
+                    elseif code == 187 or code == 107 then
+                        char = '+'
+                    end
+                end
+                if char and not ctrl then
+                    Text.insert(e, char, e.control and e.control.type == 'input' and 48 or 24)
+                    if not self.repeating_text then
+                        text_repeat = {
+                            editor = e,
+                            code = code,
+                            age = 0,
+                            next = 0.4,
+                            picker = self.color_picker,
+                            dialog = self.outfit_dialog,
+                            dropdown = self.dropdown,
+                        }
+                    end
+                    return
+                end
+                -- Commit/Tab keep the existing validation paths below; all
+                -- other keys belong to this editor rather than menu navigation.
+                if code ~= 13 and code ~= 9 then
+                    return
+                end
+            end
 
             if code == 27 then
                 self.text_edit = nil
@@ -1283,6 +1429,7 @@ function M.new(api, measure)
 
     function self.input_focus(focused, input)
         if not focused then
+            text_repeat = nil
             cancel_custom_drag('focus lost')
             if console then
                 console.release()
@@ -1309,7 +1456,7 @@ function M.new(api, measure)
         end
         return true
     end
-    function self.tick(input)
+    function self.tick(input, dt)
         self.shift = input.down(16)
         if console then
             input = console.filter(input, self.visible)
@@ -1349,45 +1496,95 @@ function M.new(api, measure)
             end
             held[code] = down
         end
+        if Text then
+            if
+                input.down(17)
+                or (
+                    text_repeat
+                    and (
+                        text_repeat.picker ~= self.color_picker
+                        or text_repeat.dialog ~= self.outfit_dialog
+                        or text_repeat.dropdown ~= self.dropdown
+                    )
+                )
+            then
+                text_repeat = nil
+            end
+            self.repeating_text = true
+            text_repeat = Text.repeat_key(text_repeat, self.text_edit, input.down, dt, function(code)
+                self.key(code, false, input.down(16))
+            end)
+            self.repeating_text = false
+        end
 
         if self.visible and input.mouse then
             local x, y = input.mouse()
             self.pointer_x, self.pointer_y = x, y
             if x and y and input.down(1) and not self.mouse_held then
-                local valid = self.finish_color_field()
-
-                if self.text_edit and self.text_edit.control and self.text_edit.control.type == 'input' then
-                    self.key(13)
-
-                    valid = self.text_edit == nil
-                end
-
-                if valid then
-                    self.text_edit = nil
-                end
-
-                for i = #hits, 1, -1 do
-                    local h = hits[i]
-                    if x >= h.x and x <= h.x + h.w and y >= h.y and y <= h.y + h.h then
-                        if valid then
-                            local now = os.clock()
-                            local key = h.x .. ':' .. h.y .. ':' .. h.w .. ':' .. h.h
-                            local twice = h.double_click
-                                and self.last_click_key == key
-                                and now - (self.last_click_time or -1) <= 0.35
-                            self.shortcut_context = { floating = h.floating_owner }
-                            api.shortcut_context = self.shortcut_context
-                            h.click(x, y)
-                            if twice then
-                                self.last_click_key = nil
-                                h.double_click(x, y)
-                            else
-                                self.last_click_key = key
-                                self.last_click_time = now
-                            end
-                            self.redraw_revision = (self.redraw_revision or 0) + 1
+                local field = Text and self.text_edit and self.text_edit.field_bounds
+                if field and x >= field.x and x <= field.x + field.w and y >= field.y and y <= field.y + field.h then
+                    local e = self.text_edit
+                    local function move(px, py)
+                        if self.text_edit ~= e then
+                            cancel_custom_drag('field changed')
+                            return
                         end
-                        break
+                        local view = e.field_bounds
+                        local offset = (px * self.window_bounds.scale + self.window_bounds.x - view.text_x) / view.scale
+                            + (e.scroll or 0)
+                        e.cursor = Text.at(e, offset, view.measure)
+                    end
+                    local px = (x - self.window_bounds.x) / self.window_bounds.scale
+                    move(px, (y - self.window_bounds.y) / self.window_bounds.scale)
+                    if not self.shift then
+                        e.anchor = e.cursor
+                    end
+                    custom_drag = {
+                        move = move,
+                        text_edit = e,
+                        owner = field.owner,
+                        finish = function() end,
+                        mod = field.mod,
+                        page = field.page,
+                    }
+                    text_repeat = nil
+                    self.mouse_held = true
+                else
+                    local valid = self.finish_color_field()
+
+                    if self.text_edit and self.text_edit.control and self.text_edit.control.type == 'input' then
+                        self.key(13)
+
+                        valid = self.text_edit == nil
+                    end
+
+                    if valid then
+                        self.text_edit = nil
+                    end
+
+                    for i = #hits, 1, -1 do
+                        local h = hits[i]
+                        if x >= h.x and x <= h.x + h.w and y >= h.y and y <= h.y + h.h then
+                            if valid then
+                                local now = os.clock()
+                                local key = h.x .. ':' .. h.y .. ':' .. h.w .. ':' .. h.h
+                                local twice = h.double_click
+                                    and self.last_click_key == key
+                                    and now - (self.last_click_time or -1) <= 0.35
+                                self.shortcut_context = { floating = h.floating_owner }
+                                api.shortcut_context = self.shortcut_context
+                                h.click(x, y)
+                                if twice then
+                                    self.last_click_key = nil
+                                    h.double_click(x, y)
+                                else
+                                    self.last_click_key = key
+                                    self.last_click_time = now
+                                end
+                                self.redraw_revision = (self.redraw_revision or 0) + 1
+                            end
+                            break
+                        end
                     end
                 end
             end
@@ -1634,6 +1831,7 @@ function M.new(api, measure)
     end
     function self.compose(w, h)
         if not self.visible then
+            text_repeat = nil
             cancel_custom_drag('menu closed')
             self.release_console()
             hits = {}
@@ -1713,6 +1911,33 @@ function M.new(api, measure)
         local T = M.palette
         local white, muted, accent, selection_text = T.white, T.muted, { 244, 202, 53 }, T.white
         local text_focus = false
+        local function text_metrics(size, label)
+            size = self.compact_fonts and (self.font_size or 12) or size
+            if Text and self.text_edit and label then
+                local ending = self.text_edit.text .. '|'
+                if tostring(label):sub(-#ending) == ending then
+                    label = tostring(label):sub(1, -2)
+                end
+            end
+            if self.text_metrics then
+                local ok, m = pcall(self.text_metrics, size * s, label)
+                if
+                    ok
+                    and m
+                    and type(m.min_y) == 'number'
+                    and type(m.max_y) == 'number'
+                    and m.max_y > m.min_y
+                    and m.max_y - m.min_y < size * s * 3
+                then
+                    return { min_y = m.min_y / s, max_y = m.max_y / s, height = (m.max_y - m.min_y) / s }
+                end
+            end
+            return { min_y = 0, max_y = size, height = size }
+        end
+        local function text_y(y, height, size, label)
+            local m = text_metrics(size, label)
+            return y + (height - m.height) / 2 - m.min_y
+        end
         local function hovering(x, y, rw, rh)
             return self.pointer_x
                 and self.pointer_y
@@ -1722,9 +1947,17 @@ function M.new(api, measure)
                 and self.pointer_y <= oy + (y + rh) * s
         end
 
-        local function rect(x, y, rw, rh, color, a)
-            commands[#commands + 1] =
-                { type = 'rect', x = ox + x * s, y = oy + y * s, w = rw * s, h = rh * s, c = color, a = a or 1 }
+        local function rect(x, y, rw, rh, color, a, role)
+            commands[#commands + 1] = {
+                type = 'rect',
+                x = ox + x * s,
+                y = oy + y * s,
+                w = rw * s,
+                h = rh * s,
+                c = color,
+                a = a or 1,
+                ui_role = role,
+            }
         end
         local function frame(id, x, y, rw, rh, color)
             local thickness = math.min(2 / s, rw / 2, rh / 2)
@@ -1742,10 +1975,25 @@ function M.new(api, measure)
             end
         end
 
+        local draw_field
+        local drawing_field = false
+        local function is_field(value)
+            local e = Text and self.text_edit
+            if not e or drawing_field then
+                return false
+            end
+            local ending = e.text .. '|'
+            value = tostring(value)
+            return value:sub(-#ending) == ending
+        end
         local function text(x, y, value, size, color, fitted)
             size = size or 20
             if self.compact_fonts and not fitted then
                 size = self.font_size or 12
+            end
+            if is_field(value) then
+                draw_field(x, y, value, size, color or white)
+                return
             end
             commands[#commands + 1] = {
                 type = 'text',
@@ -1762,6 +2010,10 @@ function M.new(api, measure)
         local function bounded(x, y, value, size, color, width)
             if self.compact_fonts then
                 size = self.font_size or 12
+            end
+            if is_field(value) then
+                draw_field(x, y, value, size, color or white, width)
+                return
             end
 
             local key = tostring(value) .. '|' .. x .. '|' .. y .. '|' .. width
@@ -1787,6 +2039,119 @@ function M.new(api, measure)
             text(x, y, result, size, color, true)
             commands[#commands].full_text = tostring(value)
             commands[#commands].text_width = width * s
+        end
+        draw_field = function(x, y, value, size, color, width)
+            local e = Text.ensure(self.text_edit)
+            local box
+            for i = #commands, 1, -1 do
+                local c = commands[i]
+                if
+                    c.type == 'rect'
+                    and c.h >= size * s
+                    and c.h <= 50 * s
+                    and c.x <= ox + x * s
+                    and c.y <= oy + y * s
+                    and c.x + c.w >= ox + x * s
+                    and c.y + c.h >= oy + y * s
+                then
+                    box = c
+                    break
+                end
+            end
+            box = box or { x = ox + (x - 5) * s, y = oy + (y - 5) * s, w = (width or 180) * s, h = (size + 10) * s }
+            local label = tostring(value)
+            local prefix = label:sub(1, #label - #e.text - 1)
+            local cache_key = e.text .. ':' .. size .. ':' .. s
+            if e.measure_key ~= cache_key then
+                e.measure_key, e.measure_cache, e.glyph_advances = cache_key, {}, {}
+            end
+            local function length(text_value)
+                if text_value == '' then
+                    return 0
+                end
+                local got = e.measure_cache[text_value]
+                if not got then
+                    got = 0
+                    for glyph in text_value:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                        local advance = e.glyph_advances[glyph]
+                        if advance == nil then
+                            advance = measure and measure(glyph, size * s) / s or size * 0.62
+                            e.glyph_advances[glyph] = advance
+                        end
+                        got = got + advance
+                    end
+                    e.measure_cache[text_value] = got
+                end
+                return got
+            end
+            local prefix_width = length(prefix)
+            local tx = x + prefix_width
+            local available = math.max(1, (box.x + box.w - ox) / s - tx - 5)
+            local cursor = length(e.text:sub(1, e.cursor))
+            e.scroll = math.max(0, e.scroll or 0)
+            if cursor - e.scroll > available - 2 then
+                e.scroll = cursor - available + 2
+            end
+            if cursor - e.scroll < 0 then
+                e.scroll = cursor
+            end
+            e.scroll = math.min(e.scroll, math.max(0, length(e.text) - available + 2))
+            local a, b = Text.range(e)
+            local low, high = length(e.text:sub(1, a)) - e.scroll, length(e.text:sub(1, b)) - e.scroll
+            local ink = text_metrics(size, e.text ~= '' and e.text or nil)
+            local sy = math.max((box.y - oy) / s + 1, y + ink.min_y - 1)
+            local sh = math.min(ink.height + 2, (box.y + box.h - oy) / s - sy - 1)
+            if high > low then
+                local left, right = math.max(0, low), math.min(available, high)
+                if right > left then
+                    rect(tx + left, sy, right - left, sh, T.text_selection)
+                    commands[#commands].ui_role = 'text_selection'
+                end
+            end
+            local start, at, finish = 0, 0, 0
+            while at < #e.text do
+                local next_at = Text.next(e.text, at)
+                if length(e.text:sub(1, at)) < e.scroll then
+                    start = next_at
+                end
+                if length(e.text:sub(1, next_at)) - e.scroll <= available then
+                    finish = next_at
+                else
+                    break
+                end
+                at = next_at
+            end
+            drawing_field = true
+            if prefix ~= '' then
+                text(x, y, prefix, size, color, true)
+            end
+            text(
+                tx + math.max(0, length(e.text:sub(1, start)) - e.scroll),
+                y,
+                e.text:sub(start + 1, finish),
+                size,
+                color,
+                true
+            )
+            commands[#commands].full_text = label
+            commands[#commands].text_width = available * s
+            commands[#commands].ui_role = 'text_field'
+            drawing_field = false
+            local cx = tx + math.max(0, math.min(available - 1, cursor - e.scroll))
+            rect(cx, sy, 1 / s, sh, T.focus)
+            commands[#commands].ui_role = 'text_caret'
+            e.field_bounds = {
+                x = box.x,
+                y = box.y,
+                w = box.w,
+                h = box.h,
+                text_x = ox + tx * s,
+                scale = s,
+                measure = length,
+                owner = floating_context and floating_context.id,
+                mod = mod,
+                page = page,
+            }
         end
 
         local function hit(x, y, rw, rh, fn, right, middle, tooltip, double)
@@ -2169,7 +2534,8 @@ function M.new(api, measure)
             end
 
             if type(page.render_layout) == 'function' then
-                local primitives = { rect = rect, text = text, hit = hit, bounded = bounded, hovering = hovering }
+                local primitives =
+                    { rect = rect, text = text, hit = hit, bounded = bounded, hovering = hovering, text_y = text_y }
                 local ok, why = pcall(
                     page.render_layout,
                     M.custom_ui({
@@ -2197,9 +2563,19 @@ function M.new(api, measure)
                         text_size = function(size)
                             return self.compact_fonts and (self.font_size or 12) or size
                         end,
+                        text_metrics = text_metrics,
+                        text_y = text_y,
+                        control_height = function(size, padding, label)
+                            local resolved = self.compact_fonts and (self.font_size or 12) or size
+                            return text_metrics(size, label).height + 2 * (padding or 5) * resolved / size
+                        end,
                         text_width = function(value, size)
                             size = self.compact_fonts and (self.font_size or 12) or size
-                            return measure and measure(tostring(value), size * s) / s or #tostring(value) * size * 0.62
+                            local width = 0
+                            for glyph in tostring(value):gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                                width = width + (measure and measure(glyph, size * s) / s or size * 0.62)
+                            end
+                            return width
                         end,
                         shift = function()
                             return self.shift
@@ -2305,7 +2681,7 @@ function M.new(api, measure)
                             )
                             bounded(
                                 x + track + 5,
-                                y + (height - font) / 2,
+                                text_y(y, height, 14, editing and self.text_edit.text or string.format('%.7g', value)),
                                 editing and self.text_edit.text .. '|' or string.format('%.7g', value),
                                 14,
                                 enabled and white or T.disabled,
@@ -3560,8 +3936,7 @@ function M.new(api, measure)
                     if not enabled then
                         return
                     end
-                    self.text_edit =
-                        { color_channel = field.key, text = tostring(field.value):gsub('^#', ''), replace = true }
+                    self.text_edit = { color_channel = field.key, text = tostring(field.value), replace = true }
                 end)
             end
 
@@ -3771,7 +4146,15 @@ function M.new(api, measure)
                     break
                 end
             end
-            local key = target and target.tooltip and (target.x .. ':' .. target.y .. ':' .. target.tooltip)
+            local tip = target and target.tooltip
+            if type(tip) == 'function' then
+                local ok, value = pcall(tip)
+                tip = ok and value or nil
+            end
+            if type(tip) ~= 'string' or not tip:find('%S') then
+                tip = nil
+            end
+            local key = tip and (target.x .. ':' .. target.y .. ':' .. tip)
             if key ~= self.tooltip_key then
                 self.tooltip_key = key
                 self.tooltip_started = elapsed
@@ -3783,7 +4166,7 @@ function M.new(api, measure)
                 local size = self.compact_fonts and (self.font_size or 12) or 12
                 local step = size + 5
                 local maximum = math.max(1, math.floor((wh - 40) / step))
-                for paragraph in (target.tooltip .. '\n'):gmatch('(.-)\n') do
+                for paragraph in (tip .. '\n'):gmatch('(.-)\n') do
                     for word in paragraph:gmatch('%S+') do
                         local candidate = line == '' and word or line .. ' ' .. word
                         local measured = 0

@@ -8,7 +8,25 @@ function M.new(sr,preview_only,diagnostic_log)
     local popup_view=not preview_only and M.new(sr,true) or nil
     local function live()for _,w in pairs(sr.Application.worlds() or {})do if w==world then return true end end;return false end
     local metrics={}
+    local vertical_metrics={};local vertical_count=0
+    function self.text_metrics(size,label)
+        label=label or 'Ag0#'
+        local key=tostring(size)..'|'..label
+        if vertical_metrics[key]then return vertical_metrics[key]end
+        local result={min_y=0,max_y=size,height=size}
+        if gui and live()and type(G.text_extents)=='function' and label~=''then
+            local ok,lo,hi=pcall(G.text_extents,gui,label,'core/performance_hud/debug',size)
+            if ok and lo and hi and type(lo.y)=='number' and type(hi.y)=='number'
+                and lo.y==lo.y and hi.y==hi.y and hi.y>lo.y and hi.y-lo.y<size*3 then
+                result={min_y=lo.y,max_y=hi.y,height=hi.y-lo.y}
+            end
+            if vertical_count>=512 then vertical_metrics={};vertical_count=0 end
+            vertical_metrics[key]=result;vertical_count=vertical_count+1
+        end
+        return result
+    end
     function self.measure(glyph,size)
+        if glyph==''then return 0 end
         local key=glyph..'|'..size;if metrics[key]then return metrics[key]end
         local width=size*.62
         if gui and live() and type(G.text_extents)=='function' then
@@ -25,6 +43,12 @@ function M.new(sr,preview_only,diagnostic_log)
     local function destroy_item(item)
         if item.bold_id then pcall(G.destroy_text,item.gui or gui,item.bold_id)end
         pcall(G['destroy_'..item.type],item.gui or gui,item.id);if item.extra_id then pcall(G.destroy_triangle,item.gui or gui,item.extra_id)end
+    end
+    local swatch_depth={swatch_border=0,swatch_fill=.01,selection_outline=.02}
+    local function command_depth(c)
+        -- Retained GUI IDs can outlive a changed border's ID. Stable role depth
+        -- keeps fills above borders without tying unrelated surfaces to counts.
+        return (c.layer or 100)+(c.type=='text'and 1 or 0)+(swatch_depth[c.ui_role]or 0)
     end
     function self.clear()
         if gui and live()then for _,item in ipairs(ids)do destroy_item(item)end end;ids={}
@@ -60,7 +84,7 @@ function M.new(sr,preview_only,diagnostic_log)
         local signatures={}
         for index,c in ipairs(commands)do
             -- Sidebar command counts must not change unrelated content depth.
-            local z=(c.layer or 100)+(c.type=='text' and 1 or 0)
+            local z=command_depth(c)
             signatures[index]=table.concat({c.type,c.text or '',c.x,c.y,c.w or 0,c.h or 0,c.size or 0,c.a,c.c[1],c.c[2],c.c[3],z,c.font_resource or '',c.font_material or '',c.preview_material or '',c.preview_uv and table.concat(c.preview_uv,',') or '',c.preview_role or '',tostring(c.bold)},'|')
         end
         -- Destroy all stale IDs before allocations: engines may reuse IDs immediately.
@@ -71,7 +95,7 @@ function M.new(sr,preview_only,diagnostic_log)
         end
         for index,c in ipairs(commands)do
             -- Sidebar command counts must not change unrelated content depth.
-            local z=(c.layer or 100)+(c.type=='text' and 1 or 0)
+            local z=command_depth(c)
             local signature=signatures[index]
             local target_gui=command_gui(c)
             local old=old_ids[index]

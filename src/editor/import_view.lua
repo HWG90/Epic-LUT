@@ -1,6 +1,6 @@
 -- Import workspace: source selection and target previews left; actions right.
 local V = {}
-function V.new(info, tables, select_color, core, help)
+function V.new(info, tables, select_color, core, help, swatch_tooltip)
     help = help or {}
     local self = {
         scroll = 0,
@@ -386,31 +386,26 @@ function V.new(info, tables, select_color, core, help)
                                     select_color(entry, selected_row, col, false, kind)
                                 end
                             end
-                            ui.hit(
-                                sx,
-                                y,
-                                size,
-                                row_step - 2,
-                                select,
-                                function()
-                                    select()
-                                    paint()
-                                end,
-                                function()
-                                    self.scratch = { rgb[1], rgb[2], rgb[3] }
-                                    if core then
-                                        self.hue = core.rgb_hsv(self.scratch)
-                                    end
-                                    if ui.set then
-                                        ui.set('scratch_color', string.format('#%02X%02X%02X', rgb[1], rgb[2], rgb[3]))
-                                    end
-                                end,
-                                'Left-click selects. Double-click edits color. Right-click paints Scratch. Middle-click copies.',
-                                function()
-                                    select()
-                                    ui.activate('quick_color')
+                            ui.hit(sx, y, size, row_step - 2, select, function()
+                                select()
+                                paint()
+                            end, function()
+                                self.scratch = { rgb[1], rgb[2], rgb[3] }
+                                if core then
+                                    self.hue = core.rgb_hsv(self.scratch)
                                 end
-                            )
+                                if ui.set then
+                                    ui.set('scratch_color', string.format('#%02X%02X%02X', rgb[1], rgb[2], rgb[3]))
+                                end
+                            end, function()
+                                local values = swatch_tooltip and swatch_tooltip(entry, selected_row, col)
+                                local guidance =
+                                    'Left-click selects. Double-click edits. Right-click paints. Middle-click copies.'
+                                return values and (values .. '\n' .. guidance) or guidance
+                            end, function()
+                                select()
+                                ui.activate('quick_color')
+                            end)
                         end
                     end
                 end

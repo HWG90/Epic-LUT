@@ -13,7 +13,12 @@ local operations = {}
 local import_jobs
 local setup, resume_job, resume_done
 local original_luts
+local appearance
+local appearance_pending = {}
+local appearance_elapsed = 0
+local appearance_read
 local defaults = {}
+local default_proofs = {}
 local select_suppressed = false
 local live_select_suppressed = false
 local basic_imported, basic_names
@@ -307,8 +312,119 @@ local function poll_job()
     end
     return message(event.message)
 end
-local function apply_bindings(document, targets)
-    return bindings.apply(document, targets)
+local function appearance_proof()
+    if not m.avatar.resolve then
+        return nil
+    end
+    local ok, identity = pcall(m.avatar.resolve, memory, game, appearance_read)
+    if not ok or not identity or identity.body == nil or identity.armor == nil or identity.helmet == nil then
+        return nil
+    end
+    return { armor = tostring(identity.body) .. ':' .. tostring(identity.armor), helmet = tostring(identity.helmet) }
+end
+local function appearance_resource(b)
+    local original = original_luts and original_luts.get(b.original)
+    return original and original.resource
+end
+local function set_default(kind, texture)
+    defaults[kind] = texture
+    local proof = texture and appearance_proof()
+    default_proofs[kind] = proof and proof[kind] or nil
+end
+local function remember_appearance(targets, pattern)
+    if not appearance then
+        return
+    end
+    local proof = appearance_proof()
+    if not proof then
+        return
+    end
+    for _, b in ipairs(targets) do
+        local kind = b.helmet and 'helmet' or b.armor and 'armor'
+        for key, pending in pairs(appearance_pending) do
+            if
+                pending.kind == kind
+                and pending.pattern == not not pattern
+                and pending.proof == proof[kind]
+                and pending.save_key == b.save_key
+            then
+                appearance_pending[key] = nil
+            end
+        end
+    end
+    local _, pending = appearance.remember(targets, pattern, proof, appearance_resource)
+    for _, item in ipairs(pending or {}) do
+        local key = tostring(item.pattern) .. ':' .. item.kind .. ':' .. item.proof .. ':' .. item.save_key
+        appearance_pending[key] = item
+    end
+    edit.remember_application = true
+end
+local function apply_bindings(document, targets, transient)
+    local count, texture = bindings.apply(document, targets)
+    if not transient then
+        remember_appearance(targets, false)
+    end
+    return count, texture
+end
+local function recover_appearance(dt)
+    if not appearance then
+        return
+    end
+    appearance_elapsed = appearance_elapsed + math.max(0, dt or 0)
+    if appearance_elapsed < 0.5 then
+        return
+    end
+    appearance_elapsed = 0
+    if
+        (region_indicator and region_indicator.job)
+        or (pattern_editor and pattern_editor.flashing())
+        or (
+            frontend
+            and frontend.menu
+            and frontend.menu.visible
+            and frontend.menu.is_interacting
+            and frontend.menu.is_interacting()
+        )
+    then
+        return
+    end
+    for key, pending in pairs(appearance_pending) do
+        local b =
+            { original = pending.original, save_key = pending.save_key, kind = pending.kind, texture = pending.texture }
+        local captured_proof = { [pending.kind] = pending.proof }
+        local count = appearance.remember({ b }, pending.pattern, captured_proof, appearance_resource)
+        if count > 0 then
+            appearance_pending[key] = nil
+        end
+    end
+    if appearance.count() == 0 then
+        return
+    end
+    local proof = appearance_proof()
+    if not proof then
+        return
+    end
+    local material_ready = pcall(refresh, true)
+    local function replay(collection, pattern, session)
+        local targets = {}
+        for _, group in ipairs(collection or {}) do
+            for _, b in ipairs(group.bindings) do
+                targets[#targets + 1] = b
+            end
+        end
+        for _, batch in ipairs(appearance.batches(targets, pattern, proof, appearance_resource, binding)) do
+            session.apply(batch.document, batch.targets)
+        end
+    end
+    if material_ready then
+        replay(groups, false, bindings)
+    end
+    if pattern_editor and operations.pattern_session then
+        local ok, discovered = pcall(pattern_editor.scan, true)
+        if ok then
+            replay(discovered, true, operations.pattern_session)
+        end
+    end
 end
 local function initialize_editor_state()
     gear_catalog = m.gear_catalog.new({
@@ -375,7 +491,9 @@ local function initialize_editor_state()
     region_indicator = m.region_indicator.new({
         present = present,
         binding = binding,
-        apply = apply_bindings,
+        apply = function(document, targets)
+            return apply_bindings(document, targets, true)
+        end,
         bind = function(b, object)
             m.engine.bind(native, b.material, m.engine.LUT_SLOT, object)
             native.commit(b.mesh)
@@ -462,10 +580,10 @@ local function apply(document, selected_kind)
         end
         refresh_applied_palettes()
         if scope == 2 or scope == 4 then
-            defaults.armor = nil
+            set_default('armor', nil)
         end
         if scope == 3 or scope == 4 then
-            defaults.helmet = nil
+            set_default('helmet', nil)
         end
         return message(
             'Palette applied to ' .. count .. ' bindings with game-original emissives, including zero values.'
@@ -474,10 +592,10 @@ local function apply(document, selected_kind)
     count, texture = apply_bindings(document, targets)
     refresh_applied_palettes()
     if scope == 2 or scope == 4 then
-        defaults.armor = texture
+        set_default('armor', texture)
     end
     if scope == 3 or scope == 4 then
-        defaults.helmet = texture
+        set_default('helmet', texture)
     end
     return message('Palette applied to ' .. count .. ' bindings. Other applied LUTs stay active.')
 end
@@ -500,12 +618,26 @@ local function save_setup()
         end
     end
     if #active == 0 then
+        if appearance and (appearance.count() > 0 or next(appearance_pending)) then
+            return message('Applied appearance retained while the player is temporarily unavailable.')
+        end
         assert(setup, 'Setup storage unavailable').clear()
         return message('No owned palettes remain applied; saved setup cleared.')
     end
+    local saved_defaults, proof = {}, appearance_proof()
+    for kind, texture in pairs(defaults) do
+        if not default_proofs[kind] or (proof and proof[kind] == default_proofs[kind]) then
+            for _, b in ipairs(active) do
+                if b[kind] then
+                    saved_defaults[kind] = texture
+                    break
+                end
+            end
+        end
+    end
     return message(
         'Saved '
-            .. assert(setup, 'Setup storage unavailable').save(active, defaults)
+            .. assert(setup, 'Setup storage unavailable').save(active, saved_defaults)
             .. ' applied palettes. Armor, helmet and Pattern LUTs will resume on later launches.'
     )
 end
@@ -1058,7 +1190,11 @@ local function remove_lut()
     elseif operations.pattern_session then
         assert(operations.pattern_session.restore(), 'Pattern restoration pending')
     end
-    defaults = {}
+    defaults, default_proofs = {}, {}
+    if appearance then
+        appearance.clear()
+    end
+    appearance_pending = {}
     if setup then
         setup.clear()
         edit.remember_application = false
@@ -1203,10 +1339,10 @@ local function resume_setup()
                 local count, texture = apply_bindings(documents[file], targets)
                 applied = applied + count
                 if file == plan['armor-all'] then
-                    defaults.armor = texture
+                    set_default('armor', texture)
                 end
                 if file == plan['helmet-all'] then
-                    defaults.helmet = texture
+                    set_default('helmet', texture)
                 end
                 if not edit.loaded then
                     edit.loaded = documents[file]
@@ -1218,6 +1354,7 @@ local function resume_setup()
             end
             for file, targets in pairs(pattern_files) do
                 applied = applied + operations.pattern_session.apply(documents[file], targets)
+                remember_appearance(targets, true)
                 coroutine.yield()
             end
             edit.remember_application = applied > 0
@@ -1244,12 +1381,16 @@ local function capture_action()
         basic = {},
         editor_tables = {},
         defaults = {},
+        default_proofs = {},
         palettes = {},
         selected = basic_selected,
         editor_target = edit.editor_target,
         imported = edit.imported,
         scope = handle.get('scope'),
         palette_index = handle.get('palette'),
+        appearance = appearance and appearance.entries() or {},
+        appearance_pending = {},
+        remember_application = edit.remember_application,
     }
     local copier = m.basic_state.copier()
     local document = copier.copy
@@ -1277,9 +1418,37 @@ local function capture_action()
     end
     for k, v in pairs(defaults) do
         snapshot.defaults[k] = v
+        snapshot.default_proofs[k] = default_proofs[k]
     end
     for i, v in ipairs(palettes) do
         snapshot.palettes[i] = v
+    end
+    for _, entry in ipairs(snapshot.appearance) do
+        signature[#signature + 1] = 'appearance:'
+            .. entry.kind
+            .. ':'
+            .. tostring(entry.pattern)
+            .. ':'
+            .. entry.proof
+            .. ':'
+            .. entry.save_key
+            .. ':'
+            .. entry.resource
+            .. ':'
+            .. tostring(entry.texture.object)
+    end
+    local pending_keys = {}
+    for key, entry in pairs(appearance_pending) do
+        local copy = {}
+        for k, v in pairs(entry) do
+            copy[k] = v
+        end
+        snapshot.appearance_pending[key] = copy
+        pending_keys[#pending_keys + 1] = key
+    end
+    table.sort(pending_keys)
+    for _, key in ipairs(pending_keys) do
+        signature[#signature + 1] = 'pending:' .. key .. ':' .. tostring(appearance_pending[key].texture.object)
     end
     snapshot.bytes = copier.bytes
     snapshot.signature = table.concat(signature, '|')
@@ -1297,6 +1466,7 @@ local function restore_action(snapshot, expected)
     snapshot.basic = {}
     snapshot.editor_tables = {}
     snapshot.defaults = {}
+    snapshot.default_proofs = {}
     snapshot.palettes = {}
     snapshot.owned = {}
     for k, d in pairs(saved.basic) do
@@ -1307,6 +1477,7 @@ local function restore_action(snapshot, expected)
     end
     for k, v in pairs(saved.defaults) do
         snapshot.defaults[k] = v
+        snapshot.default_proofs[k] = saved.default_proofs[k]
     end
     for k, v in pairs(saved.palettes) do
         snapshot.palettes[k] = v
@@ -1375,8 +1546,21 @@ local function restore_action(snapshot, expected)
         end
     end
     edit.imported = snapshot.imported
+    if appearance then
+        appearance.replace(snapshot.appearance)
+    end
+    appearance_pending = {}
+    for key, entry in pairs(snapshot.appearance_pending) do
+        local copy = {}
+        for k, v in pairs(entry) do
+            copy[k] = v
+        end
+        appearance_pending[key] = copy
+    end
+    edit.remember_application = snapshot.remember_application
     edit.loaded = snapshot.loaded
     defaults = snapshot.defaults
+    default_proofs = snapshot.default_proofs
     palettes = snapshot.palettes
     editor_tables = snapshot.editor_tables
     index_job = nil
@@ -1548,7 +1732,7 @@ local function apply_outfit(kind)
         next(batches) or next(patterns),
         'No saved LUT bindings match this gear; select a table and apply it manually to adapt the preset'
     )
-    defaults[kind] = nil -- A multi-LUT preset never becomes a blanket override for unmatched pieces.
+    set_default(kind, nil) -- A multi-LUT preset never becomes a blanket override for unmatched pieces.
     resume_done = true
     resume_job = nil
     local count = 0
@@ -1560,6 +1744,7 @@ local function apply_outfit(kind)
     end
     for d, targets in pairs(patterns) do
         count = count + assert(operations.pattern_session, 'Pattern application unavailable').apply(d, targets)
+        remember_appearance(targets, true)
     end
     assert(count > 0, 'No worn gear bindings available for this preset')
     edit.remember_application = true
@@ -2414,8 +2599,14 @@ local function register(current)
         api.mods[handle.id].controls.basic_preset.choices = choices
     end
     if m.import_view then
-        import_view =
-            m.import_view.new(import_state, m.table_groups, operations.select_import_cell, m.ui_core, m.control_help)
+        import_view = m.import_view.new(
+            import_state,
+            m.table_groups,
+            operations.select_import_cell,
+            m.ui_core,
+            m.control_help,
+            m.palette.value_tooltip
+        )
         direct_page.render_layout = import_view.draw
         direct_page.on_wheel = import_view.wheel
     end
@@ -2472,7 +2663,7 @@ local function reset_transient_state()
     -- buffers in retain and the import sequence belong to the process lifetime.
     ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor = nil
     updates, bindings, gear_catalog, sharing, pattern_editor, armory_mirror = nil
-    edit, groups, operations, defaults = {}, {}, {}, {}
+    edit, groups, operations, defaults, default_proofs = {}, {}, {}, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
     pending, palettes, table_index, import_jobs = nil, {}, nil, nil
     setup, resume_job, resume_done, original_luts = nil
@@ -2482,6 +2673,7 @@ local function reset_transient_state()
     populate_request, populate_next = nil, 0
     region_indicator, stop_identification, identify_kind, editor_pending = nil
     history, outfits, armory_collection, import_view = nil
+    appearance, appearance_pending, appearance_elapsed, appearance_read = nil, {}, 0, nil
     source_tables, editor_tables, import_ids = {}, {}, {}
     index_job, refresh_needed, next_refresh = nil, false, 0
     m.quick_source, m.import_description = nil, nil
@@ -2509,6 +2701,12 @@ return {
         game = memory.address(assert(memory.module('game.dll')))
         native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
         initialize_editor_state()
+        if m.appearance_state then
+            appearance = m.appearance_state.new()
+        end
+        if m.avatar.reader then
+            appearance_read = m.avatar.reader(memory)
+        end
         if m.armory_mirror then
             local mirror_read = m.avatar.reader(memory)
             armory_mirror = m.armory_mirror.new({
@@ -2799,6 +2997,19 @@ return {
                 end,
             })
             pattern_editor = m.pattern_luts.new({
+                applied = function(targets)
+                    remember_appearance(targets, true)
+                end,
+                restored = function()
+                    if appearance then
+                        appearance.clear(nil, true)
+                    end
+                    for key, pending in pairs(appearance_pending) do
+                        if pending.pattern then
+                            appearance_pending[key] = nil
+                        end
+                    end
+                end,
                 present = present,
                 auto_populate = function()
                     return handle and handle.get('auto_populate_worn') == true
@@ -3057,6 +3268,13 @@ return {
             if not ok then
                 message('Original snapshot error: ' .. tostring(why))
             end
+        end
+        local recovered, recovery_error = pcall(recover_appearance, dt)
+        if not recovered and recovery_error ~= edit.appearance_error then
+            edit.appearance_error = recovery_error
+            ctx.log('Appearance recovery waiting: ' .. tostring(recovery_error))
+        elseif recovered then
+            edit.appearance_error = nil
         end
         frontend.tick(dt)
         local current = frontend.resolve()

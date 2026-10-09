@@ -25,6 +25,7 @@ S.columns = {
     'Camo controls',
     'Bump scaling / matte-gloss',
 }
+-- Bump-map names and R0-R25 mapping by Scarpheon.
 -- Column 2 R selects this zero-based bump-map index; labels never alter raw values.
 S.bump_maps = {
     'flat (dry grime)',

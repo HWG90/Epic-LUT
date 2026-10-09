@@ -1,4 +1,4 @@
-# Epic LUT R5 — MDL / LLL package
+# Epic LUT R5.5 — MDL / LLL package
 
 Same Python-free editor as the BSL release, packaged as an API-2 folder mod. This ZIP contains no BSL startup archive and does not require BSL for activation.
 
@@ -23,4 +23,4 @@ No Python installation, pip, browser or MCM integration is required. Windows Pow
 
 Enable exactly one Epic LUT entrypoint. Disable the older epic_player_preview test sidecar; R5 includes Player Preview. Disable the BSL Epic LUT archive if switching to this folder package. LLL also scans some legacy MDL locations, so do not leave the same folder enabled in multiple roots.
 
-The folder model and native DLL match the BSL package. Metadata/package and editor checks pass offline; live MDL/LLL activation, input, snapshot behavior and shutdown still require confirmation. R5 remains alpha and work in progress. See README.md for controls, limits and credits.
+The folder model and native DLL match the BSL package. See README.md for controls, compatibility and credits.

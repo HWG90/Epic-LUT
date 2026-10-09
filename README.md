@@ -1,25 +1,25 @@
-# Epic LUT R5.5 RC1
+# Epic LUT R5.5
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5 RC1 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5 brings a roomier editor, clipboard shortcuts, named gear presets and bulk DDS export into one package.
 
-**Release candidate.** [Download R5.5 RC1](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5-rc1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5-RC1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5-RC1-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5 RC1: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
-## Sharing and Pattern LUT candidate
+## Sharing and Pattern LUTs
 
-This prerelease adds full Armor, Helmet and Pattern LUT sharing for compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. Multiplayer sharing still needs a two-player live test. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
+**Shared Lobby LUT is in testing.** Share Armor, Helmet and Pattern LUTs with compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
 
 **LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo, DDS export and Pattern Patch ZIP export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
 
@@ -35,7 +35,7 @@ For one-click DDS export of every custom LUT currently applied to your Armor and
 
 To export a saved Armory collection without equipping it, select the preset and choose **Raw DDS (entire preset)**. **Save Current Gear Preset** keeps the currently applied Armor and/or Helmet LUTs in the app for later reuse.
 
-Closing or popping out Player Preview returns its reserved grid width. Tools and Pattern Editor use one active popup at a time so dropdowns and input stay with the visible window.
+Closing or popping out Player Preview returns its reserved grid width. Tools, Scratch and Pattern Editor can stay open independently.
 
 The active tools shortcut stays highlighted. Clicking it again keeps its window open; use that window's close button to close it. The LUT dropdown sits indented below Helmet/Armor, with Pattern Editor beside those gear buttons. Settings and the footer share one UI scale. Windows and popouts have visible borders.
 
@@ -66,6 +66,8 @@ Press **F10**, then **Import / Apply** for full table previews. Every loaded Arm
 
 Matching uses texture IDs, not armor names or table order. Archives can contain gear you are not wearing; use manual targeting when no IDs match.
 
+Applied material and Pattern LUTs are retained during loading gaps and automatically restored to matching worn gear when the game recreates its materials. Recovery reuses the applied texture without changing its values. Different gear and bindings owned by another writer are left untouched; Restore clears the retained appearance.
+
 ## Pick, paint, copy
 
 On Import / Apply swatch previews:
@@ -83,9 +85,11 @@ Painting targets the clicked gear table. **Undo Last Action / Redo Last Action**
 
 Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including stock-game values. The Import toolbox includes Apply to All Armor LUTs or Apply to All Helmet LUTs beneath its selected-table action; it applies the current editor table.
 
-The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
+The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Click or drag row labels in Select mode to select whole rows; Shift-click extends the row range. Copy, select the destination rows, and paste from their top-left row. Full-row paste includes every RGBA channel and requires Advanced editing. Selected swatches keep their colors inside an outline. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
 
-Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields retain their own Ctrl+C/V behavior while typing.
+The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
+
+Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.
 
 Typed values can exceed recommended slider ranges. Swatches clamp RGB for viewing; stored floats remain intact. Export edited DDS files to `%LOCALAPPDATA%/Epic LUT/files/exports` to share them.
 
@@ -97,11 +101,11 @@ Use **Player Preview** or **F6** to see your worn character while editing. It do
 - Drag the title to move a floating panel; drag its corner to resize.
 - **Pop Out / Dock** changes placement.
 
-Close the preview or editor before switching game screens. Player Preview is experimental; broader equipment and screen transitions still need testing.
+Close the preview or editor before switching game screens.
 
-SDK names come from a compact, pinned Community Edition catalog. Unknown resources and shader parents remain unknown. Material Info captures on request; it does not scan archives or poll every material each frame. [SDK integration details](docs/SDK-INTEGRATION.md).
+SDK names come from a compact, pinned Community Edition catalog. Unknown resources and shader parents remain unknown. [SDK integration details](docs/SDK-INTEGRATION.md).
 
-Preview uses the game's lighter **Game Default UI pipeline**, with an independently owned model and portrait target. Material completeness and flicker reduction remain unconfirmed in-game. [Full Render vs Game Default](docs/PREVIEW-RENDER-PATH.md).
+Preview uses the game's lighter **Game Default UI pipeline**, with an independently owned model and portrait target. [Full Render vs Game Default](docs/PREVIEW-RENDER-PATH.md).
 
 ## The Armory
 
@@ -138,7 +142,7 @@ When DBF-MCM is available, **Epic LUT Settings** appears there too. Both menus u
 
 Supports 23-column 2D RGBA16F/RGBA32F DDS, valid mip chains, and ZIP/RAR containing DDS or supported patch resources with GPU/stream sidecars. Mesh-only archives contain no palettes to import.
 
-Native adapters target Steam build **25480438**; game updates may require changes. This alpha does not certify every loader, screen transition, multiplayer scenario or long session. Packages contain no user settings, presets, logs, snapshots or game textures.
+Native adapters target Steam build **25480438**; game updates may require changes. Packages contain no user settings, presets, logs, snapshots or game textures.
 
 ## Credits
 
@@ -148,11 +152,15 @@ A huge thank you to **Scarpheon** for all the time he has dedicated to helping m
 
 His testing, bug reports, and continued assistance were vital to getting **Export to Patch** implemented correctly and working reliably. He kept trying builds, checking the results in-game, and helping me work through the problems until we got it right.
 
+And a **massive additional thank you to Scarpheon for mapping every bump map**. He worked through all 26 entries, matched their actual column-2 R values, and gave us useful names instead of a list of mystery numbers. Flat grime, suede, denim, wool, leather, metal, circuitboard: those readable choices are here because he put in the time to identify them.
+
+That mapping makes material editing easier for everyone using this tool. Alongside his repeated testing and Export to Patch work, it is a substantial contribution to what Epic LUT has become. **Scarpheon, thank you for the patience, the detail, and the continued help. You have made this a much better tool for people.**
+
 That work deserves more than a name in a credits list. Epic LUT is a better tool because of the time and care he has put into it. **Thank you, Scarpheon. Your help made this possible.**
 
 **Plain Furniture** created the bundled **Debug LUT**.
 
-Made by **Goose**. Thanks to everyone testing this extremely alpha paint job.
+Made by **Goose**. Thanks to everyone helping make Epic LUT better.
 
 Native adapters and foundational LUT research: [CowboyBingus / Match Your Colors](https://github.com/CowboyBingus/MatchYourColors), under the included Zero-Clause BSD license.
 

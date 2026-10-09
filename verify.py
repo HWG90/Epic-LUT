@@ -17,10 +17,10 @@ from tools.lua_runner import LuaRunner
 
 TESTS = (
     'sdk_catalog', 'ui_styling', 'window_frames',
-    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'clipboard', 'menu_clipboard_drag',
+    'tooltip_wrapping', 'lut_editor_hierarchy', 'floating_windows', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'font_padding',
     'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc',
     'frontend', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
-    'startup_apply_gate', 'direct_editor', 'palette_editor', 'standalone_frontend',
+    'startup_apply_gate', 'appearance_state', 'appearance_persistence', 'direct_appearance_runtime', 'direct_editor', 'palette_editor', 'standalone_frontend',
     'import_view', 'table_groups', 'original_luts', 'basic_view', 'update_check',
     'editor_state', 'direct_setup', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'floating_dropdown', 'slider_preview', 'input_preview', 'editor_layout', 'mcm_ui_port', 'mcm_settings', 'preset_export', 'bulk_dds_export', 'armory_mirror', 'limb_caps',
 )
