@@ -585,13 +585,15 @@ local function identify_region()
     return message('Flashing region ' .. row .. ' in magenta for 4 seconds; prior bindings restore automatically.')
 end
 local function apply(document, selected_kind)
-    selected_kind = (selected_kind == 'armor' or selected_kind == 'helmet' or selected_kind == 'cape') and selected_kind
+    local scope = handle.get('scope')
+    selected_kind = scope == 5 and 'cape'
+        or (selected_kind == 'armor' or selected_kind == 'helmet' or selected_kind == 'cape') and selected_kind
         or nil
     assert(stop_identification(), 'Highlight restoration pending')
     if selected_kind == 'cape' then
         local proof = appearance_proof()
         assert(proof and proof.cape, 'Current Cape identity unavailable; load current gear again')
-        local selected = frontend.basic_mode and basic_selected or edit.editor_target
+        local selected = scope == 1 and (frontend.basic_mode and basic_selected or edit.editor_target) or nil
         if selected and selected.kind == 'cape' then
             assert(selected.cape_proof and selected.resource, 'Load current Cape colors with a known texture ID first')
         end
@@ -615,7 +617,6 @@ local function apply(document, selected_kind)
     if #groups == 0 then
         refresh()
     end
-    local scope = handle.get('scope')
     local targets = m.gear_catalog.targets(
         groups,
         scope,
@@ -889,7 +890,7 @@ local function resource_id(object)
     end
     return m.resource_ids.describe(hash, handle.get('resource_format') == 2, m.sdk_catalog)
 end
-local function matching_plan()
+local function matching_plan(refresh_patterns)
     if not m.import_matches then
         return nil
     end
@@ -911,36 +912,102 @@ local function matching_plan()
             material_groups[#material_groups + 1] = { object = group.object, bindings = targets }
         end
     end
-    return m.import_matches.plan(documents, material_groups, function(hash)
+    local resolve = function(hash)
         return m.engine.texture_object(native, hash)
-    end)
+    end
+    local plan = m.import_matches.plan(documents, material_groups, resolve)
+    -- Use the whole import for duplicate-resource checks, then route documents
+    -- by shape. A Pattern table can never become a material-slot upload.
+    for i = #plan.plans, 1, -1 do
+        if plan.plans[i].document.width ~= 23 then
+            table.remove(plan.plans, i)
+            plan.matched = plan.matched - 1
+        end
+    end
+    local needs_patterns = false
+    for _, document in ipairs(documents) do
+        needs_patterns = needs_patterns or (document.resource and document.width == 3 and document.height == 1)
+    end
+    if needs_patterns and pattern_editor then
+        local cached = operations.matching_patterns
+        if refresh_patterns or not cached or cached.material_groups ~= groups then
+            local discovered = pattern_editor.flashing
+                    and pattern_editor.flashing()
+                    and (pattern_editor.all_groups or {})
+                or pattern_editor.scan(true)
+            cached = { material_groups = groups, groups = discovered }
+            operations.matching_patterns = cached
+        end
+        local pattern_groups = {}
+        for _, group in ipairs(cached.groups) do
+            local targets = {}
+            for _, b in ipairs(group.bindings) do
+                if not b.cape then
+                    targets[#targets + 1] = b
+                end
+            end
+            if #targets > 0 then
+                pattern_groups[#pattern_groups + 1] = { object = group.object, bindings = targets }
+            end
+        end
+        local patterns = m.import_matches.plan(documents, pattern_groups, resolve)
+        for _, p in ipairs(patterns.plans) do
+            if p.document.width == 3 and p.document.height == 1 then
+                p.pattern = true
+                plan.plans[#plan.plans + 1] = p
+                plan.matched = plan.matched + 1
+            end
+        end
+    end
+    plan.unmatched = plan.total - plan.matched - plan.ambiguous - plan.unidentified
+    return plan
 end
 local function apply_matching()
     assert(not index_job, 'Import is still being indexed; wait for the LUT list')
     assert(stop_identification(), 'Highlight restoration pending')
+    if pattern_editor then
+        assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+    end
     refresh(true)
-    local plan = assert(matching_plan(), 'Matching unavailable')
+    local plan = assert(matching_plan(true), 'Matching unavailable')
     assert(plan.matched > 0, 'No imported resource IDs match the currently worn gear')
     local batches = {}
     for _, p in ipairs(plan.plans) do
         local document = p.document
-        if handle.get('preserve_emissives') then
+        if p.pattern then
+            assert(
+                operations.pattern_session and document.width == 3 and document.height == 1,
+                'Pattern application unavailable'
+            )
+            local original = original_luts and original_luts.get(p.targets[1].original)
+            assert(
+                original and original.width == 3 and original.height == 1 and original.resource == p.resource,
+                'Matching Pattern snapshot is unavailable or changed; load current Pattern LUTs first'
+            )
+        elseif handle.get('preserve_emissives') then
             assert(original_luts, 'Original snapshot reader unavailable')
             document = m.original_luts.preserve(document, original_luts.get(p.targets[1].original), document.height > 8)
         end
         for _, b in ipairs(p.targets) do
+            assert(not p.pattern or b.slot == m.engine.PATTERN_SLOT, 'Pattern target slot changed')
+            assert(p.pattern or (b.slot or m.engine.LUT_SLOT) == m.engine.LUT_SLOT, 'Material target slot changed')
             assert(present(b) and binding(b) == b.current, 'Gear bindings changed; load current gear again')
         end
-        batches[#batches + 1] = { document = document, targets = p.targets }
+        batches[#batches + 1] = { document = document, targets = p.targets, pattern = p.pattern }
     end
     resume_done = true
     resume_job = nil
     local bindings = 0
     for _, p in ipairs(batches) do
-        bindings = bindings + apply_bindings(p.document, p.targets)
-        for _, b in ipairs(p.targets) do
-            basic_documents[(m.gear_catalog.kind(b)) .. ':' .. tostring(b.original)] =
-                m.basic_state.clone(p.document, p.document.source)
+        if p.pattern then
+            bindings = bindings + operations.pattern_session.apply(p.document, p.targets)
+            remember_appearance(p.targets, true)
+        else
+            bindings = bindings + apply_bindings(p.document, p.targets)
+            for _, b in ipairs(p.targets) do
+                basic_documents[(m.gear_catalog.kind(b)) .. ':' .. tostring(b.original)] =
+                    m.basic_state.clone(p.document, p.document.source)
+            end
         end
     end
     return message(
@@ -1149,6 +1216,7 @@ import_state = function()
         tables = tables,
         armor = previews.armor,
         helmet = previews.helmet,
+        cape_available = #m.gear_catalog.targets(groups, 5, nil, 'cape') > 0,
         loaded = edit.imported,
         import_description = m.import_description,
         import_detail = pending and pending.detail,
@@ -2723,6 +2791,15 @@ local function register(current)
                 refresh(true)
                 assert(handle.set('scope', 3))
                 return apply(edit.imported, 'helmet')
+            end)
+        end,
+        apply_file_cape_activate = function()
+            return action(function()
+                assert(edit.imported, 'Import a palette first')
+                assert(stop_identification(), 'Highlight restoration pending')
+                refresh(true)
+                assert(handle.set('scope', 5))
+                return apply(edit.imported, 'cape')
             end)
         end,
         apply_file_both_activate = function()

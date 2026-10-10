@@ -30,6 +30,7 @@ local state = {
 }
 local picked
 local pick_calls = 0
+local cape_actions = 0
 local view = dofile('src/editor/import_view.lua').new(
     function()
         return state
@@ -61,6 +62,7 @@ for _, id in ipairs({
     'global_redo',
     'apply_file_armor',
     'apply_file_helmet',
+    'apply_file_cape',
     'apply_file_both',
     'apply_import_armor',
     'apply_import_helmet',
@@ -84,6 +86,8 @@ for _, id in ipairs({
         on_activate = function()
             if id == 'populate_worn' then
                 load_actions = load_actions + 1
+            elseif id == 'apply_file_cape' then
+                cape_actions = cape_actions + 1
             end
             return true
         end,
@@ -135,6 +139,7 @@ assert(
     texts['Apply LUT 1 to All Armor LUTs'] and texts['Apply LUT 1 to All Helmet LUTs'],
     'Multi-LUT selected-source broadcast controls missing'
 )
+assert(texts['Apply to All Cape LUTs'], 'Imported palette Cape action missing')
 assert(
     texts.Armor and texts.Helmet and texts['Armor LUT 1'] and texts['Helmet LUT 2'],
     'Target color previews were not grouped'
@@ -230,6 +235,34 @@ for _, font in ipairs({ 12, 20 }) do
     end
 end
 assert(compact and stacked, 'Header layout did not adapt to available label space')
+-- The added action remains in the scrollable action frame and only accepts
+-- input when both an imported palette and worn Cape targets are available.
+menu.window_width, menu.window_height, menu.ui_scale = 1800, 1100, 1
+state.loaded, state.palette_count, state.busy = saved_document, 1, false
+view.action_scroll = 0
+for _, font in ipairs({ 12, 20 }) do
+    menu.font_size = font
+    state.cape_available = false
+    local commands = menu.compose(1920, 1200)
+    local cape_button = button_rectangle(commands, 'Apply to All Cape LUTs')
+    local armor_button = button_rectangle(commands, 'Apply to All Armor LUTs')
+    local helmet_button = button_rectangle(commands, 'Apply to All Helmet LUTs')
+    local preserve = button_rectangle(commands, '[   ] Preserve Original Emissives')
+    assert(
+        not overlap(cape_button, armor_button)
+            and not overlap(cape_button, helmet_button)
+            and not overlap(cape_button, preserve),
+        'Cape action overlaps existing import controls'
+    )
+    local before = cape_actions
+    tap(cape_button.x + cape_button.w / 2, cape_button.y + cape_button.h / 2)
+    assert(cape_actions == before, 'Missing Cape accepted an Apply click')
+    state.cape_available = true
+    commands = menu.compose(1920, 1200)
+    cape_button = button_rectangle(commands, 'Apply to All Cape LUTs')
+    tap(cape_button.x + cape_button.w / 2, cape_button.y + cape_button.h / 2)
+    assert(cape_actions == before + 1, 'Visible Cape action lost its callback')
+end
 -- The persistent preview/highlight actions belong inside the frame, with a
 -- reserved band below both scrollable gear lists and the import guidance.
 local prior_portrait = package.loaded['epic.player_preview.v1']

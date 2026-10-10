@@ -6,6 +6,7 @@ local required = {
     'apply_checked_activate',
     'apply_editor_activate',
     'apply_file_armor_activate',
+    'apply_file_cape_activate',
     'apply_file_both_activate',
     'apply_file_helmet_activate',
     'apply_helmet_activate',
@@ -405,6 +406,12 @@ function R.pages(callbacks, defaults)
                     on_activate = callbacks.apply_file_helmet_activate,
                 },
                 {
+                    id = 'apply_file_cape',
+                    type = 'button',
+                    label = 'Apply to Cape',
+                    on_activate = callbacks.apply_file_cape_activate,
+                },
+                {
                     id = 'apply_file_both',
                     type = 'button',
                     label = 'Apply to Both',
@@ -452,7 +459,13 @@ function R.pages(callbacks, defaults)
                     type = 'choice',
                     presentation = 'combined',
                     label = 'Apply scope',
-                    choices = { 'Selected LUT', 'All Armor LUTs', 'Helmet LUTs', 'All Armor + Helmet LUTs' },
+                    choices = {
+                        'Selected LUT',
+                        'All Armor LUTs',
+                        'Helmet LUTs',
+                        'All Armor + Helmet LUTs',
+                        'Cape LUTs',
+                    },
                     default = 4,
                 },
                 {

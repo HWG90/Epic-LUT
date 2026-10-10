@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an explicit Apply Cape action for imported palettes; isolate Cape material bindings from Armor, Helmet and the separate tint slot.
+- Preserve complete RGBA, material and camo controls when pasting swatches or rows without Advanced mode; keep typed advanced edits protected.
+- Apply paired Pattern DDS files through Apply Matching LUTs when their exact resource IDs match the worn gear.
+- Add a lossless shared-value dictionary format to fit larger combined material and Pattern appearances within the existing lobby budget.
 - Compare lossless Windows XPRESS compression with the existing sharing compressor and send the smaller packet; preserve exact LUT bytes, all bindings and earlier packet decoding.
 - Remove the old 128-destination sharing cap with a compact extended packet format supporting up to 4,096 bindings; retain the lobby byte budget and exact LUT values.
 - Keep receiving Shared Lobby LUTs when the local appearance cannot be encoded; retain the last shareable appearance only for the same equipped kits and keep the failure visible.

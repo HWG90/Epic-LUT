@@ -210,7 +210,7 @@ assert(
 assert(not transmog_packet:match('^([123])|'), 'EL4 incorrectly advertised compatibility with old decoders')
 -- Small appearances retain the old raw layout. Tagged optional compression
 -- never changes that layout and all untagged old versions still read.
-assert(codec.encode(identity, entries):match('^[123]x?|'), 'Small appearance unnecessarily switched raw protocols')
+assert(codec.encode(identity, entries):match('^[1235]x?|'), 'Small appearance used large-count-only EL4')
 local function word(value)
     return ffi.string(ffi.new('uint32_t[1]', value), 4)
 end
@@ -503,16 +503,16 @@ local failed_optional = C.new(fallback)
 local tiny_entries = { { key = 'p:0:1:0:0', document = pattern } }
 local legacy_tiny = failed_optional.encode(identity, tiny_entries)
 assert(
-    legacy_tiny:match('^[123]|') and failed_optional.decode(legacy_tiny),
+    legacy_tiny:match('^[12345]|') and failed_optional.decode(legacy_tiny),
     'Optional compression failure blocked valid legacy appearance'
 )
 api, calls = fake_native('ok', 'ok')
 local tagged = C.compression(api)
 local x_only = C.new({ formats = { 'x' }, compress = tagged.compress, decompress = tagged.decompress })
 local tagged_tiny = x_only.encode(identity, tiny_entries)
-assert(tagged_tiny:match('^[123]x|') and x_only.decode(tagged_tiny), 'Explicit optional compression tag failed')
-assert(not pcall(x_only.decode, tagged_tiny:gsub('^([123])x|', '%1|')), 'Untagged XPRESS was decoded as legacy')
-assert(not pcall(x_only.decode, legacy_tiny:gsub('^([123])|', '%1x|')), 'Legacy bytes were decoded as XPRESS')
+assert(tagged_tiny:match('^[12345]x|') and x_only.decode(tagged_tiny), 'Explicit optional compression tag failed')
+assert(not pcall(x_only.decode, tagged_tiny:gsub('^([12345])x|', '%1|')), 'Untagged XPRESS was decoded as legacy')
+assert(not pcall(x_only.decode, legacy_tiny:gsub('^([12345])|', '%1x|')), 'Legacy bytes were decoded as XPRESS')
 for _, bad in ipairs({
     function()
         return nil
@@ -579,13 +579,16 @@ local old = C.new({
         return native.decompress(bytes, size, '')
     end,
 })
-local legacy_ok, legacy_error = pcall(old.encode, identity, generated_entries)
+pcall(old.encode, identity, generated_entries)
 assert(
-    not legacy_ok and tostring(legacy_error):find('lobby budget', 1, true),
-    'Generated regression did not exceed old lobby compression budget'
+    math.min(old.packet_sizes.full, old.packet_sizes.sparse, old.packet_sizes.xor) > C.MAX_TEXT,
+    'Generated regression did not exceed earlier raw-layout lobby budget'
 )
 local improved = codec.encode(identity, generated_entries)
-assert(improved:match('^[123]x|') and #improved <= C.MAX_TEXT, 'Repeated exact palette did not fit with tagged XPRESS')
+assert(
+    improved:match('^[12345]x?|') and #improved <= C.MAX_TEXT,
+    'Repeated exact palette did not fit with tagged XPRESS'
+)
 local generated_result = codec.decode(improved)
 for _, entry in ipairs(generated_entries) do
     assert(
@@ -598,3 +601,211 @@ print(
         .. #improved
         .. ' bytes'
 )
+
+do
+    -- Force EL5 to exercise both index widths even when a short legacy raw
+    -- table happens to compress better. Source values remain opaque F32 bits.
+    local dictionary_raw
+    local dictionary_codec = C.new({
+        formats = native.formats,
+        compress = function(raw, tag)
+            if raw:sub(1, 3) == 'EL5' then
+                dictionary_raw = raw
+                return native.compress(raw, tag)
+            end
+            return string.rep('x', 4000)
+        end,
+        decompress = native.decompress,
+    })
+    local boundary_raw = {}
+    for _, size in ipairs({ 255, 256, 257 }) do
+        local values = ffi.new('uint32_t[276]')
+        for i = 0, 275 do
+            local index = i % size
+            values[i] = index == 0 and 0 or index == 1 and 0x80000000 or index == 2 and 0xc0200000 or 0x3f000000 + index
+        end
+        local d = { width = 23, height = 3, data = ffi.new('float[276]') }
+        ffi.copy(d.data, values, 1104)
+        local packet = dictionary_codec.encode(identity, { { key = '0:1:0:0', document = d } })
+        assert(packet:match('^5x?|'), 'Forced word dictionary did not select EL5')
+        boundary_raw[size] = dictionary_raw
+        local lo, hi = dictionary_raw:byte(19, 20)
+        assert(
+            lo + hi * 256 == size and #dictionary_raw == 20 + 2 + size * 4 + 276 * (size <= 256 and 1 or 2) + 3,
+            'Dictionary index-width boundary changed'
+        )
+        local got = dictionary_codec.decode(packet).entries['0:1:0:0'].document
+        assert(
+            ffi.string(got.data, 1104) == ffi.string(d.data, 1104),
+            'Word planes changed HDR/signed-zero/alpha bits at index boundary'
+        )
+    end
+    local mixed = {
+        { key = '0:1:0:0', document = doc },
+        { key = 'p:0:1:0:0', document = pattern },
+    }
+    local packet = dictionary_codec.encode(identity, mixed)
+    local decoded = dictionary_codec.decode(packet)
+    assert(
+        ffi.string(decoded.entries['0:1:0:0'].document.data, 2944) == ffi.string(doc.data, 2944)
+            and ffi.string(decoded.entries['p:0:1:0:0'].document.data, 48) == ffi.string(pattern.data, 48),
+        'Combined Pattern/material dictionary changed full precision bits'
+    )
+    local function planes(words)
+        local result = {}
+        for lane = 1, 4 do
+            for _, value in ipairs(words) do
+                result[#result + 1] = value:sub(lane, lane)
+            end
+        end
+        return table.concat(result)
+    end
+    local function raw(words, indexes, tail)
+        return 'EL5'
+            .. kit
+            .. string.char(1)
+            .. short(1)
+            .. short(#words)
+            .. string.char(3, 1)
+            .. planes(words)
+            .. indexes
+            .. tail
+    end
+    local valid_tail = packed_binding(0, 1, 0, 0, 1, true)
+    local valid = raw({ word(0) }, string.rep('\0', 12), valid_tail)
+    local function reject(value, message)
+        local injected = C.new({
+            decompress = function()
+                return value
+            end,
+        })
+        assert(not pcall(injected.decode, '5|' .. #value .. '|AAAA'), message)
+    end
+    reject('EL5' .. kit .. string.char(0) .. short(4097) .. short(0), 'EL5 accepted binding4097')
+    reject('EL5' .. kit .. string.char(33) .. short(0) .. short(0), 'EL5 accepted document33')
+    reject(
+        'EL5' .. kit .. string.char(1) .. short(0) .. short(13) .. string.char(3, 1),
+        'Dictionary cardinality exceeded reconstructed floats'
+    )
+    reject(
+        'EL5' .. kit .. string.char(1) .. short(0) .. short(0) .. string.char(3, 1),
+        'Empty dictionary accepted nonempty data'
+    )
+    reject('EL5' .. kit .. string.char(1) .. short(0) .. short(1) .. string.char(23, 65), 'EL5 accepted row65')
+    reject(
+        'EL5' .. kit .. string.char(3) .. short(0) .. short(1) .. string.rep(string.char(23, 64), 3),
+        'EL5 exceeded reconstructed64KiB'
+    )
+    reject(valid:sub(1, 24), 'Truncated dictionary planes accepted')
+    reject(valid:sub(1, 37), 'Truncated index stream accepted')
+    reject(
+        raw({ word(0) }, string.char(1) .. string.rep('\0', 11), valid_tail),
+        'Out-of-range one-byte word index accepted'
+    )
+    local two_byte = boundary_raw[257]
+    local high_start = 20 + 2 + 257 * 4 + 276 + 1
+    reject(
+        two_byte:sub(1, high_start - 1) .. string.char(2) .. two_byte:sub(high_start + 1),
+        'Out-of-range high index plane accepted'
+    )
+    reject(
+        raw({ word(0), word(0x7fc00000) }, string.rep('\0', 12), valid_tail),
+        'Unused nonfinite dictionary word accepted'
+    )
+    reject(raw({ word(0x7f800000) }, string.rep('\0', 12), valid_tail), 'Infinite dictionary word accepted')
+    reject(
+        raw({ ffi.string(ffi.new('float[1]', 1e20), 4) }, string.rep('\0', 12), valid_tail),
+        'Dictionary changed existing float magnitude policy'
+    )
+    reject(valid .. 'x', 'EL5 trailing bytes accepted')
+    reject(
+        raw({ word(0) }, string.rep('\0', 12), packed_binding(3, 1, 0, 0, 1, true)),
+        'EL5 accepted reserved garment type'
+    )
+    reject(
+        raw({ word(0) }, string.rep('\0', 12), packed_binding(0, 1, 0, 0, 1, false)),
+        'EL5 Pattern/material binding shape mismatch accepted'
+    )
+    assert(not pcall(codec.decode, '6x|20|AAAA'), 'Future unknown protocol accepted')
+    print(
+        'PASS EL5 planar dictionary:255/256/257 index widths, exact combined Pattern/material/HDR/signed-zero bytes, bounded and malformed dictionary rejection'
+    )
+end
+
+do
+    -- Public deterministic multi-table workload: independent repeated material
+    -- phrases and exact Pattern values defeat earlier compressed raw layouts.
+    -- Park-Miller products remain exact integers in Lua's double range.
+    local state = 20261010
+    local function next_value()
+        state = (state * 48271) % 2147483647
+        return state
+    end
+    local words = {}
+    for n = 1, 126 do
+        words[n] = 0x3f000000 + next_value() % 0x800000
+    end
+    words[127], words[128] = 0x80000000, 0x40500000 -- Signed zero and HDR3.25.
+    local documents = {}
+    for n = 1, 11 do
+        local phrase = {}
+        for i = 1, 112 do
+            phrase[i] = next_value() % 128 + 1
+        end
+        local bits = ffi.new('uint32_t[736]')
+        for i = 0, 735 do
+            bits[i] = words[phrase[i % 112 + 1]]
+        end
+        local document = { width = 23, height = 8, data = ffi.new('float[736]') }
+        ffi.copy(document.data, bits, 2944)
+        documents[n] = document
+    end
+    for n = 12, 13 do
+        local bits = ffi.new('uint32_t[12]')
+        for i = 0, 11 do
+            bits[i] = words[next_value() % 128 + 1]
+        end
+        local document = { width = 3, height = 1, data = ffi.new('float[12]') }
+        ffi.copy(document.data, bits, 48)
+        documents[n] = document
+    end
+    local entries = {}
+    for i = 0, 123 do
+        local pattern = i >= 86
+        local index = pattern and (12 + (i - 86) % 2) or (i % 11 + 1)
+        entries[#entries + 1] = {
+            key = (pattern and 'p:' or '') .. '0:2:' .. math.floor(i / 2) .. ':' .. i % 2,
+            document = documents[index],
+        }
+    end
+    local codec = C.new()
+    local packet = codec.encode(identity, entries)
+    local earlier = math.min(codec.packet_sizes.full, codec.packet_sizes.sparse, codec.packet_sizes.xor)
+    assert(
+        earlier > C.MAX_TEXT and packet:match('^5x?|') and #packet <= C.MAX_TEXT,
+        'Public overbudget appearance did not fit the planar word dictionary'
+    )
+    local result = codec.decode(packet)
+    local count = 0
+    for _ in pairs(result.entries) do
+        count = count + 1
+    end
+    assert(count == 124 and #result.documents == 13, 'Dictionary dropped destinations or material/Pattern tables')
+    for _, entry in ipairs(entries) do
+        local got = result.entries[entry.key].document
+        local bytes = entry.document.width * entry.document.height * 16
+        assert(
+            got.width == entry.document.width
+                and got.height == entry.document.height
+                and ffi.string(got.data, bytes) == ffi.string(entry.document.data, bytes),
+            'Dictionary altered opaque F32/Pattern/HDR/signed-zero bits'
+        )
+    end
+    print(
+        'PASS public overbudget combined appearance: '
+            .. earlier
+            .. ' -> '
+            .. #packet
+            .. ' bytes,124 exact destinations/13 material and Pattern tables'
+    )
+end

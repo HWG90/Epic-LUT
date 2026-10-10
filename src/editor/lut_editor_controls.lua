@@ -238,8 +238,8 @@ function C.new(deps)
                         label = 'Copy selected row',
                         on_activate = function()
                             local d = assert(document(), 'Import first')
-                            self.row_clip =
-                                ffi.string(d.data + (self.handle.get('edit_row') - 1) * d.width * 4, d.width * 16)
+                            local at = semantics.index(self.handle.get('edit_row'), 1, 1, d.width, d.height)
+                            self.row_clip = ffi.string(d.data + at, d.width * 16)
                             return note(
                                 'Copied row '
                                     .. self.handle.get('edit_row')
@@ -255,12 +255,15 @@ function C.new(deps)
                         label = 'Paste row',
                         on_activate = function()
                             assert(self.row_clip, 'Copy a row first')
-                            local d = remember()
-                            ffi.copy(
-                                d.data + (self.handle.get('edit_row') - 1) * d.width * 4,
-                                self.row_clip,
-                                #self.row_clip
-                            )
+                            local d = assert(document(), 'Import first')
+                            assert(not d.read_only and not d.stale, 'Load an editable current LUT first')
+                            assert(#self.row_clip == d.width * 16, 'Row clipboard columns differ')
+                            local at = semantics.index(self.handle.get('edit_row'), 1, 1, d.width, d.height)
+                            local copied = ffi.new('float[?]', d.width * 4)
+                            ffi.copy(copied, self.row_clip, #self.row_clip)
+                            deps.dds.validate(copied, d.width, 1)
+                            d = remember()
+                            ffi.copy(d.data + at, self.row_clip, #self.row_clip)
                             self.sync()
                             return note(
                                 'Pasted into row '

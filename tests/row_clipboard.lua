@@ -99,10 +99,13 @@ assert(
 )
 selected_rows(12, 14)
 assert(h.set('unlock', false))
+assert(h.activate('paste_selection'), 'Complete row paste incorrectly requires Advanced mode')
+expected = unchanged:sub(1, 11 * row_bytes) .. three_rows .. unchanged:sub(14 * row_bytes + 1)
 assert(
-    not pcall(editor.paste_selection) and bytes() == unchanged and #editor.undo == count,
-    'Locked rows were pasted or partially changed'
+    bytes() == expected and #editor.undo == count + 1,
+    'Basic row paste lost camo/material/alpha bytes or changed other rows'
 )
+assert(h.activate('undo') and bytes() == unchanged, 'Basic row paste undo lost exact data')
 assert(h.set('unlock', true))
 document.read_only = true
 assert(not pcall(editor.paste_selection) and bytes() == unchanged, 'Read-only row paste was accepted')
@@ -132,6 +135,33 @@ editor.sync()
 selected_rows(1, 64)
 assert(h.activate('paste_selection') and bytes() == full_table, '64-row block paste lost float bits')
 assert(h.activate('undo') and bytes() ~= full_table, '64-row block paste cannot be undone')
+-- The legacy row action has the same bounds/validity protections during document changes.
+assert(h.set('unlock', false))
+assert(h.set('edit_row', 1) and h.activate('copy_row'))
+local legacy_initial = bytes()
+assert(h.set('edit_row', 2) and h.activate('paste_row'))
+assert(
+    bytes() == legacy_initial:sub(1, row_bytes) .. editor.row_clip .. legacy_initial:sub(2 * row_bytes + 1),
+    'Legacy Basic row paste lost material/camo/alpha bytes'
+)
+assert(h.activate('undo') and bytes() == legacy_initial)
+assert(h.set('edit_row', 64))
+local height = document.height
+document.height = 2 -- Choices still describe the previous document until sync.
+local legacy_before, legacy_history = bytes(), #editor.undo
+assert(
+    not h.activate('paste_row') and bytes() == legacy_before and #editor.undo == legacy_history,
+    'Legacy row paste accepted a stale row beyond the current document'
+)
+assert(not h.activate('copy_row'), 'Legacy row copy read beyond the current document')
+document.height = height
+assert(h.set('edit_row', 2))
+editor.row_clip = editor.row_clip:sub(1, -5)
+legacy_before = bytes()
+assert(
+    not h.activate('paste_row') and bytes() == legacy_before and #editor.undo == legacy_history,
+    'Legacy row paste accepted a different clipboard width'
+)
 print(
-    'PASS row clipboard: 2/3 complete RGBA rows, reverse ranges, normalized destination anchor, cross-document 64-row paste, exact HDR/signed-zero bits and atomic locks/fit/undo'
+    'PASS row clipboard: 2/3 complete RGBA rows including camo without Advanced unlock, reverse ranges, normalized destination anchor, cross-document 64-row paste, exact HDR/signed-zero bits and atomic validity/fit/undo'
 )

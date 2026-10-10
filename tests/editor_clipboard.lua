@@ -200,9 +200,29 @@ editor.focus_cell(1, 1)
 assert(editor.key(67, true, false, context()))
 editor.focus_cell(2, 3)
 assert(
-    not pcall(editor.key, 86, true, false, context()) and bytes() == before,
-    'Pixel shortcut silently discarded protected RGBA channels'
+    editor.key(86, true, false, context()) and ffi.string(document.data + 100, 16) == pixel,
+    'Basic pixel shortcut lost full RGBA channels'
 )
+assert(handle.activate('undo') and bytes() == before)
+-- Camo colors and the pattern selector transfer exact bytes without unlocking typed edits.
+for _, column in ipairs({ 17, 20, 22 }) do
+    editor.focus_cell(1, column)
+    assert(editor.key(67, true, false, context()))
+    local source = m.semantics.index(1, column, 1, 23, 2)
+    local copied = ffi.string(document.data + source, 16)
+    editor.focus_cell(2, column)
+    local destination = m.semantics.index(2, column, 1, 23, 2)
+    local history = #editor.undo
+    assert(handle.activate('paste_selection'))
+    assert(
+        ffi.string(document.data + destination, 16) == copied and #editor.undo == history + 1,
+        'Camo swatch paste lost color, alpha or selector bytes'
+    )
+    assert(handle.activate('undo') and bytes() == before, 'Camo swatch undo changed other values')
+end
+editor.focus_value(1, 22, 4)
+text = '7'
+assert(not pcall(editor.paste_value) and bytes() == before, 'Camo scalar paste bypassed Advanced')
 -- Scratch system HEX copy/paste changes only the shared brush, retaining alpha on RGB paste.
 assert(handle.set_many({ scratch_color = '#123456', scratch_alpha = 0.75 }))
 assert(editor.key(67, true, false, context(nil, 'editor_scratch')) and text == '#123456')

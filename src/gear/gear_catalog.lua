@@ -119,6 +119,7 @@ function G.targets(groups, scope, selected, kind, basic_kind)
             (scope == 4 and (group.armor or group.helmet))
             or (scope == 2 and group.armor)
             or (scope == 3 and group.helmet)
+            or (scope == 5 and group.cape)
             or (scope == 1 and index == selected)
         then
             for _, binding in ipairs(group.bindings) do
@@ -126,9 +127,10 @@ function G.targets(groups, scope, selected, kind, basic_kind)
                     or (scope == 4 and (binding.armor or binding.helmet))
                     or (scope == 2 and binding.armor)
                     or (scope == 3 and binding.helmet)
+                    or (scope == 5 and binding.cape)
                 if
                     in_scope
-                    and (kind == 'cape' or not binding.cape)
+                    and (kind == 'cape' or scope == 5 or not binding.cape)
                     and (not kind or binding[kind])
                     and (scope ~= 1 or not basic_kind or binding[basic_kind])
                 then

@@ -632,11 +632,9 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         end
         m.semantics.index(row, column, 1, d.width, d.height)
         assert(row + clip.height - 1 <= d.height and column + clip.width - 1 <= d.width, 'Clipboard does not fit here')
-        for c = column, column + clip.width - 1 do
-            for channel = 1, 4 do
-                assert(editable(d, c, channel), 'Unlock advanced edits to paste full RGBA into these channels')
-            end
-        end
+        -- Copy/paste transfers complete existing RGBA values, including camo
+        -- selectors. Advanced mode gates typed/painted fields, not this exact
+        -- transfer, consistent with the separate Paste Row action.
         -- Pixel bytes are copied only after the entire destination passes validation.
         d = remember()
         for r = 0, clip.height - 1 do
@@ -664,7 +662,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
                 .. row
                 .. ', column '
                 .. column
-                .. ' (full RGBA)'
+                .. ' (full RGBA, including material and camo controls)'
         )
     end
     function self.reset_part(full_row)
@@ -812,6 +810,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         color_columns = color_columns,
     })
     self.pages = m.lut_editor_controls.new({
+        dds = m.dds,
         preset_files = preset_files,
         editor = self,
         palette = m.palette,

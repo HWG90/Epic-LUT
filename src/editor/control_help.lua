@@ -2,9 +2,10 @@
 local basic = {
     browse = 'Choose a DDS file or an archive. Importing loads colors; use an Apply button to put them on gear.',
     populate_worn = 'Read the current colors from your worn Armor, Cape and Helmet.',
-    apply_matching = 'Apply imported LUTs whose resource IDs match your worn gear. Unmatched tables are left unchanged.',
+    apply_matching = 'Apply imported material and Pattern LUTs whose resource IDs match your worn gear. Unmatched tables are left unchanged.',
     apply_file_armor = 'Apply the imported LUT selected on the right to every LUT on your worn Armor.',
     apply_file_helmet = 'Apply the imported LUT selected on the right to every LUT on your worn Helmet.',
+    apply_file_cape = 'Apply the selected imported LUT only to the worn Cape material LUTs. Armor and Helmet stay unchanged.',
     apply_import_armor = 'Import the selected lut00X.dds on the right panel into the selected Armor or Cape table only.',
     apply_import_helmet = 'Import the selected lut00X.dds on the right panel into this Helmet table only.',
     basic_copy_helmet = 'Copy the selected Helmet table into the selected Armor or Cape table. Colors apply live.',
@@ -21,9 +22,10 @@ local basic = {
 }
 local imported = {
     browse = 'Import a DDS or select one variant from an archive. This does not apply colors to gear.',
-    apply_matching = 'Match imported resource IDs to worn gear and apply only matching LUTs.',
+    apply_matching = 'Match imported resource IDs to worn gear and apply matching material and Pattern LUTs.',
     apply_file_armor = 'Apply the selected imported LUT to all worn Armor LUTs.',
     apply_file_helmet = 'Apply the selected imported LUT to all worn Helmet LUTs.',
+    apply_file_cape = 'Apply the selected imported LUT to all worn Cape material LUTs.',
     save_palette = 'Copy the selected imported LUT into the LUT Editor. Gear stays unchanged.',
     restore = 'Restore Arrowhead original gear LUTs and refresh the palettes.',
     restore_imported = 'Reset editor values to the imported file.',

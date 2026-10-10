@@ -540,6 +540,37 @@ assert(
     bound[armor][1] ~= 3001 and bound[cape][1] == 3001,
     'Cape startup batch applied after the kit changed following scan'
 )
+-- Imported palettes can target all Cape materials without selecting Cape in
+-- the Armor dropdown or changing same-resource Armor/Helmet bindings.
+actor(4)
+kits.cape = 13
+h = api.mods.epic_direct_lut.handle
+activate('populate_worn')
+assert(h.set('basic_armor_lut', 1))
+local imported_pixels = ffi.new('float[736]')
+imported_pixels[0] = 0.625
+DDS.write(fixture .. '/cape-import.dds', imported_pixels, 23, 8)
+assert(h.set('format', 1) and h.set('file', 'cape-import'))
+activate('load')
+armor, cape, helmet = current()
+activate('apply_file_cape')
+local imported_cape = bound[cape][1]
+assert(
+    imported_cape ~= 4001 and bound[armor][1] == 4001 and bound[helmet][1] == 4002,
+    'Imported Cape action changed Armor/Helmet or failed to target Cape'
+)
+assert(bound[cape][3] == 999 and h.get('scope') == 5, 'Imported Cape action changed the tint slot or scope')
+activate('global_undo')
+assert(
+    bound[cape][1] == 4001 and bound[armor][1] == 4001 and bound[helmet][1] == 4002,
+    'Imported Cape Undo changed unrelated gear'
+)
+activate('global_redo')
+assert(
+    bound[cape][1] == imported_cape and bound[armor][1] == 4001,
+    'Imported Cape Redo did not restore the isolated application'
+)
+os.remove(fixture .. '/cape-import.dds')
 runtime.on_disable(ctx)
 os.remove(fixture .. '/' .. armor_file)
 os.remove(fixture .. '/' .. filename)

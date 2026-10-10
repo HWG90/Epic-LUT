@@ -9,6 +9,10 @@
 5. Check Helmet and/or Armor to preview editor changes immediately. Apply LUT on Import / Apply sends the selected file LUT; Save LUT to Palette overwrites the editor table. Applications are cumulative; changing source selections does not remove previously applied targets.
 6. Armor and Helmet previews show separate assigned palettes, grouped by LUT and row. Their swatches represent Base, Detail, Inner, Outer, Curvature, Tint and four Camo color fields. Refresh updates the live LUT list.
 
+**Apply to All Cape LUTs** sends the selected imported palette only to the worn Cape material tables. It uses the same 23-column format while keeping Armor, Helmet and the separate Cape tint slot unchanged. Cape tables remain labeled in the Armor dropdown.
+
+Swatch and row Copy/Paste transfers complete RGBA values, including material and camo controls, with Advanced mode either On or Off. Typed advanced fields and scalar alpha edits still require Advanced mode. Paste checks the current editable destination and clipboard validity before creating one undo step.
+
 ## Restore and share
 
 Restore Original LUT restores game bindings and clears saved automatic application while retaining the editor document. Restore Imported LUT resets editor changes to its original imported data; use Apply LUT to send that reset to gear.

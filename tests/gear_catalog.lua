@@ -74,6 +74,10 @@ assert(
     'Armor/Both wide scopes include Cape'
 )
 assert(G.targets(result.groups, 1, 1, 'cape')[1] == cape, 'Explicit Cape selection has no application targets')
+assert(
+    G.targets(result.groups, 5, nil)[1] == cape and #G.targets(result.groups, 5, nil) == 1,
+    'Cape-wide scope omitted Cape or included Armor'
+)
 cape_object = 20
 result = cape_catalog.refresh({}, nil)
 assert(
@@ -84,6 +88,8 @@ assert(
     #G.targets(result.groups, 1, 1, 'cape') == 1 and #G.targets(result.groups, 2, 1) == 1,
     'Shared resource selection spills across gear kinds'
 )
+local cape_only = G.targets(result.groups, 5, nil)
+assert(#cape_only == 1 and cape_only[1].cape, 'Cape-wide scope repainted shared-resource Armor')
 
 local calls = 0
 local names = G.new({

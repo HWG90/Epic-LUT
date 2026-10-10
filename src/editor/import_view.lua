@@ -607,7 +607,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         local actions = preview_bottom - 30
         local action_bottom = content_bottom + math.max(34, (ui.text_size and ui.text_size(13, 'hint') or 13) + 20)
         local action_top = preview_bottom - 18
-        local tail = ((state.palette_count or 0) > 1 and 70 or 0) + 221
+        local tail = ((state.palette_count or 0) > 1 and 70 or 0) + 259
         self.action_max = math.max(0, action_bottom - (actions - tail))
         self.action_scroll = math.max(0, math.min(self.action_max, self.action_scroll or 0))
         self.action_bounds = { x = rx, y = action_bottom, w = rw, h = math.max(0, action_top - action_bottom) }
@@ -677,6 +677,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             )
             action_text(actions - 55, 'Applies to every LUT on that gear.', 'hint', muted)
         end
+        button(
+            rx + 12,
+            actions - 89,
+            rw - 24,
+            'Apply to All Cape LUTs',
+            'apply_file_cape',
+            state.cape_available == true and state.loaded ~= nil and not state.busy
+        )
+        actions = actions - 38
         button(
             rx + 12,
             actions - 95,
