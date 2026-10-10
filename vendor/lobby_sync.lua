@@ -231,7 +231,8 @@ end
 -- A sync session. deps: {memory, game, natives (Sync.natives or a test's), note}. poll(frame, text, include_local)
 -- posts text (nil: sharing off) when due and returns the members' values {{peer_low, peer_high, text (or nil), local},
 -- ...} (a list the next poll reuses), or nil outside a joined lobby and while sharing is off. include_local: the
--- local member too (the test build's loopback).
+-- local member too (the test build's loopback). Optional {enabled=true} keeps receiving when an enabled sender
+-- temporarily cannot encode its own appearance; nil outgoing text still removes an obsolete advertisement.
 function Sync.session(deps)
     local read = reader(deps.memory)
     local api, why_not
@@ -266,7 +267,7 @@ function Sync.session(deps)
         if result == 0 then
             self.posted_low, self.posted_high, self.posted_text = l.low, l.high, text
             self.posts = self.posts + 1
-            deps.note(text and ('Sync: shared full LUT appearance (' .. #text .. ' bytes).') or 'Sync: sharing removed.')
+            deps.note(text and ('Sync: published appearance packet (' .. #text .. ' bytes).') or 'Sync: sharing removed.')
         else
             self.failures, self.next_post = self.failures + 1, frame + Sync.RETRY_FRAMES
             deps.note(string.format('Sync: post failed (0x%08X); retrying later.', result % HIGH))
@@ -299,7 +300,7 @@ function Sync.session(deps)
         return list
     end
 
-    function self.poll(frame, text, include_local)
+    function self.poll(frame, text, include_local, options)
         local l = lobby(read, deps.game, current)
         -- Without the local entity id the local member cannot be told apart: nothing is read then.
         if not l or not l.joined or not l.id or not natives() then
@@ -309,7 +310,9 @@ function Sync.session(deps)
         l.since = l.since or frame
         local found = members(l, include_local)
         maybe_post(frame, l, text)
-        if text == nil then return nil end -- only players who share read the others' values
+        local enabled = text ~= nil
+        if options and options.enabled ~= nil then enabled = not not options.enabled end
+        if not enabled then return nil end -- receiving follows consent, independently of outgoing encoding
         return found
     end
     function self.clear()

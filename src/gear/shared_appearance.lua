@@ -3,17 +3,29 @@
 local S = {}
 function S.new(deps)
     local self = { status = 'Sharing: waiting for lobby', elapsed = 0, frame = 0, peers = {} }
+    local text, signature, current_kit, packet_kit, publication_status
+    local decode_failures = {}
+    local function message(value)
+        local line = tostring(value):match('^[^\r\n]*') or 'Appearance unavailable'
+        for _ = 1, 4 do
+            local clean, removed = line:gsub('^.-%.lua:%d+:%s*', '')
+            if removed == 0 then
+                break
+            end
+            line = clean
+        end
+        return line:gsub('%s+', ' '):sub(1, 240)
+    end
     local session = deps.sync.session({
         memory = deps.memory,
         game = deps.game,
         natives = deps.sync.natives,
         note = function(message)
-            self.status = message
+            self.status = publication_status or message
             deps.note(message)
         end,
     })
     local codec = deps.codec
-    local text, signature
     local function peer_key(p)
         return string.format('%08x%08x', p.peer_high, p.peer_low)
     end
@@ -29,42 +41,84 @@ function S.new(deps)
         return false
     end
     local function publish(identity)
+        local kit = table.concat({ identity.body or 0, identity.armor or 0, identity.helmet or 0 }, ':')
+        if current_kit ~= kit then
+            current_kit, signature, publication_status = kit, nil, nil
+            if packet_kit ~= kit then
+                text, packet_kit = nil, nil
+            end
+        end
         if deps.highlighting() then
+            if not text then
+                publication_status = 'Sharing: waiting for region highlight to finish; receiving remains on'
+                self.status = publication_status
+            end
             return text
         end
         local entries = deps.entries()
         local marks = { identity.body or 0, identity.armor or 0, identity.helmet or 0 }
         for _, entry in ipairs(entries) do
             local d = entry.document
+            local base = entry.original
+            local baseline = base
+                    and table.concat({
+                        base.resource or '',
+                        base.width or 0,
+                        base.height or 0,
+                        base.data and tostring(base.data) or 'pending',
+                    }, ':')
+                or ''
             marks[#marks + 1] = entry.key
                 .. ':'
                 .. d.width
                 .. ':'
                 .. d.height
                 .. ':'
-                .. (entry.original and entry.original.resource or '')
+                .. baseline
                 .. ':'
                 .. require('ffi').string(d.data, d.width * d.height * 16)
         end
         local now = table.concat(marks, '|')
         if signature ~= now then
-            local ok, packet = pcall(codec.encode, identity, entries)
+            local ok, packet = pcall(function()
+                local encoded = codec.encode(identity, entries)
+                assert(type(encoded) == 'string' and encoded ~= '', 'Shared LUT encoder returned no appearance')
+                return encoded
+            end)
             signature = now
-            text = ok and packet or nil
-            self.status = ok
-                    and ('Ready to share ' .. #entries .. ' full LUT bindings (' .. #packet .. ' bytes); waiting for stable lobby')
-                or tostring(packet)
-            if not ok then
+            if ok then
+                text, packet_kit = packet, kit
+                publication_status = nil
+                self.status = #entries == 0 and 'Sharing: enabled; no custom LUTs to publish'
+                    or (
+                        'Ready to share '
+                        .. #entries
+                        .. ' LUT bindings ('
+                        .. #packet
+                        .. ' bytes); waiting for stable lobby'
+                    )
+            else
+                -- Keep a previously encoded packet only for this exact kit.
+                -- Nil with enabled=true removes a stale-kit advertisement while
+                -- the transport continues receiving the other peers' packets.
+                if packet_kit ~= kit then
+                    text, packet_kit = nil, nil
+                end
+                local reason = message(packet)
+                publication_status = (reason:match('^Sharing:') and reason or 'Sharing: ' .. reason)
+                    .. (text and '; keeping previous shareable appearance' or '; receiving remains on')
+                self.status = publication_status
                 deps.note(self.status)
             end
         end
         return text
     end
     local function receive(members)
-        local players, seen = nil, {}
+        local players, seen, present = nil, {}, {}
         for _, member in ipairs(members or {}) do
             if member.text and not member['local'] then
                 local key = peer_key(member)
+                present[key] = true
                 local old = self.peers[key]
                 local ok, appearance
                 if old and old.text == member.text then
@@ -73,13 +127,20 @@ function S.new(deps)
                     ok, appearance = pcall(codec.decode, member.text)
                 end
                 if not ok then
-                    local status = tostring(appearance)
-                    if self.status ~= status then
-                        self.status = status
+                    local status = message(appearance)
+                    local failed = decode_failures[key]
+                    if not failed or failed.text ~= member.text or failed.status ~= status then
                         deps.note(status)
                     end
+                    decode_failures[key] = { text = member.text, status = status }
+                    self.status = publication_status or status
                 end
                 if ok then
+                    local prior_failure = decode_failures[key]
+                    decode_failures[key] = nil
+                    if prior_failure and not publication_status and self.status == prior_failure.status then
+                        self.status = 'Sharing: peer appearance ready'
+                    end
                     players = players or deps.players()
                     for _, player in ipairs(players) do
                         if not player['local'] and peer_key(player) == key then
@@ -122,11 +183,21 @@ function S.new(deps)
                 restore(key)
             end
         end
+        for key in pairs(decode_failures) do
+            if not present[key] then
+                if not publication_status and self.status == decode_failures[key].status then
+                    self.status = 'Sharing: waiting for peer appearance'
+                end
+                decode_failures[key] = nil
+            end
+        end
     end
     function self.tick(dt, enabled)
         self.frame = self.frame + math.max(0, dt or 0) * 60
         self.elapsed = self.elapsed + math.max(0, dt or 0)
         if not enabled then
+            signature, current_kit, publication_status = nil, nil, nil
+            self.status = 'Sharing: off'
             for key, peer in pairs(self.peers) do
                 peer.job = nil
                 restore(key)
@@ -150,18 +221,20 @@ function S.new(deps)
             return
         end
         self.elapsed = 0
-        local identity = deps.identity()
-        if not identity then
-            receive(nil)
-            self.status = 'Sharing: waiting for local Helldiver'
-            return
+        local outgoing
+        if enabled then
+            local identity = deps.identity()
+            if identity then
+                outgoing = publish(identity)
+            else
+                text, signature, current_kit, packet_kit = nil, nil, nil, nil
+                publication_status = 'Sharing: waiting for local Helldiver; receiving remains on'
+                self.status = publication_status
+            end
         end
-        local outgoing = enabled and publish(identity) or nil
-        local members = session.poll(math.floor(self.frame), outgoing, false)
+        local members = session.poll(math.floor(self.frame), outgoing, false, { enabled = enabled })
         receive(enabled and members or nil)
-        if not enabled then
-            self.status = 'Sharing: off'
-        end
+        self.status = not enabled and 'Sharing: off' or publication_status or self.status
     end
     function self.close()
         local complete = true

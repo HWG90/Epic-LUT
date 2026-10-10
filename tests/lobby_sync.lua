@@ -52,11 +52,11 @@ local memory = {read_into = function(pointer, size, buffer)
     end
     return false
 end}
-local posts, found_own = 0, true
+local posts, found_own, found_remote = 0, true, false
 local session = Sync.session({memory = memory, game = game, note = function() end,
     natives = function() return {
-        members = function() return found_own and 1 or 0, key_at end,
-        property = function() return nil end,
+        members = function() return found_own and (found_remote and 2 or 1) or 0, key_at end,
+        property = function(_, member) return member == key_at + 16 and 0x740000 or nil end,
         post = function(handle, own, text)
             assert(handle == 0x9000000000000001ULL and own == key_at, 'Post did not use PlayFab member identity')
             posts = posts + 1; return 0
@@ -73,4 +73,12 @@ session.poll(1200, 'new'); session.poll(1800, 'new')
 assert(posts == 1, 'Posted without safe local member identity')
 found_own = true
 assert(session.clear() and posts == 2)
-print('PASS lobby transport: exact uint64 handles, retained immutable buffers, bounded chunks, clear, stable lobby and safe member identity')
+u64(key_at + 16, 0x720000); u64(key_at + 24, 0x730000)
+str(0x720000, '456'); str(0x730000, 'title_player_account'); str(0x740000, 'peer-packet')
+found_remote = true
+local received = session.poll(2100, nil, false, {enabled = true})
+assert(received and #received == 1 and received[1].peer_low == 0x456 and received[1].text == 'peer-packet',
+    'An outgoing encoding failure disabled receiving while sharing remained enabled')
+assert(session.poll(2400, nil) == nil, 'Legacy nil payload no longer disabled receiving')
+assert(session.poll(2700, packet, false, {enabled = false}) == nil, 'Explicit sharing-off still received appearances')
+print('PASS lobby transport: exact uint64 handles, retained immutable buffers, bounded chunks, clear, stable lobby, safe member identity and independent receive consent')

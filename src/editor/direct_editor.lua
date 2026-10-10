@@ -32,6 +32,7 @@ local myc_warned = false
 local region_indicator, stop_identification
 local identify_kind
 local checked_editor_target
+local import_target
 local editor_pending
 local history
 local outfits, armory_collection
@@ -479,6 +480,8 @@ local function recover_appearance(dt)
 end
 local function initialize_editor_state()
     operations.appearance_proof = appearance_proof
+    operations.import_target = import_target
+    operations.checked_editor_target = checked_editor_target
     gear_catalog = m.gear_catalog.new({
         identity = function()
             return m.avatar.resolve_live(memory, game)
@@ -948,6 +951,27 @@ local function apply_matching()
             .. ' bindings; unmatched and ambiguous LUTs left untouched.'
     )
 end
+import_target = function(kind, index)
+    local group = assert(groups[index], 'Selected live LUT is unavailable')
+    local proof = appearance_proof and appearance_proof()
+    local original = original_luts and original_luts.get(group.object)
+    local target = {
+        kind = kind,
+        group = index,
+        object = group.object,
+        resource = original and original.resource,
+        cape_proof = kind == 'cape' and proof and proof.cape or nil,
+        kit_proof = proof and proof[kind],
+        binding_keys = {},
+    }
+    for _, b in ipairs(group.bindings) do
+        if b[kind] then
+            target.binding_keys[material_key(b) .. ':' .. tostring(b.slot or m.engine.LUT_SLOT)] = b.save_key or ''
+        end
+    end
+    assert(next(target.binding_keys), 'Selected live LUT has no matching binding')
+    return target
+end
 import_state = function()
     local palette_ready = edit.loaded ~= nil or edit.imported ~= nil
     local previews = { armor = {}, helmet = {}, cape = {} }
@@ -967,6 +991,7 @@ import_state = function()
                     data = document.data,
                     revision = document.revision,
                     edited = (document.revision or 0) > 0,
+                    target = operations.import_target(kind, index),
                 }
             end
         end
@@ -1042,6 +1067,7 @@ import_state = function()
                         height = doc.height,
                         data = doc.data,
                         revision = doc.revision,
+                        target = operations.import_target(selected.kind, selected.group),
                     },
                 }
             end
@@ -1086,6 +1112,7 @@ import_state = function()
                     height = doc.height,
                     data = doc.data,
                     revision = doc.revision,
+                    target = operations.import_target(entry.kind, entry.group),
                 }
             end
         end
@@ -1146,6 +1173,36 @@ import_state = function()
 end
 checked_editor_target = function(target)
     assert(target, 'Load current gear again')
+    if target.binding_keys then
+        local proof = appearance_proof and appearance_proof()
+        assert(
+            not target.kit_proof or proof and proof[target.kind] == target.kit_proof,
+            'Worn kit changed; load current colors again'
+        )
+        refresh(true)
+        for index, group in ipairs(groups) do
+            if group.object == target.object then
+                local actual = {}
+                for _, b in ipairs(group.bindings) do
+                    if b[target.kind] then
+                        actual[material_key(b) .. ':' .. tostring(b.slot or m.engine.LUT_SLOT)] = b.save_key or ''
+                    end
+                end
+                local same = true
+                for key, value in pairs(target.binding_keys) do
+                    if actual[key] ~= value then
+                        same = false
+                        break
+                    end
+                end
+                if same then
+                    target.group = index
+                    return index
+                end
+            end
+        end
+        error('Worn binding or slot changed; load current colors again')
+    end
     if target.kind ~= 'cape' then
         refresh(true)
         for index, group in ipairs(groups) do
@@ -1183,6 +1240,7 @@ checked_editor_target = function(target)
     end
     error('Cape material changed; load current Cape colors again')
 end
+operations.checked_editor_target = checked_editor_target
 local function load_editor_target(container)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
@@ -2256,6 +2314,8 @@ end
 local function paint_quick(q, hex)
     return action(function()
         assert(q and q.document == edit.loaded, 'Select an editable region first')
+        local target = edit.editor_target
+        local index = target and checked_editor_target(target)
         if palette_editor then
             assert(palette_editor.can_pick(q.row, q.column, 1))
             palette_editor.paint_rgb(q.row, q.column, hex)
@@ -2265,10 +2325,13 @@ local function paint_quick(q, hex)
             edit.loaded.data[at], edit.loaded.data[at + 1], edit.loaded.data[at + 2] = r, g, b
             edit.loaded.revision = (edit.loaded.revision or 0) + 1
         end
-        if edit.editor_target then
-            assert(handle.set('lut', edit.editor_target.group))
+        if target then
+            live_select_suppressed = true
+            local ok, why = handle.set('lut', index)
+            live_select_suppressed = false
+            assert(ok, why)
             assert(handle.set('scope', 1))
-            apply(edit.loaded, edit.editor_target.kind)
+            apply(edit.loaded, target.kind)
             edit.preview_document = edit.loaded
             edit.preview_revision = edit.loaded.revision or 0
         end
@@ -2279,8 +2342,8 @@ local function select_import_cell(entry, row, column, identify, kind)
     kind = entry.kind or kind
     if entry.index then
         basic_selected = nil
-        edit.editor_target =
-            { kind = kind, group = entry.index, object = groups[entry.index] and groups[entry.index].object }
+        edit.editor_target = entry.target or operations.import_target(kind, entry.index)
+        entry.index = checked_editor_target(edit.editor_target)
     end
     if identify or entry.index then
         identify_kind = (kind == 'armor' or kind == 'helmet' or kind == 'cape') and kind or nil
@@ -3001,6 +3064,12 @@ local function register(current)
                 if not q or q.document ~= edit.loaded then
                     return false, 'Select an editable region first'
                 end
+                if edit.editor_target then
+                    local current, why = pcall(operations.checked_editor_target, edit.editor_target)
+                    if not current then
+                        return false, why
+                    end
+                end
                 return palette_editor.can_pick(q.row, q.column, 1)
             end
             quick.picker_begin = function()
@@ -3013,10 +3082,18 @@ local function register(current)
                 return cell.picker_begin(1)
             end
             quick.picker_preview = function(color)
+                local allowed, why = quick.can_open_picker()
+                assert(allowed, why)
                 return cell.picker_preview(color, cell.picker_alpha())
             end
-            quick.picker_end = cell.picker_end
-            quick.picker_channel_enabled = cell.picker_channel_enabled
+            quick.picker_end = function(commit)
+                if cell.picker_end then
+                    return cell.picker_end(commit)
+                end
+            end
+            quick.picker_channel_enabled = function(channel, mode)
+                return cell.picker_channel_enabled and cell.picker_channel_enabled(channel, mode)
+            end
             quick.picker_commit = function(color)
                 quick.picker_preview(color)
                 return true

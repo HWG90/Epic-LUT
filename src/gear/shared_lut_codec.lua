@@ -1,5 +1,5 @@
 -- Full RGBA32F tables and stable garment/material destinations. No lossy color conversion.
-local C = { MAX_RAW = 65536, MAX_TEXT = 3600, MAX_DOCS = 32, MAX_BINDINGS = 128 }
+local C = { MAX_RAW = 65536, MAX_TEXT = 3600, MAX_DOCS = 32, MAX_BINDINGS = 4096, LEGACY_BINDINGS = 128 }
 local ffi = require('ffi')
 local bit = require('bit')
 local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -75,14 +75,27 @@ function C.new(compression, original)
     local self = {}
     function self.encode(identity, entries)
         local docs, delta_docs, xor_docs, lookup, bindings, seen = {}, {}, {}, {}, {}, {}
+        local decoded_bytes = 0
         for _, entry in ipairs(entries) do
-            if not seen[entry.key] then
-                local d = entry.document
-                finite(d)
-                local pixels = ffi.string(d.data, d.width * d.height * 16)
-                local signature = string.char(d.width, d.height) .. pixels
+            local pattern = entry.key:sub(1,2) == 'p:'
+            local destination = pattern and entry.key:sub(3) or entry.key
+            local t, slot, mesh, material = destination:match('^(%d+):(%d+):(%d+):(%d+)$')
+            t, slot, mesh, material = tonumber(t), tonumber(slot), tonumber(mesh), tonumber(material)
+            assert(t and slot and mesh and material and t <= 2 and slot <= 9 and mesh <= 63 and material <= 63, 'Invalid shared destination')
+            local key = (pattern and 'p:' or '') .. t .. ':' .. slot .. ':' .. mesh .. ':' .. material
+            local d = entry.document
+            finite(d)
+            assert(d.width == (pattern and 3 or 23), 'Binding slot and table shape disagree')
+            local pixels = ffi.string(d.data, d.width * d.height * 16)
+            local signature = string.char(d.width, d.height) .. pixels
+            assert(not seen[key] or seen[key] == signature, 'Conflicting shared destination')
+            if not seen[key] then
+                assert(#bindings < C.MAX_BINDINGS, 'Too many LUT bindings to share; limit is ' .. C.MAX_BINDINGS .. '; local edits are kept')
                 local index = lookup[signature]
                 if not index then
+                    assert(#docs < C.MAX_DOCS, 'Too many unique LUT tables to share; limit is ' .. C.MAX_DOCS .. '; local edits are kept')
+                    decoded_bytes = decoded_bytes + #pixels
+                    assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget; local edits are kept')
                     docs[#docs + 1] = signature; index = #docs; lookup[signature] = index
                     local encoded = string.char(0) .. signature
                     xor_docs[index] = encoded
@@ -115,39 +128,49 @@ function C.new(compression, original)
                     end
                     delta_docs[index] = encoded
                 end
-                local pattern = entry.key:sub(1,2) == 'p:'
-                local destination = pattern and entry.key:sub(3) or entry.key
-                local t, slot, mesh, material = destination:match('^(%d+):(%d+):(%d+):(%d+)$')
-                t, slot, mesh, material = tonumber(t), tonumber(slot), tonumber(mesh), tonumber(material)
-                assert(t and t <= 2 and slot <= 9 and mesh <= 63 and material <= 63, 'Invalid shared destination')
-                bindings[#bindings + 1] = string.char(t + (pattern and 128 or 0), slot, mesh, material, index)
-                seen[entry.key] = true
+                bindings[#bindings + 1] = {t = t, pattern = pattern, slot = slot, mesh = mesh, material = material, index = index}
+                seen[key] = signature
             end
         end
-        assert(#docs <= C.MAX_DOCS and #bindings <= C.MAX_BINDINGS, 'Too many LUTs to share')
-        local raw = 'EL1' .. word(identity.body or 0) .. word(identity.armor or 0) .. word(identity.helmet or 0)
-            .. string.char(#docs, #bindings) .. table.concat(docs) .. table.concat(bindings)
-        assert(#raw <= C.MAX_RAW, 'Shared LUT raw budget exceeded')
-        local text = '1|' .. #raw .. '|' .. base64(compression.compress(raw))
-        local delta = 'EL2' .. raw:sub(4,17) .. table.concat(delta_docs) .. table.concat(bindings)
-        assert(#delta <= C.MAX_RAW, 'Shared delta raw budget exceeded')
-        local compact = '2|' .. #delta .. '|' .. base64(compression.compress(delta))
-        self.packet_sizes = { full = #text, sparse = #compact }
-        if #compact < #text then text = compact end
-        local xored = 'EL3' .. raw:sub(4,17) .. table.concat(xor_docs) .. table.concat(bindings)
-        if #xored <= C.MAX_RAW then
-            local packed = '3|' .. #xored .. '|' .. base64(compression.compress(xored))
-            self.packet_sizes.xor = #packed
-            if #packed < #text then text = packed end
+        local legacy = #bindings <= C.LEGACY_BINDINGS
+        local header = word(identity.body or 0) .. word(identity.armor or 0) .. word(identity.helmet or 0)
+            .. string.char(#docs) .. (legacy and string.char(#bindings) or short(#bindings))
+        local encoded_bindings, full_docs = {}, {}
+        for i, b in ipairs(bindings) do
+            if legacy then
+                encoded_bindings[i] = string.char(b.t + (b.pattern and 128 or 0), b.slot, b.mesh, b.material, b.index)
+            else
+                -- Exactly 24 bits: document index minus one (5), material (6),
+                -- mesh (6), slot (4), garment type (2), and Pattern flag (1).
+                -- Keep all destination keys; repeated tables stay deduplicated.
+                local packed = b.index - 1 + b.material * 32 + b.mesh * 2048 + b.slot * 131072
+                    + (b.t + (b.pattern and 4 or 0)) * 2097152
+                encoded_bindings[i] = string.char(packed % 256, math.floor(packed / 256) % 256, math.floor(packed / 65536))
+            end
         end
+        for i, doc in ipairs(docs) do full_docs[i] = (legacy and '' or string.char(0)) .. doc end
+        local tail, text = table.concat(encoded_bindings), nil
+        self.packet_sizes = {}
+        local function candidate(version, name, representation)
+            local raw = 'EL' .. version .. header .. table.concat(representation) .. tail
+            if #raw <= C.MAX_RAW then
+                local packed = version .. '|' .. #raw .. '|' .. base64(compression.compress(raw))
+                self.packet_sizes[name] = #packed
+                if not text or #packed < #text then text = packed end
+            end
+        end
+        candidate(legacy and '1' or '4', 'full', full_docs)
+        candidate(legacy and '2' or '4', 'sparse', delta_docs)
+        candidate(legacy and '3' or '4', 'xor', xor_docs)
+        assert(text, 'Shared LUT raw budget exceeded; local edits are kept')
         assert(#text <= C.MAX_TEXT, 'Full LUT appearance needs ' .. #text .. ' bytes; lobby budget is ' .. C.MAX_TEXT .. '; local edits are kept')
         return text
     end
     function self.decode(text)
         assert(type(text) == 'string' and #text <= C.MAX_TEXT, 'Invalid shared LUT packet size')
-        local version, size, encoded = text:match('^([123])|(%d+)|(.+)$')
+        local version, size, encoded = text:match('^([1234])|(%d+)|(.+)$')
         size = tonumber(size)
-        assert(size and size >= 17 and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
+        assert(size and size >= (version == '4' and 18 or 17) and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
         local raw = compression.decompress(unbase64(encoded), size)
         assert(#raw == size and raw:sub(1,3) == 'EL' .. version, 'Invalid shared LUT header')
         local at = 4
@@ -160,11 +183,12 @@ function C.new(compression, original)
         end
         local result = {body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {}}
         local docs, bindings = take(1):byte(), take(1):byte()
+        if version == '4' then bindings = bindings + take(1):byte() * 256 end
         local decoded_bytes = 0
-        assert(docs <= C.MAX_DOCS and bindings <= C.MAX_BINDINGS, 'Shared appearance count exceeds budget')
+        assert(docs <= C.MAX_DOCS and bindings <= (version == '4' and C.MAX_BINDINGS or C.LEGACY_BINDINGS), 'Shared appearance count exceeds budget')
         for i = 1, docs do
             local mode = version ~= '1' and take(1):byte() or 0
-            assert(mode == 0 or mode == 1 or (version == '3' and mode == 2), 'Invalid shared LUT representation')
+            assert(mode == 0 or mode == 1 or ((version == '3' or version == '4') and mode == 2), 'Invalid shared LUT representation')
             local width, height = take(2):byte(1,2)
             assert((width == 23 and height >= 1 and height <= 64) or (width == 3 and height == 1), 'Invalid shared LUT shape')
             decoded_bytes = decoded_bytes + width * height * 16
@@ -209,9 +233,19 @@ function C.new(compression, original)
         end
         local seen = {}
         for i = 1, bindings do
-            local t, slot, mesh, material, index = take(5):byte(1,5)
-            local pattern = t >= 128
-            if pattern then t = t - 128 end
+            local t, slot, mesh, material, index, pattern
+            if version == '4' then
+                local a, b, c = take(3):byte(1,3)
+                local packed = a + b * 256 + c * 65536
+                local kind = math.floor(packed / 2097152)
+                t, pattern = kind % 4, kind >= 4
+                slot, mesh = math.floor(packed / 131072) % 16, math.floor(packed / 2048) % 64
+                material, index = math.floor(packed / 32) % 64, packed % 32 + 1
+            else
+                t, slot, mesh, material, index = take(5):byte(1,5)
+                pattern = t >= 128
+                if pattern then t = t - 128 end
+            end
             assert(t <= 2 and slot <= 9 and mesh <= 63 and material <= 63 and result.documents[index], 'Invalid shared binding')
             local key = (pattern and 'p:' or '') .. t .. ':' .. slot .. ':' .. mesh .. ':' .. material
             assert(not seen[key], 'Duplicate shared binding'); seen[key] = true

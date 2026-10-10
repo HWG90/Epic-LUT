@@ -172,3 +172,202 @@ local malformed = C.new({
     end,
 })
 assert(not pcall(malformed.decode, '1|19|AAAA'), 'Shared decoder accepted row 65')
+
+-- Transmog multiplies destinations, not unique palettes. EL4 preserves each
+-- canonical key while storing the ten exact documents only once.
+local transmog = {}
+many[1].document.data[3] = -1 / math.huge
+for n = 1, 172 do
+    local template = many[(n - 1) % 10 + 1]
+    local at = n <= 8 and n - 1 or n - 9
+    local key = '0:' .. (n <= 8 and 0 or 1) .. ':' .. math.floor(at / 4) .. ':' .. at % 4
+    transmog[#transmog + 1] = { key = key, document = template.document, original = template.original }
+end
+local transmog_packet = small.encode(identity, transmog)
+assert(
+    transmog_packet:sub(1, 2) == '4|' and #transmog_packet <= C.MAX_TEXT,
+    '172 destination packet did not use compact EL4'
+)
+local transmog_result = small.decode(transmog_packet)
+assert(#transmog_result.documents == 10, 'Transmog repeated exact documents')
+local count = 0
+for _ in pairs(transmog_result.entries) do
+    count = count + 1
+end
+assert(count == 172, 'EL4 dropped Transmog destinations')
+for _, entry in ipairs(transmog) do
+    assert(
+        ffi.string(transmog_result.entries[entry.key].document.data, 2944) == ffi.string(entry.document.data, 2944),
+        'EL4 changed exact F32/alpha/signed-zero bytes'
+    )
+end
+transmog[#transmog + 1] = { key = 'p:0:1:0:0', document = changed_pattern, original = base_pattern }
+local with_pattern = small.decode(small.encode(identity, transmog))
+assert(
+    ffi.string(with_pattern.entries['p:0:1:0:0'].document.data, 48) == ffi.string(changed_pattern.data, 48),
+    'EL4 Pattern representation changed bytes'
+)
+assert(not transmog_packet:match('^([123])|'), 'EL4 incorrectly advertised compatibility with old decoders')
+-- Small appearances continue using the old wire format. Their exact native
+-- compressor outputs above remain unchanged and all old versions still read.
+assert(codec.encode(identity, entries):match('^[123]|'), 'Small appearance unnecessarily switched protocols')
+local function word(value)
+    return ffi.string(ffi.new('uint32_t[1]', value), 4)
+end
+local kit = word(identity.body) .. word(identity.armor) .. word(identity.helmet)
+local pixels = ffi.string(doc.data, 2944)
+local legacy_tail = string.char(0, 1, 2, 3, 1)
+for version = 1, 3 do
+    local raw = 'EL'
+        .. version
+        .. kit
+        .. string.char(1, 1)
+        .. (version == 1 and '' or string.char(0))
+        .. string.char(23, 8)
+        .. pixels
+        .. legacy_tail
+    local fixture = C.new({
+        decompress = function()
+            return raw
+        end,
+    })
+    assert(
+        ffi.string(fixture.decode(version .. '|' .. #raw .. '|AAAA').entries['0:1:2:3'].document.data, 2944) == pixels,
+        'Legacy packet stopped decoding'
+    )
+end
+
+-- Exercise the count representation independently of compression capacity.
+-- 4,096 is a destination bound, not a promise that every appearance fits3,600.
+local stored, next_token = {}, 0
+local serialization = C.new({
+    compress = function(raw)
+        next_token = next_token + 1
+        local token = word(next_token)
+        stored[token] = raw
+        return token
+    end,
+    decompress = function(token, size)
+        local raw = assert(stored[token])
+        assert(#raw == size)
+        return raw
+    end,
+})
+local maximum = {}
+for mesh = 0, 63 do
+    for material = 0, 63 do
+        maximum[#maximum + 1] = { key = '0:1:' .. mesh .. ':' .. material, document = doc }
+    end
+end
+local maximum_result = serialization.decode(serialization.encode(identity, maximum))
+count = 0
+for key, entry in pairs(maximum_result.entries) do
+    count = count + 1
+    assert(
+        key:match('^0:1:') and ffi.string(entry.document.data, 2944) == pixels,
+        'Maximum-count compact destination/data changed'
+    )
+end
+assert(count == 4096 and #maximum_result.documents == 1, 'EL4 count limit truncated bindings or repeated documents')
+local indexed, all_indexes = {}, {}
+for n = 1, 31 do
+    indexed[n] = { width = 23, height = 1, data = ffi.new('float[92]') }
+    indexed[n].data[0] = n
+end
+for n = 1, 129 do
+    all_indexes[#all_indexes + 1] =
+        { key = '0:1:' .. math.floor((n - 1) / 4) .. ':' .. (n - 1) % 4, document = indexed[(n - 1) % 31 + 1] }
+end
+all_indexes[#all_indexes + 1] = { key = 'p:2:9:63:63', document = changed_pattern }
+local indexed_result = serialization.decode(serialization.encode(identity, all_indexes))
+assert(
+    #indexed_result.documents == 32
+        and indexed_result.entries['p:2:9:63:63'].document == indexed_result.documents[32]
+        and ffi.string(indexed_result.documents[32].data, 48) == ffi.string(changed_pattern.data, 48),
+    'Five-bit index32 or maximum destination fields changed'
+)
+maximum[#maximum + 1] = { key = '1:0:0:0', document = doc }
+local ok, why = pcall(serialization.encode, identity, maximum)
+assert(not ok and tostring(why):find('4096', 1, true), '4,097 destinations did not fail accurately before publication')
+assert(
+    C.MAX_DOCS == 32 and C.MAX_RAW == 65536 and C.MAX_TEXT == 3600,
+    'Binding expansion changed table or byte budgets'
+)
+
+local aliases = { { key = '0:1:0:0', document = doc }, { key = '00:01:00:00', document = doc } }
+local alias_result = codec.decode(codec.encode(identity, aliases))
+count = 0
+for _ in pairs(alias_result.entries) do
+    count = count + 1
+end
+assert(count == 1, 'Canonical duplicate destination was not deduplicated')
+local different = { width = 23, height = 8, data = ffi.new('float[736]') }
+ffi.copy(different.data, doc.data, 2944)
+different.data[0] = different.data[0] + 1
+aliases[2].document = different
+ok, why = pcall(codec.encode, identity, aliases)
+assert(
+    not ok and tostring(why):find('Conflicting shared destination', 1, true),
+    'Conflicting duplicate destination was silently dropped'
+)
+
+local function short(value)
+    return string.char(value % 256, math.floor(value / 256))
+end
+local function packed_binding(t, slot, mesh, material, index, pattern)
+    local value = index - 1 + material * 32 + mesh * 2048 + slot * 131072 + (t + (pattern and 4 or 0)) * 2097152
+    return string.char(value % 256, math.floor(value / 256) % 256, math.floor(value / 65536))
+end
+local function rejects(raw, reason)
+    local fixture = C.new({
+        decompress = function()
+            return raw
+        end,
+    })
+    assert(not pcall(fixture.decode, '4|' .. #raw .. '|AAAA'), reason)
+end
+local function raw_packet(bindings, tail, documents)
+    return 'EL4' .. kit .. string.char(documents or 1) .. short(bindings) .. string.char(0, 23, 8) .. pixels .. tail
+end
+rejects('EL4' .. kit .. string.char(0) .. short(4097), 'Decoder accepted count4,097')
+rejects('EL4' .. kit .. string.char(33) .. short(0), 'Decoder accepted33 table slots')
+rejects(raw_packet(1, packed_binding(3, 1, 0, 0, 1, false)), 'Reserved garment type accepted')
+rejects(raw_packet(1, packed_binding(0, 10, 0, 0, 1, false)), 'Out-of-range slot accepted')
+rejects(raw_packet(1, packed_binding(0, 1, 0, 0, 32, false)), 'Missing compact document index accepted')
+rejects(raw_packet(1, packed_binding(0, 1, 0, 0, 1, true)), 'Pattern destination accepted material table shape')
+local valid_binding = packed_binding(0, 1, 0, 0, 1, false)
+rejects(raw_packet(2, valid_binding .. valid_binding), 'Duplicate compact binding accepted')
+rejects(raw_packet(2, valid_binding), 'Truncated compact binding accepted')
+rejects(raw_packet(1, valid_binding) .. 'x', 'Trailing EL4 bytes accepted')
+assert(not pcall(codec.encode, identity, { { key = '3:1:0:0', document = doc } }), 'Reserved garment type packed')
+assert(not pcall(codec.encode, identity, { { key = '0:1:64:0', document = doc } }), 'Mesh64 packed')
+assert(not pcall(codec.encode, identity, { { key = '0:1:0:64', document = doc } }), 'Material64 packed')
+assert(
+    not pcall(codec.encode, identity, { { key = 'p:0:1:0:0', document = doc } }),
+    'Pattern/material shape mismatch packed'
+)
+
+-- Packet size errors identify the real lobby budget and preserve source data;
+-- this represents a detailed appearance whose lossless compression cannot fit.
+local over_budget = C.new({
+    compress = function()
+        return string.rep('x', 5113)
+    end,
+})
+local oversized_entries = {}
+for _, entry in ipairs(transmog) do
+    oversized_entries[#oversized_entries + 1] = { key = entry.key, document = entry.document }
+end
+local before = ffi.string(doc.data, 2944)
+ok, why = pcall(over_budget.encode, identity, oversized_entries)
+assert(
+    not ok
+        and tostring(why):find('6828', 1, true)
+        and tostring(why):find('3600', 1, true)
+        and tostring(why):find('local edits are kept', 1, true),
+    'Oversized appearance did not report its encoded size and budget'
+)
+assert(ffi.string(doc.data, 2944) == before, 'Oversize rejection altered local colors')
+print(
+    'PASS compact EL4:172/173 exact Transmog bindings, Pattern/HDR/signed-zero data,4,096 count representation, legacy compatibility and strict malformed/budget rejection'
+)

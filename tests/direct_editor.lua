@@ -577,6 +577,27 @@ activate('save_palette')
 local quick_path = test_root .. '/tests/tmp/files/palette.dds'
 quick_select({ width = 23, height = 8, data = data, source = quick_path, name = 'Table 1' }, 3, 6)
 local before_quick = creates
+local quick_picker = api.mods.epic_direct_lut.controls.quick_color
+assert(type(quick_picker.picker_end) == 'function', 'Quick picker copied an unavailable close callback at registration')
+assert(quick_picker.can_open_picker())
+quick_picker.picker_begin()
+quick_picker.picker_preview({ 17, 35, 57 })
+quick_picker.picker_end(true)
+local refreshed_data = ffi.new('float[?]', 23 * 8 * 4)
+ffi.copy(refreshed_data, data, 23 * 8 * 16)
+quick_select({ width = 23, height = 8, data = refreshed_data, source = quick_path, name = 'Refreshed table' }, 3, 6)
+assert(quick_picker.can_open_picker(), 'Closed quick picker left a stale session blocking a replacement document')
+local refreshed_document = quick_info().editor
+local refreshed_pixels = ffi.string(refreshed_document.data, 23 * 8 * 16)
+quick_picker.picker_begin()
+assert(not quick_picker.picker_channel_enabled(4, 1), 'Quick picker bypassed current channel locks')
+quick_picker.picker_preview({ 21, 39, 61 })
+quick_picker.picker_end(false)
+assert(
+    ffi.string(refreshed_document.data, 23 * 8 * 16) == refreshed_pixels,
+    'Quick picker cancel used a former document callback'
+)
+assert(creates == before_quick, 'Imported quick picker changed live bindings')
 assert(handle.set('target_armor', false))
 assert(handle.set('target_helmet', false))
 assert(handle.set('quick_color', '#123456'))
@@ -821,6 +842,65 @@ local undone = quick_info().armor[1]
 assert(
     ffi.string(undone.data, undone.width * undone.height * 16) == original_pixels,
     'Right-click paint could not be undone'
+)
+-- Open/preview/refresh/close/reopen uses one document and the same physical
+-- target while our own immutable GPU texture changes underneath discovery.
+quick_select(quick_info().armor[1], 1, 1, false, 'armor')
+quick_picker = api.mods.epic_direct_lut.controls.quick_color
+local live_document = quick_info().editor
+local live_pixels = ffi.string(live_document.data, live_document.width * live_document.height * 16)
+quick_picker.picker_begin()
+quick_picker.picker_preview({ 15, 37, 59 })
+editor.on_update(ctx, 0.01)
+local own_texture = bound[3]
+activate('refresh')
+assert(
+    quick_info().editor == live_document and quick_picker.can_open_picker(),
+    'Owned texture/discovery refresh replaced an active picker document'
+)
+quick_picker.picker_preview({ 23, 43, 63 })
+editor.on_update(ctx, 0.01)
+assert(bound[3] ~= own_texture and bound[3] == bound[4] and bound[8] == old_helmet)
+quick_picker.picker_end(false)
+editor.on_update(ctx, 0.01)
+assert(ffi.string(live_document.data, live_document.width * live_document.height * 16) == live_pixels)
+local descriptor = {}
+for key, value in pairs(quick_info().armor[1]) do
+    descriptor[key] = value
+end
+quick_select(descriptor, 2, 1, false, 'armor')
+assert(quick_picker.can_open_picker(), 'New descriptor for the same physical binding could not reopen')
+quick_picker.picker_begin()
+quick_picker.picker_end(true)
+local physical_pixels = ffi.string(quick_info().editor.data, 23 * 8 * 16)
+local physical_bound, physical_creates = bound[3], creates
+local old_slot = units[1].slot
+units[1].slot = 9
+activate('refresh')
+assert(not quick_picker.can_open_picker(), 'Changed live gear slot retained an editable picker target')
+assert(not pcall(quick_picker.picker_preview, { 255, 0, 0 }))
+assert(handle.set('quick_color', '#FEDCBA'))
+assert(bound[3] == physical_bound and creates == physical_creates, 'Stale quick target wrote another gear slot')
+assert(ffi.string(quick_info().editor.data, 23 * 8 * 16) == physical_pixels, 'Stale quick target modified local pixels')
+units[1].slot = old_slot
+activate('refresh')
+assert(quick_picker.can_open_picker(), 'Unchanged physical binding did not recover after a rejected slot')
+local prior_resolve = m.avatar.resolve
+local armor_kit = 10
+m.avatar.resolve = function()
+    return { body = 1, armor = armor_kit, helmet = 20, cape = 30 }
+end
+quick_select(quick_info().armor[1], 1, 1, false, 'armor')
+assert(quick_picker.can_open_picker())
+armor_kit = 11
+assert(not quick_picker.can_open_picker(), 'Changed kit proof retained the former picker target')
+local called, allowed = pcall(quick_picker.picker_begin)
+assert(called and allowed == false and bound[3] == physical_bound and creates == physical_creates)
+armor_kit = 10
+assert(quick_picker.can_open_picker())
+m.avatar.resolve = prior_resolve
+print(
+    'PASS quick swatch picker: dynamic close/channel callbacks, repeat selection, owned texture/descriptor refresh and stale slot/kit rejection'
 )
 assert(editor.on_disable(ctx))
 assert(bound[3] == 100 and bound[6] == 300 and bound[8] == 400)
