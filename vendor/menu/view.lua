@@ -194,7 +194,15 @@ function M.new(sr, preview_only, diagnostic_log, shared_fonts)
                 and hi.y > lo.y
                 and hi.y - lo.y < size * 3
             then
-                result = { min_y = lo.y, max_y = hi.y, height = hi.y - lo.y }
+                result = {
+                    min_y = lo.y,
+                    max_y = hi.y,
+                    height = hi.y - lo.y,
+                    -- Optical correction for the HUD face, calibrated from
+                    -- the visible lettering. Keep raw quad bearings intact
+                    -- for selection and caret geometry.
+                    optical_y = active_font and -size * 0.12 or 0,
+                }
             end
             if vertical_count >= 512 then
                 vertical_metrics = {}

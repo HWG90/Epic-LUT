@@ -82,6 +82,11 @@ local function frame(commands, id, bounds, color, min_layer)
     local edges = {}
     for _, c in ipairs(commands) do
         if c.window_frame == id then
+            assert((c.layer or 0) == math.floor(c.layer or 0), 'Noninteger authored window plane')
+            if c.paint_plane then
+                assert(c.layer == c.paint_plane and c.paint_span == 20, 'Window frame escaped declared integer band')
+                assert(not bounds.paint_plane or bounds.paint_plane == c.paint_plane, 'Frame used another surface band')
+            end
             assert(not edges[c.frame_edge], 'Duplicate window border: ' .. id)
             edges[c.frame_edge] = c
             assert(
@@ -172,14 +177,14 @@ input(label.x + 3, label.y + 3, false)
 assert(menu.dropdown)
 commands = compose()
 local dropdown_body = body(commands, 240 * menu.window_bounds.scale, 70 * menu.window_bounds.scale)
-frame(commands, 'dropdown', dropdown_body, Menu.palette.border, 230)
+frame(commands, 'dropdown', dropdown_body, Menu.palette.border, dropdown_body.paint_plane)
 menu.key(27)
 
 menu.color_picker = { mod = mod, control = mod.controls.color, rgb = { 255, 255, 255 } }
 commands = compose()
 local s = menu.window_bounds.scale
 local picker_body = body(commands, 700 * s, 430 * s)
-local picker_edges = frame(commands, 'color_picker', picker_body, nil, 300)
+local picker_edges = frame(commands, 'color_picker', picker_body, nil, picker_body.paint_plane)
 assert(picker_edges.top.c[1] == 244 and picker_edges.top.c[2] == 202, 'Picker lost its gold outline')
 local picker_x = picker_body.x
 input(picker_body.x + 100, picker_body.y + picker_body.h - 20, true)
@@ -188,7 +193,7 @@ input(picker_body.x + 140, picker_body.y + picker_body.h - 20, false)
 commands = compose()
 picker_body = body(commands, 700 * s, 430 * s)
 assert(picker_body.x > picker_x, 'Picker title did not drag')
-frame(commands, 'color_picker', picker_body, picker_edges.top.c, 300)
+frame(commands, 'color_picker', picker_body, picker_edges.top.c, picker_body.paint_plane)
 menu.color_picker = nil
 
 menu.preview_window = {
@@ -217,7 +222,8 @@ for _, phase in ipairs({ 'confirm', 'scope', 'name' }) do
         end,
     }
     commands = compose()
-    frame(commands, 'outfit_dialog', body(commands, 440 * s, 190 * s), Menu.palette.border, 400)
+    local dialog_body = body(commands, 440 * s, 190 * s)
+    frame(commands, 'outfit_dialog', dialog_body, Menu.palette.border, dialog_body.paint_plane)
 end
 menu.outfit_dialog = nil
 menu.text_edit = nil
@@ -232,12 +238,18 @@ compose()
 menu.advance(0.6)
 commands = compose()
 local tooltip_body
+local tooltip_plane
+for _, c in ipairs(commands) do
+    if c.window_frame == 'tooltip' then
+        tooltip_plane = c.paint_plane
+    end
+end
 for _, c in ipairs(commands) do
     if
         c.type == 'rect'
         and not c.window_frame
         and c.paint_plane
-        and c.paint_plane >= 5000
+        and c.paint_plane == tooltip_plane
         and c.c == Menu.palette.panel
     then
         tooltip_body = c

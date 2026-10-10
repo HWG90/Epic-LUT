@@ -220,8 +220,16 @@ input(tooltip_x, tooltip_y, false)
 compose()
 menu.advance(0.6)
 local tooltip_text = {}
-for _, command in ipairs(compose()) do
-    if command.paint_plane and command.paint_plane >= 5000 and command.text then
+local tooltip_commands = compose()
+local tooltip_plane
+for _, command in ipairs(tooltip_commands) do
+    if command.window_frame == 'tooltip' then
+        tooltip_plane = command.paint_plane
+    end
+end
+assert(tooltip_plane, 'Missing swatch tooltip surface')
+for _, command in ipairs(tooltip_commands) do
+    if command.paint_plane == tooltip_plane and command.text then
         tooltip_text[#tooltip_text + 1] = command.full_text or command.text
     end
 end

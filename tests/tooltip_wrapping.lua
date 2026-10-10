@@ -20,6 +20,23 @@ local menu = Menu.new(api, function(_, size)
     return size * 0.62
 end)
 menu.visible, menu.selected, menu.page, menu.compact_fonts = true, 1, 1, true
+local function tooltip_text(commands)
+    local plane, lines = nil, {}
+    for _, command in ipairs(commands) do
+        if command.window_frame == 'tooltip' then
+            plane = command.paint_plane
+        end
+    end
+    if plane then
+        assert(plane == math.floor(plane), 'Tooltip plane is not an integer')
+        for _, command in ipairs(commands) do
+            if command.paint_plane == plane and command.text then
+                lines[#lines + 1] = command
+            end
+        end
+    end
+    return lines, plane
+end
 for _, font in ipairs({ 12, 20 }) do
     menu.font_size = font
     local label
@@ -42,12 +59,7 @@ for _, font in ipairs({ 12, 20 }) do
     })
     menu.compose(1920, 1080)
     menu.advance(0.6)
-    local lines = {}
-    for _, command in ipairs(menu.compose(1920, 1080)) do
-        if command.paint_plane and command.paint_plane >= 5000 and command.text then
-            lines[#lines + 1] = command
-        end
-    end
+    local lines = tooltip_text(menu.compose(1920, 1080))
     local full = {}
     for i, line in ipairs(lines) do
         assert(line.text == line.full_text, 'Tooltip renderer truncated a wrapped word')
@@ -74,21 +86,13 @@ for _, empty in ipairs({
     help = empty
     menu.compose(1920, 1080)
     menu.advance(0.6)
-    for _, command in ipairs(menu.compose(1920, 1080)) do
-        assert(
-            (not command.paint_plane or command.paint_plane < 5000) and command.window_frame ~= 'tooltip',
-            'Empty tooltip rendered a blank panel'
-        )
-    end
+    local lines, plane = tooltip_text(menu.compose(1920, 1080))
+    assert(not plane and #lines == 0, 'Empty tooltip rendered a blank panel')
 end
 help = function()
     return guidance
 end
 menu.compose(1920, 1080)
 menu.advance(0.6)
-local callback_text = false
-for _, command in ipairs(menu.compose(1920, 1080)) do
-    callback_text = callback_text or (command.paint_plane and command.paint_plane >= 5000 and command.text ~= nil)
-end
-assert(callback_text, 'Nonempty callback tooltip was suppressed')
+assert(#tooltip_text(menu.compose(1920, 1080)) > 0, 'Nonempty callback tooltip was suppressed')
 print('PASS tooltip wrapping: per-glyph fallback, complete words and resized line spacing')

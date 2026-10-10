@@ -27,8 +27,9 @@ end
 local menu = Menu.new(api, advance, Text)
 menu.visible, menu.compact_fonts, menu.font_bold = true, true, true
 menu.window_width, menu.window_height = 1420, 960
+local optical = 0
 menu.text_metrics = function(size)
-    return { min_y = -size * 0.2, max_y = size * 0.7, height = size * 0.9 }
+    return { min_y = -size * 0.2, max_y = size * 0.7, height = size * 0.9, optical_y = optical * size }
 end
 local geometry = {}
 local guidance = 'Edit the current brush color. Scratch tools also include alpha and retain every copied channel value.'
@@ -170,7 +171,7 @@ for _, font in ipairs({ 12, 20 }) do
         menu.advance(0.6)
         local tooltip_lines = {}
         for _, c in ipairs(compose()) do
-            if c.paint_plane and c.paint_plane >= 5000 and c.text then
+            if c.paint_plane and c.paint_plane >= 420 and c.text then
                 tooltip_lines[#tooltip_lines + 1] = c.text
                 close(c.size, font * 0.88 * bounds.scale, 'Tooltip wrapped and rendered at different hint sizes')
                 assert(
@@ -245,6 +246,26 @@ face, menu.font_metric_key = 1.2, 'game-face-two'
 local second_width = measured_field()
 assert(second_width > first_width and measure_calls > cached, 'Changing font face retained stale caret metrics')
 menu.key(27)
+local unshifted = command(compose(), 'HEX: #AVA')
+optical = -0.12
+local calibrated = command(compose(), 'HEX: #AVA')
+close(
+    calibrated.y - unshifted.y,
+    -calibrated.size * 0.12,
+    'Game font optical offset was not propagated in physical pixels'
+)
+local b = menu.window_bounds
+local low = b.y + geometry.field.y * b.scale
+local high = b.y + (geometry.field.y + geometry.field.h) * b.scale
+assert(
+    calibrated.y - calibrated.size * 0.2 >= low and calibrated.y + calibrated.size * 0.7 <= high,
+    'Optical calibration clipped native glyph ink'
+)
+optical = -0.99
+local clamped = command(compose(), 'HEX: #AVA')
+close(clamped.y - clamped.size * 0.2, low + b.scale, 'Optical baseline escaped its one-unit ink inset')
+optical = 0
+close(command(compose(), 'HEX: #AVA').y, unshifted.y, 'Stock/debug zero-offset baseline changed')
 print(
-    'PASS typography: Epic roles, regular fields, retained bold preference, matched metrics/caret, scaled padding, popup containment, legacy rendering and game-face kerning/cache invalidation'
+    'PASS typography: Epic roles, regular fields, matched metrics/caret, scaled padding, popup containment, legacy rendering, game-face kerning/cache invalidation and clamped optical baseline'
 )

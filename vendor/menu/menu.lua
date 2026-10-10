@@ -461,6 +461,13 @@ function M.new(api, measure, Text)
         notice = '',
         capture = false,
     }
+    function self.open_dropdown(state)
+        self.dropdown = state
+        if type(self.on_dropdown_open) == 'function' then
+            local id = tostring(state.control.id or 'choice'):gsub('[^%w_-]', '?'):sub(1, 80)
+            pcall(self.on_dropdown_open, id, #state.control.choices)
+        end
+    end
     local console = api.diagnostics and api.diagnostics_surface and api.diagnostics_surface(api.diagnostics)
     function self.release_console()
         if console then
@@ -682,7 +689,7 @@ function M.new(api, measure, Text)
                 anchor.prepare()
             end
             local value = (h.preview or h.get)(c.id)
-            self.dropdown = {
+            self.open_dropdown({
                 mod = current,
                 control = c,
                 selected = value,
@@ -692,7 +699,7 @@ function M.new(api, measure, Text)
                 width = anchor.width,
                 owner = anchor.owner,
                 widget = anchor.widget,
-            }
+            })
             return
         elseif c.type == 'color' then
             picker_mode = picker_mode or c.picker_mode or (self.basic_only and 1)
@@ -1984,14 +1991,28 @@ function M.new(api, measure, Text)
                     and m.max_y > m.min_y
                     and m.max_y - m.min_y < size * s * 3
                 then
-                    return { min_y = m.min_y / s, max_y = m.max_y / s, height = (m.max_y - m.min_y) / s }
+                    local optical = type(m.optical_y) == 'number'
+                            and m.optical_y == m.optical_y
+                            and math.abs(m.optical_y) < size * s
+                            and m.optical_y / s
+                        or 0
+                    return {
+                        min_y = m.min_y / s,
+                        max_y = m.max_y / s,
+                        height = (m.max_y - m.min_y) / s,
+                        optical_y = optical,
+                    }
                 end
             end
             return { min_y = 0, max_y = size, height = size }
         end
         local function text_y(y, height, size, label, role)
             local m = text_metrics(size, label, role)
-            return y + (height - m.height) / 2 - m.min_y
+            local baseline = y + (height - m.height) / 2 - m.min_y + (m.optical_y or 0)
+            if height >= m.height + 2 then
+                baseline = math.max(y - m.min_y + 1, math.min(y + height - m.max_y - 1, baseline))
+            end
+            return baseline
         end
         local function hovering(x, y, rw, rh)
             return self.pointer_x
@@ -2993,7 +3014,7 @@ function M.new(api, measure, Text)
                                 change(input, 0)
                             end)
                             hit(x + width - 82, y, 28, 26, function()
-                                self.dropdown = {
+                                self.open_dropdown({
                                     mod = mod,
                                     control = choice,
                                     selected = value,
@@ -3002,7 +3023,7 @@ function M.new(api, measure, Text)
                                     top = y - 4,
                                     width = math.max(width, choice.dropdown_width or 0),
                                     owner = owner,
-                                }
+                                })
                             end)
                             hit(x + width - 50, y, 24, 26, function()
                                 change(choice, -1)
@@ -3056,7 +3077,7 @@ function M.new(api, measure, Text)
                                     prepare()
                                     value = mod.handle.get(id)
                                 end
-                                self.dropdown = {
+                                self.open_dropdown({
                                     mod = mod,
                                     owner = owner,
                                     widget = widget,
@@ -3066,7 +3087,7 @@ function M.new(api, measure, Text)
                                     x = x,
                                     top = y - 4,
                                     width = math.max(width, control.dropdown_width or 0),
-                                }
+                                })
                             end)
                         end,
                     })
@@ -3488,7 +3509,7 @@ function M.new(api, measure, Text)
                                         end
                                         select()
 
-                                        self.dropdown = {
+                                        self.open_dropdown({
                                             mod = owner,
                                             control = control,
                                             selected = value,
@@ -3499,7 +3520,7 @@ function M.new(api, measure, Text)
                                             x = cx,
                                             top = y - 8,
                                             width = cw,
-                                        }
+                                        })
                                     end)
                                 end
                             else
@@ -3861,16 +3882,19 @@ function M.new(api, measure, Text)
                 f.close()
             end)
             floating_context = nil
-            paint_surface(first, 1000 + (ordinal - 1) * 32, 32)
+            paint_surface(first, 210 + (ordinal - 1) * 20, 20)
             for i = first, #commands do
                 commands[i].popup = true
                 commands[i].floating_id = f.id
             end
         end
-        local popup_planes = { dropdown = math.max(2100, 1000 + #floating_requests * 32) }
-        popup_planes.picker = math.max(3000, popup_planes.dropdown + 32)
-        popup_planes.dialog = math.max(4000, popup_planes.picker + 32)
-        popup_planes.tooltip = math.max(5000, popup_planes.dialog + 32)
+        -- Reuse the native draw-layer region that rendered earlier releases.
+        -- Integer roles occupy 0..15; twenty layers keep every surface separate.
+        local last_floating_plane = #floating_requests > 0 and 210 + (#floating_requests - 1) * 20 or 180
+        local popup_planes = { dropdown = math.max(300, last_floating_plane + 20) }
+        popup_planes.picker = math.max(340, popup_planes.dropdown + 20)
+        popup_planes.dialog = math.max(380, popup_planes.picker + 20)
+        popup_planes.tooltip = math.max(420, popup_planes.dialog + 20)
         if self.dropdown then
             local overlay_start = #commands + 1
 
@@ -3982,7 +4006,7 @@ function M.new(api, measure, Text)
             text_focus = false
             scrollbar('dropdown', x + dw - 7, top - height + 4, height - 8, #d.control.choices, count, d.scroll)
             frame('dropdown', x, top - height, dw, height)
-            paint_surface(overlay_start, popup_planes.dropdown, 32)
+            paint_surface(overlay_start, popup_planes.dropdown, 20)
 
             for index = overlay_start, #commands do
                 commands[index].popup = true
@@ -4274,7 +4298,7 @@ function M.new(api, measure, Text)
             end)
 
             frame('color_picker', px, py, 700, 430, accent)
-            paint_surface(start, popup_planes.picker, 32)
+            paint_surface(start, popup_planes.picker, 20)
             for index = start, #commands do
                 commands[index].popup = true
             end
@@ -4400,7 +4424,7 @@ function M.new(api, measure, Text)
             bounded(px + 236, py + 30, dialog.phase == 'confirm' and 'No' or 'Cancel', 14, white, 180)
             hit(px + 228, py + 22, 198, 30, cancel)
             frame('outfit_dialog', px, py, 440, 190)
-            paint_surface(first, popup_planes.dialog, 32)
+            paint_surface(first, popup_planes.dialog, 20)
             for i = first, #commands do
                 commands[i].popup = true
             end
@@ -4480,7 +4504,7 @@ function M.new(api, measure, Text)
                     bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20, 'hint')
                 end
                 frame('tooltip', x, y, width, height, accent)
-                paint_surface(first, popup_planes.tooltip, 32)
+                paint_surface(first, popup_planes.tooltip, 20)
                 for i = first, #commands do
                     commands[i].popup = true
                 end

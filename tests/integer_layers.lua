@@ -95,7 +95,7 @@ local function rect(x, y, w, h, color, role, plane)
         c = color,
         ui_role = role,
         paint_plane = plane,
-        paint_span = plane and 32 or nil,
+        paint_span = plane and 20 or nil,
     }
 end
 local function text(x, y, label, color, plane)
@@ -108,7 +108,7 @@ local function text(x, y, label, color, plane)
         a = 1,
         c = color,
         paint_plane = plane,
-        paint_span = plane and 32 or nil,
+        paint_span = plane and 20 or nil,
     }
 end
 local function pixel(x, y)
@@ -187,10 +187,10 @@ view.draw(commands)
 assert(allocations == stable, 'Stable integer-layer frame reallocated primitives')
 -- Entire foreground windows outrank every rear primitive, even new rear text
 -- and frame allocations. Their counts have no influence on semantic depth.
-local rear_bg = rect(250, 0, 220, 180, gray, 'window_background', 1000)
-local rear_frame = rect(250, 0, 220, 2, gold, 'window_frame', 1000)
-local rear_text = text(300, 20, 'Rear', white, 1000)
-local front_bg = rect(280, 0, 150, 180, blue, 'window_background', 1032)
+local rear_bg = rect(250, 0, 220, 180, gray, 'window_background', 210)
+local rear_frame = rect(250, 0, 220, 2, gold, 'window_frame', 210)
+local rear_text = text(300, 20, 'Rear', white, 210)
+local front_bg = rect(280, 0, 150, 180, blue, 'window_background', 230)
 commands[#commands + 1] = rear_bg
 commands[#commands + 1] = rear_frame
 commands[#commands + 1] = rear_text
@@ -203,7 +203,7 @@ rear_frame.c = white
 view.draw(commands)
 assert(pixel(302, 22) == front, 'Reallocated rear content escaped its integer range')
 for i = 1, 1000 do
-    commands[#commands + 1] = rect(460, 170, 1, 1, red, 'control_fill', 1000)
+    commands[#commands + 1] = rect(460, 170, 1, 1, red, 'control_fill', rear_bg.paint_plane)
 end
 view.draw(commands)
 assert(pixel(302, 22).color.b == 220, 'Dense rear content changed window ordering')

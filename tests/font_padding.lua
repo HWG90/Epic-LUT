@@ -125,6 +125,52 @@ for _, scale in ipairs({ 0.85, 1 }) do
         end
     end
 end
+-- HUD optical centering lowers visible ink without rewriting the raw bearings,
+-- shrinking controls, or changing the stock font's measured placement.
+local face = { font = '1234567890abcdef', material = '234567890abcdef1', atlas = '34567890abcdef12' }
+sr.IdString64 = {
+    from_hex = function(value)
+        return value
+    end,
+}
+sr.Material = { set_texture = function() end }
+sr.Gui.material = function()
+    return {}
+end
+view.set_font_source({
+    resolve = function()
+        return face
+    end,
+})
+assert(view.refresh_font())
+local game_metric = view.text_metrics(20, 'Tools')
+assert(
+    game_metric.min_y == -4 and game_metric.max_y == 11 and game_metric.optical_y == -2.4,
+    'HUD adjustment changed raw bearings'
+)
+menu.epic_typography = true
+for _, scale in ipairs({ 0.85, 1, 1.3 }) do
+    for _, font in ipairs({ 12, 20 }) do
+        menu.ui_scale, menu.font_size = scale, font
+        local commands = menu.compose(1920, 1080)
+        local item
+        for _, c in ipairs(commands) do
+            if c.full_text == 'Tools' then
+                item = c
+            end
+        end
+        assert(item)
+        local s = menu.window_bounds.scale
+        local lo, hi = native_metrics(item.size, 'Tools')
+        local bottom = item.y + lo - (menu.window_bounds.y + button_box.y * s)
+        local upper = menu.window_bounds.y + (button_box.y + button_box.h) * s - item.y - hi
+        assert(bottom >= 0 and upper >= 0, 'HUD centering clips its raw glyph quad')
+        assert(math.abs(upper - bottom - item.size * 0.24) < 0.01, 'HUD optical shift does not scale with the font')
+    end
+end
+view.set_font_source(nil)
+assert(view.refresh_font())
+assert((view.text_metrics(20, 'Tools').optical_y or 0) == 0, 'HUD shift leaked into stock fallback')
 print(
     'PASS font padding: native ink bearings, cached label metrics, balanced visible button/choice/number insets and font-scaled logical padding at12/20 and85/100'
 )

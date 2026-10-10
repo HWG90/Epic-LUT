@@ -42,6 +42,7 @@ function F.new(m,ctx,deps)
     self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
     self.menu=m.ui_menu.new(self.api,self.view.measure,m.text_editor)
     self.menu.text_metrics=self.view.text_metrics
+    self.menu.on_dropdown_open=function(id,count)ctx.log('Epic LUT dropdown opened: '..tostring(id)..' ('..tostring(count)..' choices)')end
     if self.view.refresh_font then self.menu.measure_text=self.view.measure end
     self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({window=function()return self.input.window()end}))
     self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard

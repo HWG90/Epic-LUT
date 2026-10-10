@@ -40,6 +40,12 @@ local menu = dofile('vendor/menu/menu.lua').new(api, function(text, size)
 end)
 menu.visible = true
 menu.window_width, menu.window_height = 1200, 880
+local openings = {}
+local function record_open(id, count)
+    assert(id == 'floating_selector' and count == 2, 'Dropdown diagnostic reported a different control/count')
+    openings[#openings + 1] = id
+end
+menu.on_dropdown_open = record_open
 local function input(x, y, pressed)
     menu.tick({
         down = function(key)
@@ -64,14 +70,16 @@ assert(selector, 'Floating selector not rendered')
 input(selector.x + 12, selector.y + 5, true)
 input(selector.x + 12, selector.y + 5, false)
 assert(menu.dropdown and menu.dropdown.owner, 'Floating dropdown has no owner')
+assert(#openings == 1, 'Dropdown opening diagnostic was omitted or repeated')
 commands = menu.compose(1920, 1080)
 local above = false
 for _, c in ipairs(commands) do
-    if c.popup and c.text == 'Alpha' and c.paint_plane and c.paint_plane >= 2100 then
+    if c.popup and c.text == 'Alpha' and c.paint_plane and c.paint_plane >= 300 then
         above = true
     end
 end
 assert(above, 'Dropdown is behind floating window')
+assert(#openings == 1, 'Composing an open dropdown spammed its diagnostic')
 local position = menu.floating_positions.test_popup
 local oldx, oldtop = menu.dropdown.x, menu.dropdown.top
 position.x = position.x - 50
@@ -103,7 +111,7 @@ local bounded_window = false
 for _, c in ipairs(menu.compose(1920, 1080)) do
     if c.floating_id == 'test_popup' then
         assert(
-            c.paint_plane >= 1000 and c.paint_span == 32 and c.paint_plane + c.paint_span < 2100,
+            c.paint_plane >= 210 and c.paint_span == 20 and c.paint_plane + c.paint_span < 300,
             'Floating content escaped its reserved window range'
         )
         bounded_window = true
@@ -174,3 +182,61 @@ assert(
     'Duplicate dropdown lost its own moving window anchor'
 )
 print('PASS duplicate choice anchors: left/right hits keep separate anchors and follow their own popup')
+assert(#openings == 4, 'Actual choice openings were not reported exactly once')
+
+-- Logging is optional and cannot prevent the control from opening.
+menu.key(27)
+menu.on_dropdown_open = function()
+    error('Unavailable diagnostic sink')
+end
+duplicate = duplicate_labels(menu.compose(1920, 1080))
+input(duplicate[1].x + 3, duplicate[1].y + 3, true)
+input(duplicate[1].x + 3, duplicate[1].y + 3, false)
+assert(menu.dropdown, 'Diagnostic failure prevented dropdown opening')
+menu.key(27)
+menu.on_dropdown_open = record_open
+
+-- Keep small and larger window stacks in the prior working native region,
+-- while reserving all sixteen integer content roles for each window.
+for _, count in ipairs({ 3, 8 }) do
+    page.render_layout = function(ui)
+        for n = 1, count do
+            ui.floating('range_' .. n, function(x, y, w, h)
+                ui.rect(x, y, w, h, ui.theme.panel)
+                ui.choice('floating_selector', x + 10, y + 40, w - 20)
+            end, 250, 150, function() end, 40)
+        end
+    end
+    local last
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        if c.floating_id == 'range_' .. count and c.full_text == 'Alpha' then
+            last = c
+        end
+        if c.floating_id then
+            assert(c.paint_plane % 1 == 0 and c.paint_span == 20)
+        end
+    end
+    assert(last)
+    input(last.x + 3, last.y + 3, true)
+    input(last.x + 3, last.y + 3, false)
+    local expected = math.max(300, 210 + (count - 1) * 20 + 20)
+    local seen
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        if c.popup and not c.floating_id and c.full_text == 'Alpha' then
+            assert(
+                c.paint_plane == expected and c.paint_span == 20,
+                'Dropdown escaped the compact integer overlay contract'
+            )
+            seen = true
+        end
+    end
+    assert(
+        seen and menu.dropdown.owner.id == 'range_' .. count,
+        'Topmost stack selector failed to open its visible dropdown'
+    )
+    menu.key(27)
+end
+assert(#openings == 6, 'Stacked window openings logged per-frame instead of per-open')
+print(
+    'PASS dropdown visibility contract: prior working layer region, three/eight window stacks and bounded once-per-open diagnostics'
+)

@@ -199,6 +199,28 @@ menu.floating_positions.pattern = { x = 260, y = 240 }
 menu.floating_positions.tools = { x = 300, y = 220 }
 menu.floating_positions.scratch = { x = 760, y = 250 }
 local commands = compose()
+local float_planes = {}
+for _, c in ipairs(commands) do
+    if c.paint_plane then
+        assert(c.paint_plane == math.floor(c.paint_plane) and c.paint_span == 20, 'Surface lost its integer paint band')
+        if c.floating_id then
+            assert(
+                not float_planes[c.floating_id] or float_planes[c.floating_id] == c.paint_plane,
+                'One window used several paint bands'
+            )
+            float_planes[c.floating_id] = c.paint_plane
+        end
+    end
+end
+local ordered = {}
+for _, plane in pairs(float_planes) do
+    ordered[#ordered + 1] = plane
+end
+table.sort(ordered)
+assert(#ordered == 3, 'Fixture did not produce all independent tool surfaces')
+for index, plane in ipairs(ordered) do
+    assert(plane == 210 + (index - 1) * 20, 'Floating fixture left prior working menu bands')
+end
 local rear = label(commands, 'Pattern REAR', 'pattern')
 body_wins(rear.x + 2, rear.y + 2, specs[2].color, 'Rear Pattern text crossed foreground Tools body')
 -- Recreating only rear text must not defeat the retained front background.
@@ -265,6 +287,7 @@ for _, c in ipairs(commands) do
     end
 end
 assert(second, 'Missing dropdown overlay row')
+assert(second.paint_plane == 300 and second.paint_span == 20, 'Dropdown left its declared working paint band')
 assert(pixel(second.x + 2, second.y + 2).text == 'Two', 'Dropdown text was behind floating windows')
 input(second.x + 2, second.y + 2, false)
 commands = compose()
@@ -277,6 +300,7 @@ compose()
 menu.advance(0.6)
 commands = compose()
 local tooltip = label(commands, 'Tools action help')
+assert(tooltip.paint_plane == 420 and tooltip.paint_span == 20, 'Tooltip left its declared working paint band')
 assert(pixel(tooltip.x + 2, tooltip.y + 2).text == 'Tools action help', 'Tooltip text was behind popup surfaces')
 -- A context color picker must cover every independent tool window.
 input(0, 0, false)
@@ -286,6 +310,7 @@ tap(picker.x + 3, picker.y + 3)
 commands = compose()
 assert(menu.color_picker, 'Context picker did not open')
 local hex = label(commands, 'HEX')
+assert(hex.paint_plane == 340 and hex.paint_span == 20, 'Picker left its declared working paint band')
 assert(pixel(hex.x + 2, hex.y + 2).text == 'HEX', 'Context picker text was behind independent windows')
 local markers = {}
 local s = menu.window_bounds.scale

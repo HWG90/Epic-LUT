@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Use the game's loaded HUD font with measured caret alignment and a guarded debug-font fallback.
+- Balance the HUD font's visible vertical padding across buttons, selectors and row headers.
+- Restore dropdowns and floating overlays to the previously working native drawing-layer range while preserving their integer ordering.
 - Give Epic LUT a distinct near-black skin, outlined secondary actions, gold navigation indicators and quieter row/inspector headers.
 - Use integer native drawing layers and narrow border strips so retained swatches, labels and dark selected-card fills stay visible after partial updates.
 - Keep Import preview/highlight actions inside a reserved footer; scroll its lower actions when the window cannot fit them.
