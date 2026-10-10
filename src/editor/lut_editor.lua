@@ -523,6 +523,16 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         assert(handle.set('scratch_alpha', 1)) -- New scratch starts fully opaque each session.
         self.sync()
         self.refresh_presets()
+        api.mods[handle.id].controls.row_preset_select.on_delete_choice = function(index, label)
+            local name = assert(self.preset_names[index - 1], 'Choose a saved row preset')
+            assert(name == label, 'Preset list changed; reopen it before removing a preset')
+            preset_files.delete_row(name)
+            if handle.get('row_preset') == name then
+                assert(handle.set('row_preset', ''))
+            end
+            self.refresh_presets()
+            return true, 'Removed saved row preset: ' .. name
+        end
         for _, page in ipairs(api.mods[handle.id].pages) do
             if page.id == 'colors' then
                 page.render_layout = self.layout

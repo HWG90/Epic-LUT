@@ -336,18 +336,41 @@ function C.new(deps)
                         id = 'load_row',
                         type = 'button',
                         label = 'Apply row preset',
+                        description = 'Apply the complete preset to every selected row whose first swatch is selected, or to the current row when column 1 is not selected.',
                         on_activate = function()
-                            local name = self.handle.get('row_preset')
-                            local data = preset_files.load_row(name)
                             local current = assert(document(), 'Load a material LUT first')
                             assert(
-                                current.width == 23 and not current.read_only and not current.stale,
+                                current.data and current.width == 23 and not current.read_only and not current.stale,
                                 'Load a current editable material LUT first'
                             )
+                            local first, last = self.handle.get('edit_row'), self.handle.get('edit_row')
+                            local selected = self.selection
+                            if selected then
+                                semantics.index(selected.r1, selected.c1, 1, current.width, current.height)
+                                semantics.index(selected.r2, selected.c2, 4, current.width, current.height)
+                                assert(
+                                    selected.r1 <= selected.r2 and selected.c1 <= selected.c2,
+                                    'Invalid selection bounds'
+                                )
+                                if selected.c1 == 1 then
+                                    first, last = selected.r1, selected.r2
+                                end
+                            end
+                            semantics.index(first, 1, 1, current.width, current.height)
+                            semantics.index(last, current.width, 4, current.width, current.height)
+                            local data = preset_files.load_row(self.handle.get('row_preset'))
                             local d = remember()
-                            ffi.copy(d.data + (self.handle.get('edit_row') - 1) * d.width * 4, data, d.width * 16)
+                            for row = first, last do
+                                ffi.copy(d.data + (row - 1) * d.width * 4, data, d.width * 16)
+                            end
                             self.sync()
-                            return note('Row preset applied. Live preview updates automatically.')
+                            local count = last - first + 1
+                            return note(
+                                'Row preset applied to '
+                                    .. count
+                                    .. (count == 1 and ' row.' or ' rows.')
+                                    .. ' Live preview updates automatically.'
+                            )
                         end,
                     },
                     {

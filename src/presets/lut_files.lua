@@ -57,6 +57,36 @@ function L.new(folder, deps)
         local bytes = deps.read(path(name, 'row-'), deps.dds.MAX_BYTES)
         return deps.dds.decode(bytes, 23, 1)
     end
+    local function delete_named(name, prefix)
+        local source = path(name, prefix)
+        local function file_exists(filename)
+            local file = io.open(filename, 'rb')
+            if not file then
+                return false
+            end
+            file:close()
+            return true
+        end
+        local exists, move = deps.exists or file_exists, deps.move or os.rename
+        assert(exists(source), 'Saved preset not found')
+        for index = 1, 10000 do
+            local backup = source .. '.deleted' .. (index == 1 and '' or '-' .. index)
+            if not exists(backup) then
+                -- Windows rename refuses an existing destination, including a
+                -- backup created after the existence check. Never overwrite it.
+                local ok, why = move(source, backup)
+                assert(ok, why or 'Could not delete saved preset')
+                return backup
+            end
+        end
+        error('Too many deleted preset backups with this name')
+    end
+    function self.delete_row(name)
+        return delete_named(name, 'row-')
+    end
+    function self.delete_palette(name)
+        return delete_named(name, 'palette-')
+    end
     function self.row_names()
         return deps.row_names and deps.row_names(folder) or {}
     end

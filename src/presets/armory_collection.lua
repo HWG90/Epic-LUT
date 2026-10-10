@@ -80,6 +80,36 @@ function A.new(storage, control, handle)
         end
         error('Saved preset is not in the Armory collection')
     end
+    function self.remove_choice(index, label)
+        assert(type(index) == 'number' and index % 1 == 0 and index > 1, 'Choose a saved Armory preset to remove')
+        local name = self.names[index - 1]
+        local selector = control()
+        assert(
+            type(label) == 'string' and name == label and selector.choices[index] == label,
+            'Saved preset list changed; reopen the dropdown before removing it'
+        )
+        local previous = self.selected and self.selected.name
+        local removed, why = storage.delete(name)
+        assert(removed ~= false, why or 'Could not remove the saved Armory preset')
+        if previous == name then
+            self.selected = nil
+        end
+        self.refresh()
+        local selected = 1
+        if previous ~= name then
+            for i, value in ipairs(self.names) do
+                if value == previous then
+                    selected = i + 1
+                    break
+                end
+            end
+        end
+        if selected == 1 then
+            self.selected = nil
+        end
+        assert(handle().set('outfit_preset', selected))
+        return true, 'Removed ' .. name .. ' from The Armory.'
+    end
     function self.save(name, entries)
         storage.save(name, entries)
         self.selected = storage.load(name)

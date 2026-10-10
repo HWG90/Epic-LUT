@@ -4048,13 +4048,19 @@ function M.new(api, measure, Text)
 
                 local preview = d.control.choice_previews and d.control.choice_previews[index]
                 local detail = d.control.choice_details and d.control.choice_details[index]
+                local can_delete = index > 1
+                    and type(d.control.on_delete_choice) == 'function'
+                    and not d.control.disabled
+                    and not d.control.read_only
+                local delete_width = can_delete and 36 or 0
+                local choice_label = tostring(d.control.choices[index])
                 bounded(
                     x + 8,
                     y + (detail and 12 or 0),
-                    tostring(d.control.choices[index]),
+                    choice_label,
                     detail and 13 or 18,
                     index == d.selected and selection_text or white,
-                    math.max(0, dw - (preview and 138 or 24))
+                    math.max(0, dw - (preview and 138 or 24) - delete_width)
                 )
                 if detail then
                     bounded(
@@ -4063,13 +4069,13 @@ function M.new(api, measure, Text)
                         detail,
                         10,
                         index == d.selected and selection_text or accent,
-                        math.max(0, dw - 24)
+                        math.max(0, dw - 24 - delete_width)
                     )
                 end
                 if preview then
                     for n, kind in ipairs({ 'armor', 'helmet' }) do
                         local colors = preview[kind] or {}
-                        local sx = x + dw - 122 + (n - 1) * 54
+                        local sx = x + dw - 122 - delete_width + (n - 1) * 54
                         if #colors == 0 then
                             rect(sx, y, 48, 12, { 65, 76, 85 }, nil, 'swatch_fill')
                         else
@@ -4078,7 +4084,7 @@ function M.new(api, measure, Text)
                             end
                         end
                     end
-                    rect(x + dw - 70, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
+                    rect(x + dw - 70 - delete_width, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
                 end
 
                 hit(x + 3, y - 4, dw - 16, 30, function()
@@ -4091,6 +4097,31 @@ function M.new(api, measure, Text)
                         change(d.control.input_control, 0)
                     end
                 end)
+                if can_delete then
+                    local dx = x + dw - 48
+                    rect(
+                        dx,
+                        y - 4,
+                        30,
+                        30,
+                        hovering(dx, y - 4, 30, 30) and T.field_hover or T.panel,
+                        nil,
+                        'control_fill'
+                    )
+                    text(dx + 10, text_y(y - 4, 30, 14, 'X'), 'X', 14, muted)
+                    -- Register after the option body so removal cannot select or
+                    -- apply the row first. Keep the chooser open after refresh.
+                    hit(dx, y - 4, 30, 30, function()
+                        local called, ok, notice = pcall(d.control.on_delete_choice, choice, choice_label)
+                        self.notice = called and (notice or (ok and 'Preset removed' or 'Could not remove preset'))
+                            or tostring(ok)
+                        if called and ok then
+                            d.selected = (d.mod.handle.preview or d.mod.handle.get)(d.control.id)
+                            d.scroll = math.max(0, math.min(d.scroll, math.max(0, #d.control.choices - 8)))
+                            self.redraw_revision = (self.redraw_revision or 0) + 1
+                        end
+                    end, nil, nil, 'Remove this saved preset. Applied colors stay unchanged.')
+                end
             end
 
             text_focus = false

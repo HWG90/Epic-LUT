@@ -98,6 +98,8 @@ Use **Tools → Rows → Import Paydex JSON...** to choose a Paydex row-presets 
 
 Use **Dock / Undock** in Tools to place its tabs below the swatches inside the LUT Editor or return them to a floating window. The docked Tools body scrolls independently when space is limited.
 
+Select multiple rows through their row labels, or select their first-column cells, then **Apply preset to selected rows** to fill every selected row with the preset as one undoable edit. Use the **X** beside a saved row, palette or Armory preset to remove it from the library. Removed files remain recoverable; the applied appearance is preserved.
+
 The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
 
 Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.

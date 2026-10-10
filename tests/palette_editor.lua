@@ -172,6 +172,92 @@ assert(
     'Row preset Apply Undo did not restore the target'
 )
 assert(h.set('edit_row', 5))
+do
+    local preset = ffi.new('float[?]', d.width * 4)
+    ffi.copy(preset, saved_row, d.width * 16)
+    ffi.cast('uint32_t *', preset)[0] = 0x80000000 -- Preserve signed zero as raw F32.
+    preset[7], preset[13], preset[(22 - 1) * 4 + 3] = 4.25, -12.5, 5
+    local preset_bytes = ffi.string(preset, d.width * 16)
+    m.dds.write('tests/tmp/presets/row-multi-row-apply.dds', preset, d.width, 1)
+    local prior_name, prior_unlock = h.get('row_preset'), h.get('unlock')
+    assert(h.set('row_preset', 'multi-row-apply'))
+    assert(h.set('unlock', false)) -- Existing full rows do not require paint/typing unlock.
+    assert(h.set('edit_row', 7))
+    editor.select_rows(4, 2)
+    editor.selection.c2 = 1 -- Selecting only the first swatch still selects each destination row.
+    local selection = editor.selection
+    local before_multi = ffi.string(d.data, d.width * d.height * 16)
+    local undo_before = #editor.undo
+    local expected = before_multi:sub(1, d.width * 16) .. preset_bytes:rep(3) .. before_multi:sub(4 * d.width * 16 + 1)
+    assert(h.activate('load_row'))
+    assert(
+        ffi.string(d.data, d.width * d.height * 16) == expected,
+        'Row preset missed selected rows or changed unselected rows/channels'
+    )
+    assert(
+        #editor.undo == undo_before + 1 and editor.selection == selection,
+        'Multirow preset Apply changed selection or recorded multiple edits'
+    )
+    assert(h.activate('undo'))
+    assert(
+        ffi.string(d.data, d.width * d.height * 16) == before_multi and #editor.undo == undo_before,
+        'One Undo did not restore all preset destinations'
+    )
+    assert(h.activate('redo'))
+    assert(
+        ffi.string(d.data, d.width * d.height * 16) == expected and #editor.undo == undo_before + 1,
+        'One Redo did not restore the complete multirow preset'
+    )
+    assert(h.activate('undo'))
+
+    editor.selection = { r1 = 1, r2 = 3, c1 = 2, c2 = 3 }
+    local fallback = before_multi:sub(1, 6 * d.width * 16) .. preset_bytes .. before_multi:sub(7 * d.width * 16 + 1)
+    assert(h.activate('load_row'))
+    assert(
+        ffi.string(d.data, d.width * d.height * 16) == fallback,
+        'Selection without column 1 did not fall back to the current row'
+    )
+    assert(h.activate('undo'))
+    editor.selection = nil
+    assert(h.activate('load_row'))
+    assert(
+        ffi.string(d.data, d.width * d.height * 16) == fallback,
+        'No-selection preset Apply did not use the current row'
+    )
+    assert(h.activate('undo'))
+
+    local function rejected()
+        local revision, undo, redo = d.revision, #editor.undo, #editor.redo
+        local ok = h.activate('load_row')
+        assert(not ok, 'Invalid/read-only/stale row preset destination was accepted')
+        assert(
+            ffi.string(d.data, d.width * d.height * 16) == before_multi
+                and d.revision == revision
+                and #editor.undo == undo
+                and #editor.redo == redo,
+            'Rejected row preset Apply changed pixels or history'
+        )
+    end
+    for _, invalid in ipairs({
+        { r1 = 2, r2 = 9, c1 = 1, c2 = 1 },
+        { r1 = 4, r2 = 2, c1 = 1, c2 = 1 },
+        { r1 = 1, r2 = 3, c1 = 0, c2 = 1 },
+        { r1 = 1, r2 = 3, c1 = 1, c2 = 24 },
+    }) do
+        editor.selection = invalid
+        rejected()
+    end
+    editor.selection = nil
+    for _, flag in ipairs({ 'read_only', 'stale' }) do
+        d[flag] = true
+        rejected()
+        d[flag] = nil
+    end
+    assert(h.set('row_preset', prior_name) and h.set('unlock', prior_unlock) and h.set('edit_row', 5))
+    print(
+        'PASS row preset Apply: first-column three-row targeting, exact RGBA/signed-zero/HDR/camo values, unselected isolation, one Undo/Redo, current-row fallbacks and atomic bounds/read-only/stale guards'
+    )
+end
 local commands, hits = {}, {}
 local function command(t)
     commands[#commands + 1] = t
@@ -296,6 +382,17 @@ local function tap(x, y)
 end
 -- Custom preset input must show keystrokes and commit the typed name.
 editor.tools.open('rows')
+do
+    local selection, anchor, target = editor.selection, editor.paste_anchor, editor.value_target
+    editor.select_rows(3, 1)
+    local plural_title, plural_apply = false, false
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        plural_title = plural_title or c.full_text == 'Selected rows: 1-3 / 8'
+        plural_apply = plural_apply or c.full_text == 'Apply preset to rows'
+    end
+    assert(plural_title and plural_apply, 'Rows Tools did not show the selected multirow Apply scope')
+    editor.selection, editor.paste_anchor, editor.value_target = selection, anchor, target
+end
 rendered = menu.compose(1920, 1080)
 local preset_label
 for _, c in ipairs(rendered) do

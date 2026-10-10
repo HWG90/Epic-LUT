@@ -120,7 +120,13 @@ function R.pages(callbacks, defaults)
                     default = '#FFFFFF',
                     on_change = callbacks.quick_color_change,
                 },
-                { id = 'basic_preset_name', type = 'input', label = 'Preset name', default = 'my-palette' },
+                {
+                    id = 'basic_preset_name',
+                    type = 'input',
+                    label = 'Preset name',
+                    default = 'my-palette',
+                    allow_empty = true,
+                },
                 {
                     id = 'apply_matching',
                     type = 'button',

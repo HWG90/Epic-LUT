@@ -2724,6 +2724,9 @@ local function register(current)
             end)
         end,
         basic_preset_change = function(index)
+            if edit.refreshing_basic_presets then
+                return
+            end
             select_outfit(1)
             if index == 1 then
                 assert(handle.set('basic_preset_name', ''))
@@ -2750,16 +2753,7 @@ local function register(current)
                 assert(name:match('^[%w _-]+$') and #name > 0 and #name <= 48, 'Enter a preset name')
                 assert(edit.loaded, 'Import a palette first')
                 operations.preset_files.save(name, edit.loaded, 'palette-')
-                basic_names = {}
-                local choices = { 'New preset...' }
-                for _, file in ipairs(m.windows.files(paths.presets, 'palette-*.dds')) do
-                    local value = file:match('^palette%-([%w _-]+)%.dds$')
-                    if value then
-                        basic_names[#basic_names + 1] = value
-                        choices[#choices + 1] = value
-                    end
-                end
-                api.mods[handle.id].controls.basic_preset.choices = choices
+                operations.refresh_basic_presets(name)
                 return message('Palette preset saved: ' .. name)
             end)
         end,
@@ -3156,6 +3150,13 @@ local function register(current)
     api.mods[handle.id].minimum_width = 1420
     api.mods[handle.id].minimum_height = 960
     frontend.default_mod_id = handle.id
+    if armory_collection and api.mods[handle.id].controls.outfit_preset then
+        api.mods[handle.id].controls.outfit_preset.on_delete_choice = function(index, label)
+            local ok, status = armory_collection.remove_choice(index, label)
+            sync_armory_export()
+            return ok, status
+        end
+    end
     if palette_editor then
         palette_editor.pattern_editor = pattern_editor
         palette_editor.can_select_gear = function(kind)
@@ -3271,16 +3272,42 @@ local function register(current)
         page.minimum_height = 780
         page.render_layout = basic.draw
         page.on_wheel = basic.wheel
-        basic_names = {}
-        local choices = { 'New preset...' }
-        for _, file in ipairs(m.windows.files(paths.presets, 'palette-*.dds')) do
-            local name = file:match('^palette%-([%w _-]+)%.dds$')
-            if name then
-                basic_names[#basic_names + 1] = name
-                choices[#choices + 1] = name
+    end
+    if api.mods[handle.id].controls.basic_preset then
+        operations.refresh_basic_presets = function(previous)
+            local selector = api.mods[handle.id].controls.basic_preset
+            previous = previous or selector.choices[handle.get('basic_preset')]
+            basic_names = {}
+            local choices, selected = { 'New preset...' }, 1
+            for _, file in
+                ipairs(m.windows and m.windows.files and m.windows.files(paths.presets, 'palette-*.dds') or {})
+            do
+                local name = file:match('^palette%-([%w _-]+)%.dds$')
+                if name then
+                    basic_names[#basic_names + 1] = name
+                    choices[#choices + 1] = name
+                    if name == previous then
+                        selected = #choices
+                    end
+                end
             end
+            selector.choices = choices
+            edit.refreshing_basic_presets = true
+            local called, ok, why = pcall(handle.set, 'basic_preset', selected)
+            edit.refreshing_basic_presets = false
+            assert(called and ok, called and why or ok)
         end
-        api.mods[handle.id].controls.basic_preset.choices = choices
+        api.mods[handle.id].controls.basic_preset.on_delete_choice = function(index, label)
+            local name = assert(basic_names[index - 1], 'Choose a saved palette preset')
+            assert(name == label, 'Preset list changed; reopen it before removing a preset')
+            operations.preset_files.delete_palette(name)
+            if handle.get('basic_preset_name') == name then
+                assert(handle.set('basic_preset_name', ''))
+            end
+            operations.refresh_basic_presets()
+            return true, 'Removed saved palette preset: ' .. name
+        end
+        operations.refresh_basic_presets()
     end
     if m.import_view then
         import_view = m.import_view.new(

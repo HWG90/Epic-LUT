@@ -227,7 +227,7 @@ function V.new(deps)
             shortcut(ui.x + 8 * font_scale, tools_width, 'Tools', function()
                 open_tools()
             end, self.tools and self.tools.is_open(), self.tools ~= nil)
-            if self.tools and self.tools.is_open() then
+            if self.tools and self.tools.is_open() and not (self.tools.is_docked and self.tools.is_docked()) then
                 local children =
                     { { 'Import', 'import' }, { 'Rows', 'rows' }, { 'Export', 'export' }, { 'Options', 'options' } }
                 local begin = ui.x + 8 * font_scale + tools_width + gap
@@ -378,7 +378,7 @@ function V.new(deps)
             and self.tools.is_open()
             and self.tools.is_docked
             and self.tools.is_docked()
-        local function dock_tools(ceiling, wanted)
+        local function dock_tools(ceiling)
             local available = ceiling - gridbottom - 16 * font_scale
             if not docking or available <= 0 then
                 return
@@ -387,7 +387,7 @@ function V.new(deps)
                 x = ui.x + 8 * font_scale,
                 y = gridbottom + 8 * font_scale,
                 w = left - (portrait_width or 0) - 16 * font_scale,
-                h = math.min(available, wanted),
+                h = available,
             }
         end
         if not d then
@@ -444,7 +444,7 @@ function V.new(deps)
                 button(ui.x + 12 + load_width + gap, cursor, browse_width, 'Choose file...', 'browse', row_height)
                 cursor = cursor - gap
                 message('Uses currently worn LUT values; a file import is optional.', 14, muted, 'hint')
-                dock_tools(cursor, 300 * font_scale)
+                dock_tools(cursor)
                 overlays()
                 return
             end
@@ -467,7 +467,7 @@ function V.new(deps)
                 cursor = cursor - gap
             end
             message('Uses the applied values from the selected Live LUT.', 14, muted, 'hint')
-            dock_tools(cursor, 300 * font_scale)
+            dock_tools(cursor)
             overlays()
             return
         end
@@ -513,14 +513,13 @@ function V.new(deps)
         local cell = math.max(4, math.min(d.height > 8 and 40 or 64, width_cell, space / math.min(d.height, 8)))
         if docking then
             local minimum = self.tools.minimum_height and self.tools.minimum_height(ui) or 140
-            local wanted = math.max(minimum, math.min(260 * font_scale, space * 0.48))
-            local below_rows = space - cell * math.min(d.height, 8) - 16 * font_scale
-            if below_rows >= minimum then
-                wanted = math.min(260 * font_scale, below_rows)
-            end
+            local rows = math.min(d.height, 8)
+            rows =
+                math.min(rows, math.max(math.min(2, d.height), math.floor((space - minimum - 24 * font_scale) / cell)))
             -- Keep the grid's cell size and at least two rows; the row viewport
             -- scrolls rather than drawing swatches through the docked Tools.
-            dock_tools(grid_top - cell * math.min(2, d.height) - 30 - 8 * font_scale, wanted)
+            -- Tools fills everything below those rows, down to the footer.
+            dock_tools(grid_top - cell * rows - 30 - 8 * font_scale)
             if tools_bounds then
                 grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30
                 space = math.max(4, grid_top - grid_floor)

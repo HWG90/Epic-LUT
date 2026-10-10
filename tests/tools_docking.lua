@@ -152,6 +152,18 @@ local function label(commands, value, popup)
         end
     end
 end
+local function tab_sets(commands, main, floating)
+    for _, name in ipairs({ 'Import', 'Rows', 'Export', 'Options' }) do
+        local counts = { main = 0, floating = 0 }
+        for _, command in ipairs(commands) do
+            if command.type == 'text' and (command.full_text or command.text) == name then
+                local kind = command.popup and 'floating' or 'main'
+                counts[kind] = counts[kind] + 1
+            end
+        end
+        assert(counts.main == main and counts.floating == floating, 'Unexpected duplicate/restored Tools tab: ' .. name)
+    end
+end
 local function tap(x, y)
     for _, down in ipairs({ true, false }) do
         menu.tick({
@@ -174,8 +186,18 @@ end
 local initial_pixels = ffi.string(document.data, document.width * document.height * 16)
 editor.tools.open('rows')
 assert(not editor.tools.is_docked(), 'Tools no longer defaults to its independent window')
+do
+    local floating_rows = compose()
+    local previous = assert(label(floating_rows, 'my-row', true))
+    for _, name in ipairs({ 'Save selected row', 'Apply preset to row', 'Import Paydex JSON...', 'Copy row' }) do
+        local current = assert(label(floating_rows, name, true))
+        assert(previous.y > current.y + current.size, 'Rows controls are out of order/overlap: ' .. name)
+        previous = current
+    end
+end
 click('Dock', true)
 local commands = compose()
+tab_sets(commands, 1, 0)
 assert(editor.tools.is_open() and editor.tools.is_docked() and editor.tools.bounds, 'Dock did not retain active Tools')
 for _, window in ipairs(menu.floating_windows) do
     assert(window.id ~= 'editor_tools', 'Docked Tools kept a floating owner')
@@ -319,12 +341,40 @@ for _, scenario in ipairs({ { 12, 0.7, 1000 }, { 20, 0.85, 1000 }, { 12, 1.15, 8
     assert(label(compose(), 'Undock', false), 'Dock toggle disappeared after font/scale change')
     reveal('Reset row')
 end
+-- A taller editor must give the dock all free height, beyond the old 260 cap.
+menu.font_size, menu.ui_scale, menu.window_height = 12, 0.65, 1200
+editor.tools.scroll = 0
+commands = compose()
+contained()
+tab_sets(commands, 1, 0)
+local filled = assert(editor.tools.bounds)
+assert(filled.h > 300, 'Tall editor retained an arbitrary dock height cap')
+assert(document.height - editor.grid_max == 8, 'Tall dock did not retain its normal eight-row grid viewport')
+local lowest_swatch = math.huge
+for _, command in ipairs(commands) do
+    if
+        command.ui_role == 'swatch_fill'
+        and not command.popup
+        and command.x >= menu.window_bounds.x + filled.x * menu.window_bounds.scale
+        and command.x < menu.window_bounds.x + (filled.x + filled.w) * menu.window_bounds.scale
+    then
+        lowest_swatch = math.min(lowest_swatch, command.y)
+    end
+end
+local gap_below_grid = (lowest_swatch - menu.window_bounds.y) / menu.window_bounds.scale - filled.y - filled.h
+assert(math.abs(gap_below_grid - 47) < 0.01, 'Dock left unused height below the grid navigation/padding')
+local tools_footer = assert(label(commands, 'Tools', false))
+assert(
+    (menu.window_bounds.y + filled.y * menu.window_bounds.scale - tools_footer.y) / menu.window_bounds.scale < 50,
+    'Dock left unused height above the persistent footer'
+)
 menu.font_size, menu.ui_scale, menu.window_height = 12, 1, 1000
 local current = document
 document = nil
 editor.sync()
 editor.tools.scroll = 0
 commands = compose()
+tab_sets(commands, 1, 0)
 assert(label(commands, 'Import Paydex JSON...', false), 'Rows JSON import requires an active LUT')
 click('Import Paydex JSON...', false)
 assert(imports == 1)
@@ -334,6 +384,7 @@ assert(imports == 1, 'Busy Paydex import button still activated')
 import_control.disabled = false
 click('Undock', false)
 commands = compose()
+tab_sets(commands, 1, 1)
 assert(
     editor.tools.is_open() and not editor.tools.is_docked() and not editor.tools.bounds,
     'Undock closed Tools or kept stale wheel bounds'
@@ -348,7 +399,12 @@ assert(floating and editor.tools.tab == 'rows' and label(commands, 'Dock', true)
 document = current
 assert(ffi.string(document.data, document.width * document.height * 16) == initial_pixels)
 editor.tools.close()
-compose()
+commands = compose()
+tab_sets(commands, 0, 0)
+assert(
+    label(commands, 'Tools', false) and label(commands, 'Scratch', false),
+    'Closing Tools removed persistent footer actions'
+)
 assert(not editor.tools.bounds, 'Closed Tools retained dock wheel ownership')
 package.loaded['epic.player_preview.v1'] = prior_preview
 print(

@@ -267,6 +267,10 @@ m.preset_export = dofile('src/presets/preset_export.lua')
 bound[8] = 50 -- A Helmet group sorts before the first Armor group.
 stock_editor.on_enable(ctx)
 stock_editor.on_update(ctx, 0)
+assert(
+    type(api.mods.epic_direct_lut.controls.outfit_preset.on_delete_choice) == 'function',
+    'Shared Basic/Armory chooser lacks removal callback'
+)
 handle = api.mods.epic_direct_lut.handle
 assert(not api.mods.epic_direct_lut.controls.export_material_report, 'Removed inspector export still registered')
 local armor_before, helmet_before = handle.get('target_armor'), handle.get('target_helmet')
@@ -1032,6 +1036,64 @@ end
 assert(test_frontend.menu.visible and test_frontend.menu.page == 2, 'JSON import lost the previous editor page')
 print(
     'PASS direct Paydex import: JSON-only picker, serialized mode-preserving retry, exact named row publication, immediate selector refresh and unchanged editor/live gear'
+)
+-- Every saved preset selector removes only its stored entry. Refreshing the
+-- legacy palette chooser must not reload or replace the active editor table.
+assert(rh.set('format', 1) and rh.set('file', 'palette'))
+assert(rh.activate('load') and rh.activate('save_palette'))
+for _, name in ipairs({ 'RemovalAlpha', 'RemovalBeta' }) do
+    assert(rh.set('basic_preset_name', name) and rh.activate('basic_save'))
+end
+local preset_controls = api.mods.epic_direct_lut.controls
+local function preset_index(control, name)
+    for index, label in ipairs(control.choices) do
+        if label == name then
+            return index
+        end
+    end
+    error('Missing saved preset: ' .. name)
+end
+assert(rh.set('basic_preset', preset_index(preset_controls.basic_preset, 'RemovalAlpha')))
+local removal_document = assert(quick_info().editor)
+local removal_pixels = ffi.string(removal_document.data, removal_document.width * removal_document.height * 16)
+local removal_creates = creates
+assert(
+    preset_controls.basic_preset.on_delete_choice(
+        preset_index(preset_controls.basic_preset, 'RemovalBeta'),
+        'RemovalBeta'
+    )
+)
+assert(
+    preset_controls.basic_preset.choices[rh.get('basic_preset')] == 'RemovalAlpha',
+    'Removing another palette lost the selected palette'
+)
+assert(
+    preset_controls.basic_preset.on_delete_choice(
+        preset_index(preset_controls.basic_preset, 'RemovalAlpha'),
+        'RemovalAlpha'
+    )
+)
+assert(rh.get('basic_preset') == 1 and rh.get('basic_preset_name') == '', 'Removed palette remained selected')
+assert(
+    preset_controls.row_preset_select.on_delete_choice(
+        preset_index(preset_controls.row_preset_select, 'Paydex-integration'),
+        'Paydex-integration'
+    )
+)
+assert(
+    rh.get('row_preset_select') == 1 and rh.get('row_preset') == '' and not m.file_io.read(saved_row_path, 1024, true)
+)
+assert(
+    quick_info().editor == removal_document
+        and ffi.string(removal_document.data, #removal_pixels) == removal_pixels
+        and creates == removal_creates,
+    'Stored preset removal replaced the editor table, pixels or GPU textures'
+)
+for key, value in pairs(paydex_bindings) do
+    assert(bound[key] == value, 'Stored preset removal changed live gear')
+end
+print(
+    'PASS preset removal wiring: row, palette and shared Basic/Armory chooser callbacks, retained current selection and unchanged editor/GPU appearance'
 )
 assert(recovery.on_disable(ctx))
 -- Reusing the same addon object must not carry old documents or worker results

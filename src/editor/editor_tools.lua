@@ -210,23 +210,22 @@ function T.new(deps)
                 action(top - step * 5.3, 'Apply to checked targets', 'apply_editor', d ~= nil)
             end
         elseif self.tab == 'rows' then
-            label(
-                top,
-                'Selected row: ' .. h.get('edit_row') .. (d and ' / ' .. d.height or ' / Load a LUT first'),
-                nil,
-                'heading'
-            )
-            action(top - step, 'Import Paydex JSON...', 'import_paydex_rows', true)
+            local selected = editor.selection
+            local multiple = d and selected and selected.c1 == 1 and selected.r1 < selected.r2
+            local target = multiple and ('Selected rows: ' .. selected.r1 .. '-' .. selected.r2)
+                or ('Selected row: ' .. h.get('edit_row'))
+            label(top, target .. (d and ' / ' .. d.height or ' / Load a LUT first'), nil, 'heading')
             if ui.preset then
-                local py = top - step * 2 + offset
+                local py = top - step + offset
                 if visible(py, 26) then
                     ui.preset('row_preset', 'row_preset_select', bx, py, width)
                 end
             else
-                action(top - step * 2, 'Preset: ' .. h.get('row_preset'), 'row_preset', true)
+                action(top - step, 'Preset: ' .. h.get('row_preset'), 'row_preset', true)
             end
-            action(top - step * 3, 'Save selected row', 'save_row', d ~= nil)
-            action(top - step * 4, 'Apply preset to row', 'load_row', d ~= nil)
+            action(top - step * 2, 'Save selected row', 'save_row', d ~= nil)
+            action(top - step * 3, multiple and 'Apply preset to rows' or 'Apply preset to row', 'load_row', d ~= nil)
+            action(top - step * 4, 'Import Paydex JSON...', 'import_paydex_rows', true)
             divider(top - step * 4 - 10)
             button(bx, top - step * 5.3, half, 'Copy row', 'copy_row', d ~= nil)
             button(bx + half + 8, top - step * 5.3, half, 'Paste row', 'paste_row', d ~= nil and editor.row_clip ~= nil)

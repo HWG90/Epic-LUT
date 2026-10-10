@@ -106,12 +106,23 @@ with tempfile.TemporaryDirectory(prefix='epic-paydex-worker-') as temporary:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
     started = time.monotonic()
     progress = result.with_name(result.name + '.progress')
-    while process.poll() is None and time.monotonic() - started < 8:
-        if progress.exists() and '\treading\t' in progress.read_text():
-            result.with_name(result.name + '.cancel').write_text('cancel')
-            break
-        time.sleep(.02)
-    stdout, stderr = process.communicate(timeout=15)
+    try:
+        while process.poll() is None and time.monotonic() - started < 8:
+            try:
+                heartbeat = progress.read_text()
+            except (FileNotFoundError, PermissionError):
+                # The worker atomically replaces its heartbeat. Like the
+                # runtime reader, retry a transient Windows sharing lock.
+                heartbeat = ''
+            if '\treading\t' in heartbeat:
+                result.with_name(result.name + '.cancel').write_text('cancel')
+                break
+            time.sleep(.02)
+        stdout, stderr = process.communicate(timeout=15)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
     assert process.returncode == 0 and result.read_text() == 'cancel', (stdout, stderr, result.read_text())
     assert not (folder / 'mid-canceled').exists()
     source.write_text(json.dumps({f'Row {i}': row() for i in range(4097)}, separators=(',', ':')), encoding='utf-8')
