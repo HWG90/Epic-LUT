@@ -493,12 +493,13 @@ def main(argv=None):
     parser.add_argument('--build', action='store_true', help='Build and verify six Static/Animation BSL+LLL+MDL archives')
     parser.add_argument('--install', action='store_true', help='Update runtime code/metadata and the authorized additive Pattern default; preserve native libraries, existing defaults and settings')
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument('--static', action='store_true', help='Select current verified static development build')
+    modes.add_argument('--static', action='store_true', help='Select current verified static development build (default)')
+    modes.add_argument('--animation', action='store_true', help='Explicitly select the experimental animation development build')
     modes.add_argument('--rollback', action='store_true', help='Select immutable static R5.5.4 release')
     parser.add_argument('--expect-installed', help='Required first-install/adoption current main.lua or mod.lua SHA-256')
     args = parser.parse_args(argv)
     require_physical_runtime()
-    mode = 'rollback' if args.rollback else 'static' if args.static else 'animation'
+    mode = 'rollback' if args.rollback else 'animation' if args.animation else 'static'
     def run():
         if args.build:
             build_pair(ROOT)

@@ -1,16 +1,18 @@
 # Managed Epic LUT development
 
-The active development deployment uses the integrated LLL editor with the default idle preview. Animation testing is preserved separately and remains disabled in the active copy until requested. Every shared fix is included in Static and Animation packages for BSL, modular LLL and standalone MDL. They use the same source; only animation metadata and the animation gate may differ. Published release ZIPs remain immutable.
+Maintain three package targets: BSL, modular LLL and standalone API-2 MDL. Modular LLL is the default local build and installation target, with the default idle preview. Animation testing is preserved separately and remains disabled in the active copy until explicitly selected. Every shared fix is included in Static and Animation packages for all three targets. They use the same source; only animation metadata and the animation gate may differ. Published release ZIPs remain immutable.
 
 Build and check all six archives, then update the installed static LLL development copy:
 
 ```powershell
-python tools/manage_dev.py --build --static --install
+python tools/manage_dev.py --build --install
 ```
 
 The first installation or explicit adoption after the modular migration requires `--expect-installed` with the current installed entrypoint SHA-256 (`main.lua` for LLL R30 projects). Later installations check the recorded hashes in `dist/deployment/active.json` and refuse to overwrite untracked changes. Running without `--install` leaves installed files alone.
 
 The workflow builds matching Static and Animation packages for all three loaders, checks their shared code, DLL and helper payloads, and saves receipts under `dist/deployment`. LLL uses `tools/build_lll.py`, `main.lua` and separate modules. BSL and MDL use `build.py --loader bsl` and `build.py --loader mdl`; their bundled `mod.lua` bytes are identical for each preview variant. BSL includes its startup archive; MDL is a standalone API 2 bundle without an archive provider.
+
+The local selection defaults to Static LLL. `--static` remains an explicit equivalent; `--animation` selects the separate animation candidate only when requested. Building packages does not change the local provider to BSL or MDL. LLL also supports the legacy MDL package; MDL cannot use LLL's modular entrypoint.
 
 BSL and MDL archives are written to `dist/Epic-LUT-Dev-{Static|Animation}-{BSL|MDL}.zip`. Modular LLL archives are written to `dist/releases/modular-20261010/Epic-LUT-Dev-{Static|Animation}-LLL.zip`. The MDL ZIP is copied and enabled independently in MDL; this helper never installs or activates it. Enable one Epic LUT provider at a time.
 

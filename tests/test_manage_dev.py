@@ -160,6 +160,35 @@ class ManagedDevelopment(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'development build IDs differ'):
             dev.validate_pair(self.paths)
 
+    def test_cli_defaults_static_lll_and_animation_requires_explicit_option(self):
+        artifacts = {key: path.read_bytes() for key, path in self.paths.items()}
+        cases = [
+            ([], 'static', False),
+            (['--install'], 'static', True),
+            (['--static', '--install'], 'static', True),
+            (['--animation', '--install'], 'animation', True),
+            (['--rollback'], 'rollback', False),
+            (['--build', '--install'], 'static', True),
+        ]
+        for argv, mode, installing in cases:
+            with self.subTest(argv=argv):
+                chosen = {'entry': 'main.lua', 'format': 'modular', 'path': 'LLL-only fixture'}
+                with patch.object(dev, 'ROOT', self.root), patch.object(dev, 'require_physical_runtime'), patch.object(dev, 'build_pair') as build, patch.object(dev, 'select_package', return_value=chosen) as select, patch.object(dev, 'deploy', return_value={'mode': mode}) as deploy, patch('builtins.print'):
+                    dev.main(argv)
+                select.assert_called_once_with(self.root, mode)
+                deploy.assert_called_once_with(self.root, chosen, mode, None, installing)
+                self.assertEqual(build.call_count, int('--build' in argv))
+        self.assertEqual(artifacts, {key: path.read_bytes() for key, path in self.paths.items()})
+        self.assertEqual(set(dev.LOADERS), {'bsl', 'lll', 'mdl'})
+
+    def test_cli_preview_modes_are_mutually_exclusive(self):
+        for argv in (['--animation', '--static'], ['--animation', '--rollback']):
+            with self.subTest(argv=argv), patch('sys.stderr'), patch.object(dev, 'deploy') as deploy:
+                with self.assertRaises(SystemExit) as error:
+                    dev.main(argv)
+                self.assertEqual(error.exception.code, 2)
+                deploy.assert_not_called()
+
     def test_mdl_pair_model_payload_provider_and_stamp_guards(self):
         receipt = dev.validate_pair(self.paths)
         self.assertEqual({entry['loader'] for entry in receipt['archives']}, {'bsl', 'lll', 'mdl'})
