@@ -81,6 +81,10 @@ He also painstakingly [b]mapped all 26 bump maps by their actual column-2 R valu
 This deserves much more than a name at the bottom of a page. Scarpheon helped make Epic LUT easier to use and gave us the detail needed to make these features work properly. [b]Thank you, Scarpheon. Your work and continued help have made a huge difference.[/b]
 
 [size=4][b]THE PEOPLE BEHIND THE PALETTE[/b][/size]
+[b]Additional thanks to Scarpheon[/b] for his continued assistance with [b]Shared LUT testing[/b]. Your help with this update has made a real difference.
+
+[b]Arkturus425[/b] — thank you for helping test the [b]Shared LUT Update[/b].
+
 [b]CowboyBingus[/b] found the path. Epic LUT builds on his original LUT discovery and [url=https://github.com/CowboyBingus/MatchYourColors]Match Your Colors[/url] foundation. Reused native adapters retain the included [b]Zero-Clause BSD license[/b]. Thank you, Bingus.
 
 [b]Goose🪿 (honk dat's me honk)[/b] — editor, workflow, vibing and questionable fashion decisions.

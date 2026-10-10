@@ -1,4 +1,4 @@
-param([string]$Package='',[switch]$Pick,[switch]$Navigate,[switch]$ListVariants,[string]$VariantFolder='',[Parameter(Mandatory=$true)][string]$Output,[Parameter(Mandatory=$true)][string]$Result,[int]$OwnerPID=0,[string]$SevenZip='')
+param([string]$Package='',[switch]$Pick,[switch]$Navigate,[switch]$ListVariants,[switch]$RowPresets,[string]$VariantFolder='',[Parameter(Mandatory=$true)][string]$Output,[Parameter(Mandatory=$true)][string]$Result,[int]$OwnerPID=0,[string]$SevenZip='')
 $ErrorActionPreference='Stop'
 function Test-LutShape($Width,$Height) { return (($Width -eq 23 -and $Height -ge 1 -and $Height -le 64) -or ($Width -eq 3 -and $Height -eq 1)) }
 # Data only: ZIP members are never installed or executed. All work is outside the game.
@@ -85,13 +85,155 @@ function Publish($Text) {
     [IO.File]::WriteAllText($Result+'.tmp',$Text,(New-Object Text.UTF8Encoding($false)))
     [IO.File]::Move($Result+'.tmp',$Result)
 }
+function Convert-RowPresets {
+    if([IO.Path]::GetExtension($Package) -ine '.json') {throw 'Choose a Paydex row-presets JSON file'}
+    if((Get-Item -LiteralPath $Package).Length -gt 8MB) {throw 'Preset JSON exceeds 8 MiB'}
+    if([IO.Directory]::Exists($Output) -or [IO.File]::Exists($Output)) {throw 'Row-preset scratch output already exists'}
+    Pulse 'reading'
+    $bytes=[IO.File]::ReadAllBytes($Package)
+    if($bytes.Length -gt 8MB) {throw 'Preset JSON exceeds 8 MiB'}
+    $json=([Text.UTF8Encoding]::new($false,$true)).GetString($bytes)
+    if($json.Length -gt 0 -and $json[0] -eq [char]0xfeff) {$json=$json.Substring(1)}
+    # PowerShell 5.1's JSON conversion silently folds duplicate/case-only keys.
+    # This bounded, data-only parser preserves names/order and rejects duplicates.
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+public static class EpicPaydexRows {
+    public sealed class Row { public string Name; public byte[] Bytes; }
+    sealed class Object { public List<KeyValuePair<string,object>> Members=new List<KeyValuePair<string,object>>(); }
+    sealed class Number { public double Value; public bool NegativeZero; }
+    sealed class Parser {
+        readonly string text; readonly Action pulse; int at,nodes;
+        public Parser(string text,Action pulse) { this.text=text;this.pulse=pulse; }
+        void Fail() { throw new Exception("Invalid Paydex JSON"); }
+        void Space() { while(at<text.Length && (text[at]==' ' || text[at]=='\t' || text[at]=='\r' || text[at]=='\n'))at++; }
+        bool Eat(char c) { Space();if(at<text.Length && text[at]==c){at++;return true;}return false; }
+        void Require(char c) { if(!Eat(c))Fail(); }
+        string String() {
+            Space();if(at>=text.Length || text[at++]!='"')Fail();var s=new StringBuilder();
+            while(at<text.Length) {
+                char c=text[at++];if(c=='"')return s.ToString();if(c<32)Fail();
+                if(c!='\\'){s.Append(c);continue;}
+                if(at>=text.Length)Fail();c=text[at++];
+                switch(c) {
+                    case '"':case '\\':case '/':s.Append(c);break;
+                    case 'b':s.Append('\b');break;case 'f':s.Append('\f');break;
+                    case 'n':s.Append('\n');break;case 'r':s.Append('\r');break;case 't':s.Append('\t');break;
+                    case 'u':
+                        if(at+4>text.Length)Fail();int n;
+                        if(!Int32.TryParse(text.Substring(at,4),NumberStyles.AllowHexSpecifier,CultureInfo.InvariantCulture,out n))Fail();
+                        at+=4;s.Append((char)n);break;
+                    default:Fail();break;
+                }
+            }
+            Fail();return null;
+        }
+        bool Literal(string word) {
+            if(at+word.Length>text.Length || System.String.CompareOrdinal(text,at,word,0,word.Length)!=0)return false;
+            at+=word.Length;return true;
+        }
+        object Value(int depth) {
+            if(depth>32 || ++nodes>500000)throw new Exception("Preset JSON structure exceeds budget");
+            if((nodes&4095)==0 && pulse!=null)pulse();Space();if(at>=text.Length)Fail();char c=text[at];
+            if(c=='"')return String();
+            if(c=='{') {
+                at++;var result=new Object();var names=new HashSet<string>(StringComparer.Ordinal);
+                if(Eat('}'))return result;
+                do { string name=String();if(!names.Add(name))throw new Exception("Duplicate JSON key");Require(':');result.Members.Add(new KeyValuePair<string,object>(name,Value(depth+1)));if(Eat('}'))return result;Require(','); } while(true);
+            }
+            if(c=='[') {
+                at++;var result=new List<object>();if(Eat(']'))return result;
+                do {result.Add(Value(depth+1));if(Eat(']'))return result;Require(',');}while(true);
+            }
+            if(Literal("true"))return true;if(Literal("false"))return false;if(Literal("null"))return null;
+            int start=at;if(c=='-')at++;
+            if(at>=text.Length)Fail();
+            if(text[at]=='0')at++;
+            else {if(text[at]<'1'||text[at]>'9')Fail();do{at++;}while(at<text.Length && text[at]>='0' && text[at]<='9');}
+            bool floating=false;
+            if(at<text.Length && text[at]=='.') {floating=true;at++;int first=at;while(at<text.Length && text[at]>='0'&&text[at]<='9')at++;if(first==at)Fail();}
+            if(at<text.Length && (text[at]=='e'||text[at]=='E')) {floating=true;at++;if(at<text.Length && (text[at]=='+'||text[at]=='-'))at++;int first=at;while(at<text.Length && text[at]>='0'&&text[at]<='9')at++;if(first==at)Fail();}
+            double value;
+            if(!Double.TryParse(text.Substring(start,at-start),NumberStyles.Float,CultureInfo.InvariantCulture,out value) || Double.IsNaN(value) || Double.IsInfinity(value))throw new Exception("Expected a finite JSON number");
+            return new Number { Value=value,NegativeZero=value==0 && text[start]=='-' && floating };
+        }
+        public object Read() {var value=Value(0);Space();if(at!=text.Length)Fail();return value;}
+    }
+    static object Get(Object obj,string key) {foreach(var pair in obj.Members)if(pair.Key==key)return pair.Value;return null;}
+    static void Word(byte[] data,int at,uint value) {Array.Copy(BitConverter.GetBytes(value),0,data,at,4);}
+    public static List<Row> Convert(string text,Action pulse) {
+        var presets=new Parser(text,pulse).Read() as Object;
+        if(presets==null || presets.Members.Count<1 || presets.Members.Count>4096)throw new Exception("Expected 1-4096 named Paydex row presets");
+        var rows=new List<Row>();var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var pair in presets.Members) {
+            if(pulse!=null)pulse();var preset=pair.Value as Object;
+            if(String.IsNullOrWhiteSpace(pair.Key) || preset==null)throw new Exception("Every preset needs a name and a rowData object");
+            var cells=Get(preset,"rowData") as List<object>;
+            if(cells==null || cells.Count!=23)throw new Exception("Every Paydex row must contain exactly 23 columns");
+            var data=new byte[516];Word(data,0,0x20534444);Word(data,4,124);Word(data,8,0x100f);Word(data,12,1);Word(data,16,23);Word(data,20,368);Word(data,28,1);
+            Word(data,76,32);Word(data,80,4);Word(data,84,0x30315844);Word(data,108,0x1000);Word(data,128,2);Word(data,132,3);Word(data,140,1);
+            int at=148;
+            foreach(var item in cells) {
+                var cell=item as Object;
+                if(cell==null || cell.Members.Count!=4)throw new Exception("Every row column must contain exactly r, g, b, a");
+                foreach(string channel in new string[]{"r","g","b","a"}) {
+                    var number=Get(cell,channel) as Number;
+                    if(number==null)throw new Exception("Every row channel must be a finite number");
+                    float value=(float)number.Value;
+                    if(Single.IsNaN(value)||Single.IsInfinity(value))throw new Exception("Row value exceeds float32 range");
+                    if(number.NegativeZero)Word(data,at,0x80000000);else Array.Copy(BitConverter.GetBytes(value),0,data,at,4);at+=4;
+                }
+            }
+            string stem=Regex.Replace(pair.Key,"[^A-Za-z0-9 _-]+","_").Trim(' ','_');
+            if(stem.Length>48)stem=stem.Substring(0,48).TrimEnd();if(stem.Length==0)stem="Preset-"+(rows.Count+1).ToString("D3",CultureInfo.InvariantCulture);
+            string original=stem;int suffix=1;
+            while(!used.Add(stem)) {string tail="-"+(++suffix).ToString(CultureInfo.InvariantCulture);stem=original.Substring(0,Math.Min(original.Length,48-tail.Length)).TrimEnd()+tail;}
+            rows.Add(new Row { Name="row-"+stem+".dds",Bytes=data });
+        }
+        return rows;
+    }
+}
+'@
+    # Complete schema/float validation happens before any scratch file is created.
+    try {$rows=[EpicPaydexRows]::Convert($json,[Action]{Pulse 'reading'})}
+    catch {
+        # Delegate exceptions acquire a .NET invocation wrapper. Preserve the
+        # worker's cancel protocol when cancellation arrives during JSON parsing.
+        $reason=$_.Exception
+        while($reason) {if($reason.Message -eq 'Import canceled'){throw 'Import canceled'};$reason=$reason.InnerException}
+        throw
+    }
+    $names=New-Object 'System.Collections.Generic.List[string]'
+    foreach($row in $rows) {$names.Add($row.Name)}
+    $manifest=($names -join "`n")+"`n"
+    if([Text.Encoding]::UTF8.GetByteCount($manifest) -gt 256KB) {throw 'Row-preset manifest exceeds budget'}
+    Pulse 'extracting'
+    New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
+    $script:rowScratchCreated=$true
+    $index=0
+    foreach($row in $rows) {
+        $script:percent=[int](100*$index/$rows.Count);$script:detail='Paydex / '+$rows.Count+' named rows';Pulse 'extracting';$index++
+        $path=Join-Path $Output $row.Name;$script:rowScratchFiles.Add($path);[IO.File]::WriteAllBytes($path,$row.Bytes)
+    }
+    $path=Join-Path $Output 'rows.tsv';$script:rowScratchFiles.Add($path)
+    [IO.File]::WriteAllText($path,$manifest,(New-Object Text.UTF8Encoding($false)))
+    $script:percent=100;Pulse 'extracting'
+    Publish "row-presets`nrows.tsv"
+    $script:rowScratchPublished=$true
+}
+$script:rowScratchCreated=$false;$script:rowScratchPublished=$false
+$script:rowScratchFiles=New-Object 'System.Collections.Generic.List[string]'
 try {
     Pulse 'starting'
     if($Pick) {
         Add-Type -AssemblyName System.Windows.Forms
         $dialog=New-Object Windows.Forms.OpenFileDialog
-        $dialog.Filter='LUT palettes or mod archives (*.dds;*.zip;*.rar)|*.dds;*.zip;*.rar'
-        $dialog.Title='Epic LUT - Choose a palette or mod archive'
+        $dialog.Filter=if($RowPresets){'Paydex row presets (*.json)|*.json'}else{'LUT palettes or mod archives (*.dds;*.zip;*.rar)|*.dds;*.zip;*.rar'}
+        $dialog.Title=if($RowPresets){'Epic LUT - Import Paydex row presets'}else{'Epic LUT - Choose a palette or mod archive'}
         $timer=New-Object Windows.Forms.Timer
         $timer.Interval=500
         $timer.Add_Tick({try {Pulse 'picker'} catch {try {Publish 'cancel'} finally {[Environment]::Exit(0)}}})
@@ -101,6 +243,7 @@ try {
             $Package=$dialog.FileName
         } finally {$timer.Stop();$timer.Dispose();$dialog.Dispose()}
     }
+    if($RowPresets) {Convert-RowPresets;return}
     if([IO.Path]::GetExtension($Package) -ieq '.dds') {
         if((Get-Item -LiteralPath $Package).Length -gt 1MB) {throw 'DDS size budget exceeded'}
         New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
@@ -373,6 +516,10 @@ public static class EpicVariantWindow {
     Publish ("ok`n"+($files -join "`n"))
 } catch {if($_.Exception.Message -eq 'Import canceled') {Publish 'cancel';return};Publish ("error`n"+$_.Exception.Message.Replace("`n",' ').Replace("`r",' '));exit 1}
 finally {
+    if($script:rowScratchCreated -and -not $script:rowScratchPublished) {
+        foreach($file in $script:rowScratchFiles) {if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}
+        if([IO.Directory]::Exists($Output) -and [IO.Directory]::GetFileSystemEntries($Output).Length -eq 0) {[IO.Directory]::Delete($Output)}
+    }
     if($zip) {$zip.Dispose()}
     if($staging -and [IO.Directory]::Exists($staging)) {
         # Only this worker's generated flat .bin files exist here; no archive paths are used.

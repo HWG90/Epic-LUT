@@ -39,6 +39,10 @@ function P.result(text)
         )
         return { preset = lines[2], label = lines[3], names = {} }
     end
+    if lines[1] == 'row-presets' then
+        assert(#lines == 2 and lines[2] == 'rows.tsv', 'Invalid Paydex row import result')
+        return { rows = lines[2], names = {} }
+    end
     assert(lines[1] == 'ok', lines[2] or 'Archive extraction failed')
     assert(#lines >= 2 and #lines <= P.MAX_TABLES + 1, 'Invalid extracted palette count')
     local names, seen = {}, {}

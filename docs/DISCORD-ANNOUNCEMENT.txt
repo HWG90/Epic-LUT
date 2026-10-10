@@ -15,6 +15,10 @@ Paint your Helldiver in-game. **F9** for Basic Mode; **F10** for the full LUT Ed
 ## A MASSIVE THANK YOU TO SCARPHEON
 For his time, patience and continued testing—and for mapping **all 26 bump maps** by their actual R values. His work was vital to getting **Export to Patch** working correctly and making Epic LUT a better tool for everyone. **Thank you, Scarpheon.**
 
+Additional thanks to **Scarpheon** for his continued assistance with **Shared LUT testing**.
+
+**Arkturus425:** thank you for helping test the **Shared LUT Update**.
+
 **CowboyBingus:** native adapters and LUT foundation.
 **Plain Furniture:** Debug LUT.
 **[Lytatroan](https://www.nexusmods.com/profile/Lytatroan):** human-made thumbnail.

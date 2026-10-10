@@ -12,6 +12,7 @@ end
 local result = p.result('ok\nlut001.dds\nlut015.dds')
 assert(result.names[2] == 'lut015.dds' and p.result('cancel').canceled)
 assert(p.result('preset\npreset.tsv\nShared Set').label == 'Shared Set', 'Shared preset result rejected')
+assert(p.result('row-presets\nrows.tsv').rows == 'rows.tsv', 'Paydex row result rejected')
 for _, text in ipairs({
     'ok',
     'ok\n../outside.dds',
@@ -19,6 +20,8 @@ for _, text in ipairs({
     'preset\n../preset.tsv\nShared',
     'preset\npreset.tsv\n../Shared',
     'preset\npreset.tsv\nShared\nextra',
+    'row-presets\n../rows.tsv',
+    'row-presets\nrows.tsv\nextra',
     string.rep('x', 8193),
 }) do
     assert(not pcall(p.result, text), 'Invalid result accepted')

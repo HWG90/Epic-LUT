@@ -94,6 +94,10 @@ Choose **Armor LUT**, then select a **Cape LUT** entry from its dropdown to edit
 
 Click the texture ID beside the LUT dropdown to give it a custom name. Names are saved locally by the exact texture ID. Hover the name to see its original hash; save an empty name to show the hash again.
 
+Use **Tools → Rows → Import Paydex JSON...** to choose a Paydex row-presets JSON file. Imported rows appear immediately in the preset selector. Choose a destination row and press **Apply preset to row** separately. The importer preserves full RGBA/material values, reuses identical existing presets, and gives conflicting names a suffix instead of overwriting them.
+
+Use **Dock / Undock** in Tools to place its tabs below the swatches inside the LUT Editor or return them to a floating window. The docked Tools body scrolls independently when space is limited.
+
 The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
 
 Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.
@@ -164,6 +168,10 @@ And a **massive additional thank you to Scarpheon for mapping every bump map**. 
 That mapping makes material editing easier for everyone using this tool. Alongside his repeated testing and Export to Patch work, it is a substantial contribution to what Epic LUT has become. **Scarpheon, thank you for the patience, the detail, and the continued help. You have made this a much better tool for people.**
 
 That work deserves more than a name in a credits list. Epic LUT is a better tool because of the time and care he has put into it. **Thank you, Scarpheon. Your help made this possible.**
+
+An additional thank you to **Scarpheon** for his continued assistance with **Shared LUT testing**. Your help with this update has made a real difference.
+
+**Arkturus425** — thank you for helping test the **Shared LUT Update**.
 
 **Plain Furniture** created the bundled **Debug LUT**.
 

@@ -1,6 +1,6 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E = {}
-function E.new(m, document, note, save, presets, live_document, open_export, save_patch, save_bulk)
+function E.new(m, document, note, save, presets, live_document, open_export, save_patch, save_bulk, import_rows)
     local ffi = require('ffi')
     local self = { undo = {}, redo = {}, busy = false, value_scroll = 0 }
     local channels = { { 1, 2, 3 }, { 1, 2, 3, 4 }, { 1 }, { 2 }, { 3 }, { 4 } }
@@ -538,6 +538,9 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         return note('Custom edits reset to the imported palette. Apply to update the live LUTs.')
     end
     function self.wheel(x, y, delta)
+        if self.tools and self.tools.wheel and self.tools.wheel(x, y, delta) then
+            return true
+        end
         local b = self.grid_bounds
         if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
             self.grid_first = math.max(1, math.min((self.grid_max or 0) + 1, (self.grid_first or 1) - delta / 120 * 3))
@@ -821,6 +824,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         open_export = open_export,
         save_patch = save_patch,
         save_bulk = save_bulk,
+        import_rows = import_rows,
         remember = remember,
         change = change,
         history = history,

@@ -311,6 +311,16 @@ function C.new(deps)
                         end,
                     },
                     {
+                        id = 'import_paydex_rows',
+                        type = 'button',
+                        label = 'Import Paydex JSON...',
+                        description = 'Import named material rows into local presets. Existing presets are preserved; choose a row and Apply separately.',
+                        disabled = not deps.import_rows,
+                        on_activate = function()
+                            return assert(deps.import_rows, 'Paydex row import unavailable')()
+                        end,
+                    },
+                    {
                         id = 'save_row',
                         type = 'button',
                         label = 'Save row preset',
@@ -329,6 +339,11 @@ function C.new(deps)
                         on_activate = function()
                             local name = self.handle.get('row_preset')
                             local data = preset_files.load_row(name)
+                            local current = assert(document(), 'Load a material LUT first')
+                            assert(
+                                current.width == 23 and not current.read_only and not current.stale,
+                                'Load a current editable material LUT first'
+                            )
                             local d = remember()
                             ffi.copy(d.data + (self.handle.get('edit_row') - 1) * d.width * 4, data, d.width * 16)
                             self.sync()

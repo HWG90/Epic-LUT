@@ -54,6 +54,7 @@ local m = {
         end,
     },
     lut_files = dofile('src/presets/lut_files.lua'),
+    paydex_rows = dofile('src/presets/paydex_rows.lua'),
     editor_tools = dofile('src/editor/editor_tools.lua'),
     table_index = dofile('src/imports/table_index.lua'),
     file_io = dofile('src/core/file_io.lua'),
@@ -940,7 +941,7 @@ local actual_launch = m.native_import.launch_worker
 local workers = {}
 m.native_import.launch_worker = function(args)
     local base = assert(args:match('%-Result "([^"]+)%.txt"'))
-    local worker = { pid = 12345, alive = true, base = base, closed = false }
+    local worker = { pid = 12345, alive = true, base = base, closed = false, args = args }
     function worker.running()
         return worker.alive
     end
@@ -982,6 +983,56 @@ recovery.on_update(ctx, 0.1)
 assert(workers[4].closed and #workers == 5, 'Retry launched a second picker before closing the old one')
 workers[5].alive = false
 recovery.on_update(ctx, 0.1)
+-- Direct JSON row imports work with no loaded editor table and keep the
+-- current import, LUT selection and GPU bindings intact through retry/success.
+local before_paydex = quick_info().editor
+local paydex_creates, paydex_lut = creates, rh.get('lut')
+local paydex_bindings = {}
+for key, value in pairs(bound) do
+    paydex_bindings[key] = value
+end
+test_frontend.menu.visible, test_frontend.menu.page = true, 2
+assert(rh.activate('import_paydex_rows'))
+local row_worker = workers[#workers]
+assert(row_worker.args:find(' -RowPresets ', 1, true) and not row_worker.args:find(' -Navigate ', 1, true))
+recovery.on_update(ctx, 0.1)
+assert(api.mods.epic_direct_lut.controls.import_paydex_rows.disabled, 'Pending JSON import remained enabled')
+assert(rh.activate('retry_import'))
+row_worker.alive = false
+recovery.on_update(ctx, 0.1)
+row_worker = workers[#workers]
+assert(row_worker.args:find(' -RowPresets ', 1, true), 'Retry changed JSON picker to archive picker')
+if not pcall(ffi.typeof, 'epic_test_rows_mkdir') then
+    ffi.cdef('int epic_test_rows_mkdir(const char*,void*) __asm__("CreateDirectoryA");')
+end
+assert(ffi.load('kernel32').epic_test_rows_mkdir(row_worker.base, nil) ~= 0)
+local row_pixels = ffi.new('float[92]')
+row_pixels[0], row_pixels[3], row_pixels[8], row_pixels[91] = -0.125, 0.75, 13.25, 5
+local row_bytes = m.dds.encode(row_pixels, 23, 1)
+local saved_row_path = m.paths.new().presets .. '/row-Paydex-integration.dds'
+os.remove(saved_row_path)
+m.file_io.write(row_worker.base .. '/row-Paydex-integration.dds', row_bytes)
+m.file_io.write(row_worker.base .. '/rows.tsv', 'row-Paydex-integration.dds\n')
+m.file_io.write(row_worker.base .. '.txt', 'row-presets\nrows.tsv')
+row_worker.alive = false
+recovery.on_update(ctx, 0.1)
+assert(row_worker.closed and not api.mods.epic_direct_lut.controls.import_paydex_rows.disabled)
+assert(m.file_io.read(saved_row_path, 1024) == row_bytes, 'JSON rows were not published as exact local presets')
+assert(
+    rh.get('row_preset') == 'Paydex-integration' and rh.get('row_preset_select') > 1,
+    'JSON import did not refresh/select the row preset'
+)
+assert(
+    quick_info().editor == before_paydex and rh.get('lut') == paydex_lut and creates == paydex_creates,
+    'JSON row import changed the editor table, target or GPU textures'
+)
+for key, value in pairs(paydex_bindings) do
+    assert(bound[key] == value, 'JSON row import changed a live binding')
+end
+assert(test_frontend.menu.visible and test_frontend.menu.page == 2, 'JSON import lost the previous editor page')
+print(
+    'PASS direct Paydex import: JSON-only picker, serialized mode-preserving retry, exact named row publication, immediate selector refresh and unchanged editor/live gear'
+)
 assert(recovery.on_disable(ctx))
 -- Reusing the same addon object must not carry old documents or worker results
 -- into the next activation, and cleanup must finish before state is discarded.

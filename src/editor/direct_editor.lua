@@ -223,10 +223,13 @@ local function load_dds(path)
     refresh_needed = not pcall(refresh)
     return message('DDS imported (' .. w .. ' x ' .. h .. '). Send to LUT Editor to edit; Apply LUT sends it to gear.')
 end
-local function load(pick)
+local function load(pick, rows_mode)
     assert(not pending, 'ZIP import is still pending')
-    resume_done = true
-    resume_job = nil
+    operations.last_import_rows_mode = rows_mode
+    if not rows_mode then
+        resume_done = true
+        resume_job = nil
+    end
     local name
     if not pick then
         name = handle.get('file')
@@ -257,7 +260,8 @@ local function load(pick)
         .. script
         .. '"'
         .. input
-        .. ' -Navigate -Output "'
+        .. (rows_mode and ' -RowPresets' or ' -Navigate')
+        .. ' -Output "'
         .. base
         .. '" -Result "'
         .. base
@@ -267,18 +271,23 @@ local function load(pick)
     pending = import_jobs.start({
         base = base,
         pick = pick,
+        rows_mode = rows_mode,
         worker = worker,
         menu_visible = frontend.menu and frontend.menu.visible,
         menu_page = frontend.menu and frontend.menu.page,
     })
     return message(
-        pick and 'Choose a DDS or ZIP in the Windows file picker.' or 'Extracting ZIP palettes. No Python is used.'
+        rows_mode and 'Choose a Paydex row-presets JSON file.'
+            or (
+                pick and 'Choose a DDS or ZIP in the Windows file picker.'
+                or 'Extracting ZIP palettes. No Python is used.'
+            )
     )
 end
 local function cancel_import(retry)
     if not import_jobs.cancel(retry) then
         if retry then
-            return load(true)
+            return load(true, operations.last_import_rows_mode)
         end
         return message('No import is running.')
     end
@@ -292,6 +301,32 @@ local function accept_import(text, job)
         if result.canceled then
             return message('File selection canceled; current palette retained.')
         end
+        if result.rows then
+            assert(job.rows_mode, 'Unexpected Paydex row import result')
+            local names, created = m.paydex_rows
+                .new({
+                    folder = paths.presets,
+                    read = m.file_io.read,
+                    write = m.file_io.write,
+                    dds = m.dds,
+                })
+                .import(job.base, result.rows)
+            assert(palette_editor.handle.set('row_preset', names[1]))
+            palette_editor.refresh_presets()
+            if job.menu_visible and frontend.menu then
+                frontend.menu.visible = true
+                frontend.menu.page = job.menu_page or frontend.menu.page
+                frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
+            end
+            return message(
+                'Imported '
+                    .. #names
+                    .. ' Paydex row presets ('
+                    .. created
+                    .. ' new). Choose a row preset and Apply when ready.'
+            )
+        end
+        assert(not job.rows_mode, 'Paydex import returned a palette result')
         if result.preset then
             if job.menu_visible and frontend.menu then
                 frontend.menu.visible, frontend.menu.suspended = true, true
@@ -348,7 +383,7 @@ local function poll_job()
         return accept_import(event.text, event.job)
     end
     if event.kind == 'retry' then
-        return load(true)
+        return load(true, event.job and event.job.rows_mode)
     end
     return message(event.message)
 end
@@ -3946,6 +3981,11 @@ return {
                     return action(function()
                         return operations.export_custom_dds(name, naming)
                     end)
+                end,
+                function()
+                    return action(function()
+                        return load(true, true)
+                    end)
                 end
             )
         end
@@ -4010,6 +4050,9 @@ return {
                     pending = import_jobs.job
                 end
                 message('Import stopped safely; editor remains available: ' .. tostring(import_error))
+            end
+            if api.mods[handle.id].controls.import_paydex_rows then
+                api.mods[handle.id].controls.import_paydex_rows.disabled = pending ~= nil
             end
             if editor_pending and os.time() >= (editor_pending.next or 0) then
                 local job = editor_pending

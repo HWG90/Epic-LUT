@@ -70,6 +70,7 @@ function J.new(protocol, deps)
                 return {
                     kind = job.retry and 'retry' or 'canceled',
                     message = 'Import canceled; current palette retained.',
+                    job = job,
                 }
             end
             return

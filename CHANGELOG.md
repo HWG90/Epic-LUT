@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Import Paydex JSON row libraries directly from Tools > Rows, preserving complete float RGBA values, existing presets and the current editor/gear state.
+- Dock or undock Tools beneath the LUT grid, with independent scrolling and shared Import, Rows, Export and Options controls.
+- Thank Arkturus425 and Scarpheon for helping test the Shared LUT update.
 - Size editable preset-name hit areas to their text, preserve a large dropdown opening area, and enlarge dropdown/step controls; keep the caret inside its own field.
 - Clear the previous row-preset name when choosing New preset and reject blank saves before modifying a saved row.
 - Add an explicit Apply Cape action for imported palettes; isolate Cape material bindings from Armor, Helmet and the separate tint slot.

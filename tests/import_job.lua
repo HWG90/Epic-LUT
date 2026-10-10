@@ -28,7 +28,7 @@ local function worker()
     return w
 end
 local first = worker()
-jobs.start({ base = 'one', worker = first })
+jobs.start({ base = 'one', worker = first, rows_mode = true })
 assert(not pcall(jobs.start, { base = 'second', worker = worker() }), 'Concurrent import allowed')
 files['one.txt.progress'] = '42\textracting\t0\t30'
 now = 1
@@ -36,7 +36,9 @@ assert(not jobs.poll() and jobs.job.percent == 30)
 assert(jobs.cancel(true) and cancellations['one.txt.cancel'])
 assert(not jobs.poll(), 'Retry emitted before old worker closed')
 first.alive = false
-assert(jobs.poll().kind == 'retry' and first.closed == 1 and not jobs.job)
+local retry = jobs.poll()
+assert(retry.kind == 'retry' and first.closed == 1 and not jobs.job)
+assert(retry.job.rows_mode == true, 'Retry discarded the Paydex picker mode')
 jobs.close()
 assert(first.closed == 1, 'Closed handle twice')
 local second = worker()

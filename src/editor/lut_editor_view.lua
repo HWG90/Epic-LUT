@@ -30,6 +30,7 @@ function V.new(deps)
         local dark, blue, white, muted = theme.panel, theme.header, theme.white, theme.muted
         local show_values = h.get('value_editor_visible') ~= false
         local left = show_values and math.floor(ui.w * 0.70) or ui.w
+        local tools_bounds
         self.grid_bounds, self.value_bounds = nil, nil
         if not d then
             self.grid_max = 0
@@ -170,6 +171,9 @@ function V.new(deps)
         end
         local function overlays()
             if self.tools and self.tools.is_open() then
+                if self.tools.dock then
+                    self.tools.dock(ui, tools_bounds)
+                end
                 self.tools.popup(ui)
             end
             if self.pattern_editor then
@@ -369,6 +373,23 @@ function V.new(deps)
                 portrait_width = requested_width
             end
         end
+        local docking = not self.embedded
+            and self.tools
+            and self.tools.is_open()
+            and self.tools.is_docked
+            and self.tools.is_docked()
+        local function dock_tools(ceiling, wanted)
+            local available = ceiling - gridbottom - 16 * font_scale
+            if not docking or available <= 0 then
+                return
+            end
+            tools_bounds = {
+                x = ui.x + 8 * font_scale,
+                y = gridbottom + 8 * font_scale,
+                w = left - (portrait_width or 0) - 16 * font_scale,
+                h = math.min(available, wanted),
+            }
+        end
         if not d then
             -- Empty documents share the responsive header with loaded ones.
             -- Flow each block from its predecessor instead of retaining the
@@ -423,6 +444,7 @@ function V.new(deps)
                 button(ui.x + 12 + load_width + gap, cursor, browse_width, 'Choose file...', 'browse', row_height)
                 cursor = cursor - gap
                 message('Uses currently worn LUT values; a file import is optional.', 14, muted, 'hint')
+                dock_tools(cursor, 300 * font_scale)
                 overlays()
                 return
             end
@@ -445,6 +467,7 @@ function V.new(deps)
                 cursor = cursor - gap
             end
             message('Uses the applied values from the selected Live LUT.', 14, muted, 'hint')
+            dock_tools(cursor, 300 * font_scale)
             overlays()
             return
         end
@@ -488,6 +511,21 @@ function V.new(deps)
         end
         local space = math.max(18, grid_top - grid_floor)
         local cell = math.max(4, math.min(d.height > 8 and 40 or 64, width_cell, space / math.min(d.height, 8)))
+        if docking then
+            local minimum = self.tools.minimum_height and self.tools.minimum_height(ui) or 140
+            local wanted = math.max(minimum, math.min(260 * font_scale, space * 0.48))
+            local below_rows = space - cell * math.min(d.height, 8) - 16 * font_scale
+            if below_rows >= minimum then
+                wanted = math.min(260 * font_scale, below_rows)
+            end
+            -- Keep the grid's cell size and at least two rows; the row viewport
+            -- scrolls rather than drawing swatches through the docked Tools.
+            dock_tools(grid_top - cell * math.min(2, d.height) - 30 - 8 * font_scale, wanted)
+            if tools_bounds then
+                grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30
+                space = math.max(4, grid_top - grid_floor)
+            end
+        end
         local visible_rows = math.max(1, math.min(d.height, math.floor(space / cell)))
         self.grid_max = math.max(0, d.height - visible_rows)
         self.grid_first = math.max(1, math.min(self.grid_max + 1, self.grid_first or 1))
@@ -506,7 +544,7 @@ function V.new(deps)
         if self.grid_max > 0 then
             ui.bounded(
                 ui.x + 10,
-                gridbottom + 11,
+                grid_floor - 19,
                 'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
                 12,
                 muted,
@@ -514,7 +552,7 @@ function V.new(deps)
                 'hint'
             )
             local function navigate(x, label, direction)
-                ui.button(x, gridbottom + 3, 54, 24, label, function()
+                ui.button(x, grid_floor - 27, 54, 24, label, function()
                     self.grid_first =
                         math.max(1, math.min(self.grid_max + 1, self.grid_first + direction * visible_rows))
                 end)

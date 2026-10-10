@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from tools.runtime_guard import require_physical_runtime,blocked_path
 require_physical_runtime()
 assert blocked_path('C:/Users/test/AppData/Local/Microsoft/WindowsApps/python.exe')
@@ -22,7 +24,7 @@ TESTS = (
     'frontend', 'frontend_suspension', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'appearance_state', 'appearance_persistence', 'direct_appearance_runtime', 'cape_editor', 'direct_editor', 'palette_editor', 'standalone_frontend',
     'import_view', 'table_groups', 'original_luts', 'basic_view', 'update_check',
-    'editor_state', 'direct_setup', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'pattern_import_matching', 'floating_dropdown', 'preset_dropdown', 'slider_preview', 'input_preview', 'editor_layout', 'mcm_ui_port', 'mcm_settings', 'preset_export', 'export_pairing', 'bulk_dds_export', 'armory_mirror', 'limb_caps',
+    'editor_state', 'direct_setup', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'paydex_rows', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'pattern_import_matching', 'floating_dropdown', 'preset_dropdown', 'tools_docking', 'slider_preview', 'input_preview', 'editor_layout', 'mcm_ui_port', 'mcm_settings', 'preset_export', 'export_pairing', 'bulk_dds_export', 'armory_mirror', 'limb_caps',
 )
 runner = LuaRunner()
 for path in sorted([*ROOT.glob('src/**/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):
@@ -31,4 +33,5 @@ for path in (ROOT/'dist/armor_lut_editor/mod.lua', ROOT/'dist/Epic-LUT-BSL-start
     runner.check(path)
 for name in TESTS:
     runner.check(ROOT/'tests'/f'{name}.lua', execute=True)
+subprocess.run([sys.executable, str(ROOT/'tests/test_paydex_worker.py')], cwd=ROOT, check=True)
 print('PASS: source and bundled LuaJIT syntax; isolated editor contracts')

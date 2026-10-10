@@ -1601,6 +1601,10 @@ function M.new(api, measure, Text)
                             return
                         end
                         local view = e.field_bounds
+                        if not view then
+                            cancel_custom_drag('field hidden')
+                            return
+                        end
                         local offset = (px * self.window_bounds.scale + self.window_bounds.x - view.text_x) / view.scale
                             + (e.scroll or 0)
                         e.cursor = Text.at(e, offset, view.measure)
@@ -1925,6 +1929,11 @@ function M.new(api, measure, Text)
         local commands = {}
         hits = {}
         choice_bounds = {}
+        if self.text_edit then
+            -- A scrollable host can omit the focused field this frame. Keep
+            -- its draft, but do not let an old caret box consume other controls.
+            self.text_edit.field_bounds = nil
+        end
         local floating_requests, floating_by_id, floating_context = {}, {}, nil
         local choice_widgets = {}
         local function focus_floating(owner)
