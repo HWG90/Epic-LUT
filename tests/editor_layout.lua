@@ -286,10 +286,10 @@ local closed_count = #compose()
 for _, hidden in ipairs({ 'Import', 'Rows', 'Export', 'Options' }) do
     assert(not label(compose(), hidden), 'Closed Tools left a child shortcut visible: ' .. hidden)
 end
-local function shortcut_color(text)
+local function tab_color(text)
     local commands = compose()
     for i, command in ipairs(commands) do
-        if not command.popup and command.full_text == text then
+        if command.popup and command.full_text == text then
             local surface = commands[i - 1]
             assert(surface and surface.type == 'rect', 'No shortcut surface: ' .. text)
             return table.concat(surface.c, ':')
@@ -300,7 +300,18 @@ end
 tap_label('Tools')
 commands = compose()
 assert(editor.tools.is_open() and menu.floating_bounds, 'Tools button did not open an actual floating window')
-assert(shortcut_color('Import') ~= shortcut_color('Rows'), 'Active tool shortcut is not highlighted')
+assert(tab_color('Import') ~= tab_color('Rows'), 'Active floating tool tab is not highlighted')
+for _, command in ipairs(commands) do
+    if not command.popup then
+        assert(
+            command.full_text ~= 'Import'
+                and command.full_text ~= 'Rows'
+                and command.full_text ~= 'Export'
+                and command.full_text ~= 'Options',
+            'Floating Tools duplicated its footer tabs'
+        )
+    end
+end
 tap_label('Tools')
 assert(editor.tools.is_open(), 'Re-clicking Tools closed its window')
 tap_label('Import')
@@ -528,7 +539,7 @@ for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 110
     footer_padding_ratio = ratio
     assert(editor.grid_bounds.y >= body.y + body.h, 'Growing footer overlaps the pixel grid')
     local previous = assert(label(commands, 'Tools'))
-    for _, child in ipairs({ 'Import', 'Rows', 'Export', 'Options', 'Scratch', 'Hide Values' }) do
+    for _, child in ipairs({ 'Scratch', 'Hide Values' }) do
         local current = assert(label(commands, child), 'Footer child missing at scale: ' .. child)
         assert(
             current.x > previous.x and previous.x + previous.text_width <= current.x,
@@ -536,7 +547,7 @@ for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 110
         )
         previous = current
     end
-    assert(shortcut_color('Rows') ~= shortcut_color('Import'), 'Flyout lost its active child highlight')
+    assert(tab_color('Rows') ~= tab_color('Import'), 'Floating Tools lost its active tab highlight')
     editor.tools.close()
     commands = compose()
     assert(

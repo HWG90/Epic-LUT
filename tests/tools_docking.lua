@@ -189,7 +189,13 @@ assert(not editor.tools.is_docked(), 'Tools no longer defaults to its independen
 do
     local floating_rows = compose()
     local previous = assert(label(floating_rows, 'my-row', true))
-    for _, name in ipairs({ 'Save selected row', 'Apply preset to row', 'Import Paydex JSON...', 'Copy row' }) do
+    for _, name in ipairs({
+        'Save selected row',
+        'Apply preset to row',
+        'Copy row',
+        'Reset row',
+        'Import Paydex JSON...',
+    }) do
         local current = assert(label(floating_rows, name, true))
         assert(previous.y > current.y + current.size, 'Rows controls are out of order/overlap: ' .. name)
         previous = current
@@ -213,6 +219,14 @@ local function contained()
     local scale, wb = menu.window_bounds.scale, menu.window_bounds
     local footer = assert(label(compose(), 'Tools', false))
     assert(wb.y + b.y * scale > footer.y + footer.size, 'Docked Tools overlaps the footer')
+    local footer_title =
+        assert(label(compose(), 'LUT Editor Tools', false), 'Docked Tools heading did not move into the footer')
+    assert(footer_title.y + footer_title.size < wb.y + b.y * scale, 'Docked Tools title still occupies body height')
+    for _, c in ipairs(compose()) do
+        if c.type == 'text' and (c.full_text or c.text) == 'LUT Editor Tools' then
+            assert(c.y == footer_title.y, 'Duplicate Tools title remains in the docked body')
+        end
+    end
     for _, command in ipairs(compose()) do
         if
             command.ui_role == 'swatch_fill'
@@ -271,6 +285,7 @@ assert(
     'Dock/selection applied rows automatically'
 )
 -- A focused name loses caret hit priority as soon as its row scrolls away.
+menu.window_height = 820
 editor.tools.scroll = 0
 commands = reveal('Example')
 local editable = assert(label(commands, 'Example', false))
@@ -310,6 +325,7 @@ tap((shared_left + shared_right) / 2, (shared_bottom + shared_top) / 2)
 assert(not menu.text_edit and #editor.undo == before_reset + 1, 'Hidden name caret intercepted the docked Reset action')
 assert(handle.activate('undo'))
 assert(ffi.string(document.data, document.width * document.height * 16) == initial_pixels)
+menu.window_height = 1000
 pattern_open = true
 commands = compose()
 local pattern_window
@@ -384,7 +400,7 @@ assert(imports == 1, 'Busy Paydex import button still activated')
 import_control.disabled = false
 click('Undock', false)
 commands = compose()
-tab_sets(commands, 1, 1)
+tab_sets(commands, 0, 1)
 assert(
     editor.tools.is_open() and not editor.tools.is_docked() and not editor.tools.bounds,
     'Undock closed Tools or kept stale wheel bounds'
@@ -398,7 +414,25 @@ end
 assert(floating and editor.tools.tab == 'rows' and label(commands, 'Dock', true), 'Undock lost tabs/window controls')
 document = current
 assert(ffi.string(document.data, document.width * document.height * 16) == initial_pixels)
-editor.tools.close()
+click('Dock', true)
+commands = compose()
+local closing_bounds = assert(editor.tools.bounds)
+local close_button
+for _, c in ipairs(commands) do
+    if
+        c.type == 'text'
+        and (c.full_text or c.text) == 'X'
+        and not c.popup
+        and c.x >= menu.window_bounds.x + closing_bounds.x * menu.window_bounds.scale
+        and c.x < menu.window_bounds.x + (closing_bounds.x + closing_bounds.w) * menu.window_bounds.scale
+        and c.y >= menu.window_bounds.y + closing_bounds.y * menu.window_bounds.scale
+    then
+        close_button = c
+    end
+end
+assert(close_button, 'Docked Tools lost its visible Close control')
+tap(close_button.x + 2, close_button.y + 2)
+assert(not editor.tools.is_open() and menu.visible, 'Dock Close dismissed the whole editor instead of Tools')
 commands = compose()
 tab_sets(commands, 0, 0)
 assert(

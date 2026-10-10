@@ -32,6 +32,28 @@ function R.new(deps)
     function self.start(items, row)
         assert(self.stop(), 'Previous highlight restoration pending')
         assert(#items > 0, 'No live target for this region')
+        assert(type(row) == 'number' and row % 1 == 0 and row >= 1, 'Invalid highlight region')
+        -- Validate the complete target set before allocating or changing any
+        -- binding. Only the material and Pattern layouts have known colors.
+        for _, item in ipairs(items) do
+            local source, b = item.source, item.binding
+            assert(source and source.data and b, 'Highlight target pixels unavailable')
+            assert(
+                (
+                    source.width == 23
+                    and type(source.height) == 'number'
+                    and source.height % 1 == 0
+                    and source.height >= 1
+                    and source.height <= 64
+                ) or (source.width == 3 and source.height == 1),
+                'Unsupported highlight table shape'
+            )
+            assert(row <= source.height, 'Selected region does not exist on this target')
+            assert(
+                item.object ~= nil and deps.present(b) and deps.binding(b) == item.object,
+                'Live highlight target changed; load current colors again'
+            )
+        end
         self.job = {
             items = items,
             remaining = 4,
@@ -42,15 +64,22 @@ function R.new(deps)
         local ok, why = pcall(function()
             for _, item in ipairs(items) do
                 local source = item.source
-                assert(row >= 1 and row <= source.height, 'Selected region does not exist on this target')
                 local data = ffi.new('float[?]', source.width * source.height * 4)
                 ffi.copy(data, source.data, source.width * source.height * 16)
-                local at = (row - 1) * source.width * 4
-                data[at] = 1
-                data[at + 1] = 0
-                data[at + 2] = 1
+                -- Camo and bump/curvature colors can cover the primary color.
+                -- Flash those documented RGB contributions too; retain every
+                -- alpha, material/mask value, tint, emission and camo selector.
+                local columns = source.width == 23 and { 1, 3, 6, 7, 13, 17, 18, 19, 20 } or { 1 }
+                for _, column in ipairs(columns) do
+                    local at = ((row - 1) * source.width + column - 1) * 4
+                    data[at], data[at + 1], data[at + 2] = 1, 0, 1
+                end
                 local b = item.binding
                 local applied, texture = pcall(function()
+                    assert(
+                        deps.present(b) and deps.binding(b) == item.object,
+                        'Live highlight target changed; load current colors again'
+                    )
                     local _, result = deps.apply({ data = data, width = source.width, height = source.height }, { b })
                     return result
                 end)

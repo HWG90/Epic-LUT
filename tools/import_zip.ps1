@@ -37,9 +37,10 @@ public static class EpicImportJob {
 }
 function Pulse($Phase='') {
     Check-Owner
+    $phaseChanged=$Phase -and $Phase -ne $script:phase
     if($Phase) {$script:phase=$Phase}
     $now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    if($now -ne $script:lastPulse) {
+    if($phaseChanged -or $now -ne $script:lastPulse) {
         $script:lastPulse=$now
         $text="$PID`t$script:phase`t$now`t$script:percent`t$script:detail"
         try {

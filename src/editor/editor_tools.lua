@@ -16,6 +16,7 @@ function T.new(deps)
             self.scroll = 0
         end
         self.tab, opened = tab or self.tab, true
+        self.raise_pending = true
     end
     function self.close()
         opened = false
@@ -46,16 +47,15 @@ function T.new(deps)
         return heading, header, button, ui.spacing and ui.spacing(10) or 10
     end
     function self.minimum_height(ui)
-        local _, header, button, gap = metrics(ui)
-        return header + button * 2 + gap * 3 + 12
+        local _, _, button, gap = metrics(ui)
+        return button * 2 + gap * 3 + 12
     end
     local function draw(ui, x, y, w, ht, docked)
         local h = editor.handle
         local controls = editor.api.mods[h.id].controls
         local d = document()
         local heading_size, header_height, bh, gap = metrics(ui)
-        local compact_header = docked and ht < self.minimum_height(ui)
-        if compact_header then
+        if docked then
             header_height = 0
         end
         local theme = ui.theme
@@ -135,31 +135,40 @@ function T.new(deps)
             end
         end
         ui.rect(x, y, w, ht, theme.panel)
-        if not compact_header then
+        if not docked then
             ui.rect(x, y + ht - header_height, w, header_height, theme.header)
             local title_y = ui.text_y
                     and ui.text_y(y + ht - header_height, header_height, 14, 'LUT Editor Tools', 'heading')
                 or y + ht - header_height + (header_height - heading_size) / 2
             ui.bounded(bx, title_y, 'LUT Editor Tools', 14, white, width - 30, 'heading')
-            if docked then
-                ui.button(x + w - 30, y + ht - header_height + 6, 24, header_height - 12, 'X', self.close)
-            end
         end
         local dock_label = docked and 'Undock' or 'Dock'
         local dock_width = math.max(70, (ui.text_width and ui.text_width(dock_label, 14) or #dock_label * 8) + gap * 2)
-        local tabw = (width - dock_width - 30) / #tabs
+        local close_width = docked and math.max(28, bh) or 0
+        local tabw = (width - dock_width - close_width - (docked and 36 or 30)) / #tabs
         for i, tab in ipairs(tabs) do
             local tx = bx + (i - 1) * (tabw + 6)
             ui.button(tx, tab_y, tabw, bh, labels[tab], function()
                 self.open(tab)
             end, { selected = self.tab == tab })
         end
-        ui.button(bx + width - dock_width, tab_y, dock_width, bh, dock_label, function()
-            self.set_docked(not docked)
-        end, {
-            help = docked and 'Open Tools in its own window.'
-                or 'Place Tools below the swatches inside the LUT Editor.',
-        })
+        ui.button(
+            bx + width - dock_width - close_width - (docked and 6 or 0),
+            tab_y,
+            dock_width,
+            bh,
+            dock_label,
+            function()
+                self.set_docked(not docked)
+            end,
+            {
+                help = docked and 'Open Tools in its own window.'
+                    or 'Place Tools below the swatches inside the LUT Editor.',
+            }
+        )
+        if docked then
+            ui.button(bx + width - close_width, tab_y, close_width, bh, 'X', self.close, { help = 'Close Tools.' })
+        end
 
         if self.tab == 'import' then
             label(top, 'Import a palette, then choose the table to edit or apply.', muted, 'hint')
@@ -225,12 +234,12 @@ function T.new(deps)
             end
             action(top - step * 2, 'Save selected row', 'save_row', d ~= nil)
             action(top - step * 3, multiple and 'Apply preset to rows' or 'Apply preset to row', 'load_row', d ~= nil)
-            action(top - step * 4, 'Import Paydex JSON...', 'import_paydex_rows', true)
-            divider(top - step * 4 - 10)
-            button(bx, top - step * 5.3, half, 'Copy row', 'copy_row', d ~= nil)
-            button(bx + half + 8, top - step * 5.3, half, 'Paste row', 'paste_row', d ~= nil and editor.row_clip ~= nil)
-            button(bx, top - step * 6.3, half, 'Reset row', 'reset_row', d ~= nil)
-            button(bx + half + 8, top - step * 6.3, half, 'Reset cell', 'reset_cell', d ~= nil)
+            divider(top - step * 3 - 10)
+            button(bx, top - step * 4.3, half, 'Copy row', 'copy_row', d ~= nil)
+            button(bx + half + 8, top - step * 4.3, half, 'Paste row', 'paste_row', d ~= nil and editor.row_clip ~= nil)
+            button(bx, top - step * 5.3, half, 'Reset row', 'reset_row', d ~= nil)
+            button(bx + half + 8, top - step * 5.3, half, 'Reset cell', 'reset_cell', d ~= nil)
+            action(top - step * 6.3, 'Import Paydex JSON...', 'import_paydex_rows', true)
         elseif self.tab == 'export' then
             label(top, 'Choose what to export. A timestamp is added to each filename.', muted, 'hint')
             action(
@@ -336,7 +345,8 @@ function T.new(deps)
         local _, header_height = metrics(ui)
         ui.floating('editor_tools', function(x, y, w, ht)
             draw(ui, x, y, w, ht, false)
-        end, 620, 540, self.close, header_height)
+        end, 620, 540, self.close, header_height, self.raise_pending)
+        self.raise_pending = false
     end
     return self
 end

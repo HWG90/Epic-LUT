@@ -2729,6 +2729,13 @@ function M.new(api, measure, Text)
             end
 
             if type(page.render_layout) == 'function' then
+                local layout_floor = self.epic_typography
+                        and page.id == 'colors'
+                        and math.max(
+                            80,
+                            64 + text_metrics(15, self.notice, 'hint').max_y + 6 * (self.font_size or 12) / 12
+                        )
+                    or 110
                 local primitives = {
                     rect = rect,
                     text = text,
@@ -2746,9 +2753,9 @@ function M.new(api, measure, Text)
                         epic_style = self.epic_typography,
                         pixel_width = 1 / s,
                         x = rail + 20,
-                        y = 110,
+                        y = layout_floor,
                         w = ww - rail - 40,
-                        h = wh - 280,
+                        h = wh - 170 - layout_floor,
                         rect = rect,
                         text = text,
                         hit = hit,
@@ -2956,7 +2963,7 @@ function M.new(api, measure, Text)
                                 self.notice = 'Type value; Enter saves, Escape cancels'
                             end)
                         end,
-                        floating = function(id, draw, width, height, close, header_height)
+                        floating = function(id, draw, width, height, close, header_height, raise)
                             self.floating_positions = self.floating_positions or {}
                             local position = self.floating_positions[id]
                                 or {
@@ -2979,7 +2986,7 @@ function M.new(api, measure, Text)
                                     found = true
                                 end
                             end
-                            if not found then
+                            if not found or raise then
                                 focus_floating(request)
                             end
                             if floating_by_id[id] then

@@ -160,8 +160,8 @@ local function label(commands, value, popup)
     end
     error('Missing actual editor control: ' .. value)
 end
-local function control(commands, value)
-    local text, index = label(commands, value, false)
+local function control(commands, value, popup)
+    local text, index = label(commands, value, popup == true)
     local s = menu.window_bounds.scale
     for i = index - 1, 1, -1 do
         local c = commands[i]
@@ -200,8 +200,8 @@ local function tap(rect)
     input(rect.x + rect.w / 2, rect.y + rect.h / 2, true)
     input(rect.x + rect.w / 2, rect.y + rect.h / 2, false)
 end
-local function tap_label(value)
-    tap(control(compose(), value))
+local function tap_label(value, popup)
+    tap(control(compose(), value, popup))
 end
 for _, width in ipairs({ 860, 1100, 1600 }) do
     for _, font in ipairs({ 12, 20 }) do
@@ -365,13 +365,13 @@ for _, width in ipairs({ 860, 1100, 1600 }) do
                 editor.tools.is_open() and editor.scratch_tool.is_open() and editor.tools.tab == 'import',
                 'Tools closed or reset an active Scratch shortcut'
             )
-            tap_label('Rows')
+            tap_label('Rows', true)
             assert(
                 editor.tools.is_open() and editor.tools.tab == 'rows',
                 'Rows shortcut stopped routing while Tools was open'
             )
             editor.scratch_tool.close()
-            tap_label('Export')
+            tap_label('Export', true)
             local export_checkbox = label(compose(), '[ x ] Include Capes in Armor Exports', true)
             tap({
                 x = export_checkbox.x,

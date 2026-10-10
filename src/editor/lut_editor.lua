@@ -559,7 +559,10 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         end
         b = self.value_bounds
         if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
-            self.value_scroll = math.max(0, math.min(self.value_max or 0, self.value_scroll - delta / 120 * 90))
+            self.value_scroll = math.max(
+                0,
+                math.min(self.value_max or 0, self.value_scroll - delta / 120 * (self.value_wheel_step or 24))
+            )
             return true
         end
     end

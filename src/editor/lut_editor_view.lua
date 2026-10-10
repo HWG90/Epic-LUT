@@ -31,7 +31,7 @@ function V.new(deps)
         local show_values = h.get('value_editor_visible') ~= false
         local left = show_values and math.floor(ui.w * 0.70) or ui.w
         local tools_bounds
-        self.grid_bounds, self.value_bounds = nil, nil
+        self.grid_bounds, self.value_bounds, self.value_viewport = nil, nil, nil
         if not d then
             self.grid_max = 0
         end
@@ -227,16 +227,20 @@ function V.new(deps)
             shortcut(ui.x + 8 * font_scale, tools_width, 'Tools', function()
                 open_tools()
             end, self.tools and self.tools.is_open(), self.tools ~= nil)
-            if self.tools and self.tools.is_open() and not (self.tools.is_docked and self.tools.is_docked()) then
-                local children =
-                    { { 'Import', 'import' }, { 'Rows', 'rows' }, { 'Export', 'export' }, { 'Options', 'options' } }
-                local begin = ui.x + 8 * font_scale + tools_width + gap
-                local width = math.max(20, (fixed_x - begin - gap * #children) / #children)
-                for i, child in ipairs(children) do
-                    local tab = child[2]
-                    shortcut(begin + (i - 1) * (width + gap), width, child[1], function()
-                        open_tools(tab)
-                    end, self.tools.tab == tab)
+            if self.tools and self.tools.is_open() and self.tools.is_docked and self.tools.is_docked() then
+                local title_x = ui.x + 8 * font_scale + tools_width + gap
+                local title_width = fixed_x - title_x - gap
+                if title_width > 0 then
+                    ui.bounded(
+                        title_x,
+                        ui.text_y and ui.text_y(ui.y + footer_inset, footer_height, 14, 'LUT Editor Tools', 'heading')
+                            or ui.y + footer_inset + 4,
+                        'LUT Editor Tools',
+                        14,
+                        muted,
+                        title_width,
+                        'heading'
+                    )
                 end
             end
             shortcut(fixed_x, scratch_width, 'Scratch', function()
@@ -830,42 +834,67 @@ function V.new(deps)
         end
         if show_values then
             local inspector_button_width = (rightw - 21) / 2
+            local inspector_gap = 6 * font_scale
+            local selector_y = top - panel_header_height - inspector_gap - 26
+            local options_height = math.max(26, ui.control_height and ui.control_height(15, 5, 26) or 0)
+            local options_y = selector_y - inspector_gap - options_height
             local function inspector_label(full, compact)
                 local width = ui.text_width and ui.text_width(full, 15) or #full * 8
                 return width + 16 * font_scale <= inspector_button_width and full or compact
             end
             if ui.choice then
-                ui.choice('edit_row', right + 8, top - 57 - header_shift, rightw - 16)
+                ui.choice('edit_row', right + 8, selector_y, rightw - 16)
             end
             if can_identify then
                 -- Stop Highlight is kept in the persistent tools bar.
             end
             button(
                 right + 8,
-                top - 86 - header_shift,
+                options_y,
                 inspector_button_width,
                 inspector_label(
                     h.get('group_rows') and 'Group by rows: ON' or 'Selected row only',
                     h.get('group_rows') and 'All rows' or 'One row'
                 ),
-                'group_rows'
+                'group_rows',
+                options_height
             )
             button(
                 right + 13 + (rightw - 21) / 2,
-                top - 86 - header_shift,
+                options_y,
                 inspector_button_width,
                 inspector_label(
                     h.get('unlock') and 'Advanced: ON' or 'Unlock advanced edits',
                     h.get('unlock') and 'Advanced' or 'Unlock'
                 ),
-                'unlock'
+                'unlock',
+                options_height
             )
-            local clip_top, clip_bottom = top - 96 - header_shift, gridbottom + 12
-            self.value_bounds = { x = right, y = gridbottom, w = rightw, h = ui.h - content_bottom }
-            local scroll = self.value_scroll
+            local clip_top, clip_bottom = options_y - inspector_gap, gridbottom + 12
+            local viewport = math.max(0, clip_top - clip_bottom)
+            self.value_viewport = { x = right, y = clip_bottom, w = rightw, h = viewport }
+            self.value_bounds = self.value_viewport
+            local scroll = math.max(0, self.value_scroll)
             local cursor = clip_top + scroll
             local function visible(y, height)
-                return y >= clip_bottom and y + height <= clip_top
+                -- Fractional glyph heights accumulate through long columns.
+                -- Treat numerical roundoff at an exact edge as contained.
+                return y >= clip_bottom - 1e-6 and y + height <= clip_top + 1e-6
+            end
+            local function text_height(size, value, role, padding, minimum)
+                return math.max(
+                    minimum,
+                    ui.control_height and ui.control_height(size, padding, value, role)
+                        or (ui.text_size and ui.text_size(size, role) or size) + padding * 2 * font_scale
+                )
+            end
+            local function text_inside(y, height, size, value, role)
+                if not ui.text_metrics or not ui.text_y then
+                    return true
+                end
+                local ink = ui.text_metrics(size, value, role)
+                local baseline = ui.text_y(y, height, size, value, role)
+                return visible(baseline + ink.min_y, ink.height)
             end
             local function words(value)
                 local lines, line = {}, ''
@@ -887,14 +916,17 @@ function V.new(deps)
                 end
                 return lines
             end
-            local row_heading_height = math.max(23, ui.control_height and ui.control_height(14, 4, 23, 'heading') or 0)
-            local column_heading_height =
-                math.max(21, ui.control_height and ui.control_height(14, 3, 21, 'heading') or 0)
+            self.value_wheel_step = math.max(8, math.min(24, text_height(13, 'Value', 'hint', 1, 14)))
             for r = 1, d.height do
                 if h.get('group_rows') or r == row then
                     local selected_row = r
+                    local row_label = (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r
+                    local row_heading_height = text_height(14, row_label, 'heading', 4, 23)
                     cursor = cursor - row_heading_height - 2 * font_scale
-                    if visible(cursor, row_heading_height) then
+                    if
+                        visible(cursor, row_heading_height)
+                        and text_inside(cursor, row_heading_height, 14, row_label, 'heading')
+                    then
                         local row_selected = r == row
                         if not ui.epic_style or self.open_row == r or row_selected then
                             ui.rect(
@@ -931,9 +963,8 @@ function V.new(deps)
                         local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
                         ui.text(
                             right + 13,
-                            ui.text_y and ui.text_y(cursor, row_heading_height, 14, 'Row ' .. r, 'heading')
-                                or cursor + 6,
-                            (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r,
+                            ui.text_y and ui.text_y(cursor, row_heading_height, 14, row_label, 'heading') or cursor + 6,
+                            row_label,
                             14,
                             ui.epic_style and (row_selected and theme.brass or white)
                                 or can_identify and {
@@ -985,13 +1016,18 @@ function V.new(deps)
                                     self.focus_value(selected_row, selected_col, channel)
                                 end
                             end
+                            local column_label = 'Column ' .. c .. ': ' .. semantics.columns[c]
+                            local column_heading_height = text_height(14, column_label, 'heading', 3, 21)
                             cursor = cursor - column_heading_height
-                            if visible(cursor, column_heading_height) then
+                            if
+                                visible(cursor, column_heading_height)
+                                and text_inside(cursor, column_heading_height, 14, column_label, 'heading')
+                            then
                                 ui.bounded(
                                     right + 12,
-                                    ui.text_y and ui.text_y(cursor, column_heading_height, 14, 'Column', 'heading')
+                                    ui.text_y and ui.text_y(cursor, column_heading_height, 14, column_label, 'heading')
                                         or cursor + 3,
-                                    'Column ' .. c .. ': ' .. semantics.columns[c],
+                                    column_label,
                                     14,
                                     white,
                                     rightw - 58,
@@ -1012,11 +1048,20 @@ function V.new(deps)
                                     words(semantics.hints[c] or 'Unconfirmed shader meaning. Raw values are retained.')
                                 )
                             do
-                                local line_height =
-                                    math.max(14, (ui.text_size and ui.text_size(13, 'hint') or 13) + 3 * font_scale)
+                                local line_height = text_height(13, line, 'hint', 2, 14)
                                 cursor = cursor - line_height
-                                if visible(cursor, line_height) then
-                                    ui.bounded(right + 12, cursor + 2, line, 13, muted, rightw - 36, 'hint')
+                                if
+                                    visible(cursor, line_height) and text_inside(cursor, line_height, 13, line, 'hint')
+                                then
+                                    ui.bounded(
+                                        right + 12,
+                                        ui.text_y and ui.text_y(cursor, line_height, 13, line, 'hint') or cursor + 2,
+                                        line,
+                                        13,
+                                        muted,
+                                        rightw - 36,
+                                        'hint'
+                                    )
                                 end
                             end
                             for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
@@ -1030,12 +1075,22 @@ function V.new(deps)
                                     ui.control_height and ui.control_height(14, 5, 26) or 0
                                 )
                                 cursor = cursor - field_height - 4
-                                if visible(cursor, field_height) then
-                                    local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
+                                local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
+                                local widget_height = enum and 26 or numeric_height
+                                local channel_label = name:upper()
+                                local selected_field = r == h.get('edit_row') and c == h.get('edit_column')
+                                local field_label = enum and mod.controls[enum].choices[h.get(enum)]
+                                    or (selected_field and ui.input_value and ui.input_value('cell_' .. name))
+                                    or string.format('%.7g', value)
+                                if
+                                    visible(cursor, field_height)
+                                    and text_inside(cursor, widget_height, 13, channel_label)
+                                    and text_inside(cursor, widget_height, 14, tostring(field_label))
+                                then
                                     ui.text(
                                         right + 12,
-                                        ui.text_y and ui.text_y(cursor, field_height, 13, name) or cursor + 6,
-                                        name:upper(),
+                                        ui.text_y and ui.text_y(cursor, widget_height, 13, channel_label) or cursor + 6,
+                                        channel_label,
                                         13,
                                         muted
                                     )
@@ -1045,20 +1100,9 @@ function V.new(deps)
                                         end)
                                     elseif ui.number then
                                         local lo, hi = semantics.range(c, ch, value)
-                                        ui.number(
-                                            'cell_' .. name,
-                                            right + 29,
-                                            cursor,
-                                            rightw - 46,
-                                            value,
-                                            function()
-                                                prepare(selected_channel)
-                                            end,
-                                            editable(d, c, ch),
-                                            lo,
-                                            hi,
-                                            r == h.get('edit_row') and c == h.get('edit_column')
-                                        )
+                                        ui.number('cell_' .. name, right + 29, cursor, rightw - 46, value, function()
+                                            prepare(selected_channel)
+                                        end, editable(d, c, ch), lo, hi, selected_field)
                                     else
                                         ui.text(right + 29, cursor + 5, string.format('%.7g', value), 13, white)
                                     end
@@ -1073,20 +1117,24 @@ function V.new(deps)
                 end
             end
             local content = clip_top + scroll - cursor
-            local viewport = clip_top - clip_bottom
             self.value_max = math.max(0, content - viewport)
-            self.value_scroll = math.min(self.value_scroll, self.value_max)
-            if self.value_max > 0 then
-                local thumb = math.max(18, viewport * viewport / content)
-                ui.rect(right + rightw - 6, clip_bottom, 4, viewport, { 50, 55, 60 }, nil, 'slider_track')
-                ui.rect(
-                    right + rightw - 7,
-                    clip_top - thumb - (viewport - thumb) * self.value_scroll / self.value_max,
-                    6,
-                    thumb,
-                    { 120, 135, 150 },
-                    nil,
-                    'slider_thumb'
+            self.value_scroll = math.max(0, math.min(self.value_scroll, self.value_max))
+            if self.value_max > 0 and ui.scrollbar then
+                ui.scrollbar(
+                    'value_editor',
+                    right + rightw - 8,
+                    clip_bottom,
+                    viewport,
+                    content,
+                    viewport,
+                    self.value_scroll,
+                    function(value)
+                        -- The common scrollbar rounds intermediate offsets.
+                        -- Snap endpoints so fractional font metrics cannot
+                        -- leave the final whole row just outside the viewport.
+                        self.value_scroll = value <= 1 and 0 or value >= self.value_max - 1 and self.value_max or value
+                        self.focus_column = nil
+                    end
                 )
             end
         end -- optional Value Editor
