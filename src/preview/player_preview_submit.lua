@@ -7,6 +7,25 @@ local UPDATE = '48895c2408574883ec30488bf9488b0d64816f01488b9938030000488b93101c
 local RENDER = '48895c240848896c2410488974241848897c242041564883ec604c8b9c249800'
 local UI_CONTEXT = 'c7442438a8b7431a'
 local UI_FLAGS = 'c74424300f800000'
+local types
+local function function_types(ffi)
+    if types then
+        return types
+    end
+    -- Named declarations live in LuaJIT's process-wide type registry. Reloading
+    -- this Lua module reuses them instead of parsing fresh anonymous prototypes.
+    local ok, render = pcall(ffi.typeof, 'epic_preview_submit1_render')
+    if not ok then
+        ffi.cdef([[
+            typedef void (*epic_preview_submit1_update)(void *);
+            typedef void (*epic_preview_submit1_render)(void *, const void *, const void *,
+                const void *, const void *, const void *, uint32_t, uint32_t);
+        ]])
+        render = ffi.typeof('epic_preview_submit1_render')
+    end
+    types = { update = ffi.typeof('epic_preview_submit1_update'), render = render }
+    return types
+end
 local function unhex(value)
     return (value:gsub('..', function(pair)
         return string.char(tonumber(pair, 16))
@@ -39,12 +58,12 @@ function Submit.new(memory, game, exe, dependencies)
         read(game + 0x1390778, 8) == unhex(UI_CONTEXT) and read(game + 0x139079f, 8) == unhex(UI_FLAGS),
         'Native Game Default submission contract changed'
     )
-    local update = dependencies.update or ffi.cast('void (*)(void *)', update_at)
-    local render = dependencies.render
-        or ffi.cast(
-            'void (*)(void *,const void *,const void *,const void *,const void *,const void *,uint32_t,uint32_t)',
-            render_at
-        )
+    local native_types
+    if not dependencies.update or not dependencies.render then
+        native_types = function_types(ffi)
+    end
+    local update = dependencies.update or ffi.cast(native_types.update, update_at)
+    local render = dependencies.render or ffi.cast(native_types.render, render_at)
     local address = dependencies.address
         or function(value)
             return tonumber(ffi.cast('uintptr_t', ffi.cast('void *', value)))

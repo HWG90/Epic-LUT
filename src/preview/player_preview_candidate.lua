@@ -4,6 +4,7 @@ local controller, adapter, memory, game, log
 local authored_source
 local activated, base_enabled = false, false
 local frontend_owner
+local initialization_stage
 local wrapper, previous
 local pressed = false
 local elapsed = 0
@@ -147,6 +148,7 @@ local function reset_transients()
     suspended = false
     frame_clock, clock_fallback_logged = nil, false
     preview_disabled = false
+    initialization_stage = nil
     authored_source = nil
     dock_request, dock_age, docked = nil, 1, false
     floating_geometry, dock_hidden, floating_on_editor = nil, false, false
@@ -254,17 +256,19 @@ local function inspect()
     assert(identity, why)
     return adapter.capture(identity)
 end
-editor.on_enable = function(ctx)
+local function initialize_preview(ctx)
     local owner = package.loaded['epic.player_preview.v1']
     assert(not owner or owner == public, 'Player Preview is already owned by another addon instance')
     discard_request()
     assert(close(), 'Player Preview cleanup is pending; wait before re-enabling')
     assert(not authored_source or authored_source.close(), 'Authored salute worker cleanup is pending')
     reset_transients()
+    initialization_stage = 'editor'
     base_enabled = true
     enable(ctx)
     frontend_owner = package.loaded['dbf.epic_lut.frontend.v1']
     log = ctx.log
+    initialization_stage = 'memory'
     memory = m.bingus_memory.new(m.bingus_runtime)
     local authored = PREVIEW_ANIMATION_ENABLED == true and m.preview_animation == 'authored_salute'
     if authored then
@@ -272,7 +276,9 @@ editor.on_enable = function(ctx)
     end
     game = memory.address(assert(memory.module('game.dll')))
     local native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
+    initialization_stage = 'submission_bindings'
     local submit = m.player_preview_submit.new(memory, game, memory.address(assert(memory.module())))
+    initialization_stage = nil
     log('preview: native submission signatures verified')
     adapter = m.player_preview_native.new(stingray, m, {
         memory = memory,
@@ -380,6 +386,37 @@ editor.on_enable = function(ctx)
             .. '; animation='
             .. (PREVIEW_ANIMATION_ENABLED == true and (m.preview_animation or 'garment_poses') or 'static')
     )
+end
+editor.on_enable = function(ctx)
+    local ok, result = xpcall(function()
+        return initialize_preview(ctx)
+    end, debug.traceback)
+    if not ok then
+        local problem = tostring(result)
+        local first_line = problem:match('^[^\r\n]*') or problem
+        local stage = initialization_stage
+        initialization_stage = nil
+        -- Loader status labels reject control characters and oversized text.
+        -- Keep the useful trace bounded on one line; do not feed tabs/newlines
+        -- from debug.traceback back into the loader's native log panel.
+        ctx.log(('preview: initialization failed ' .. problem:gsub('[%c]+', ' | ')):sub(1, 480))
+        if
+            stage == 'submission_bindings'
+            and first_line:match('table overflow$')
+            and base_enabled
+            and frontend_owner
+            and (not controller or #controller.resources == 0)
+        then
+            -- No portrait has been created at this point. The editor is ready
+            -- and may keep running while this optional native binding is absent.
+            render_fault = 'Player Preview native binding limit reached; restart the game to restore preview.'
+            ctx.log('preview: ' .. render_fault .. ' Editor remains available.')
+            write_state(render_fault)
+            return
+        end
+        error(first_line:gsub('[%c]+', ' '):sub(1, 400), 0)
+    end
+    return result
 end
 local function read_request(dt)
     request_elapsed = request_elapsed + (dt or 0)

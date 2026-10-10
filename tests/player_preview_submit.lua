@@ -55,4 +55,46 @@ assert(not pcall(S.new, memory, game, exe, dependencies), 'Changed entry was acc
 pointer(app + 0x28, exe + 0x318150)
 bytes[game + 0x139079f] = string.rep('\0', 8)
 assert(not pcall(S.new, memory, game, exe, dependencies), 'Changed UI flags were accepted')
-print('PASS native submission signatures, world unboxing, exact arguments and dispatch drift refusal')
+bytes[game + 0x139079f] = unhex('c74424300f800000')
+
+-- Native casts use the same named ctypes on every initialization and module
+-- reload. Only create pointers here: fixture addresses must never be called.
+local cast, cdef = ffi.cast, ffi.cdef
+local declarations, anonymous, named = 0, 0, 0
+ffi.cdef = function(value)
+    declarations = declarations + 1
+    return cdef(value)
+end
+ffi.cast = function(ct, value)
+    if type(ct) == 'string' and ct:find('%(%s*%*') then
+        anonymous = anonymous + 1
+    elseif type(ct) == 'cdata' then
+        assert(
+            ct == ffi.typeof('epic_preview_submit1_update') or ct == ffi.typeof('epic_preview_submit1_render'),
+            'Unexpected cached native function type'
+        )
+        named = named + 1
+    end
+    return cast(ct, value)
+end
+local ok, why = pcall(function()
+    for i = 1, 32 do
+        local reloaded = dofile('src/preview/player_preview_submit.lua')
+        assert(type(reloaded.new(memory, game, exe)) == 'function')
+        assert(type(reloaded.new(memory, game, exe)) == 'function')
+    end
+end)
+ffi.cast, ffi.cdef = cast, cdef
+assert(ok, why)
+assert(
+    declarations == 1 and named == 128 and anonymous == 0,
+    'Reloads created anonymous function types or redeclared named types'
+)
+assert(#calls == 2, 'Constructing native function pointers called a fixture address')
+-- Injected dispatch remains unchanged after initializing the native type cache.
+local final = dofile('src/preview/player_preview_submit.lua').new(memory, game, exe, dependencies)
+final(world, 70000000, 80000000, 90000000)
+assert(table.concat(calls, ',') == 'update,render,update,render', 'Named cache changed native dispatch arguments/order')
+print(
+    'PASS native submission signatures, exact dispatch arguments/guards and one named type declaration across32module reloads/64initializations'
+)

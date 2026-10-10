@@ -782,6 +782,27 @@ local foreign_frontend = {
 registry['dbf.epic_lut.frontend.v1'] = foreign_frontend
 assert(editor.on_disable() and foreign_frontend.menu.visible, 'Preview stopped a foreign frontend')
 registry['dbf.epic_lut.frontend.v1'] = front
+-- An exhausted native function-type table cannot take the ready editor down.
+-- This fallback is limited to submission binding, before any portrait exists.
+local old_submit = env.m.player_preview_submit.new
+env.m.player_preview_submit.new = function()
+    error('table overflow', 0)
+end
+local resources_before_failure, updates_before_failure = resources, updates
+assert(pcall(editor.on_enable, ctx), 'Optional submission overflow disabled the editor')
+assert(not registry['epic.player_preview.v1'] and resources == resources_before_failure)
+editor.on_update(ctx, 0.1)
+assert(updates == updates_before_failure + 1, 'Submission fallback stopped editor updates')
+assert(editor.on_disable(), 'Submission fallback lost base editor cleanup')
+for _, entry in ipairs(logs) do
+    assert(#entry <= 512 and not entry:find('[%c]'), 'Preview failure broke loader display text')
+end
+env.m.player_preview_submit.new = function()
+    error('Native render-world submission changed', 0)
+end
+assert(not pcall(editor.on_enable, ctx), 'Submission signature drift used the overflow fallback')
+assert(editor.on_disable())
+env.m.player_preview_submit.new = old_submit
 -- A second owner is neither stopped nor overwritten, including failed-enable
 -- cleanup. Its request belongs to that active owner too.
 local foreign = {
