@@ -1,15 +1,34 @@
-## EPIC LUT R5.5.3 — HOTFIX 🪿
+# EPIC LUT R5.5.3 :goose:
+**STYLISH FREEDOM — Defend Freedom in Style.**
 
-Less menu chaos. More fashion.
+Paint your Helldiver in-game. **F9** for Basic Mode; **F10** for the full LUT Editor.
 
-- Fixed window stacking, overlapping text and disappearing swatches/markers.
-- **Cape LUTs** now live in the **Armor dropdown**, using the regular editor controls.
-- Added **optional Cape exports** and **custom LUT names**—click a hash to rename it.
-- Clearer **Armory save errors**.
+**Updates since R5.2**
+- Custom colors stay applied through hellpods, missions and ship transitions.
+- **Cape LUTs** now use the **Armor dropdown** and regular editor controls, with an option to exclude Capes from Armor exports.
+- Added **custom LUT names**—click a hash or name to rename it.
+- Fixed window stacking, overlapping text, disappearing swatches/markers and unclear **Armory save errors**.
+- Fixed text-caret drift and region flashes getting stuck; menu and Preview rendering pause during Alt-Tab/minimization.
+- **64-row LUTs** and a separate **Pattern LUT Editor**.
+- Fixed patch targeting; export LUTs, complete palettes, shareable presets or every custom DDS in one click.
+- Independent **Tools, Scratch and Pattern windows**, clearer dropdowns, borders and more editing space.
+- Drag selection, multi-row copy/paste, clipboard shortcuts, proper text selection and held-key repeat.
+- Improved Player Preview with **Game Default rendering** and wider vertical pan.
+- Named **26 bump maps**, alpha previews, RGBA tooltips and **Load Debug LUT**.
+- Organized settings, optional **MCM integration**, synchronized scale, font padding and menu fixes.
 
 **Shared Lobby LUT is in testing.**
-Huge thanks to **Scarpheon** for the testing, bump-map mapping and continued help.
+
+## A MASSIVE THANK YOU TO SCARPHEON
+For the enormous amount of testing and continued help that made **Export to Patch** possible—and for mapping **all 26 bump maps** by their actual R values. Those readable material choices exist because he did the work. Epic LUT is a better tool because of his dedication. **Thank you, Scarpheon.**
+
+**CowboyBingus:** native adapters and LUT foundation.
+**Plain Furniture:** Debug LUT.
+**[Lytatroan](https://www.nexusmods.com/profile/Lytatroan):** human-made thumbnail.
+Thanks to **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor** for ideas and inspiration.
 
 **Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
+
+Choose **BSL** for Arsenal/HD2MM or **LLL** for Live Lua Loader/compatible MDL. Enable one copy; turn Match Your Colors matching off. RAR needs 7-Zip.
