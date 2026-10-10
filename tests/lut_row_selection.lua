@@ -221,7 +221,7 @@ compose()
 menu.advance(0.6)
 local tooltip_text = {}
 for _, command in ipairs(compose()) do
-    if command.layer == 450 and command.text then
+    if command.paint_plane and command.paint_plane >= 5000 and command.text then
         tooltip_text[#tooltip_text + 1] = command.full_text or command.text
     end
 end

@@ -46,7 +46,7 @@ mod.pages[1].render_layout = function(ui)
     geometry.field = { x = ui.x + 20, y = ui.y + 30, w = 320, h = height }
     ui.button(geometry.field.x, geometry.field.y, 320, height, 'HEX: #' .. ui.input_value('hex'), function()
         ui.activate('hex')
-    end, { help = guidance })
+    end, { help = guidance, field = true })
     ui.floating('typography_popup', function(x, py, w, h)
         ui.rect(x, py, w, h, ui.theme.panel)
         ui.rect(x, py + h - 40, w, 40, ui.theme.header)
@@ -170,7 +170,7 @@ for _, font in ipairs({ 12, 20 }) do
         menu.advance(0.6)
         local tooltip_lines = {}
         for _, c in ipairs(compose()) do
-            if c.layer == 450 and c.text then
+            if c.paint_plane and c.paint_plane >= 5000 and c.text then
                 tooltip_lines[#tooltip_lines + 1] = c.text
                 close(c.size, font * 0.88 * bounds.scale, 'Tooltip wrapped and rendered at different hint sizes')
                 assert(
@@ -202,6 +202,49 @@ for _, c in ipairs(compose()) do
         assert(c.size == 14 * menu.window_bounds.scale and c.bold, 'Legacy requested font size changed')
     end
 end
+-- A game-font measurement source may include pair kerning. Cache the complete
+-- string advance and invalidate it when the selected face changes in place.
+menu.epic_typography, menu.compact_fonts, menu.font_size, menu.ui_scale = true, true, 12, 1
+assert(handle.set('hex', 'AVA'))
+local measure_calls, face = 0, 1
+menu.font_metric_key = 'game-face-one'
+menu.measure_text = function(value, size)
+    measure_calls = measure_calls + 1
+    local _, pairs = value:gsub('AV', '')
+    return (advance(value, size) - pairs * size * 0.2) * face
+end
+local idle = command(compose(), 'HEX: #AVA')
+input(idle.x + 2, idle.y + 2, true)
+input(idle.x + 2, idle.y + 2, false)
+Text.all(menu.text_edit)
+local function measured_field()
+    local field, selection, caret
+    for _, c in ipairs(compose()) do
+        if c.ui_role == 'text_field' then
+            field = c
+        end
+        if c.ui_role == 'text_selection' then
+            selection = c
+        end
+        if c.ui_role == 'text_caret' then
+            caret = c
+        end
+    end
+    assert(field and selection and caret)
+    local width = (advance('AVA', field.size) - field.size * 0.2) * face
+    close(selection.w, width, 'Selection discarded whole-string kerning')
+    close(caret.x, menu.text_edit.field_bounds.text_x + width, 'Caret discarded whole-string kerning')
+    return width
+end
+local first_width = measured_field()
+local cached = measure_calls
+menu.text_edit.field_bounds.measure('AVA')
+menu.text_edit.field_bounds.measure('AVA')
+assert(measure_calls == cached, 'Whole-string field measurements missed their cache')
+face, menu.font_metric_key = 1.2, 'game-face-two'
+local second_width = measured_field()
+assert(second_width > first_width and measure_calls > cached, 'Changing font face retained stale caret metrics')
+menu.key(27)
 print(
-    'PASS typography: Epic role hierarchy, regular body/fields, retained bold preference, matched ink/metrics/caret, scaled padding, popup containment and unchanged legacy rendering'
+    'PASS typography: Epic roles, regular fields, retained bold preference, matched metrics/caret, scaled padding, popup containment, legacy rendering and game-face kerning/cache invalidation'
 )

@@ -75,6 +75,9 @@ menu.visible = true
 menu.window_width, menu.window_height = 1400, 960
 local world, items, next_id, allocations, guis = {}, {}, 0, 0, {}
 local function allocate(gui, item)
+    local native_z = math.floor(tonumber(item.z))
+    assert(native_z == item.z, 'Fractional window layer reached native Gui')
+    item.z = native_z
     next_id, allocations = next_id + 1, allocations + 1
     item.order, item.gui = next_id, gui
     items[next_id] = item

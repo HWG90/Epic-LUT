@@ -361,8 +361,14 @@ assert(
 )
 commands = compose()
 local above = false
+local tool_title = assert(label(commands, 'LUT Editor Tools'))
 for _, command in ipairs(commands) do
-    if command.popup and command.layer == 230 and command.text then
+    if
+        command.popup
+        and command.text
+        and command.paint_plane
+        and command.paint_plane >= tool_title.paint_plane + tool_title.paint_span
+    then
         above = true
     end
 end
@@ -497,8 +503,7 @@ for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 110
         local command = commands[i]
         if
             command.type == 'rect'
-            and command.c[1] < 80
-            and command.c[2] < 100
+            and command.ui_role == 'control_fill'
             and command.w > 40
             and command.h >= ink.height
             and command.h <= 60 * menu.window_bounds.scale

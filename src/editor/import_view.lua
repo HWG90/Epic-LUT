@@ -24,6 +24,18 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 math.max(0, math.min(self.import_max or 0, (self.import_scroll or 0) - delta / 120 * 22))
             return true
         end
+        local actions = self.action_bounds
+        if
+            actions
+            and x >= actions.x
+            and x <= actions.x + actions.w
+            and y >= actions.y
+            and y <= actions.y + actions.h
+        then
+            self.action_scroll =
+                math.max(0, math.min(self.action_max or 0, (self.action_scroll or 0) - delta / 120 * 50))
+            return true
+        end
         for _, kind in ipairs({ 'armor', 'helmet' }) do
             local b = self.gear_bounds[kind]
             if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
@@ -35,12 +47,32 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
     end
     function self.draw(ui)
         local theme = ui.theme
-        ui.button(ui.x + ui.w - 150, ui.y - 24, 150, 28, 'Stop Highlight', function()
+        local font_scale = (ui.text_size and ui.text_size(14) or 12) / 12
+        local footer_inset = 6 * font_scale
+        local footer_height = ui.control_height and ui.control_height(14, 6, 28) or 28
+        local footer_band = footer_height + footer_inset * 2 + 6 * font_scale
+        local content_bottom = ui.y + footer_band
+        local content_height = math.max(0, ui.h - footer_band)
+        local function action_width(label)
+            return math.max(130, (ui.text_width and ui.text_width(label, 14) or #label * 8) + 18 * font_scale)
+        end
+        local stop_width, preview_width = action_width('Stop Highlight'), action_width('Player Preview')
+        local stop_x = ui.x + ui.w - footer_inset - stop_width
+        ui.rect(ui.x, ui.y, ui.w, footer_band, theme.panel)
+        ui.rect(ui.x, content_bottom - 3 * font_scale, ui.w, ui.pixel_width or 1, theme.line, nil, 'control_accent')
+        ui.button(stop_x, ui.y + footer_inset, stop_width, footer_height, 'Stop Highlight', function()
             ui.activate('stop_identify')
         end)
         local portrait = package.loaded['epic.player_preview.v1']
         if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
-            ui.button(ui.x + ui.w - 308, ui.y - 24, 150, 28, 'Player Preview', portrait.toggle)
+            ui.button(
+                stop_x - footer_inset - preview_width,
+                ui.y + footer_inset,
+                preview_width,
+                footer_height,
+                'Player Preview',
+                portrait.toggle
+            )
         end
         local state = info()
         local ready = state.palette_ready ~= false
@@ -57,8 +89,12 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             ui.text(x, y, value, 14, white, role)
         end
         local guidance = help.imported or {}
+        local action_clip
         local function button(x, y, w, label, id, enabled, height)
             height = height or 28
+            if action_clip and x >= rx and (y < action_clip.bottom or y + height > action_clip.top) then
+                return
+            end
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
             if w < 20 then
                 return
@@ -76,10 +112,10 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 help = guidance[id],
             })
         end
-        ui.rect(ui.x, ui.y, lw, ui.h, theme.panel)
-        ui.rect(rx, ui.y, rw, ui.h, theme.panel)
+        ui.rect(ui.x, content_bottom, lw, content_height, theme.panel)
+        ui.rect(rx, content_bottom, rw, content_height, theme.panel)
         local divider = theme.line
-        ui.rect(rx - 9, ui.y, 1, ui.h, divider, nil, 'control_accent')
+        ui.rect(rx - 9, content_bottom, 1, content_height, divider, nil, 'control_accent')
         for _, offset in ipairs({ 184 }) do
             ui.rect(rx + 12, top - offset, rw - 24, 1, divider, nil, 'control_accent')
         end
@@ -137,7 +173,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 end
             end
         end
-        local cliptop, clipbottom = header_bottom - row_height - 12, ui.y + 14
+        local cliptop, clipbottom = header_bottom - row_height - 12, content_bottom + 14
         ui.rect(ui.x + lw / 2, clipbottom, 1, math.max(0, cliptop - clipbottom), divider, nil, 'control_accent')
         local function paint()
             if self.selected and ui.set then
@@ -525,7 +561,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             rw - 24,
             'hint'
         )
-        local preview_height = math.max(44, math.min(200, ui.h - ((state.palette_count or 0) > 1 and 670 or 570)))
+        local preview_height =
+            math.max(44, math.min(200, content_height - ((state.palette_count or 0) > 1 and 670 or 570)))
         local preview_top = top - 246
         local preview_bottom = preview_top - preview_height
         self.import_bounds = { x = rx + 12, y = preview_bottom, w = rw - 24, h = preview_height }
@@ -568,7 +605,21 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         end
         ui.rect(rx + 12, preview_bottom - 18, rw - 24, 1, divider, nil, 'control_accent')
         local actions = preview_bottom - 30
-        text(rx + 12, actions, 'Apply Imported LUT ' .. (state.palette_index or 1), 'heading')
+        local action_bottom = content_bottom + math.max(34, (ui.text_size and ui.text_size(13, 'hint') or 13) + 20)
+        local action_top = preview_bottom - 18
+        local tail = ((state.palette_count or 0) > 1 and 70 or 0) + 221
+        self.action_max = math.max(0, action_bottom - (actions - tail))
+        self.action_scroll = math.max(0, math.min(self.action_max, self.action_scroll or 0))
+        self.action_bounds = { x = rx, y = action_bottom, w = rw, h = math.max(0, action_top - action_bottom) }
+        action_clip = { bottom = action_bottom, top = action_top }
+        actions = actions + self.action_scroll
+        local function action_text(y, value, role, color)
+            local size = ui.text_size and ui.text_size(14, role) or 14
+            if y >= action_bottom and y + size <= action_top then
+                ui.bounded(rx + 12, y, value, 14, color or white, rw - 24, role)
+            end
+        end
+        action_text(actions, 'Apply Imported LUT ' .. (state.palette_index or 1), 'heading')
         local apply_width = (rw - 30) / 2
         local matching = state.raw and state.raw.matching
         if (state.palette_count or 0) > 1 then
@@ -586,8 +637,10 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             if matching and matching.matched == 0 then
                 summary = matching.total .. ' imported / 0 matched / ' .. matching.total .. ' for manual assignment'
             end
-            ui.bounded(rx + 12, actions - 55, summary, 13, muted, rw - 24, 'hint')
-            ui.choice('palette', rx + 12, actions - 91, rw - 24)
+            action_text(actions - 55, summary, 'hint', muted)
+            if actions - 91 >= action_bottom and actions - 65 <= action_top then
+                ui.choice('palette', rx + 12, actions - 91, rw - 24)
+            end
             button(
                 rx + 12,
                 actions - 125,
@@ -622,7 +675,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 'apply_file_helmet',
                 state.loaded ~= nil and not state.busy
             )
-            ui.bounded(rx + 12, actions - 55, 'Applies to every LUT on that gear.', 13, muted, rw - 24, 'hint')
+            action_text(actions - 55, 'Applies to every LUT on that gear.', 'hint', muted)
         end
         button(
             rx + 12,
@@ -631,7 +684,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             '[ ' .. (state.preserve_emissives and 'x' or ' ') .. ' ] Preserve Original Emissives',
             'preserve_emissives'
         )
-        ui.rect(rx + 12, actions - 109, rw - 24, 1, divider, nil, 'control_accent')
+        if actions - 109 >= action_bottom and actions - 109 <= action_top then
+            ui.rect(rx + 12, actions - 109, rw - 24, 1, divider, nil, 'control_accent')
+        end
         button(rx + 12, actions - 145, (rw - 30) / 2, 'Restore Arrowhead LUT (Original)', 'restore')
         button(
             rx + 18 + (rw - 30) / 2,
@@ -643,7 +698,29 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         button(rx + 12, actions - 183, (rw - 29) / 2, 'Undo Last Action', 'global_undo')
         button(rx + 17 + (rw - 29) / 2, actions - 183, (rw - 29) / 2, 'Redo Last Action', 'global_redo')
         button(rx + 12, actions - 221, rw - 24, 'Save applied setup', 'save_setup')
-        ui.text(rx + 12, ui.y + 14, 'RAR requires installed 7-Zip. Match Your Colors should be Off.', 13, muted, 'hint')
+        if self.action_max > 0 and ui.scrollbar and self.action_bounds.h > 0 then
+            ui.scrollbar(
+                'import_actions',
+                rx + rw - 4,
+                action_bottom,
+                self.action_bounds.h,
+                self.action_bounds.h + self.action_max,
+                self.action_bounds.h,
+                self.action_scroll,
+                function(value)
+                    self.action_scroll = value
+                end
+            )
+        end
+        ui.bounded(
+            rx + 12,
+            content_bottom + 14,
+            'RAR requires installed 7-Zip. Match Your Colors should be Off.',
+            13,
+            muted,
+            rw - 24,
+            'hint'
+        )
     end
     return self
 end

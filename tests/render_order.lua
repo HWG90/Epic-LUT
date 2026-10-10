@@ -3,6 +3,9 @@
 local View = dofile('vendor/menu/view.lua')
 local world, items, next_id, allocations, destroyed = {}, {}, 0, 0, 0
 local function allocate(item)
+    local native_z = math.floor(tonumber(item.z))
+    assert(native_z == item.z, 'Fractional draw layer reached native Gui')
+    item.z = native_z
     next_id = next_id + 1
     allocations = allocations + 1
     item.order = next_id

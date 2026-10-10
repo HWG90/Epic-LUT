@@ -233,12 +233,18 @@ menu.advance(0.6)
 commands = compose()
 local tooltip_body
 for _, c in ipairs(commands) do
-    if c.type == 'rect' and not c.window_frame and c.layer == 450 and c.c == Menu.palette.panel then
+    if
+        c.type == 'rect'
+        and not c.window_frame
+        and c.paint_plane
+        and c.paint_plane >= 5000
+        and c.c == Menu.palette.panel
+    then
         tooltip_body = c
     end
 end
 assert(tooltip_body, 'Guidance tooltip did not open')
-frame(commands, 'tooltip', tooltip_body, nil, 450)
+frame(commands, 'tooltip', tooltip_body, nil, tooltip_body.paint_plane)
 print(
     'PASS window frames: four two-pixel edges, main move/resize, scaled floating tools, single dropdown outline, gold picker drag, palette preview, preset dialogs and guidance tooltip'
 )

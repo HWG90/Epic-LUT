@@ -20,6 +20,26 @@ M.palette = {
     enabled = { 118, 207, 177 },
     disabled = { 111, 124, 133 },
 }
+-- Epic has its own neutral workspace skin. The shared MCM palette stays intact.
+M.epic_palette = {
+    background = { 12, 14, 16 },
+    panel = { 19, 21, 23 },
+    header = { 25, 27, 29 },
+    border = { 62, 66, 69 },
+    border_hover = { 106, 111, 114 },
+    line = { 34, 37, 40 },
+    white = { 234, 235, 228 },
+    muted = { 154, 159, 159 },
+    brass = { 221, 184, 105 },
+    focus = { 244, 202, 53 },
+    hover = { 29, 31, 33 },
+    selected = { 43, 39, 24 },
+    text_selection = { 48, 117, 158 },
+    field = { 29, 31, 34 },
+    field_hover = { 39, 42, 45 },
+    enabled = { 176, 205, 176 },
+    disabled = { 105, 111, 113 },
+}
 -- Epic typography is opt-in. Other users of this menu keep their original
 -- requested sizes, compact-font behavior and global bold preference.
 function M.text_size(menu, size, role)
@@ -32,22 +52,31 @@ end
 function M.text_bold(menu, role)
     return menu.font_bold and (not menu.epic_typography or role == 'heading' or role == 'title') or false
 end
+-- Native GUI layers are integers. Border geometry must also be safe when its
+-- retained allocation changes independently: never paint over the interior.
+function M.control_border(ui, x, y, w, h, color)
+    local stroke = math.min(2 * (ui.pixel_width or 1), w / 2, h / 2)
+    ui.rect(x, y, w, stroke, color, nil, 'control_border')
+    ui.rect(x, y + h - stroke, w, stroke, color, nil, 'control_border')
+    ui.rect(x, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
+    ui.rect(x + w - stroke, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
+end
 -- Custom workspaces use the same surfaces and interaction feedback as MCM.
 -- Accents remain explicit so Load, Save and Export retain their meaning.
 function M.custom_ui(ui)
-    ui.theme = M.palette
+    ui.theme = ui.epic_style and M.epic_palette or M.palette
     ui.decorate = M.custom_ui
     function ui.surface_color(x, y, w, h, options)
-        local o, T = options or {}, M.palette
+        local o, T = options or {}, ui.theme
         local hovered = o.enabled ~= false and ui.hovering and ui.hovering(x, y, w, h)
         return o.enabled == false and T.panel
             or o.accent
             or (o.selected and T.selected)
-            or (hovered and (o.field == false and T.hover or T.field_hover))
-            or (o.field == false and T.panel or T.field)
+            or (hovered and ((ui.epic_style and o.field ~= true or o.field == false) and T.hover or T.field_hover))
+            or ((ui.epic_style and o.field ~= true or o.field == false) and T.panel or T.field)
     end
     function ui.button(x, y, w, h, label, callback, options)
-        local o, T = options or {}, M.palette
+        local o, T = options or {}, ui.theme
         if ui.text_button and ui.text_button(x, y, w, h, label, callback, o) then
             return
         end
@@ -56,7 +85,16 @@ function M.custom_ui(ui)
         local hovered = enabled and ui.hovering and ui.hovering(x, y, w, h)
         local size, role = o.size or 14, o.role
         local pad = ui.spacing and ui.spacing(o.padding or 8) or o.padding or 8
-        ui.rect(x, y, w, h, color)
+        if ui.epic_style then
+            -- Four narrow strips cannot cover the interior, even if a native
+            -- retained allocation is refreshed independently of its siblings.
+            ui.rect(x, y, w, h, color, nil, 'control_fill')
+            local border = enabled and (o.accent or o.selected and T.focus or hovered and T.border_hover or T.border)
+                or T.line
+            M.control_border(ui, x, y, w, h, border)
+        else
+            ui.rect(x, y, w, h, color, nil, 'control_fill')
+        end
         ui.bounded(
             x + pad,
             ui.text_y and ui.text_y(y, h, size, label, role)
@@ -67,8 +105,8 @@ function M.custom_ui(ui)
             math.max(0, w - pad * 2),
             role
         )
-        if enabled and (o.selected or hovered) then
-            ui.rect(x, y, 2, h, T.focus, nil, 'control_accent')
+        if enabled and (o.selected or hovered and not ui.epic_style) then
+            ui.rect(x, y, ui.epic_style and 2 * (ui.pixel_width or 1) or 2, h, T.focus, nil, 'control_accent')
         end
         ui.hit(x, y, w, h, function(...)
             if enabled and callback then
@@ -184,7 +222,7 @@ end
 
 -- Custom choices honor the same dropdown/selector/combined presentation as MCM.
 function M.choice(ui, control, value, x, y, width, change, open)
-    local T = M.palette
+    local T = ui.theme or M.palette
     local disabled = control.disabled
     local hovered = not disabled and ui.hovering and ui.hovering(x, y, width, 26)
     local color = disabled and T.disabled or T.white
@@ -209,7 +247,7 @@ function M.choice(ui, control, value, x, y, width, change, open)
                 }
             or field
     end
-    ui.rect(x, y, width, 26, disabled and T.panel or background)
+    ui.rect(x, y, width, 26, disabled and T.panel or background, nil, 'control_fill')
     ui.rect(x, y, 2, 26, disabled and T.line or T.focus, nil, 'control_accent')
     local presentation = control.presentation or 'combined'
     local dropdown, selector = presentation == 'dropdown', presentation == 'selector'
@@ -1925,7 +1963,7 @@ function M.new(api, measure, Text)
 
         self.window_x, self.window_y = ox, oy
 
-        local T = M.palette
+        local T = self.epic_typography and M.epic_palette or M.palette
         local white, muted, accent, selection_text = T.white, T.muted, { 244, 202, 53 }, T.white
         local text_focus = false
         local function text_metrics(size, label, role, resolved)
@@ -1973,7 +2011,7 @@ function M.new(api, measure, Text)
                 h = rh * s,
                 c = color,
                 a = a or 1,
-                ui_role = role,
+                ui_role = role or 'content_background',
             }
         end
         local function frame(id, x, y, rw, rh, color)
@@ -2091,7 +2129,7 @@ function M.new(api, measure, Text)
             box = box or { x = ox + (x - 5) * s, y = oy + (y - 5) * s, w = (width or 180) * s, h = (size + 10) * s }
             local label = tostring(value)
             local prefix = label:sub(1, #label - #e.text - 1)
-            local cache_key = e.text .. ':' .. size .. ':' .. s
+            local cache_key = e.text .. ':' .. size .. ':' .. s .. ':' .. (self.font_metric_key or '')
             if e.measure_key ~= cache_key then
                 e.measure_key, e.measure_cache, e.glyph_advances = cache_key, {}, {}
             end
@@ -2100,6 +2138,14 @@ function M.new(api, measure, Text)
                     return 0
                 end
                 local got = e.measure_cache[text_value]
+                if not got then
+                    if self.measure_text then
+                        local ok, width = pcall(self.measure_text, text_value, size * s)
+                        if ok and type(width) == 'number' and width >= 0 and width < math.huge then
+                            got = width / s
+                        end
+                    end
+                end
                 if not got then
                     got = 0
                     for glyph in text_value:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
@@ -2110,8 +2156,8 @@ function M.new(api, measure, Text)
                         end
                         got = got + advance
                     end
-                    e.measure_cache[text_value] = got
                 end
+                e.measure_cache[text_value] = got
                 return got
             end
             local prefix_width = length(prefix)
@@ -2292,7 +2338,20 @@ function M.new(api, measure, Text)
         )
         local mode_switch = self.basic_only and self.open_advanced or self.open_basic
         if mode_switch then
-            rect(ww - 224, wh - 58, 140, 30, { 24, 132, 140 })
+            if self.epic_typography then
+                rect(
+                    ww - 224,
+                    wh - 58,
+                    140,
+                    30,
+                    hovering(ww - 224, wh - 58, 140, 30) and T.hover or T.panel,
+                    nil,
+                    'control_fill'
+                )
+                M.control_border({ rect = rect, pixel_width = 1 / s }, ww - 224, wh - 58, 140, 30, T.border)
+            else
+                rect(ww - 224, wh - 58, 140, 30, { 24, 132, 140 }, nil, 'control_fill')
+            end
             local mode_label = self.basic_only and 'Advanced Mode' or 'Basic Mode'
             bounded(
                 ww - 214,
@@ -2305,7 +2364,15 @@ function M.new(api, measure, Text)
             hit(ww - 224, wh - 58, 140, 30, mode_switch)
         end
 
-        rect(ww - 55, wh - 45, 38, 30, hovering(ww - 55, wh - 45, 38, 30) and T.field_hover or T.field)
+        rect(
+            ww - 55,
+            wh - 45,
+            38,
+            30,
+            hovering(ww - 55, wh - 45, 38, 30) and T.field_hover or T.field,
+            nil,
+            'control_fill'
+        )
         text(ww - 43, self.epic_typography and text_y(wh - 45, 30, 20, 'X') or wh - 38, 'X', 20, white)
 
         hit(ww - 55, wh - 45, 38, 30, function()
@@ -2336,7 +2403,11 @@ function M.new(api, measure, Text)
                     local x = 25 + position * width
                     position = position + 1
                     local tab_color = entry.tab_color
-                    if tab_color then
+                    if self.epic_typography then
+                        tab_color = selected and T.selected
+                            or hovering(x, wh - 120, width - 6, 38) and T.hover
+                            or T.panel
+                    elseif tab_color then
                         local level = selected and 1 or (hovering(x, wh - 120, width - 6, 38) and 0.9 or 0.72)
                         tab_color = { tab_color[1] * level, tab_color[2] * level, tab_color[3] * level }
                     end
@@ -2349,15 +2420,25 @@ function M.new(api, measure, Text)
                             or (
                                 selected and T.selected
                                 or (hovering(x, wh - 120, width - 6, 38) and T.field_hover or T.field)
-                            )
+                            ),
+                        nil,
+                        'control_fill'
                     )
+                    if self.epic_typography then
+                        if selected then
+                            rect(x, wh - 120, width - 6, 2 / s, T.focus, nil, 'control_accent')
+                        end
+                        if position < count then
+                            rect(x + width - 3, wh - 116, 1 / s, 30, T.line, nil, 'control_border')
+                        end
+                    end
                     local tab_label = entry.name:gsub('^%d+%.%s*', '')
                     bounded(
                         x + 10,
                         self.epic_typography and text_y(wh - 120, 38, 18, tab_label, 'heading') or wh - 108,
                         tab_label,
                         18,
-                        white,
+                        self.epic_typography and (selected and white or muted) or white,
                         width - 25,
                         'heading'
                     )
@@ -2524,10 +2605,18 @@ function M.new(api, measure, Text)
                     accent
                 )
 
-                rect(ww - 340, 79, 135, 34, accent)
+                rect(ww - 340, 79, 135, 34, accent, nil, 'control_fill')
                 text(ww - 319, 89, 'APPLY', 18, T.background)
 
-                rect(ww - 190, 79, 135, 34, hovering(ww - 190, 79, 135, 34) and T.field_hover or T.field)
+                rect(
+                    ww - 190,
+                    79,
+                    135,
+                    34,
+                    hovering(ww - 190, 79, 135, 34) and T.field_hover or T.field,
+                    nil,
+                    'control_fill'
+                )
                 text(ww - 176, 89, 'DISCARD', 18, white)
 
                 hit(ww - 340, 79, 135, 34, function()
@@ -2564,7 +2653,7 @@ function M.new(api, measure, Text)
                     and not self.capture
                     and not self.dropdown
                 local rw = tabbed and 190 or math.max(160, rail - 40)
-                rect(20, 79, rw, 34, resettable and T.field or T.panel)
+                rect(20, 79, rw, 34, resettable and T.field or T.panel, nil, 'control_fill')
                 bounded(32, 89, 'RESET SETTING', 16, resettable and white or T.disabled, rw - 24)
                 hit(
                     20,
@@ -2588,11 +2677,22 @@ function M.new(api, measure, Text)
             end
 
             if type(page.render_layout) == 'function' then
-                local primitives =
-                    { rect = rect, text = text, hit = hit, bounded = bounded, hovering = hovering, text_y = text_y }
+                local primitives = {
+                    rect = rect,
+                    text = text,
+                    hit = hit,
+                    bounded = bounded,
+                    hovering = hovering,
+                    text_y = text_y,
+                    theme = T,
+                    epic_style = self.epic_typography,
+                    pixel_width = 1 / s,
+                }
                 local ok, why = pcall(
                     page.render_layout,
                     M.custom_ui({
+                        epic_style = self.epic_typography,
+                        pixel_width = 1 / s,
                         x = rail + 20,
                         y = 110,
                         w = ww - rail - 40,
@@ -2722,7 +2822,7 @@ function M.new(api, measure, Text)
                                 and self.text_edit
                                 and self.text_edit.mod == mod
                                 and self.text_edit.control == control
-                            rect(x, y, width, height, T.panel)
+                            rect(x, y, width, height, T.panel, nil, 'control_fill')
                             rect(
                                 x,
                                 y + height / 2 - 3.5,
@@ -2876,7 +2976,7 @@ function M.new(api, measure, Text)
                                 owner = owner,
                             }
                             choice.input_control = input
-                            rect(x, y, width, 26, editing and T.field_hover or T.field)
+                            rect(x, y, width, 26, editing and T.field_hover or T.field, nil, 'control_fill')
                             rect(x, y, 2, 26, T.focus, nil, 'control_accent')
                             bounded(
                                 x + 8,
@@ -3206,7 +3306,7 @@ function M.new(api, measure, Text)
                                     and self.text_edit.mod == mod
                                     and self.text_edit.control == c
 
-                                rect(vx + 435, y - 5, 90, 29, editing and T.field_hover or T.field)
+                                rect(vx + 435, y - 5, 90, 29, editing and T.field_hover or T.field, nil, 'control_fill')
                                 rect(vx + 435, y - 5, 90, 1, editing and T.focus or T.border, nil, 'control_accent')
 
                                 local display = editing and self.text_edit.text .. '|'
@@ -3264,7 +3364,15 @@ function M.new(api, measure, Text)
                                     change(control, 0)
                                 end)
 
-                                rect(vx + 275, y - 5, 250, 29, not c.disabled and editing and T.field_hover or T.field)
+                                rect(
+                                    vx + 275,
+                                    y - 5,
+                                    250,
+                                    29,
+                                    not c.disabled and editing and T.field_hover or T.field,
+                                    nil,
+                                    'control_fill'
+                                )
                                 bounded(
                                     vx + 285,
                                     y,
@@ -3275,7 +3383,7 @@ function M.new(api, measure, Text)
                                 )
                             elseif c.type == 'color' then
                                 rect(vx + 300, y - 3, 34, 23, api.color_rgb(value), nil, 'swatch_fill')
-                                rect(vx + 350, y - 5, 175, 29, T.field)
+                                rect(vx + 350, y - 5, 175, 29, T.field, nil, 'control_fill')
                                 bounded(vx + 360, y, value, 18, c.disabled and T.disabled or white, 155)
 
                                 hit(vx + 295, y - 7, 230, 34, function()
@@ -3291,7 +3399,7 @@ function M.new(api, measure, Text)
                                     change(control, 0)
                                 end)
 
-                                rect(vx + 350, y - 5, 175, 29, T.field)
+                                rect(vx + 350, y - 5, 175, 29, T.field, nil, 'control_fill')
                                 rect(
                                     vx + 354,
                                     y - 1,
@@ -3330,10 +3438,10 @@ function M.new(api, measure, Text)
                                 choice_bounds[c] = { x = cx, top = y - 8, width = cw }
 
                                 if presentation ~= 'dropdown' then
-                                    rect(cx + cw + 3, y - 5, 27, 29, arrow_bg)
+                                    rect(cx + cw + 3, y - 5, 27, 29, arrow_bg, nil, 'control_fill')
                                     text(cx + cw + 10, y, '<', 18, symbol)
 
-                                    rect(cx + cw + 33, y - 5, 27, 29, arrow_bg)
+                                    rect(cx + cw + 33, y - 5, 27, 29, arrow_bg, nil, 'control_fill')
                                     text(cx + cw + 40, y, '>', 18, symbol)
 
                                     hit(cx + cw + 3, y - 5, 27, 29, function()
@@ -3348,9 +3456,16 @@ function M.new(api, measure, Text)
                                 end
 
                                 if c == selected and not c.disabled then
-                                    rect(cx - 2, y - 7, cw + 4, 33, T.border, nil, 'control_border')
+                                    M.control_border(
+                                        { rect = rect, pixel_width = 1 / s },
+                                        cx - 2,
+                                        y - 7,
+                                        cw + 4,
+                                        33,
+                                        T.border
+                                    )
                                 end
-                                rect(cx, y - 5, cw, 29, value_bg)
+                                rect(cx, y - 5, cw, 29, value_bg, nil, 'control_fill')
 
                                 bounded(
                                     cx + 9,
@@ -3402,21 +3517,22 @@ function M.new(api, measure, Text)
                                     select()
                                     change(control, 0)
                                 end)
-                                rect(
+                                M.control_border(
+                                    { rect = rect, pixel_width = 1 / s },
                                     bx - 1,
                                     y - 6,
                                     bw + 2,
                                     31,
-                                    c == selected and not c.disabled and T.border or T.line,
-                                    nil,
-                                    'control_border'
+                                    c == selected and not c.disabled and T.border or T.line
                                 )
                                 rect(
                                     bx,
                                     y - 5,
                                     bw,
                                     29,
-                                    c.disabled and T.panel or (hovering(bx, y - 5, bw, 29) and T.field_hover or T.field)
+                                    c.disabled and T.panel or (hovering(bx, y - 5, bw, 29) and T.field_hover or T.field),
+                                    nil,
+                                    'control_fill'
                                 )
                                 bounded(bx + 12, y, label, 18, c.disabled and muted or white, math.max(0, bw - 24))
                             end
@@ -3430,7 +3546,7 @@ function M.new(api, measure, Text)
                 -- The scrollbar communicates position without debug row counts.
 
                 if type(page.render_preview) == 'function' and preview_popout then
-                    rect(ww - 365, wh - 130, 300, 32, { 55, 63, 70 })
+                    rect(ww - 365, wh - 130, 300, 32, { 55, 63, 70 }, nil, 'control_fill')
                     text(ww - 355, wh - 121, 'OPEN HUD PREVIEW', 17, accent)
                     hit(ww - 365, wh - 130, 300, 32, function()
                         self.window_x = 0
@@ -3545,9 +3661,9 @@ function M.new(api, measure, Text)
             local control = mod.controls[scale_id]
             local value = scale_value
             bounded(ww - 320, 12, 'UI Scale: ' .. value .. '%', 14, muted, 210, 'hint')
-            rect(ww - 100, 6, 32, 22, T.field)
+            rect(ww - 100, 6, 32, 22, T.field, nil, 'control_fill')
             text(ww - 89, 12, '<', 14, white)
-            rect(ww - 62, 6, 32, 22, T.field)
+            rect(ww - 62, 6, 32, 22, T.field, nil, 'control_fill')
             text(ww - 51, 12, '>', 14, white)
             local function step(direction)
                 if control.disabled then
@@ -3745,13 +3861,16 @@ function M.new(api, measure, Text)
                 f.close()
             end)
             floating_context = nil
-            local span = 20 / #floating_requests
-            paint_surface(first, 210 + (ordinal - 1) * span, span)
+            paint_surface(first, 1000 + (ordinal - 1) * 32, 32)
             for i = first, #commands do
                 commands[i].popup = true
                 commands[i].floating_id = f.id
             end
         end
+        local popup_planes = { dropdown = math.max(2100, 1000 + #floating_requests * 32) }
+        popup_planes.picker = math.max(3000, popup_planes.dropdown + 32)
+        popup_planes.dialog = math.max(4000, popup_planes.picker + 32)
+        popup_planes.tooltip = math.max(5000, popup_planes.dialog + 32)
         if self.dropdown then
             local overlay_start = #commands + 1
 
@@ -3806,7 +3925,9 @@ function M.new(api, measure, Text)
                     y - 4,
                     dw - 16,
                     30,
-                    index == d.selected and T.selected or (hovering(x + 3, y - 4, dw - 16, 30) and T.hover or T.panel)
+                    index == d.selected and T.selected or (hovering(x + 3, y - 4, dw - 16, 30) and T.hover or T.panel),
+                    nil,
+                    'control_fill'
                 )
                 rect(x + 3, y - 4, 2, 30, index == d.selected and accent or T.panel, nil, 'selection_outline')
                 text_focus = index == d.selected
@@ -3861,7 +3982,7 @@ function M.new(api, measure, Text)
             text_focus = false
             scrollbar('dropdown', x + dw - 7, top - height + 4, height - 8, #d.control.choices, count, d.scroll)
             frame('dropdown', x, top - height, dw, height)
-            paint_surface(overlay_start, 230, 20)
+            paint_surface(overlay_start, popup_planes.dropdown, 32)
 
             for index = overlay_start, #commands do
                 commands[index].popup = true
@@ -3929,7 +4050,7 @@ function M.new(api, measure, Text)
             rect(px, py, 700, 430, T.panel)
             rect(px, py + 385, 700, 45, T.header)
 
-            rect(px + 650, py + 389, 32, 30, { 65, 73, 80 })
+            rect(px + 650, py + 389, 32, 30, { 65, 73, 80 }, nil, 'control_fill')
             text(px + 660, py + 396, 'X', 20, white)
 
             hit(px + 650, py + 389, 32, 30, function()
@@ -4074,7 +4195,7 @@ function M.new(api, measure, Text)
                     or picker_channel_allowed(p.control, field.key == 'alpha' and 4 or field.key, p.picker_mode)
 
                 text(px + 315, fy, field.label, 20, white)
-                rect(px + 370, fy - 5, 210, 30, enabled and T.field or T.panel)
+                rect(px + 370, fy - 5, 210, 30, enabled and T.field or T.panel, nil, 'control_fill')
 
                 local editing = self.text_edit and self.text_edit.color_channel == field.key
 
@@ -4116,7 +4237,7 @@ function M.new(api, measure, Text)
                 end)
             end
 
-            rect(px + 550, py + 78, 130, 32, { 65, 73, 80 })
+            rect(px + 550, py + 78, 130, 32, { 65, 73, 80 }, nil, 'control_fill')
             bounded(px + 560, py + 88, 'SAVE SWATCH', 16, accent, 110)
 
             hit(px + 550, py + 78, 130, 32, function()
@@ -4124,7 +4245,7 @@ function M.new(api, measure, Text)
                 self.notice = ok and 'Custom swatch saved' or tostring(err)
             end)
 
-            rect(px + 550, py + 119, 130, 32, { 65, 73, 80 })
+            rect(px + 550, py + 119, 130, 32, { 65, 73, 80 }, nil, 'control_fill')
             text(px + 557, py + 129, 'REPLACE', 16, p.selected_swatch and accent or muted)
 
             hit(px + 550, py + 119, 130, 32, function()
@@ -4137,14 +4258,14 @@ function M.new(api, measure, Text)
                 self.notice = ok and 'Selected swatch replaced' or tostring(err)
             end)
 
-            rect(px + 20, py + 20, 300, 32, accent)
+            rect(px + 20, py + 20, 300, 32, accent, nil, 'control_fill')
             text(px + 35, py + 29, 'USE COLOR', 18, T.background)
 
             hit(px + 20, py + 20, 300, 32, function()
                 self.commit_color()
             end)
 
-            rect(px + 370, py + 20, 310, 32, { 65, 73, 80 })
+            rect(px + 370, py + 20, 310, 32, { 65, 73, 80 }, nil, 'control_fill')
             text(px + 390, py + 29, 'CANCEL', 18, white)
 
             hit(px + 370, py + 20, 310, 32, function()
@@ -4153,7 +4274,7 @@ function M.new(api, measure, Text)
             end)
 
             frame('color_picker', px, py, 700, 430, accent)
-            paint_surface(start, 300, 20)
+            paint_surface(start, popup_planes.picker, 32)
             for index = start, #commands do
                 commands[index].popup = true
             end
@@ -4204,7 +4325,7 @@ function M.new(api, measure, Text)
                     white,
                     412
                 )
-                rect(px + 14, py + 22, 198, 30, { 90, 45, 40 })
+                rect(px + 14, py + 22, 198, 30, { 90, 45, 40 }, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Delete Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     local ok, why = pcall(dialog.on_save)
@@ -4218,7 +4339,7 @@ function M.new(api, measure, Text)
                 for i, option in ipairs({ { 'armor', 'Armor Only' }, { 'both', 'Both' }, { 'helmet', 'Helmet Only' } }) do
                     local bx = px + 14 + (i - 1) * 140
                     local kind, label = option[1], option[2]
-                    rect(bx, py + 70, 132, 32, T.field)
+                    rect(bx, py + 70, 132, 32, T.field, nil, 'control_fill')
                     bounded(bx + 6, py + 80, label, 14, white, 120)
                     hit(bx, py + 70, 132, 32, function()
                         dialog.save_kind = kind
@@ -4228,7 +4349,7 @@ function M.new(api, measure, Text)
                 end
             elseif dialog.phase == 'confirm' then
                 bounded(px + 14, py + 116, 'Save the current gear as a named preset.', 14, white, 412)
-                rect(px + 14, py + 22, 198, 30, T.field)
+                rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, 'Yes', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     dialog.phase = 'name'
@@ -4254,7 +4375,7 @@ function M.new(api, measure, Text)
                     bounded(px + 14, py + 130, dialog.description, 12, muted, 412)
                 end
                 local editing = self.text_edit and self.text_edit.control == dialog.control
-                rect(px + 14, py + 89, 412, 30, { 24, 39, 52 })
+                rect(px + 14, py + 89, 412, 30, { 24, 39, 52 }, nil, 'control_fill')
                 bounded(
                     px + 22,
                     py + 98,
@@ -4267,7 +4388,7 @@ function M.new(api, measure, Text)
                     self.text_edit =
                         { mod = dialog.mod, control = dialog.control, text = dialog.initial_text or '', replace = true }
                 end)
-                rect(px + 14, py + 22, 198, 30, T.field)
+                rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Save Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     if self.text_edit then
@@ -4275,11 +4396,11 @@ function M.new(api, measure, Text)
                     end
                 end)
             end
-            rect(px + 228, py + 22, 198, 30, T.field)
+            rect(px + 228, py + 22, 198, 30, T.field, nil, 'control_fill')
             bounded(px + 236, py + 30, dialog.phase == 'confirm' and 'No' or 'Cancel', 14, white, 180)
             hit(px + 228, py + 22, 198, 30, cancel)
             frame('outfit_dialog', px, py, 440, 190)
-            paint_surface(first, 400, 20)
+            paint_surface(first, popup_planes.dialog, 32)
             for i = first, #commands do
                 commands[i].popup = true
             end
@@ -4359,7 +4480,7 @@ function M.new(api, measure, Text)
                     bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20, 'hint')
                 end
                 frame('tooltip', x, y, width, height, accent)
-                paint_surface(first, 450, 20)
+                paint_surface(first, popup_planes.tooltip, 32)
                 for i = first, #commands do
                     commands[i].popup = true
                 end

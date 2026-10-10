@@ -73,6 +73,7 @@ for _, id in ipairs({
     'restore',
     'restore_imported',
     'save_setup',
+    'stop_identify',
     'undo',
     'redo',
 }) do
@@ -144,9 +145,20 @@ assert(not texts['Refresh live LUTs'], 'Advanced refresh visible by default')
 local function button_rectangle(commands, value)
     for i, command in ipairs(commands) do
         if command.full_text == value then
-            local rectangle = commands[i - 1]
-            assert(rectangle and rectangle.type == 'rect', 'Missing button background: ' .. value)
-            return rectangle
+            for index = i - 1, 1, -1 do
+                local rectangle = commands[index]
+                if
+                    rectangle.type == 'rect'
+                    and rectangle.ui_role == 'control_fill'
+                    and rectangle.x <= command.x
+                    and rectangle.x + rectangle.w >= command.x
+                    and rectangle.y <= command.y
+                    and rectangle.y + rectangle.h >= command.y
+                then
+                    return rectangle
+                end
+            end
+            error('Missing actual button background: ' .. value)
         end
     end
     error('Missing header control: ' .. value)
@@ -218,6 +230,56 @@ for _, font in ipairs({ 12, 20 }) do
     end
 end
 assert(compact and stacked, 'Header layout did not adapt to available label space')
+-- The persistent preview/highlight actions belong inside the frame, with a
+-- reserved band below both scrollable gear lists and the import guidance.
+local prior_portrait = package.loaded['epic.player_preview.v1']
+local preview_calls = 0
+package.loaded['epic.player_preview.v1'] = {
+    toggle = function()
+        preview_calls = preview_calls + 1
+    end,
+}
+for _, font in ipairs({ 12, 20 }) do
+    for _, scale in ipairs({ 0.85, 1.3 }) do
+        menu.window_width, menu.window_height, menu.font_size, menu.ui_scale = 1420, 960, font, scale
+        local commands = menu.compose(1920, 1080)
+        local preview = button_rectangle(commands, 'Player Preview')
+        local stop = button_rectangle(commands, 'Stop Highlight')
+        local bounds = menu.window_bounds
+        assert(preview.y >= bounds.y and stop.y >= bounds.y, 'Import footer actions escape the parent frame')
+        assert(
+            preview.x + preview.w < stop.x and stop.x + stop.w < bounds.x + bounds.w,
+            'Import footer actions collide'
+        )
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            local gear_bottom = bounds.y + view.gear_bounds[kind].y * bounds.scale
+            assert(
+                preview.y + preview.h < gear_bottom and stop.y + stop.h < gear_bottom,
+                'Import footer overlaps gear rows'
+            )
+        end
+        local before = preview_calls
+        tap(preview.x + preview.w / 2, preview.y + preview.h / 2)
+        assert(preview_calls == before + 1, 'Contained Player Preview action lost its hit target')
+        local action_bounds = view.action_bounds
+        assert(view.action_scroll >= 0 and view.action_scroll <= view.action_max)
+        if view.action_max > 0 then
+            assert(
+                view.wheel(action_bounds.x + 20, action_bounds.y + action_bounds.h / 2, -12000),
+                'Short import actions do not scroll'
+            )
+            commands = menu.compose(1920, 1080)
+            local save = button_rectangle(commands, 'Save applied setup')
+            assert(save.y > preview.y + preview.h, 'Scrolled import actions cross the reserved footer')
+            assert(
+                save.y + save.h <= bounds.y + (action_bounds.y + action_bounds.h) * bounds.scale,
+                'Scrolled action escapes its viewport'
+            )
+        end
+        view.action_scroll = 0
+    end
+end
+package.loaded['epic.player_preview.v1'] = prior_portrait
 state.loaded, state.palette_count = saved_document, 2
 page.minimum_width = nil
 view.selected = nil

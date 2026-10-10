@@ -67,7 +67,7 @@ assert(menu.dropdown and menu.dropdown.owner, 'Floating dropdown has no owner')
 commands = menu.compose(1920, 1080)
 local above = false
 for _, c in ipairs(commands) do
-    if c.popup and c.text == 'Alpha' and c.layer == 230 then
+    if c.popup and c.text == 'Alpha' and c.paint_plane and c.paint_plane >= 2100 then
         above = true
     end
 end
@@ -103,7 +103,7 @@ local bounded_window = false
 for _, c in ipairs(menu.compose(1920, 1080)) do
     if c.floating_id == 'test_popup' then
         assert(
-            c.paint_plane >= 210 and c.paint_span > 0 and c.paint_plane + c.paint_span <= 230,
+            c.paint_plane >= 1000 and c.paint_span == 32 and c.paint_plane + c.paint_span < 2100,
             'Floating content escaped its reserved window range'
         )
         bounded_window = true

@@ -3443,7 +3443,7 @@ return {
             history = m.action_history.new(capture_action, restore_action)
         end
         preferences = m.preferences.new(paths.storage)
-        frontend = m.frontend.new(m, ctx)
+        frontend = m.frontend.new(m, ctx, { memory = memory, game = game })
         frontend.preferences = preferences
         if m.update_check then
             updates = m.update_check.new(m.windows, paths.cache, m.version or 'R4-rc1')

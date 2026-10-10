@@ -79,6 +79,22 @@ function V.new(deps)
             ui.rect(x, y, w, height, dark)
             local header_y = y + height - panel_header_height
             ui.rect(x, header_y, w, panel_header_height, blue)
+            if ui.epic_style then
+                local edge = ui.pixel_width or 1
+                ui.rect(x, y, w, edge, theme.line, nil, 'control_accent')
+                ui.rect(x, y, edge, height, theme.line, nil, 'control_accent')
+                ui.rect(x + w - edge, y, edge, height, theme.line, nil, 'control_accent')
+                ui.rect(x, header_y, w, edge, theme.line, nil, 'control_accent')
+                ui.rect(
+                    x + 8 * font_scale,
+                    header_y,
+                    math.min(40 * font_scale, w),
+                    edge * 2,
+                    theme.brass,
+                    nil,
+                    'control_accent'
+                )
+            end
             ui.bounded(
                 x + 8 * font_scale,
                 ui.text_y and ui.text_y(header_y, panel_header_height, 17, title, 'heading') or header_y + 6,
@@ -620,7 +636,7 @@ function V.new(deps)
         for r = first_row, last_row do
             local y = grid_top - (r - first_row + 1) * cell
             local selected_row = r
-            ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, { 244, 202, 53 }, 68)
+            ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, r == row and theme.brass or muted, 68)
             ui.hit(
                 ui.x + 8,
                 y,
@@ -842,21 +858,39 @@ function V.new(deps)
                     local selected_row = r
                     cursor = cursor - row_heading_height - 2 * font_scale
                     if visible(cursor, row_heading_height) then
-                        ui.rect(
-                            right + 8,
-                            cursor,
-                            rightw - 20,
-                            row_heading_height,
-                            (
-                                ui.surface_color(
-                                    right + 8,
-                                    cursor,
-                                    rightw - 20,
-                                    row_heading_height,
-                                    { selected = r == row }
+                        local row_selected = r == row
+                        if not ui.epic_style or self.open_row == r or row_selected then
+                            ui.rect(
+                                right + 8,
+                                cursor,
+                                rightw - 20,
+                                row_heading_height,
+                                (
+                                    ui.surface_color(
+                                        right + 8,
+                                        cursor,
+                                        rightw - 20,
+                                        row_heading_height,
+                                        { selected = r == row }
+                                    )
                                 )
                             )
-                        )
+                        end
+                        if ui.epic_style then
+                            local edge = ui.pixel_width or 1
+                            ui.rect(right + 8, cursor, rightw - 20, edge, theme.line, nil, 'control_accent')
+                            if row_selected then
+                                ui.rect(
+                                    right + 8,
+                                    cursor,
+                                    edge * 2,
+                                    row_heading_height,
+                                    theme.brass,
+                                    nil,
+                                    'control_accent'
+                                )
+                            end
+                        end
                         local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
                         ui.text(
                             right + 13,
@@ -864,12 +898,12 @@ function V.new(deps)
                                 or cursor + 6,
                             (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r,
                             14,
-                            can_identify
-                                    and {
-                                        math.floor(175 + 69 * pulse),
-                                        math.floor(180 + 22 * pulse),
-                                        math.floor(140 - 87 * pulse),
-                                    }
+                            ui.epic_style and (row_selected and theme.brass or white)
+                                or can_identify and {
+                                    math.floor(175 + 69 * pulse),
+                                    math.floor(180 + 22 * pulse),
+                                    math.floor(140 - 87 * pulse),
+                                }
                                 or white,
                             'heading'
                         )
@@ -929,15 +963,7 @@ function V.new(deps)
                                 if true then
                                     local index = semantics.index(r, c, 1, d.width, d.height)
                                     local chip_y = cursor + (column_heading_height - 18) / 2
-                                    ui.rect(
-                                        right + rightw - 40,
-                                        chip_y,
-                                        24,
-                                        18,
-                                        rgb(d.data, index),
-                                        nil,
-                                        'swatch_fill'
-                                    )
+                                    ui.rect(right + rightw - 40, chip_y, 24, 18, rgb(d.data, index), nil, 'swatch_fill')
                                     ui.hit(right + rightw - 40, chip_y, 24, 18, function()
                                         prepare()
                                         ui.activate('cell_color')

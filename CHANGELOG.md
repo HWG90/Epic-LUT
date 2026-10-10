@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Use the game's loaded HUD font with measured caret alignment and a guarded debug-font fallback.
+- Give Epic LUT a distinct near-black skin, outlined secondary actions, gold navigation indicators and quieter row/inspector headers.
+- Use integer native drawing layers and narrow border strips so retained swatches, labels and dark selected-card fills stay visible after partial updates.
+- Keep Import preview/highlight actions inside a reserved footer; scroll its lower actions when the window cannot fit them.
 - Give the editor distinct title, heading, label and hint styles; keep body and editable text at regular weight with optional bold headings.
 - Scale button padding and header geometry with the configured font size; keep secondary navigation quiet and primary Load/Apply/Export actions clear.
 - Reuse named preview function types across reloads; keep the editor available when the optional preview binding reaches capacity, with bounded single-line loader diagnostics.

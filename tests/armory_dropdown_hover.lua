@@ -98,6 +98,9 @@ assert(row, 'Hover row background unavailable')
 
 local world, items, next_id, allocations = {}, {}, 0, 0
 local function allocate(item)
+    local native_z = math.floor(tonumber(item.z))
+    assert(native_z == item.z, 'Fractional dropdown layer reached native Gui')
+    item.z = native_z
     next_id, allocations = next_id + 1, allocations + 1
     item.order = next_id
     items[next_id] = item

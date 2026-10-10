@@ -36,9 +36,13 @@ function F.new(m,ctx,deps)
                 end}
             self.resolution=sr.Gui.resolution
     end
+    if m.ui_font and deps.memory and deps.game and self.view.set_font_source then
+        self.view.set_font_source(m.ui_font.new(deps.memory,deps.game,m.engine and m.engine.at))
+    end
     self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
     self.menu=m.ui_menu.new(self.api,self.view.measure,m.text_editor)
     self.menu.text_metrics=self.view.text_metrics
+    if self.view.refresh_font then self.menu.measure_text=self.view.measure end
     self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({window=function()return self.input.window()end}))
     self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
@@ -104,6 +108,14 @@ function F.new(m,ctx,deps)
                 return
             end
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
+            if self.view.refresh_font then
+                if self.view.refresh_font()then self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1 end
+                self.menu.font_metric_key=self.view.metric_key or self.view.font_key
+                if self.font_logged_key~=self.view.font_key then
+                    self.font_logged_key=self.view.font_key
+                    ctx.log('Epic LUT UI font: '..(self.view.font_key=='core/performance_hud/debug'and 'stock debug' or 'game HUD'))
+                end
+            end
             local basic_down=self.input.down(basic_key)
             if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit and not self.menu.capture then
                 if self.basic_mode and self.menu.visible then self.menu.visible=false

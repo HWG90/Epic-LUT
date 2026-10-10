@@ -44,7 +44,7 @@ for _, font in ipairs({ 12, 20 }) do
     menu.advance(0.6)
     local lines = {}
     for _, command in ipairs(menu.compose(1920, 1080)) do
-        if command.layer == 450 and command.text then
+        if command.paint_plane and command.paint_plane >= 5000 and command.text then
             lines[#lines + 1] = command
         end
     end
@@ -75,7 +75,10 @@ for _, empty in ipairs({
     menu.compose(1920, 1080)
     menu.advance(0.6)
     for _, command in ipairs(menu.compose(1920, 1080)) do
-        assert(command.layer ~= 450 and command.window_frame ~= 'tooltip', 'Empty tooltip rendered a blank panel')
+        assert(
+            (not command.paint_plane or command.paint_plane < 5000) and command.window_frame ~= 'tooltip',
+            'Empty tooltip rendered a blank panel'
+        )
     end
 end
 help = function()
@@ -85,7 +88,7 @@ menu.compose(1920, 1080)
 menu.advance(0.6)
 local callback_text = false
 for _, command in ipairs(menu.compose(1920, 1080)) do
-    callback_text = callback_text or (command.layer == 450 and command.text ~= nil)
+    callback_text = callback_text or (command.paint_plane and command.paint_plane >= 5000 and command.text ~= nil)
 end
 assert(callback_text, 'Nonempty callback tooltip was suppressed')
 print('PASS tooltip wrapping: per-glyph fallback, complete words and resized line spacing')

@@ -90,6 +90,7 @@ local h = api.register({
 })
 local mod = api.mods[h.id]
 mod.tabs_top = true
+mod.pages[2].tab_color = { 110, 69, 155 }
 mod.pages[1].render_layout = view.draw
 mod.pages[2].render_layout = function(ui)
     -- A color helper used as the final rect argument must not leak a second
@@ -105,6 +106,9 @@ mod.pages[2].render_layout = function(ui)
     ui.button(ui.x + 250, ui.y + 60, 220, 32, 'Export', function()
         clicks.export = (clicks.export or 0) + 1
     end, { accent = { 244, 202, 53 }, ink = { 25, 28, 31 } })
+    ui.button(ui.x + 10, ui.y + 20, 220, 32, 'Field input', function()
+        clicks.field = (clicks.field or 0) + 1
+    end, { field = true })
 end
 local menu = Menu.new(api, function(text, size)
     return #text * size * 0.5
@@ -116,8 +120,19 @@ end
 local function button(commands, label)
     for i, c in ipairs(commands) do
         if c.full_text == label then
-            assert(commands[i - 1].type == 'rect')
-            return commands[i - 1], c
+            for j = i - 1, 1, -1 do
+                local body = commands[j]
+                if
+                    body.type == 'rect'
+                    and body.ui_role == 'control_fill'
+                    and body.x <= c.x
+                    and body.x + body.w >= c.x
+                    and body.y <= c.y
+                    and body.y + body.h >= c.y
+                then
+                    return body, c
+                end
+            end
         end
     end
     error('Missing composed control: ' .. label)
@@ -191,6 +206,227 @@ for _, font in ipairs({ 12, 20 }) do
     local rect, label = button(compose(), 'Action')
     assert(label.y >= rect.y and label.y + label.size <= rect.y + rect.h, 'Styled label clips after font resize')
 end
+
+-- Epic uses a visibly distinct skin while the legacy checks above continue to
+-- enforce the shared MCM colors and original button behavior.
+menu.epic_typography, menu.font_size, menu.page = true, 12, 2
+local function border(commands, fill)
+    for _, c in ipairs(commands) do
+        if
+            c.ui_role == 'control_border'
+            and math.abs(c.x - fill.x) < 0.01
+            and math.abs(c.y - fill.y) < 0.01
+            and math.abs(c.w - fill.w) < 0.01
+            and math.abs(c.h - 2) < 0.01
+        then
+            return c
+        end
+    end
+    error('Missing retained two-pixel outline')
+end
+local function find_text(commands, text)
+    for _, c in ipairs(commands) do
+        if c.full_text == text then
+            return c
+        end
+    end
+    error('Missing styled text: ' .. text)
+end
+for _, scale in ipairs({ 0.85, 1.3 }) do
+    menu.ui_scale = scale
+    menu.pointer_x, menu.pointer_y = nil, nil
+    commands = compose()
+    local action, action_text = button(commands, 'Action')
+    assert(same(action.c, Menu.epic_palette.panel), 'Epic secondary action retained a large blue fill')
+    assert(same(border(commands, action).c, Menu.epic_palette.border), 'Quiet action outline missing')
+    assert(not action_text.bold and same(action_text.c, Menu.epic_palette.white), 'Epic body weight/ink changed')
+    local fields = button(commands, 'Field input')
+    assert(
+        same(fields.c, Menu.epic_palette.field) and not same(fields.c, action.c),
+        'Editable field lost its recognizable fill'
+    )
+    input(action, false)
+    local old_writes = writes
+    commands = compose()
+    local hovered = button(commands, 'Action')
+    assert(
+        same(hovered.c, Menu.epic_palette.hover) and same(border(commands, hovered).c, Menu.epic_palette.border_hover),
+        'Epic hover did not subtly brighten its outline'
+    )
+    assert(writes == old_writes, 'Epic hover wrote settings')
+    tap(hovered)
+    local selected = button(compose(), 'Selected')
+    assert(
+        same(selected.c, Menu.epic_palette.selected) and same(border(compose(), selected).c, Menu.epic_palette.focus),
+        'Selected control lost its warm gold tint/outline'
+    )
+    local primary, ink = button(compose(), 'Export')
+    assert(
+        same(primary.c, Menu.epic_palette.focus) and same(ink.c, { 25, 28, 31 }),
+        'Primary action lost its gold fill'
+    )
+    tap(primary)
+    tap(fields)
+    commands = compose()
+    local import_tab, selected_tab = find_text(commands, 'Import'), find_text(commands, 'Surfaces')
+    assert(
+        same(import_tab.c, Menu.epic_palette.muted) and same(selected_tab.c, Menu.epic_palette.white),
+        'Segmented tab ink does not distinguish active navigation'
+    )
+    local underline = false
+    local b = menu.window_bounds
+    for _, c in ipairs(commands) do
+        assert(not same(c.c, { 110, 69, 155 }), 'Configuration-style purple fill leaked into the Epic tab strip')
+        if
+            c.ui_role == 'control_accent'
+            and same(c.c, Menu.epic_palette.focus)
+            and math.abs(c.h - 2) < 0.01
+            and c.x <= selected_tab.x
+            and c.x + c.w >= selected_tab.x
+            and math.abs(c.y - (b.y + (menu.window_height - 120) * b.scale)) < 0.01
+        then
+            underline = true
+        end
+        assert(type(c.a) == 'number', 'Epic skin changed opacity type')
+    end
+    assert(underline, 'Selected navigation segment has no two-pixel gold underline')
+    -- Modal coverage suppresses both fill and outline hover without losing clicks.
+    menu.color_picker = { mod = mod, control = mod.controls.style_color, rgb = { 255, 255, 255 } }
+    input(action, false)
+    commands = compose()
+    local covered = button(commands, 'Action')
+    assert(
+        same(covered.c, Menu.epic_palette.panel) and same(border(commands, covered).c, Menu.epic_palette.border),
+        'Covered Epic outline responds through a picker'
+    )
+    menu.color_picker = nil
+end
+assert(clicks.action == 3 and clicks.export == 3 and clicks.field == 2, 'Epic skin changed existing action callbacks')
+-- Exercise the unchanged native renderer: the retained outline must sit above
+-- its parent surface while the inset fill and text keep their original order.
+commands = compose()
+local filled, ink = button(commands, 'Action')
+local outlined = border(commands, filled)
+local selected_body = button(commands, 'Selected')
+local primary_body = button(commands, 'Export')
+local edges = 0
+for _, c in ipairs(commands) do
+    if
+        c.ui_role == 'control_border'
+        and c.x >= selected_body.x
+        and c.y >= selected_body.y
+        and c.x + c.w <= selected_body.x + selected_body.w + 0.01
+        and c.y + c.h <= selected_body.y + selected_body.h + 0.01
+    then
+        edges = edges + 1
+        local cx, cy = selected_body.x + selected_body.w / 2, selected_body.y + selected_body.h / 2
+        assert(
+            not (c.x <= cx and c.x + c.w >= cx and c.y <= cy and c.y + c.h >= cy),
+            'Gold outline covers the selected control interior'
+        )
+    end
+end
+assert(edges == 4, 'Selected outline must consist of exactly four narrow border strips')
+local world, gui, rendered, next_id = {}, {}, {}, 0
+local function allocate(kind, position, dimensions, color)
+    assert(position.z == math.floor(position.z), 'Native GUI received a fractional draw layer')
+    next_id = next_id + 1
+    rendered[#rendered + 1] = { kind = kind, position = position, dimensions = dimensions, color = color }
+    return next_id
+end
+local sr = {
+    Application = {
+        worlds = function()
+            return { world }
+        end,
+        main_world = function()
+            return world
+        end,
+        can_get = function()
+            return false
+        end,
+    },
+    World = {
+        create_screen_gui = function()
+            return gui
+        end,
+        destroy_gui = function() end,
+    },
+    Vector3 = function(x, y, z)
+        return { x = x, y = y, z = z }
+    end,
+    Vector2 = function(x, y)
+        return { x = x, y = y }
+    end,
+    Color = function(a, r, g, b)
+        return { a, r, g, b }
+    end,
+    Gui = {
+        resolution = function()
+            return 1920, 1080
+        end,
+        rect = function(_, position, dimensions, color)
+            return allocate('rect', position, dimensions, color)
+        end,
+        text = function(_, _, _, _, _, position)
+            return allocate('text', position)
+        end,
+        destroy_rect = function() end,
+        destroy_text = function() end,
+    },
+}
+dofile('vendor/menu/view.lua').new(sr, true).draw(commands)
+local function native_depth(command)
+    local depth
+    for _, primitive in ipairs(rendered) do
+        local p, d = primitive.position, primitive.dimensions
+        if
+            primitive.kind == command.type
+            and math.abs(p.x - command.x) < 0.01
+            and math.abs(p.y - command.y) < 0.01
+            and (command.type == 'text' or primitive.color[2] == command.c[1] and primitive.color[3] == command.c[2] and primitive.color[4] == command.c[3])
+            and (command.type == 'text' or math.abs(d.x - command.w) < 0.01 and math.abs(d.y - command.h) < 0.01)
+        then
+            depth = math.max(depth or p.z, p.z)
+        end
+    end
+    return assert(depth, 'Styled command did not reach the native renderer')
+end
+assert(
+    native_depth(filled) == 110 and native_depth(outlined) == 111,
+    'Main body/outline no longer occupy distinct integer draw layers'
+)
+assert(
+    native_depth(filled) < 119 and native_depth(filled) < native_depth(ink),
+    'Styled fill covered field selection or text'
+)
+local function interior(body)
+    local x, y = body.x + body.w / 2, body.y + body.h / 2
+    local top
+    for _, primitive in ipairs(rendered) do
+        local p, d = primitive.position, primitive.dimensions
+        if
+            primitive.kind == 'rect'
+            and p.x <= x
+            and p.x + d.x >= x
+            and p.y <= y
+            and p.y + d.y >= y
+            and (not top or p.z >= top.position.z)
+        then
+            top = primitive
+        end
+    end
+    assert(top)
+    return { top.color[2], top.color[3], top.color[4] }
+end
+assert(
+    same(interior(selected_body), Menu.epic_palette.selected),
+    'Integer native sorting replaced selected dark RGB with its gold outline'
+)
+assert(
+    same(interior(primary_body), Menu.epic_palette.focus),
+    'Integer native sorting erased the primary action gold fill'
+)
 print(
-    'PASS custom UI styling: current MCM palette, Import toolbar clicks, hover/modal feedback, disabled controls, semantic accents and font containment'
+    'PASS custom UI styling: unchanged MCM palette/legacy behavior, Epic neutral surfaces, retained two-pixel outlines, hover/modal feedback, gold selection/primary/nav accents and callback parity'
 )

@@ -5,10 +5,19 @@ local View = dofile('vendor/menu/view.lua')
 local world, gui = {}, {}
 local calls, next_id = 0, 0
 local advances = { F = 0.38, M = 0.8, i = 0.2, ['.'] = 0.22, ['#'] = 0.46, [' '] = 0.28, ['0'] = 0.42 }
-local function advance(label, size)
+local game_advances = { F = 0.5, M = 0.72, i = 0.24, ['.'] = 0.19, ['#'] = 0.4, [' '] = 0.22, ['0'] = 0.35 }
+local game_face = { font = '1234567890abcdef', material = '234567890abcdef1', atlas = '34567890abcdef12' }
+local metric_face = 'debug'
+local function advance(label, size, face)
+    face = face or metric_face
+    local current = face == 'game' and game_advances or advances
     local width = 0
     for glyph in label:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
-        width = width + (advances[glyph] or 0.5) * size
+        width = width + (current[glyph] or 0.5) * size
+    end
+    if face == 'game' then
+        local _, pairs = label:gsub('Fi', '')
+        width = width - pairs * size * 0.05
     end
     return width
 end
@@ -17,6 +26,12 @@ local function allocate()
     return next_id
 end
 local sr = {
+    IdString64 = {
+        from_hex = function(value)
+            return value
+        end,
+    },
+    Material = { set_texture = function() end },
     Application = {
         worlds = function()
             return { world }
@@ -44,6 +59,9 @@ local sr = {
         return { a, r, g, b }
     end,
     Gui = {
+        material = function()
+            return {}
+        end,
         resolution = function()
             return 2560, 1440
         end,
@@ -51,14 +69,22 @@ local sr = {
         text = allocate,
         destroy_rect = function() end,
         destroy_text = function() end,
-        text_extents = function(_, label, _, size)
+        text_extents = function(_, label, resource, size)
             calls = calls + 1
             local right = label:sub(-1) == 'M' and 0.09 or label:sub(-1) == 'F' and 0.01 or 0.06
-            return { x = 0.02 * size, y = -0.2 * size }, { x = advance(label, size) - right * size, y = 0.7 * size }
+            return { x = 0.02 * size, y = -0.2 * size }, {
+                x = advance(label, size, resource == game_face.font and 'game' or 'debug') - right * size,
+                y = 0.7 * size,
+            }
         end,
     },
 }
 local view = View.new(sr, true)
+local cold = View.new(sr, true)
+assert(
+    math.abs(cold.measure('Fi', 20) - 24.8) < 0.001 and math.abs(cold.measure('éF', 20) - 24.8) < 0.001,
+    'Cold fallback measured a full prefix as one glyph'
+)
 view.draw({ { type = 'rect', x = 0, y = 0, w = 1, h = 1, a = 1, c = { 0, 0, 0 } } })
 assert(math.abs(view.measure('F', 20) - 7.6) < 1e-8, 'Native narrow advance was replaced by heuristic width')
 assert(math.abs(view.measure('i', 20) - 4) < 1e-8, 'Terminal ink bearing leaked into native advance')
@@ -87,6 +113,7 @@ end
 local menu = Menu.new(api, view.measure, Text)
 menu.visible, menu.compact_fonts = true, true
 menu.text_metrics = view.text_metrics
+menu.measure_text = view.measure
 menu.window_width, menu.window_height = 1400, 900
 local function compose()
     return menu.compose(2560, 1440)
@@ -200,6 +227,37 @@ for _, font in ipairs({ 12, 20 }) do
         menu.key(27)
     end
 end
+-- Switch the same focused draft, size and scale across proportional/kerning
+-- faces. The native metric identity must invalidate its prefix-width cache.
+menu.font_size, menu.ui_scale = 20, 1
+assert(h.set('name', 'FFF00Fi'))
+tap()
+local e = menu.text_edit
+Text.all(e)
+geometry()
+view.set_font_source({
+    resolve = function()
+        return metric_face == 'game' and game_face or nil
+    end,
+})
+for _, face in ipairs({ 'game', 'debug', 'game' }) do
+    metric_face = face
+    assert(view.refresh_font(), 'Face change did not invalidate metrics')
+    menu.font_metric_key = view.metric_key
+    assert(math.abs(view.measure('#F', 20) - advance('#F', 20)) < 0.001, 'Hash-prefix metrics retained another face')
+    e.cursor = #e.text
+    e.anchor = 0
+    local _, b, field = geometry()
+    local target = 3
+    input(b.text_x + advance(e.text:sub(1, target), field.size), b.y + b.h / 2, true)
+    input(b.text_x + advance(e.text:sub(1, target), field.size), b.y + b.h / 2, false)
+    assert(e.cursor == target, 'Face change left stale caret hit metrics')
+end
+assert(
+    math.abs(view.measure(string.rep('F', 256), 20) - advance(string.rep('F', 256), 20)) < 0.001,
+    'Long prefix lost native advance to single-glyph limit'
+)
+menu.key(27)
 print(
-    'PASS native text metrics: true narrow advances, cancelled terminal bearings, caret/selection/hits at12/20 fonts and80/85/100 scales, repeated F scroll and deletion'
+    'PASS native text metrics: bearings, proportional/kerning font switches, caret/selection/hits at12/20 fonts and80/85/100 scales, repeated F scrolling, cold fallback and long prefixes'
 )
