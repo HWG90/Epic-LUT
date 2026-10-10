@@ -46,6 +46,12 @@ local prefs = own.register({
                     default = true,
                 },
                 {
+                    id = 'include_patterns_in_exports',
+                    type = 'toggle',
+                    label = 'Include Pattern LUTs in Exports',
+                    default = true,
+                },
+                {
                     id = 'reset_key',
                     type = 'button',
                     label = 'Reset shortcut',
@@ -152,6 +158,14 @@ local function register_source()
                         label = 'Include Capes in Armor Exports',
                         default = true,
                     },
+                    {
+                        id = 'include_patterns_in_exports',
+                        source_mod_id = 'preferences',
+                        source_control_id = 'include_patterns_in_exports',
+                        type = 'toggle',
+                        label = 'Include Pattern LUTs in Exports',
+                        default = true,
+                    },
                     { id = 'share_appearance', type = 'toggle', label = 'Share full LUT appearance', default = true },
                     { id = 'sharing_status', type = 'text', label = share_status },
                     {
@@ -225,6 +239,31 @@ assert(
     'Cape export setting did not share its authoritative owner'
 )
 assert(handle.edit('include_capes_in_armor_exports', true))
+assert(handle.get('include_patterns_in_exports') == true)
+local pattern_writes = writes
+assert(handle.edit('include_patterns_in_exports', false))
+assert(
+    prefs.get('include_patterns_in_exports') == false
+        and original.get('include_patterns_in_exports') == false
+        and disk.preferences.include_patterns_in_exports == false
+        and writes == pattern_writes + 1
+        and external_writes == 0,
+    'MCM Pattern exports did not persist exactly once through the shared owner'
+)
+assert(original.set('include_patterns_in_exports', true) and handle.preview('include_patterns_in_exports') == true)
+assert(prefs.set('include_patterns_in_exports', false) and handle.get('include_patterns_in_exports') == false)
+assert(handle.reset('include_patterns_in_exports') and prefs.get('include_patterns_in_exports'))
+assert(own.mods.epic_direct_lut.values.include_patterns_in_exports == nil, 'Pattern export alias kept competing state')
+local cape_position, pattern_position
+for index, control in ipairs(mod.pages[1].controls) do
+    if control.id == 'include_capes_in_armor_exports' then
+        cape_position = index
+    elseif control.id == 'include_patterns_in_exports' then
+        pattern_position = index
+        assert(control.column == 2 and control.groups[1] == 'exports')
+    end
+end
+assert(pattern_position == cape_position + 1, 'MCM Pattern export checkbox did not follow Cape exports')
 local automatic_writes = writes
 assert(handle.get('auto_updates') == true and original.get('auto_updates') == true)
 assert(handle.edit('auto_updates', false))

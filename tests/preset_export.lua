@@ -5,6 +5,7 @@ local O = dofile('src/presets/outfit_presets.lua')
 local F = dofile('src/core/file_io.lua')
 local L = dofile('src/presets/lut_files.lua')
 local P = dofile('src/presets/patch_export.lua')
+local Pair = dofile('src/presets/export_pairing.lua')
 local document = { width = 23, height = 8, data = ffi.new('float[736]') }
 local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
 document.data[0], document.data[19], pattern.data[7] = 0.125, -2.5, 0.375
@@ -137,6 +138,7 @@ local m = {
     dds = D,
     file_io = F,
     lut_files = L,
+    export_pairing = Pair,
     bulk_dds_export = {
         new = function()
             return {
@@ -190,6 +192,123 @@ assert(
 )
 export.save('Saved Set', loaded, 3, 1)
 assert(calls[2][2] == loaded.entries and calls[2][3] == nil, 'Entire preset patch omitted saved entries')
+local paired_pattern = {
+    kind = 'armor',
+    key = 'p:' .. loaded.entries[1].key,
+    document = loaded.entries[2].document,
+    original = loaded.entries[2].original,
+}
+local wrong_gear = {
+    kind = 'helmet',
+    key = paired_pattern.key,
+    document = pattern,
+    original = original(pattern, '000000000000002b'),
+}
+local wrong_destination = {
+    kind = 'armor',
+    key = 'p:0:1:0:1',
+    document = pattern,
+    original = original(pattern, '000000000000002c'),
+}
+local paired_preset = { entries = { loaded.entries[1], paired_pattern, wrong_gear, wrong_destination } }
+export.save('Selected Pair', paired_preset, 2, 1)
+local patch_pair = calls[#calls]
+assert(
+    #patch_pair[2] == 2
+        and patch_pair[2][1] == loaded.entries[1]
+        and patch_pair[2][2] == paired_pattern
+        and patch_pair[3] == nil,
+    'Selected saved patch did not pair the exact material and Pattern destination'
+)
+assert(
+    ffi.string(patch_pair[2][2].document.data, 48) == ffi.string(pattern.data, 48),
+    'Selected saved patch changed Pattern float values'
+)
+local pair_folder, pair_description, pair_share = export.save('Selected Pair', paired_preset, 4, 1)
+assert(
+    pair_folder == 'tests/tmp/bulk-preset' and pair_share == pair_folder and pair_description == '2 saved LUT DDS files'
+)
+assert(
+    #bulk_entries == 2
+        and bulk_entries[1].document == loaded.entries[1].document
+        and bulk_entries[2].document == paired_pattern.document
+        and bulk_entries[1].kind == 'armor'
+        and bulk_entries[2].kind == 'armor'
+        and bulk_entries[1].ordinal == 1
+        and bulk_entries[2].ordinal == 1
+        and bulk_naming == 1,
+    'Selected DDS pair mixed targets or did not use distinct material/Pattern naming'
+)
+export.save('Selected Pair', paired_preset, 4, 1, 5)
+assert(bulk_naming == 5, 'Selected DDS pair ignored the requested naming format')
+export.save('Selected Pattern', paired_preset, 2, 2)
+assert(
+    calls[#calls][2] == paired_pattern.document and calls[#calls][3] == paired_pattern.original,
+    'Explicit selected Pattern patch exported another material'
+)
+local _, _, selected_pattern_raw = export.save('Selected Pattern', paired_preset, 4, 2)
+local selected_pixels, selected_width, selected_height = D.decode(F.read(selected_pattern_raw, D.MAX_BYTES))
+assert(
+    selected_width == 3 and selected_height == 1 and ffi.string(selected_pixels, 48) == ffi.string(pattern.data, 48),
+    'Explicit selected Pattern DDS did not remain standalone'
+)
+os.remove(selected_pattern_raw)
+local no_metadata = {
+    entries = {
+        loaded.entries[1],
+        { kind = paired_pattern.kind, key = paired_pattern.key, document = paired_pattern.document },
+    },
+}
+local before_patch_calls = #calls
+local metadata_ok, metadata_why = pcall(export.save, 'Missing Pattern Metadata', no_metadata, 2, 1)
+assert(
+    not metadata_ok and tostring(metadata_why):find('resave', 1, true) and #calls == before_patch_calls,
+    'Incomplete paired patch metadata reached the writer'
+)
+-- Exercise the real transactional exporters: a malformed second member must
+-- fail before a directory or file is created for the valid first material.
+local created_outputs, written_outputs = 0, 0
+local checked_export = E.new({
+    dds = D,
+    file_io = {
+        write = function()
+            written_outputs = written_outputs + 1
+        end,
+    },
+    lut_files = L,
+    export_pairing = Pair,
+    bulk_dds_export = dofile('src/presets/bulk_dds_export.lua'),
+    patch_export = P,
+}, {
+    exports = 'tests/tmp/presets',
+    directory_exists = function()
+        return false
+    end,
+    mkdir_new = function()
+        created_outputs = created_outputs + 1
+        error('Invalid export reached directory creation')
+    end,
+    rmdir = function() end,
+})
+local malformed_original = original(pattern, paired_pattern.original.resource)
+malformed_original.patch_source = 'invalid'
+local malformed_pair = {
+    entries = {
+        loaded.entries[1],
+        {
+            kind = paired_pattern.kind,
+            key = paired_pattern.key,
+            document = pattern,
+            original = malformed_original,
+        },
+    },
+}
+local malformed_ok, malformed_why = pcall(checked_export.save, 'Malformed Pair', malformed_pair, 2, 1)
+assert(not malformed_ok and tostring(malformed_why):find('Invalid original patch metadata', 1, true))
+malformed_original.resource = 'invalid'
+local bad_dds_ok, bad_dds_why = pcall(checked_export.save, 'Malformed Pair', malformed_pair, 4, 1)
+assert(not bad_dds_ok and tostring(bad_dds_why):find('Invalid LUT resource ID', 1, true))
+assert(created_outputs == 0 and written_outputs == 0, 'Invalid paired export left partial output')
 local _, _, raw = export.save('Saved Set', loaded, 4, 1)
 assert(raw:match('Saved Set%-%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d%.dds$'), 'Raw DDS lost timestamp naming')
 local decoded = D.decode(F.read(raw, D.MAX_BYTES))
@@ -211,7 +330,7 @@ local cape_roundtrip = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Cape Rou
 assert(#cape_roundtrip.cape == 1 and #cape_roundtrip.armor == 1 and #cape_roundtrip.entries == 3)
 assert(cape_roundtrip.entries[3].original.resource == cape_roundtrip.entries[1].original.resource)
 assert(ffi.string(cape_roundtrip.cape[1].data, 2944) == ffi.string(cape.data, 2944), 'Shared-ID Cape bytes lost')
-local include = false
+local include, include_patterns = false, true
 local filtered = E.new(m, {
     exports = 'tests/tmp/presets',
     directory_exists = function(path)
@@ -225,6 +344,9 @@ local filtered = E.new(m, {
 }, {
     include_capes = function()
         return include
+    end,
+    include_patterns = function()
+        return include_patterns
     end,
 })
 filtered.save('Without Cape', with_cape, 3, 1)
@@ -242,6 +364,107 @@ assert(
     ffi.string(D.decode(F.read(cape_raw, D.MAX_BYTES)), 2944) == ffi.string(cape.data, 2944),
     'Selected Cape DDS was filtered'
 )
+local cape_pattern = {
+    kind = 'cape',
+    key = 'p:' .. cape_entry.key,
+    document = pattern,
+    original = original(pattern, '000000000000002d'),
+}
+local paired_cape = { entries = { cape_entry, cape_pattern, loaded.entries[1], paired_pattern } }
+filtered.save('Paired Cape Excluded', paired_cape, 3, 1)
+assert(
+    #calls[#calls][2] == 2 and calls[#calls][2][1].kind == 'armor' and calls[#calls][2][2].kind == 'armor',
+    'Full export included excluded Cape or Cape Pattern'
+)
+filtered.save('Selected Cape Pair', paired_cape, 2, 1)
+assert(
+    #calls[#calls][2] == 2 and calls[#calls][2][1] == cape_entry and calls[#calls][2][2] == cape_pattern,
+    'Explicit selected Cape patch did not keep its Pattern when Cape collection exports are excluded'
+)
+filtered.save('Selected Cape Pair', paired_cape, 4, 1)
+assert(#bulk_entries == 2 and bulk_entries[1].kind == 'cape' and bulk_entries[2].kind == 'cape')
+include_patterns = false
+filtered.save('Material Only', paired_cape, 2, 3)
+assert(
+    calls[#calls][2] == loaded.entries[1].document and calls[#calls][3] == loaded.entries[1].original,
+    'Disabled Pattern inclusion still paired a selected material patch'
+)
+local material_only, _, material_only_share = filtered.save('Material Only', paired_cape, 4, 3)
+assert(
+    material_only == material_only_share and material_only:match('%.dds$'),
+    'Material-only selected DDS became a bundle'
+)
+assert(ffi.string(D.decode(F.read(material_only, D.MAX_BYTES)), 2944) == ffi.string(document.data, 2944))
+filtered.save('No Patterns Or Capes', paired_cape, 3, 3)
+assert(
+    #calls[#calls][2] == 1 and calls[#calls][2][1] == loaded.entries[1],
+    'Full patch Pattern/Cape exclusions did not combine independently'
+)
+filtered.save('No Patterns Or Capes', paired_cape, 5, 3)
+assert(#bulk_entries == 1 and bulk_entries[1].document == loaded.entries[1].document)
+local material_zip, material_label = filtered.save('No Patterns Or Capes', paired_cape, 1, 3)
+local material_zip_bytes = F.read(material_zip, 65536)
+assert(
+    material_label == '1 saved LUTs'
+        and not material_zip_bytes:find('\ncape\t', 1, true)
+        and not material_zip_bytes:find('\tp:', 1, true),
+    'Shareable preset included an excluded Pattern or Cape'
+)
+local no_patterns_bundle = E.bundle(m, paired_preset, nil, false)
+assert(
+    #no_patterns_bundle == 3 and not no_patterns_bundle[#no_patterns_bundle][2]:find('\tp:', 1, true),
+    'Direct shareable bundle ignored its Pattern exclusion argument'
+)
+local fixed_excluded = E.new(m, { exports = 'tests/tmp/presets' }, { include_patterns = false })
+fixed_excluded.save('Boolean Pattern Option', paired_cape, 2, 3)
+assert(calls[#calls][2] == loaded.entries[1].document, 'Boolean Pattern exclusion still paired selected material')
+fixed_excluded.save('Boolean Pattern Option', paired_cape, 5, 3)
+assert(
+    #bulk_entries == 2 and bulk_entries[1].kind == 'cape' and bulk_entries[2].kind == 'armor',
+    'Pattern exclusion unexpectedly disabled Cape exports'
+)
+filtered.save('Explicit Cape Pattern', paired_cape, 2, 2)
+assert(
+    calls[#calls][2] == cape_pattern.document and calls[#calls][3] == cape_pattern.original,
+    'Explicit selected Pattern patch was blocked by export inclusion settings'
+)
+local explicit_pattern, _, explicit_pattern_share = filtered.save('Explicit Cape Pattern', paired_cape, 4, 2)
+local explicit_pixels, explicit_width, explicit_height = D.decode(F.read(explicit_pattern, D.MAX_BYTES))
+assert(
+    explicit_pattern == explicit_pattern_share
+        and explicit_width == 3
+        and explicit_height == 1
+        and ffi.string(explicit_pixels, 48) == ffi.string(pattern.data, 48),
+    'Explicit selected Pattern DDS was filtered or bundled'
+)
+local pattern_only = { entries = { paired_pattern } }
+for _, format in ipairs({ 1, 3, 5 }) do
+    local before_calls, before_bulk = #calls, bulk_entries
+    local empty_ok, empty_why = pcall(filtered.save, 'Excluded Pattern Only', pattern_only, format, 1)
+    assert(
+        not empty_ok
+            and tostring(empty_why):find('No LUTs remain', 1, true)
+            and tostring(empty_why):find('Include Patterns', 1, true)
+            and #calls == before_calls
+            and bulk_entries == before_bulk,
+        'Pattern-only collection exclusion did not fail clearly before export'
+    )
+end
+include_patterns = true
+filtered.save('Patterns Restored', paired_cape, 2, 3)
+assert(
+    #calls[#calls][2] == 2 and calls[#calls][2][2] == paired_pattern,
+    'Live Pattern option change did not restore pairing'
+)
+filtered.save('Patterns Restored', paired_cape, 3, 3)
+assert(#calls[#calls][2] == 2 and calls[#calls][2][1].kind == 'armor' and calls[#calls][2][2].kind == 'armor')
+assert(
+    #paired_cape.entries == 4 and paired_cape.entries[2] == cape_pattern and paired_cape.entries[4] == paired_pattern,
+    'Export inclusion settings removed saved library entries'
+)
+os.remove(material_only)
+os.remove(material_zip)
+os.remove(explicit_pattern)
 include = true
 filtered.save('With Cape', with_cape, 5, 1, 1)
 assert(#bulk_entries == 3 and bulk_entries[3].kind == 'cape', 'Enabling Cape export did not include stored Cape')
@@ -275,5 +498,5 @@ os.remove(raw)
 os.remove(output)
 os.remove(output2)
 print(
-    'PASS preset export: 4096 destination compact round trip, independent metadata, exact full-float bytes, shared-ID conflicts, bounded manifests/payloads and legacy safety'
+    'PASS preset export: 4096 destination compact round trip, exact Pattern pairing/options, independent metadata, exact full-float bytes, shared-ID conflicts, bounded manifests/payloads and legacy safety'
 )

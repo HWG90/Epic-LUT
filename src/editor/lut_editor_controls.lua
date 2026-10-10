@@ -360,6 +360,7 @@ function C.new(deps)
                         id = 'export_format',
                         type = 'choice',
                         label = 'Export format',
+                        description = 'Include Pattern LUTs in Exports controls matching companions for loaded gear tables. DDS exports write companion files in one folder.',
                         choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)' },
                         default = 1,
                     },

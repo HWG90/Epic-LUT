@@ -2113,11 +2113,74 @@ local function include_capes_in_exports()
     local control = handle and api.mods[handle.id].controls.include_capes_in_armor_exports
     return not control or handle.get('include_capes_in_armor_exports') ~= false
 end
+function operations.include_patterns_in_exports()
+    if preferences and preferences.include_patterns_in_exports then
+        return preferences.include_patterns_in_exports() ~= false
+    end
+    local control = handle and api.mods[handle.id].controls.include_patterns_in_exports
+    return not control or handle.get('include_patterns_in_exports') ~= false
+end
+function operations.selected_export_bindings(required)
+    local selected
+    if frontend.basic_mode then
+        selected = basic_selected
+    else
+        selected = edit.editor_target
+    end
+    if not selected and not required then
+        return {}
+    end
+    refresh(true)
+    local index = selected and checked_editor_target(selected) or handle.get('lut')
+    local group = assert(groups[index], 'Select a Live LUT destination first')
+    local targets = {}
+    for _, b in ipairs(group.bindings) do
+        if
+            (not selected or not selected.kind or m.gear_catalog.kind(b) == selected.kind)
+            and (not b.cape or selected and selected.kind == 'cape' or include_capes_in_exports())
+        then
+            assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear before exporting')
+            targets[#targets + 1] = b
+        end
+    end
+    assert(#targets > 0, 'Selected LUT has no live export destination')
+    return targets
+end
+function operations.export_pattern_entries(targets, pattern_groups)
+    if
+        not operations.include_patterns_in_exports()
+        or not pattern_editor
+        or not m.engine.PATTERN_SLOT
+        or #targets == 0
+    then
+        return {}
+    end
+    pattern_groups = pattern_groups or pattern_editor.scan(true)
+    local matched = assert(m.export_pairing, 'Export pairing unavailable').live(targets, pattern_groups, {
+        key = material_key,
+        kind = m.gear_catalog.kind,
+    })
+    local entries, counts = {}, {}
+    for _, b in ipairs(matched) do
+        assert(present(b) and binding(b) == b.current, 'Pattern gear changed; load current gear before exporting')
+        local original = original_luts and original_luts.get(b.original)
+        local document = original
+        if b.current ~= b.original then
+            document = applied_document(b)
+        end
+        assert(document, 'Matching Pattern LUT snapshot is not ready; load current patterns before exporting')
+        assert(document.width == 3 and document.height == 1, 'Matching Pattern snapshot is not a 3x1 LUT')
+        local kind = m.gear_catalog.kind(b)
+        counts[kind] = (counts[kind] or 0) + 1
+        entries[#entries + 1] = { document = document, original = original, kind = kind, ordinal = counts[kind] }
+    end
+    return entries, matched
+end
 local function export_custom_dds(name, naming)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
-    local entries = {}
-    local function collect(collection)
+    local entries, material_targets = {}, {}
+    local function collect(collection, companion_targets)
         local counts = { armor = 0, helmet = 0, cape = 0 }
         for _, group in ipairs(collection) do
             local ordinals = {}
@@ -2127,25 +2190,44 @@ local function export_custom_dds(name, naming)
                     counts[kind] = counts[kind] + 1
                     ordinals[kind] = counts[kind]
                 end
-                if (not b.cape or include_capes_in_exports()) and b.current ~= b.original then
+                if
+                    (not b.cape or include_capes_in_exports())
+                    and (
+                        b.current ~= b.original
+                        or companion_targets and companion_targets[kind .. ':' .. material_key(b)]
+                    )
+                then
                     assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear before exporting')
-                    local document = assert(applied_document(b), 'Custom LUT data is unavailable')
+                    local original = original_luts and original_luts.get(b.original)
+                    local document = original
+                    if b.current ~= b.original then
+                        document = applied_document(b)
+                    end
+                    assert(document, 'LUT data is unavailable; load current patterns before exporting')
                     entries[#entries + 1] = {
                         document = document,
-                        original = original_luts and original_luts.get(b.original),
+                        original = original,
                         kind = kind,
                         ordinal = ordinals[kind],
                     }
+                    if not companion_targets then
+                        material_targets[#material_targets + 1] = b
+                    end
                 end
             end
         end
     end
     collect(groups)
-    if pattern_editor then
-        pattern_editor.scan()
-        collect(pattern_editor.all_groups or {})
+    if pattern_editor and operations.include_patterns_in_exports() then
+        local pattern_groups = pattern_editor.scan(true)
+        local _, matched = operations.export_pattern_entries(material_targets, pattern_groups)
+        local companions = {}
+        for _, b in ipairs(matched or {}) do
+            companions[m.gear_catalog.kind(b) .. ':' .. material_key(b)] = true
+        end
+        collect(pattern_groups, companions)
     end
-    assert(#entries > 0, 'Apply custom LUTs to gear first, or export the selected editor table as DDS')
+    assert(#entries > 0, 'No custom LUTs available for the selected export settings')
     local folder, count = m.bulk_dds_export.new(m, paths).save(name, entries, naming)
     return message('Exported ' .. count .. ' custom LUT DDS files to ' .. folder)
 end
@@ -2343,6 +2425,7 @@ local function register(current)
                     include_capes = function()
                         return operations.include_capes_in_exports()
                     end,
+                    include_patterns = operations.include_patterns_in_exports,
                 })
                 local output, description, sharefile = exporter.save(
                     handle.get('armory_export_name'),
@@ -3078,7 +3161,15 @@ local function reset_transient_state()
     -- buffers in retain and the import sequence belong to the process lifetime.
     ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor = nil
     updates, bindings, gear_catalog, sharing, pattern_editor, armory_mirror = nil
-    edit, groups, operations, defaults, default_proofs = {}, {}, {}, {}, {}
+    -- Keep only stateless export helpers; services and jobs belong to the old
+    -- activation. A shared table also keeps the initializer within LuaJIT's
+    -- captured-variable limit.
+    local export_helpers = {
+        include_patterns_in_exports = operations.include_patterns_in_exports,
+        selected_export_bindings = operations.selected_export_bindings,
+        export_pattern_entries = operations.export_pattern_entries,
+    }
+    edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
     pending, palettes, table_index, import_jobs = nil, {}, nil, nil
     setup, resume_job, resume_done, original_luts = nil
@@ -3541,6 +3632,29 @@ return {
                     return action(function()
                         assert(edit.loaded, 'Import a palette first')
                         local d = edit.loaded
+                        assert(stop_identification(), 'Highlight restoration pending')
+                        local targets = d.width == 23
+                                and operations.include_patterns_in_exports()
+                                and operations.selected_export_bindings(false)
+                            or {}
+                        local companions = operations.export_pattern_entries(targets)
+                        if #companions > 0 then
+                            local original = original_luts and original_luts.get(targets[1].original)
+                            local entries = {
+                                {
+                                    document = d,
+                                    original = original,
+                                    kind = m.gear_catalog.kind(targets[1]),
+                                    ordinal = 1,
+                                },
+                            }
+                            for _, entry in ipairs(companions) do
+                                entries[#entries + 1] = entry
+                            end
+                            local folder, count = m.bulk_dds_export.new(m, paths).save(name, entries, 1)
+                            d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+                            return message('Saved LUT and matching Patterns: ' .. count .. ' DDS files to ' .. folder)
+                        end
                         local chosen = operations.export_files.save_unique(name, d)
                         d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
                         return message('Saved ' .. chosen .. '.dds in Epic LUT/files/exports')
@@ -3620,7 +3734,7 @@ return {
                             for _, group in ipairs(groups) do
                                 collect(group)
                             end
-                            if pattern_editor then
+                            if pattern_editor and operations.include_patterns_in_exports() then
                                 local patterns_found = pattern_editor.scan()
                                 if patterns_found > 0 then
                                     pattern_editor.load()
@@ -3640,30 +3754,17 @@ return {
                             return message('Exported entire worn palette: ' .. count .. ' to ' .. (zip or output))
                         end
                         assert(edit.loaded, 'Load or edit a LUT first')
-                        refresh(true)
-                        local selected = basic_selected or edit.editor_target
-                        local group = groups[selected and selected.group or handle.get('lut')]
-                        assert(group, 'Select a Live LUT destination first')
-                        if selected and selected.object then
-                            assert(group.object == selected.object, 'Gear changed; select the destination LUT again')
-                        end
-                        if selected and selected.key then
-                            assert(
-                                selected.key == selected.kind .. ':' .. tostring(group.object),
-                                'Gear changed; select the destination LUT again'
-                            )
-                        end
+                        assert(
+                            edit.loaded.width == 23,
+                            'Use the Pattern LUT Editor to export a standalone Pattern patch'
+                        )
+                        assert(stop_identification(), 'Highlight restoration pending')
+                        local targets = operations.selected_export_bindings(true)
                         local original
-                        for _, b in ipairs(group.bindings) do
-                            if
-                                present(b)
-                                and binding(b) == b.current
-                                and (not selected or not selected.kind or b[selected.kind])
-                            then
-                                original = original_luts and original_luts.get(b.original)
-                                if original then
-                                    break
-                                end
+                        for _, b in ipairs(targets) do
+                            original = original_luts and original_luts.get(b.original)
+                            if original then
+                                break
                             end
                         end
                         assert(original, 'Original destination LUT snapshot is not ready')
@@ -3674,6 +3775,15 @@ return {
                             mkdir_new = paths.mkdir_new,
                             rmdir = paths.rmdir,
                         })
+                        local companions = operations.export_pattern_entries(targets)
+                        if #companions > 0 then
+                            local documents = { { document = edit.loaded, original = original } }
+                            for _, entry in ipairs(companions) do
+                                documents[#documents + 1] = entry
+                            end
+                            local output, count, zip = exporter.save(name, documents)
+                            return message('Exported LUT and matching Patterns: ' .. count .. ' to ' .. (zip or output))
+                        end
                         local output, resource, zip = exporter.save(name, edit.loaded, original)
                         return message('Exported patch ZIP for ' .. resource .. ' to ' .. (zip or output))
                     end)

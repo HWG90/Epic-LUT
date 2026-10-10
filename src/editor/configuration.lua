@@ -52,10 +52,12 @@ function C.append(pages, editor_pages, deps)
                             page.controls[#page.controls + 1] = linked
                         end
                     end
-                    local include = link_preference(owner, 'include_capes_in_armor_exports')
-                    if include then
-                        include.id = 'include_capes_in_armor_exports'
-                        page.controls[#page.controls + 1] = include
+                    for _, id in ipairs({ 'include_capes_in_armor_exports', 'include_patterns_in_exports' }) do
+                        local include = link_preference(owner, id)
+                        if include then
+                            include.id = id
+                            page.controls[#page.controls + 1] = include
+                        end
                     end
                 end
             end

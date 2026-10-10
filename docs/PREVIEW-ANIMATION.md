@@ -3,7 +3,7 @@
 The current development candidate holds the existing independent garment copies in the game's authored raised-fist salute pose, with gentle additional cape sway. It creates no additional avatar, animation component or simulation world. Standard packages keep the established static preview; animation is enabled only by an explicitly named test build.
 
 ```powershell
-python build.py --loader loose --preview-animation --output Epic-LUT-Garment-Animation-LLL.zip
+python build.py --loader mdl --preview-animation --output Epic-LUT-Garment-Animation-MDL.zip
 python build.py --preview-animation --output Epic-LUT-Garment-Animation-BSL.zip
 ```
 

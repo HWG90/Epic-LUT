@@ -27,6 +27,7 @@ from tools.runtime_guard import blocked_path, require_physical_runtime
 NATIVE = 'mcm_input_9bc2033ffbb3.dll'
 NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
 RUNTIME = 'armor_lut_editor/'
+LOADERS = ('bsl', 'lll', 'mdl')
 # The loader watches Lua. Publish matching metadata before its watched file.
 PAIR_FILES = ('manifest.json', 'mod.lua')
 COMPANIONS = (NATIVE, 'library.txt', 'LICENSE-CowboyBingus.txt', 'runtime-manifest.json')
@@ -165,15 +166,25 @@ def metadata_parity(a, b, excluded):
 
 def validate_pair(paths):
     packages = {key: read_package(path) for key, path in paths.items()}
-    require(set(packages) == {(mode, loader) for mode in ('static', 'animation') for loader in ('bsl', 'lll')}, 'Four paired archives required')
+    require(set(packages) == {(mode, loader) for mode in ('static', 'animation') for loader in LOADERS}, 'Six paired archives required')
     version = packages['static', 'lll']['version']
     build_id = packages['static', 'lll']['development_build_id']
     require(all(package['development_build_id'] == build_id for package in packages.values()), 'Paired development build IDs differ')
     for (mode, loader), package in packages.items():
         require(package['mode'] == mode and package['version'] == version, 'Paired archive metadata differs')
         require((package['startup'] is not None) == (loader == 'bsl'), 'Archive loader differs from pair identity')
+        if loader == 'mdl':
+            require(package['format'] == 'legacy' and package['entry'] == 'mod.lua', 'MDL requires the standalone API 2 bundle')
+            require(not any(name.startswith('data/') for name in package['files']), 'MDL archive must not contain a startup provider')
     for mode in ('static', 'animation'):
         a, b = packages[mode, 'bsl'], packages[mode, 'lll']
+        mdl = packages[mode, 'mdl']
+        require(a['lua'] == mdl['lua'], 'BSL/MDL Lua bytes differ')
+        bundled_runtime = {name: data for name, data in a['files'].items() if name.startswith(RUNTIME)}
+        mdl_runtime = {name: data for name, data in mdl['files'].items() if name.startswith(RUNTIME)}
+        require(bundled_runtime == mdl_runtime, 'BSL/MDL runtime payload differs')
+        for name in set(a['files']) & set(mdl['files']):
+            require(a['files'][name] == mdl['files'][name], 'BSL/MDL shared payload differs: '+name)
         if b['format'] == 'legacy':
             require(a['lua'] == b['lua'], 'BSL/LLL Lua bytes differ')
             for name in set(a['files']) & set(b['files']):
@@ -185,7 +196,7 @@ def validate_pair(paths):
                 payload = lua_value(a['lua'].decode().replace('\r\n', '\n'), field)
                 require(re.fullmatch(r'[0-9a-f]+', payload) and bytes.fromhex(payload) == b['files'][RUNTIME+name], 'BSL/modular helper payload differs: '+name)
     shared = normalize_lua(packages['static', 'bsl']['lua'])
-    for loader in ('bsl', 'lll'):
+    for loader in LOADERS:
         a, b = packages['static', loader], packages['animation', loader]
         require(a['entry'] == b['entry'] and normalize_lua(a['lua'], a['entry']) == normalize_lua(b['lua'], b['entry']), 'Unrelated Lua changes between Static and Animation')
         require(set(a['files'])-set(b['files']) == set(), 'Static-only payload in paired build')
@@ -220,16 +231,25 @@ def snapshot_inputs(root):
     native = Path(os.environ['EPIC_LUT_INPUT_LIBRARY']) if os.environ.get('EPIC_LUT_INPUT_LIBRARY') else root.parent/'DBF-MCM/native/build'/NATIVE
     result['external:'+str(native.resolve())] = sha(native.read_bytes())
     for base in (root/'dist', root/'dist/deployment/baselines/R5.5.4'):
-        for loader in ('BSL', 'LLL'):
+        for loader in ('BSL', 'LLL', 'MDL'):
             path = base/f'Epic-LUT-R5.5.4-{loader}.zip'
             if path.exists():
+                result['protected:'+str(path.resolve())] = sha(path.read_bytes())
+    # Also preserve published MDL/BSL/LLL packages when present; Dev outputs
+    # never match these release names. The frozen R5.5.4 pins remain unchanged.
+    for loader in ('BSL', 'LLL', 'MDL'):
+        release_name = f'Epic-LUT-R*-{loader}.zip'
+        releases = list((root/'dist').glob(release_name))
+        releases += list((root/'dist/releases').glob('**/'+release_name))
+        for path in releases:
+            if path.is_file():
                 result['protected:'+str(path.resolve())] = sha(path.read_bytes())
     return result
 
 
 def pair_paths(root):
-    return {(mode, loader): (root/'dist' if loader == 'bsl' else root/'dist/releases/modular-20261010')/f'Epic-LUT-Dev-{mode.title()}-{loader.upper()}.zip'
-            for mode in ('static', 'animation') for loader in ('bsl', 'lll')}
+    return {(mode, loader): (root/'dist/releases/modular-20261010' if loader == 'lll' else root/'dist')/f'Epic-LUT-Dev-{mode.title()}-{loader.upper()}.zip'
+            for mode in ('static', 'animation') for loader in LOADERS}
 
 
 def build_pair(root):
@@ -237,16 +257,18 @@ def build_pair(root):
     paths = pair_paths(root)
     stamp = uuid.uuid4().hex
     for mode in ('static', 'animation'):
-        for loader in ('bsl', 'lll'):
-            args = [sys.executable, 'build.py' if loader == 'bsl' else 'tools/build_lll.py',
+        for loader in LOADERS:
+            args = [sys.executable, 'tools/build_lll.py' if loader == 'lll' else 'build.py',
                     '--output', paths[mode, loader].name, '--dev-stamp', stamp]
-            if loader == 'bsl':
-                args += ['--loader', 'bsl']
+            if loader != 'lll':
+                args += ['--loader', loader]
             if mode == 'animation':
                 args.append('--preview-animation')
             subprocess.run(args, cwd=root, check=True)
         subprocess.run([sys.executable, 'tests/test_build_inventory.py'], cwd=root, check=True)
         subprocess.run([sys.executable, 'tests/test_release.py', str(paths[mode, 'bsl'])], cwd=root, check=True)
+        subprocess.run([sys.executable, 'tests/test_mdl_package.py', '--mdl', str(paths[mode, 'mdl']),
+                        '--bsl', str(paths[mode, 'bsl']), '--mode', mode], cwd=root, check=True)
     # Full editor checks once, then the distinct preview contracts and BSL envelopes.
     for script in ('verify.py', 'tools/verify_player_preview.py', 'tests/test_lll_modular.py'):
         subprocess.run([sys.executable, script], cwd=root, check=True)
@@ -305,6 +327,46 @@ def runtime_state(target, names):
 
 def hashes(files):
     return {name: sha(data) if data is not None else None for name, data in files.items()}
+
+
+def authorize_pattern_default(before, candidate):
+    """Allow only the requested additive Pattern-export default, never settings."""
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'Protected modular defaults contain duplicate keys')
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError('Invalid JSON constant: '+value)
+
+    def read(data):
+        try:
+            return json.loads(data.decode('utf-8'), object_pairs_hook=object_pairs, parse_constant=invalid_constant)
+        except (UnicodeError, ValueError, TypeError) as error:
+            raise RuntimeError('Protected modular defaults are invalid JSON') from error
+
+    def same_typed(a, b):
+        if type(a) is not type(b):
+            return False
+        if isinstance(a, dict):
+            return a.keys() == b.keys() and all(same_typed(a[key], b[key]) for key in a)
+        if isinstance(a, list):
+            return len(a) == len(b) and all(same_typed(x, y) for x, y in zip(a, b))
+        return a == b
+
+    previous, updated = read(before), read(candidate)
+    require(type(previous) is dict and type(updated) is dict
+            and type(previous.get('preferences')) is dict and type(updated.get('preferences')) is dict,
+            'Protected modular defaults lack the preferences schema')
+    key = 'include_patterns_in_exports'
+    require(key not in previous['preferences'] and updated['preferences'].get(key) is True,
+            'Protected modular defaults may only add preferences.include_patterns_in_exports=true')
+    remaining = dict(updated)
+    remaining['preferences'] = dict(updated['preferences'])
+    del remaining['preferences'][key]
+    require(same_typed(previous, remaining), 'Protected modular defaults contain unrelated key, value or type changes')
 
 
 def replace_pair(target, desired, before, backup, replace=os.replace, entry='mod.lua'):
@@ -375,10 +437,15 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
     if entry == 'main.lua':
         current_names = set(checksum_inventory(before['FILES-SHA256.txt']))
         require(current_names <= set(runtime), 'Modular candidate removes installed runtime files; migration is not authorized')
-        for name in (NATIVE, 'library.txt', 'config/defaults.cfg'):
+        for name in (NATIVE, 'library.txt'):
             require(name in before and runtime[name] == before[name], 'Protected modular runtime differs: '+name)
         writable = set(package['manifest']['lll']['modules']) | {'main.lua', 'manifest.json', 'FILES-SHA256.txt'}
         writable |= {name for name in runtime if name.startswith('tools/') and name.endswith(('.ps1', '.cs'))}
+        defaults = 'config/defaults.cfg'
+        require(defaults in before and defaults in runtime, 'Protected modular defaults schema is unavailable')
+        if runtime[defaults] != before[defaults]:
+            authorize_pattern_default(before[defaults], runtime[defaults])
+            writable.add(defaults)
         desired = {}
         for name, data in runtime.items():
             if before.get(name) != data:
@@ -423,8 +490,8 @@ def mutation_lock(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--build', action='store_true', help='Build and verify paired Static/Animation BSL+LLL archives')
-    parser.add_argument('--install', action='store_true', help='Update changed runtime code/metadata; preserve native libraries, defaults and settings')
+    parser.add_argument('--build', action='store_true', help='Build and verify six Static/Animation BSL+LLL+MDL archives')
+    parser.add_argument('--install', action='store_true', help='Update runtime code/metadata and the authorized additive Pattern default; preserve native libraries, existing defaults and settings')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--static', action='store_true', help='Select current verified static development build')
     modes.add_argument('--rollback', action='store_true', help='Select immutable static R5.5.4 release')

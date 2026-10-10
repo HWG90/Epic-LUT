@@ -1,8 +1,8 @@
 # Managed Epic LUT development
 
-The active development deployment uses the integrated LLL editor with the default idle preview. Animation testing is preserved separately and remains disabled in the active copy until requested. Shared fixes must have parity with both builds. They use the same source; only animation metadata and the animation gate may differ. Published release ZIPs remain immutable.
+The active development deployment uses the integrated LLL editor with the default idle preview. Animation testing is preserved separately and remains disabled in the active copy until requested. Every shared fix is included in Static and Animation packages for BSL, modular LLL and standalone MDL. They use the same source; only animation metadata and the animation gate may differ. Published release ZIPs remain immutable.
 
-Build, check both variants and update the installed development copy:
+Build and check all six archives, then update the installed static LLL development copy:
 
 ```powershell
 python tools/manage_dev.py --build --static --install
@@ -10,9 +10,13 @@ python tools/manage_dev.py --build --static --install
 
 The first installation or explicit adoption after the modular migration requires `--expect-installed` with the current installed entrypoint SHA-256 (`main.lua` for LLL R30 projects). Later installations check the recorded hashes in `dist/deployment/active.json` and refuse to overwrite untracked changes. Running without `--install` leaves installed files alone.
 
-The workflow builds matching Static and Animation BSL/modular LLL packages, checks their shared code and payloads, and saves receipts under `dist/deployment`. LLL uses `tools/build_lll.py`, `main.lua` and separate modules; BSL retains its archive builder. Modular deployment validates the installed checksum inventory, backs up changed source and metadata files, and publishes `main.lua` last. It preserves the native DLL, loader settings, shipped defaults and saved presets. Partial replacement failures restore files only while they still match this deployment's writes.
+The workflow builds matching Static and Animation packages for all three loaders, checks their shared code, DLL and helper payloads, and saves receipts under `dist/deployment`. LLL uses `tools/build_lll.py`, `main.lua` and separate modules. BSL and MDL use `build.py --loader bsl` and `build.py --loader mdl`; their bundled `mod.lua` bytes are identical for each preview variant. BSL includes its startup archive; MDL is a standalone API 2 bundle without an archive provider.
 
-Each paired build gets one shared development ID, printed in the preview startup log. This also lets another managed build retrigger LLL's normal auto-reload after deferred cleanup finishes. A pending cleanup must finish before retrying; the helper never bypasses it.
+BSL and MDL archives are written to `dist/Epic-LUT-Dev-{Static|Animation}-{BSL|MDL}.zip`. Modular LLL archives are written to `dist/releases/modular-20261010/Epic-LUT-Dev-{Static|Animation}-LLL.zip`. The MDL ZIP is copied and enabled independently in MDL; this helper never installs or activates it. Enable one Epic LUT provider at a time.
+
+Modular deployment validates the installed checksum inventory, backs up source and metadata files, and publishes `main.lua` last. It preserves the native DLL, loader settings, existing shipped defaults and saved presets. The only authorized defaults migration adds `preferences.include_patterns_in_exports=true`; every preexisting key, value and type must remain unchanged. `config/settings.cfg` and saved user preferences are never replaced. Partial replacement failures restore files only while they still match this deployment's writes.
+
+All six archives get one shared development ID, printed in the preview startup log. This also lets another managed build retrigger LLL's normal auto-reload after deferred cleanup finishes. A pending cleanup must finish before retrying; the helper never bypasses it.
 
 Switch to the current static build while retaining all shared development fixes:
 

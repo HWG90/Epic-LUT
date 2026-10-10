@@ -12,20 +12,24 @@ local E = {
     },
 }
 local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
-local function collection(preset, include_capes)
+local function collection(preset, include_capes, include_patterns)
     local entries = assert(preset and preset.entries, 'Choose a saved Armory preset first')
-    if include_capes ~= false then
+    if include_capes ~= false and include_patterns ~= false then
         return entries
     end
     local selected = {}
     for _, entry in ipairs(entries) do
-        if entry.kind ~= 'cape' then
+        local pattern = entry.document.width == 3 and entry.document.height == 1
+        if (include_capes ~= false or entry.kind ~= 'cape') and (include_patterns ~= false or not pattern) then
             selected[#selected + 1] = entry
         end
     end
     assert(
         #selected > 0,
-        'No LUTs remain to export. Enable Include Capes in Armor Exports or export a selected Cape LUT.'
+        'No LUTs remain to export. Enable '
+            .. (include_capes == false and 'Include Capes in Armor Exports' or 'Include Patterns in Exports')
+            .. (include_capes == false and include_patterns == false and ' or Include Patterns in Exports' or '')
+            .. ', or export a selected LUT.'
     )
     return selected
 end
@@ -42,10 +46,10 @@ function E.lut_choices(preset)
     end
     return #choices > 0 and choices or { 'Choose a saved preset first' }
 end
-function E.bundle(m, preset, include_capes)
+function E.bundle(m, preset, include_capes, include_patterns)
     assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
     assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
-    local entries = collection(preset, include_capes)
+    local entries = collection(preset, include_capes, include_patterns)
     local manifest, files = { 'EPIC-OUTFIT\t2' }, {}
     local payloads, sources, payload_count, source_count, bytes = {}, {}, 0, 0, 0
     for _, entry in ipairs(entries) do
@@ -103,10 +107,20 @@ function E.new(m, paths, options)
         if type(include_capes) == 'function' then
             include_capes = include_capes()
         end
-        local saved_entries = (format == 1 or format == 3 or format == 5) and collection(preset, include_capes)
-        if format == 5 then
+        local include_patterns = options.include_patterns
+        if type(include_patterns) == 'function' then
+            include_patterns = include_patterns()
+        end
+        local saved_entries = (format == 1 or format == 3 or format == 5)
+            and collection(preset, include_capes, include_patterns)
+        local selected_entries = (format == 2 or format == 4)
+            and (
+                include_patterns == false and { preset.entries[index] }
+                or assert(m.export_pairing, 'Selected LUT pairing unavailable').saved(preset.entries, index)
+            )
+        if format == 5 or (format == 4 and #selected_entries > 1) then
             local entries, counts = {}, {}
-            for _, entry in ipairs(saved_entries) do
+            for _, entry in ipairs(format == 5 and saved_entries or selected_entries) do
                 local key = entry.kind .. ':' .. entry.document.width
                 counts[key] = (counts[key] or 0) + 1
                 entries[#entries + 1] = {
@@ -116,22 +130,23 @@ function E.new(m, paths, options)
                     ordinal = counts[key],
                 }
             end
-            local folder, count =
-                assert(m.bulk_dds_export, 'Bulk DDS exporter unavailable').new(m, paths).save(name, entries, naming)
+            local folder, count = assert(m.bulk_dds_export, 'Bulk DDS exporter unavailable')
+                .new(m, paths)
+                .save(name, entries, naming or 1)
             return folder, tostring(count) .. ' saved LUT DDS files', folder
         elseif format == 4 then
             local chosen = raw.save_unique(name, preset.entries[index].document)
             local file = paths.exports .. '/' .. chosen .. '.dds'
             return file, E.lut_choices(preset)[index], file
         elseif format == 2 or format == 3 then
-            local entries = format == 2 and { preset.entries[index] } or saved_entries
+            local entries = format == 2 and selected_entries or saved_entries
             for _, entry in ipairs(entries) do
                 assert(
                     entry.original and entry.original.resource and entry.original.patch_source,
                     'This preset has no patch destination IDs; resave it on the intended gear before exporting a patch'
                 )
             end
-            if format == 2 then
+            if format == 2 and #entries == 1 then
                 return patch.save(name, entries[1].document, entries[1].original)
             end
             return patch.save(name, entries)

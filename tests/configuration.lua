@@ -1,5 +1,6 @@
 local C = dofile('src/editor/configuration.lua')
-local stored = { menu_key = 121, font_size = 12, include_capes_in_armor_exports = true }
+local stored =
+    { menu_key = 121, font_size = 12, include_capes_in_armor_exports = true, include_patterns_in_exports = true }
 local saved
 local owner = {
     id = 'preferences',
@@ -10,6 +11,12 @@ local owner = {
             id = 'include_capes_in_armor_exports',
             type = 'toggle',
             label = 'Include Capes in Armor Exports',
+            default = true,
+        },
+        include_patterns_in_exports = {
+            id = 'include_patterns_in_exports',
+            type = 'toggle',
+            label = 'Include Pattern LUTs in Exports',
             default = true,
         },
     },
@@ -79,6 +86,13 @@ assert(
         and controls.include_capes_in_armor_exports.source_control_id == 'include_capes_in_armor_exports'
 )
 assert(controls.manual_fallback.children[1].id == 'load', 'Manual fallback lost')
+assert(controls.include_patterns_in_exports.default == true)
+controls.include_patterns_in_exports.on_change(false)
+assert(
+    stored.include_patterns_in_exports == false
+        and controls.include_patterns_in_exports.source_control_id == 'include_patterns_in_exports',
+    'Pattern export checkbox missed its preference alias'
+)
 assert(controls.check_updates.on_activate() == 'Checked' and action_calls == 1)
 controls.resource_format.on_change()
 assert(refresh_calls == 1)
@@ -227,6 +241,29 @@ assert(label('Appearance') and label('Gear and Player Preview'), 'Configuration 
 local left, right = view.bounds[1], view.bounds[2]
 assert(left.x + left.w < right.x and left.h == right.h, 'Settings columns overlap')
 assert(label('Exports'), 'Export settings group did not render')
+local cape_checkbox = assert(label('[ x ] Include Capes in Armor Exports'))
+local pattern_checkbox = assert(label('[ x ] Include Pattern LUTs in Exports'))
+assert(
+    cape_checkbox.x == pattern_checkbox.x and cape_checkbox.y > pattern_checkbox.y,
+    'Pattern export checkbox was not directly beneath Cape exports'
+)
+assert(preferences.include_patterns_in_exports(), 'Pattern exports were not enabled by default')
+tap('[ x ] Include Pattern LUTs in Exports')
+assert(
+    not preferences.include_patterns_in_exports() and disk.epic_lut_preferences.include_patterns_in_exports == false,
+    'Pattern export checkbox missed its persisted owner'
+)
+local restored_preferences = dofile('src/platform/preferences.lua').new()
+restored_preferences.mount(core.new({
+    load = function(id)
+        return disk[id] or {}
+    end,
+    save = function()
+        return true
+    end,
+}))
+assert(not restored_preferences.include_patterns_in_exports(), 'Pattern export preference did not survive reload')
+assert(preferences.save_include_patterns_in_exports(true))
 tap('[ x ] Include Capes in Armor Exports')
 assert(
     not preferences.include_capes_in_armor_exports()
@@ -372,6 +409,13 @@ assert(
         and handle.get('include_capes_in_armor_exports') == true
 )
 assert(api.mods[handle.id].values.include_capes_in_armor_exports == nil, 'Cape export setting created competing state')
+assert(preferences.include_patterns_in_exports() and handle.get('include_patterns_in_exports') == true)
+assert(handle.set('include_patterns_in_exports', false) and not preferences.include_patterns_in_exports())
+assert(
+    preferences.handle.set('include_patterns_in_exports', true) and handle.get('include_patterns_in_exports') == true,
+    'External preference changes did not refresh the Pattern export alias'
+)
+assert(api.mods[handle.id].values.include_patterns_in_exports == nil, 'Pattern export setting created competing state')
 assert(api.mods[handle.id].values.configuration_font_bold == nil, 'Alias retained a competing saved value')
 local count = #writes
 assert(handle.edit('configuration_font_bold', false))

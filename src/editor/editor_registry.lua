@@ -176,6 +176,7 @@ function R.pages(callbacks, defaults)
                     id = 'armory_export_format',
                     type = 'choice',
                     label = 'Armory export format',
+                    description = 'Include Pattern LUTs in Exports controls companions stored at the same preset destination. Paired DDS files are saved together in one folder.',
                     choices = {
                         'Shareable Preset ZIP',
                         'Selected LUT Patch ZIP',

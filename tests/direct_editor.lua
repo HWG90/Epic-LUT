@@ -46,6 +46,7 @@ local pattern_deps
 local bulk_entries, bulk_naming
 local Pattern = dofile('src/editor/pattern_luts.lua')
 local m = {
+    export_pairing = dofile('src/presets/export_pairing.lua'),
     pattern_luts = {
         new = function(deps)
             pattern_deps = deps
@@ -167,11 +168,7 @@ local m = {
             end
         end,
     },
-    preferences = {
-        new = function()
-            return { close = function() end }
-        end,
-    },
+    preferences = dofile('src/platform/preferences.lua'),
     frontend = {
         new = function()
             test_frontend = {
@@ -257,6 +254,9 @@ m.patch_export = {
         return {
             save = function(name, document, original)
                 patch_saved = { name = name, document = document, original = original }
+                if not original then
+                    return folder .. '/' .. name, #document
+                end
                 return folder .. '/' .. name, original.resource
             end,
         }
@@ -319,7 +319,7 @@ assert(
 patch_saved = nil
 bound[3], bound[4] = 777, 777
 assert(
-    activate('save_patch'):find('Gear changed', 1, true) and not patch_saved,
+    activate('save_patch'):lower():find('gear changed', 1, true) and not patch_saved,
     'Changed gear exported against a stale destination'
 )
 bound[3], bound[4] = 100, 100
@@ -1020,6 +1020,18 @@ local pattern_bound = { [3] = 900, [4] = 900, [6] = 901, [8] = 902 }
 local pattern_available, clock = false, 0
 local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
 pattern.data[0], pattern.data[3], pattern.data[7], pattern.data[11] = 0.3125, -0.125, 0.75, 13.25
+local pattern_originals, missing_pattern = {}, nil
+for object = 900, 902 do
+    local pixels = ffi.new('float[12]')
+    ffi.copy(pixels, pattern.data, 48)
+    pixels[0] = pattern.data[0] + (object - 900) * 0.125
+    pattern_originals[object] = {
+        width = 3,
+        height = 1,
+        data = pixels,
+        resource = string.format('%016x', object),
+    }
+end
 m.engine.PATTERN_SLOT = 2
 memory.time = function()
     return clock
@@ -1056,7 +1068,7 @@ m.original_luts = {
             close = function() end,
             get = function(object)
                 if object >= 900 and object <= 902 then
-                    return pattern
+                    return object ~= missing_pattern and pattern_originals[object] or nil
                 end
                 return { data = stock, width = 23, height = 8, resource = 'ffffffffffffffff' }
             end,
@@ -1097,6 +1109,100 @@ for _, entry in ipairs(bulk_entries) do
     end
 end
 assert(exported_pattern, 'Bulk DDS omitted applied Pattern LUTs')
+-- Unedited Pattern slots still travel with custom material exports.
+pattern_bound[3] = 900
+bulk_entries = nil
+assert(mixed_handle.activate('export_selected'))
+assert(#bulk_entries == 2, 'Custom material did not include its unchanged Pattern companion')
+assert(
+    bulk_entries[2].document.width == 3
+        and bulk_entries[2].original.resource == pattern_originals[900].resource
+        and ffi.string(bulk_entries[2].document.data, 48) == ffi.string(pattern_originals[900].data, 48),
+    'Bulk companion changed exact Pattern values or used an unrelated destination'
+)
+-- A shared material LUT can have distinct Patterns on its exact bindings.
+pattern_bound[4] = 901
+assert(mixed_handle.activate('populate_worn'))
+local before_export_creates = creates
+local before_export_material = bound[3]
+patch_saved = nil
+assert(mixed_handle.activate('save_patch'))
+assert(patch_saved and not patch_saved.original and #patch_saved.document == 3)
+local paired_ids = {}
+for i, entry in ipairs(patch_saved.document) do
+    if i == 1 then
+        assert(entry.document.width == 23, 'Selected patch lost its primary material LUT')
+    else
+        assert(entry.document.width == 3 and entry.document.height == 1)
+        paired_ids[entry.original.resource] = true
+    end
+end
+assert(
+    paired_ids[pattern_originals[900].resource]
+        and paired_ids[pattern_originals[901].resource]
+        and not paired_ids[pattern_originals[902].resource],
+    'Selected patch paired by gear/ordinal instead of exact material destinations'
+)
+bulk_entries = nil
+assert(mixed_handle.activate('save_dds'))
+assert(#bulk_entries == 3 and bulk_entries[1].document.width == 23)
+assert(bulk_entries[2].document.width == 3 and bulk_entries[3].document.width == 3)
+assert(
+    creates == before_export_creates and bound[3] == before_export_material and pattern_bound[3] == 900,
+    'Paired exports applied textures or changed the worn appearance'
+)
+missing_pattern = 900
+bulk_entries = nil
+local export_ok, export_error = mixed_handle.activate('save_dds')
+assert(
+    export_ok and tostring(export_error):find('Pattern LUT snapshot is not ready', 1, true) and not bulk_entries,
+    'Missing companion snapshot exported a partial appearance'
+)
+missing_pattern = 902
+assert(mixed_handle.activate('save_dds') and #bulk_entries == 3, 'Unrelated Pattern snapshot blocked selected export')
+missing_pattern, pattern_bound[4] = nil, 900
+assert(mixed_handle.get('include_patterns_in_exports') == true, 'Pattern export default is not On')
+assert(mixed_handle.set('include_patterns_in_exports', false))
+patch_saved = nil
+assert(mixed_handle.activate('save_patch'))
+assert(patch_saved and patch_saved.original and patch_saved.document.width == 23, 'Off setting still paired Patterns')
+bulk_entries = nil
+assert(mixed_handle.set('export_format', 4) and mixed_handle.activate('export_selected'))
+assert(#bulk_entries == 1 and bulk_entries[1].document.width == 23, 'Off setting included bulk Pattern DDS')
+local off_dds_write, off_written = m.dds.write, nil
+m.dds.write = function(_, data, width, height)
+    off_written = { data = data, width = width, height = height }
+    return true
+end
+bulk_entries = nil
+assert(mixed_handle.activate('save_dds'))
+assert(off_written and off_written.width == 23 and not bulk_entries, 'Off setting still wrote companion DDS')
+m.dds.write = off_dds_write
+assert(mixed_handle.set('include_patterns_in_exports', true))
+local standalone = assert(quick_info().editor)
+local saved_width, saved_height, saved_data, saved_pixels =
+    standalone.width, standalone.height, standalone.data, standalone.saved_pixels
+local saved_dds_write, standalone_written = m.dds.write, nil
+standalone.width, standalone.height, standalone.data = 3, 1, pattern_originals[900].data
+m.dds.write = function(_, data, width, height)
+    standalone_written = { data = data, width = width, height = height }
+    return true
+end
+bulk_entries, patch_saved = nil, nil
+assert(mixed_handle.activate('save_dds'))
+assert(
+    standalone_written and standalone_written.width == 3 and standalone_written.height == 1 and not bulk_entries,
+    'Standalone Pattern DDS inherited a stale material export target'
+)
+local _, standalone_error = mixed_handle.activate('save_patch')
+assert(
+    tostring(standalone_error):find('Pattern LUT Editor', 1, true) and not patch_saved,
+    'Standalone Pattern patched a material texture destination'
+)
+standalone.width, standalone.height, standalone.data, standalone.saved_pixels =
+    saved_width, saved_height, saved_data, saved_pixels
+m.dds.write = saved_dds_write
+assert(mixed_handle.activate('pattern_load') and mixed_handle.set('pattern_color', '#0080FF'))
 assert(quick_info().editor and quick_info().editor.width == 23, 'Pattern setup was loaded into the material editor')
 assert(combined_editor.on_disable(ctx))
 assert(bound[3] == 100 and pattern_bound[3] == 900, 'Owned Pattern/material cleanup did not restore source bindings')

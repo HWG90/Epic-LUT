@@ -13,7 +13,7 @@
 
 Restore Original LUT restores game bindings and clears saved automatic application while retaining the editor document. Restore Imported LUT resets editor changes to its original imported data; use Apply LUT to send that reset to gear.
 
-Save applied setup stores active assignments for later launches. Save / History -> Export DDS preset to share writes the full edited LUT to `%LOCALAPPDATA%/Epic LUT/files/<name>.dds`. Share that DDS; another user can import it directly. RGB display clamping does not alter exported finite float values. Export and application are separate.
+Save applied setup stores active assignments for later launches. Export DDS writes the edited LUT and its exact matching Pattern DDS files into one named folder under `%LOCALAPPDATA%/Epic LUT/files/exports`. Selected LUT Patch bundles the same textures into one patch ZIP. A table without an attached gear destination remains a standalone DDS. RGB display clamping does not alter exported finite float values. Exporting does not apply textures to gear.
 
 ## Loading and recovery
 

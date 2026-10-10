@@ -43,7 +43,7 @@ def package(path, mode, loader, extra='', stamp=None):
         files[dev.PATCH+'.stream'] = b''
         files[dev.PATCH+'.gpu_resources'] = b''
     else:
-        files['INSTALL-MDL-LLL.md'] = b'LLL instructions'
+        files['INSTALL-MDL.md' if loader == 'mdl' else 'INSTALL-MDL-LLL.md'] = b'standalone instructions'
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, 'w') as archive:
         for filename, data in files.items():
@@ -51,7 +51,7 @@ def package(path, mode, loader, extra='', stamp=None):
     return path
 
 
-def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n'):
+def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', defaults=None):
     animated = mode == 'animation'
     name = 'Epic LUT R5.5.4'+(' Preview Animation Test' if animated else '')
     main = ('local m={}\nmod.scope.m=m\n'+
@@ -65,7 +65,7 @@ def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n'):
     manifest = {'id': 'armor_lut_editor', 'name': name, 'version': 'R5.5.4', 'author': 'Goose',
                 'lll': {'entry': 'main.lua', 'defaults': 'config/defaults.cfg', 'modules': sorted(modules)}}
     files = {'main.lua': main, 'manifest.json': json.dumps(manifest).encode(), dev.NATIVE: DLL,
-             'library.txt': dev.NATIVE.encode(), 'config/defaults.cfg': b'{"preferences":{}}\n',
+             'library.txt': dev.NATIVE.encode(), 'config/defaults.cfg': defaults if defaults is not None else b'{"preferences":{}}\n',
              'LICENSE-CowboyBingus.txt': b'license', 'INSTALL.txt': b'LLL R30 instructions', **modules, **HELPER_BYTES}
     files['FILES-SHA256.txt'] = ''.join(dev.sha(data)+'  '+name+'\n' for name, data in sorted(files.items())).encode()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,9 +105,9 @@ class ManagedDevelopment(unittest.TestCase):
 
     def test_pair_and_unrelated_lua_rejection(self):
         receipt = dev.validate_pair(self.paths)
-        self.assertEqual(len(receipt['archives']), 4)
+        self.assertEqual(len(receipt['archives']), 6)
         self.assertFalse(receipt['reload_requested'])
-        for loader in ('bsl', 'lll'):
+        for loader in dev.LOADERS:
             package(self.paths['animation', loader], 'animation', loader, 'local unrelated_change=true\n')
         with self.assertRaisesRegex(RuntimeError, 'Unrelated Lua'):
             dev.validate_pair(self.paths)
@@ -121,7 +121,7 @@ class ManagedDevelopment(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Manifest mode'):
             dev.read_package(path)
         package(path, 'animation', 'lll')
-        for loader in ('bsl', 'lll'):
+        for loader in dev.LOADERS:
             change_member(self.paths['animation', loader], 'README.md', b'unrelated docs')
         with self.assertRaisesRegex(RuntimeError, 'Unrelated paired payload'):
             dev.validate_pair(self.paths)
@@ -130,15 +130,20 @@ class ManagedDevelopment(unittest.TestCase):
         def fixture_build(command, **_):
             if command[1] in ('build.py', 'tools/build_lll.py'):
                 mode = 'animation' if '--preview-animation' in command else 'static'
-                loader = 'bsl' if command[1] == 'build.py' else 'lll'
+                loader = command[command.index('--loader')+1] if command[1] == 'build.py' else 'lll'
                 stamp = command[command.index('--dev-stamp')+1]
                 package(self.paths[mode, loader], mode, loader, stamp=stamp)
         with patch.object(dev, 'snapshot_inputs', return_value={'input': 'stable'}), patch.object(dev.subprocess, 'run', side_effect=fixture_build) as run:
             receipt = dev.build_pair(self.root)
+            self.assertEqual(dev.select_package(self.root, 'static')['path'], str(self.paths['static', 'lll'].resolve()))
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(sum(command[1] == 'verify.py' for command in commands), 1)
-        self.assertEqual(sum(command[1] == 'build.py' for command in commands), 2)
+        self.assertEqual(sum(command[1] == 'build.py' for command in commands), 4)
         self.assertEqual(sum(command[1] == 'tools/build_lll.py' for command in commands), 2)
+        self.assertEqual(sum(command[1] == 'build.py' and command[command.index('--loader')+1] == 'mdl' for command in commands), 2)
+        mdl_checks = [command for command in commands if command[1] == 'tests/test_mdl_package.py']
+        self.assertEqual(len(mdl_checks), 2)
+        self.assertEqual({command[command.index('--mode')+1] for command in mdl_checks}, {'static', 'animation'})
         stamps = [command[command.index('--dev-stamp')+1] for command in commands if command[1] in ('build.py', 'tools/build_lll.py')]
         self.assertEqual(set(stamps), {receipt['development_build_id']})
         self.assertRegex(stamps[0], r'^[0-9a-f]{32}$')
@@ -154,6 +159,54 @@ class ManagedDevelopment(unittest.TestCase):
         package(self.paths['animation', 'lll'], 'animation', 'lll', stamp='b'*32)
         with self.assertRaisesRegex(RuntimeError, 'development build IDs differ'):
             dev.validate_pair(self.paths)
+
+    def test_mdl_pair_model_payload_provider_and_stamp_guards(self):
+        receipt = dev.validate_pair(self.paths)
+        self.assertEqual({entry['loader'] for entry in receipt['archives']}, {'bsl', 'lll', 'mdl'})
+        for mode in ('static', 'animation'):
+            self.assertEqual(self.paths[mode, 'mdl'], self.root/'dist'/f'Epic-LUT-Dev-{mode.title()}-MDL.zip')
+            mdl = dev.read_package(self.paths[mode, 'mdl'])
+            bsl = dev.read_package(self.paths[mode, 'bsl'])
+            self.assertEqual(mdl['lua'], bsl['lua'])
+            self.assertIsNone(mdl['startup'])
+        package(self.paths['animation', 'mdl'], 'animation', 'mdl', extra='local MDL_only_behavior=99\n')
+        with self.assertRaisesRegex(RuntimeError, 'BSL/MDL Lua bytes differ'):
+            dev.validate_pair(self.paths)
+        package(self.paths['animation', 'mdl'], 'animation', 'mdl')
+        change_member(self.paths['static', 'mdl'], dev.RUNTIME+'library.txt', b'unrelated DLL registration')
+        with self.assertRaisesRegex(RuntimeError, 'BSL/MDL runtime payload differs'):
+            dev.validate_pair(self.paths)
+        package(self.paths['static', 'mdl'], 'static', 'mdl')
+        change_member(self.paths['static', 'mdl'], 'README.md', b'MDL changed shared documentation')
+        with self.assertRaisesRegex(RuntimeError, 'BSL/MDL shared payload differs'):
+            dev.validate_pair(self.paths)
+        package(self.paths['static', 'mdl'], 'static', 'bsl')
+        with self.assertRaisesRegex(RuntimeError, 'loader differs from pair identity'):
+            dev.validate_pair(self.paths)
+        package(self.paths['static', 'mdl'], 'static', 'mdl')
+        change_member(self.paths['static', 'mdl'], 'data/unrelated.patch_0', b'unexpected provider')
+        with self.assertRaisesRegex(RuntimeError, 'must not contain a startup provider'):
+            dev.validate_pair(self.paths)
+        modular_package(self.paths['static', 'mdl'], 'static')
+        with self.assertRaisesRegex(RuntimeError, 'MDL requires'):
+            dev.validate_pair(self.paths)
+        package(self.paths['static', 'mdl'], 'static', 'mdl')
+        package(self.paths['animation', 'mdl'], 'animation', 'mdl', stamp='b'*32)
+        with self.assertRaisesRegex(RuntimeError, 'development build IDs differ'):
+            dev.validate_pair(self.paths)
+
+    def test_published_mdl_archives_are_protected_inputs(self):
+        source = self.root/'source.lua'
+        source.write_bytes(b'return maintained_source')
+        native = self.root/'reviewed.dll'
+        native.write_bytes(DLL)
+        release = self.root/'dist/releases/R5.5.5/Epic-LUT-R5.5.5-MDL.zip'
+        release.parent.mkdir(parents=True)
+        release.write_bytes(b'preserved published MDL fixture')
+        with patch.dict(dev.os.environ, {'EPIC_LUT_INPUT_LIBRARY': str(native)}), patch.object(dev.subprocess, 'check_output', side_effect=[str(self.root), b'source.lua\0']):
+            inputs = dev.snapshot_inputs(self.root)
+        self.assertEqual(inputs['protected:'+str(release.resolve())], dev.sha(release.read_bytes()))
+        self.assertFalse(any(name.startswith('protected:') and 'Epic-LUT-Dev-' in name for name in inputs))
 
     def test_guarded_pair_backups_static_switch_and_settings(self):
         animation = dev.read_package(self.paths['animation', 'lll'])
@@ -229,10 +282,10 @@ class ManagedDevelopment(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'baseline changed'):
             dev.select_package(self.root, 'rollback')
 
-    def install_modular_fixture(self, module=b'old shared module\n'):
-        path = modular_package(self.root/'initial-modular.zip', 'static', module=module)
+    def install_modular_fixture(self, module=b'old shared module\n', defaults=None):
+        path = modular_package(self.root/'initial-modular.zip', 'static', module=module, defaults=defaults)
         package_data = dev.read_package(path)
-        (self.target/'mod.lua').unlink()
+        (self.target/'mod.lua').unlink(missing_ok=True)
         for name, data in package_data['files'].items():
             relative = name[len(dev.RUNTIME):]
             target = self.target/relative
@@ -308,6 +361,102 @@ class ManagedDevelopment(unittest.TestCase):
             dev.replace_pair(self.target, desired, before, self.root/'modular-backup', replace=fail_main, entry='main.lua')
         self.assertEqual(dev.installed_files(self.target), before)
         self.assertFalse((self.target/'mod.lua').exists())
+
+    def test_authorized_pattern_default_migration_backs_up_and_preserves_settings(self):
+        old_defaults = b'{"preferences":{"menu_key":121,"include_capes_in_armor_exports":true},"other":{"keep":[false,1,"x"]}}\n'
+        updated = json.loads(old_defaults)
+        updated['preferences']['include_patterns_in_exports'] = True
+        new_defaults = (json.dumps(updated, indent=2)+'\n').encode()
+        before = self.install_modular_fixture(defaults=old_defaults)
+        settings = self.target/'config/settings.cfg'
+        settings.write_bytes(b'{"preferences":{"menu_key":45,"include_patterns_in_exports":false}}\n')
+        settings_before = settings.read_bytes()
+        candidate = dev.read_package(modular_package(self.root/'pattern-default.zip', 'static', 'e'*32, defaults=new_defaults))
+        preflight = dev.deploy(self.root, candidate, 'static', target=self.target)
+        self.assertIn('config/defaults.cfg', preflight['changed_files'])
+        self.assertEqual(dev.installed_files(self.target), before)
+        order = []
+        original_replace = dev.replace_pair
+        def replacing(*args, **kwargs):
+            def record(source, target):
+                order.append(target.relative_to(self.target).as_posix())
+                os.replace(source, target)
+            return original_replace(*args, **kwargs, replace=record)
+        with patch.object(dev, 'replace_pair', side_effect=replacing):
+            receipt = dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        self.assertEqual(order[-1], 'main.lua')
+        self.assertIn('config/defaults.cfg', order)
+        self.assertNotIn('config/settings.cfg', order)
+        self.assertNotIn(dev.NATIVE, order)
+        self.assertNotIn('library.txt', order)
+        self.assertEqual((self.target/'config/defaults.cfg').read_bytes(), new_defaults)
+        self.assertEqual((Path(receipt['backup'])/'config/defaults.cfg').read_bytes(), old_defaults)
+        self.assertEqual(settings.read_bytes(), settings_before)
+        self.assertEqual((self.target/'settings.ini').read_bytes(), b'keep settings')
+        inventory = dev.checksum_inventory((self.target/'FILES-SHA256.txt').read_bytes())
+        self.assertEqual(inventory['config/defaults.cfg'], dev.sha(new_defaults))
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+        self.assertEqual(dev.deploy(self.root, candidate, 'static', target=self.target)['changed_files'], [])
+
+    def test_pattern_default_partial_failure_restores_defaults_and_inventory(self):
+        old_defaults = b'{"preferences":{"menu_key":121}}\n'
+        new_defaults = b'{"preferences":{"menu_key":121,"include_patterns_in_exports":true}}\n'
+        before = self.install_modular_fixture(defaults=old_defaults)
+        settings = self.target/'config/settings.cfg'
+        settings.write_bytes(b'{"preferences":{"include_capes_in_armor_exports":false}}\n')
+        settings_before = settings.read_bytes()
+        candidate = dev.read_package(modular_package(self.root/'failed-pattern-default.zip', 'animation', 'f'*32, defaults=new_defaults))
+        original_replace = dev.replace_pair
+        order = []
+        def replacing(*args, **kwargs):
+            def fail_main(source, target):
+                order.append(target.relative_to(self.target).as_posix())
+                if target.name == 'main.lua':
+                    raise OSError('Pattern migration main failure')
+                os.replace(source, target)
+            return original_replace(*args, **kwargs, replace=fail_main)
+        with patch.object(dev, 'replace_pair', side_effect=replacing):
+            with self.assertRaisesRegex(RuntimeError, 'Pattern migration main failure'):
+                dev.deploy(self.root, candidate, 'animation', dev.sha(before['main.lua']), True, self.target)
+        self.assertIn('config/defaults.cfg', order)
+        self.assertEqual(dev.installed_files(self.target), before)
+        self.assertEqual(settings.read_bytes(), settings_before)
+        backup = list((self.root/'dist/deployment/backups').glob('*/config/defaults.cfg'))
+        self.assertEqual(len(backup), 1)
+        self.assertEqual(backup[0].read_bytes(), old_defaults)
+        self.assertFalse((self.root/'dist/deployment/active.json').exists())
+
+    def test_pattern_default_migration_rejects_unrelated_and_existing_changes(self):
+        baseline = {'preferences': {'menu_key': 121, 'include_capes_in_armor_exports': True}, 'other': {'keep': [False, 1, 'x']}}
+        before = self.install_modular_fixture(defaults=json.dumps(baseline).encode())
+        variants = []
+        def variant(change):
+            value = json.loads(json.dumps(baseline))
+            value['preferences']['include_patterns_in_exports'] = True
+            change(value)
+            variants.append(value)
+        variant(lambda v: v['preferences'].update(menu_key=45))
+        variant(lambda v: v['preferences'].update(menu_key=121.0))
+        variant(lambda v: v['preferences'].update(include_capes_in_armor_exports=1))
+        variant(lambda v: v['preferences'].pop('menu_key'))
+        variant(lambda v: v['preferences'].update(unrelated=True))
+        variant(lambda v: v.update(unrelated=True))
+        variant(lambda v: v['other']['keep'].__setitem__(0, 0))
+        variant(lambda v: v['preferences'].update(include_patterns_in_exports=False))
+        variant(lambda v: v['preferences'].update(include_patterns_in_exports=1))
+        for index, defaults in enumerate(variants):
+            with self.subTest(index=index):
+                candidate = dev.read_package(modular_package(self.root/f'rejected-{index}.zip', 'static', defaults=json.dumps(defaults).encode()))
+                with self.assertRaisesRegex(RuntimeError, 'Protected modular defaults'):
+                    dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+                self.assertEqual(dev.installed_files(self.target), before)
+        existing = {'preferences': {'include_patterns_in_exports': False}}
+        before = self.install_modular_fixture(defaults=json.dumps(existing).encode())
+        existing['preferences']['include_patterns_in_exports'] = True
+        candidate = dev.read_package(modular_package(self.root/'changed-pattern.zip', 'static', defaults=json.dumps(existing).encode()))
+        with self.assertRaisesRegex(RuntimeError, 'may only add'):
+            dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        self.assertEqual(dev.installed_files(self.target), before)
 
 
 if __name__ == '__main__':

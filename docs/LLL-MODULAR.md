@@ -1,9 +1,11 @@
-# Modular LLL review package
+# Modular LLL package
 
-Build with `py -3 tools/build_lll.py`. Output is `dist/releases/modular-20261010`; LLL R30 or later is required. The package uses `main.lua`, separate modules and `config/defaults.cfg`. Existing archive builders and installed mods are unchanged.
+Build with `python tools/build_lll.py`. Output is `dist/releases/modular-20261010`; **LLL R30 or later is required**. This package uses `main.lua`, separate modules, private `mod.scope` and `config/defaults.cfg`. The modular package cannot run in MDL.
 
-Epic LUT presets, exports and preferences retain their established Local AppData/Epic LUT locations. Shipped preference defaults are editable CFG data. The epiclut.preferences command surface uses the existing preferences handle. Preview animation remains disabled in this ordinary modular candidate.
+For MDL, use `python build.py --loader mdl` and its standalone API-2 `mod.lua` folder package. That bundled MDL package can also load through LLL's legacy compatibility route. The compatibility is one-way: LLL's modular package depends on LLL's module and configuration APIs. Installation details are in [MDL-LLL.md](MDL-LLL.md).
 
-Active development uses `python tools/manage_dev.py --build --install`, which pairs the unchanged BSL builder with this modular LLL builder and enables authored preview animation in the development variant. Direct modular animation builds require `--preview-animation --output Epic-LUT-Dev-Animation-LLL.zip`; both the preview metadata and private `mod.scope` gate are set together. The standard modular package remains static.
+Epic LUT presets, exports and preferences retain their established Local AppData/Epic LUT locations. Shipped LLL preference defaults are editable CFG data. The `epiclut.preferences` command surface uses the existing preferences handle. The ordinary modular package keeps the default idle preview with authored animation disabled.
 
-Modules compile and constructors are checked in an isolated LuaJIT process. Activation, input, visuals and resource lifetime still need game validation. This work does not deploy the package.
+Active development uses `python tools/manage_dev.py --build --static --install` to build matching static and animation variants for BSL, MDL and modular LLL while selecting the default idle preview for the installed LLL copy. Shared source and payloads retain parity; authored animation remains a separate candidate. Direct modular animation builds require `--preview-animation --output Epic-LUT-Dev-Animation-LLL.zip`; preview metadata and the private animation gate are set together.
+
+Modules compile and constructors are checked in an isolated LuaJIT process. Build checks, installed bytes, loader activation and observed game behavior are separate checkpoints. Running the modular builder alone does not deploy the package.
