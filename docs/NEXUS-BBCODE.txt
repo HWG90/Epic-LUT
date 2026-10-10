@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC LUT R5.5.5[/b][/size]
+[center][size=6][b]EPIC LUT R5.5.6[/b][/size]
 [size=5][b]STYLISH FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
@@ -12,6 +12,14 @@ Tactical pink. Pastel menace. A helmet that finally matches. Paint your Helldive
 
 Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
 [b]Make freedom look good.[/b]
+
+[size=4][b]R5.5.6 - PATTERN EXPORTS & MDL[/b][/size]
+[list]
+[*]Restored Pattern LUT DDS and Patch export controls.
+[*]Matching Pattern LUTs now travel with your LUT exports by default. Toggle Include Pattern LUTs in Exports in Configuration; MCM stays synced.
+[*]Choose BSL, LLL or the new dedicated MDL package. Nexus has BSL and MDL; GitHub has all three.
+[*]Player Preview keeps its default idle pose.
+[/list]
 
 [size=4][b]R5.5.5 - LUT TARGETING HOTFIX[/b][/size]
 [list]
@@ -41,7 +49,7 @@ Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
 [*][b]Cape materials, without the clutter.[/b] Cape LUTs are labeled in the Armor dropdown and use the regular editor controls. Choose whether to include them in Armor exports.
 [*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or apply a table to one LUT, all Armor LUTs or all Helmet LUTs.
 [*][b]Build your Armory.[/b] Save named looks, mix Armor and Helmet presets, and share importable preset ZIPs.
-[*][b]Export your work.[/b] LUT patches, complete palette patches and raw DDS. Export every custom LUT in one click, with five naming formats and timestamped folders.
+[*][b]Export your work.[/b] LUT patches, complete palette patches and raw DDS, with matching Pattern LUTs included by default. Export every custom LUT in one click, with five naming formats and timestamped folders.
 [*][b]See the fit.[/b] Dock or pop out Player Preview. Pan, rotate and zoom using the game's Game Default rendering path.
 [*][b]Make it yours.[/b] Organized Configuration, optional MCM integration, synchronized UI scale, shortcuts and a permanent Preview-off setting.
 [*][b]Find your region.[/b] Flash it magenta, inspect swatch RGBA values, or load the bundled Debug LUT from Tools > Options.
@@ -53,8 +61,9 @@ Shared Lobby LUT is in testing.
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.5-BSL.zip[/b] and enable its BSL startup option.
-[*][b]Live Lua Loader R30+ (GitHub):[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.5-LLL.zip[/b] into your loader's Mods directory, then enable it.
+[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.6-BSL.zip[/b] and enable its BSL startup option.
+[*][b]MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.6-MDL.zip[/b] into your loader's configured Mods directory, then enable it.
+[*][b]Live Lua Loader R30+ (GitHub):[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.6-LLL.zip[/b] into your loader's Mods directory, then enable it. The modular LLL package requires LLL; use the MDL ZIP for MDL.
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].
 [/list]
 
@@ -79,7 +88,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.5]GitHub downloads[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6]GitHub downloads[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

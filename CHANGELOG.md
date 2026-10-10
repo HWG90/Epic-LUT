@@ -2,13 +2,18 @@
 
 ## Unreleased
 
-- Restore dedicated Pattern LUT export names, DDS and Patch ZIP buttons in the floating Pattern window.
-- Include exact matching Pattern LUTs in selected live and saved-preset exports; DDS exports write companion files, and bulk custom exports retain unchanged associated Patterns.
-- Add Include Pattern LUTs in Exports under Configuration > Exports, default On, with synchronized MCM settings.
-- Add a separate bundled API-2 MDL package alongside modular LLL R30+; maintain BSL, LLL and MDL parity in managed development builds.
 - Add a separately named preview animation test using procedural standing/salute poses, cape sway and Pause/Play on existing garment copies.
 - Resolve salute joints across segmented garments; handle missing update deltas and keep diagnostic single-frame mode from leaking into normal preview openings.
 - Use the actual Helldiver standing and salute clip tracks, including fingers, from a bounded local game cache; keep cape sway separate and ship no animation assets.
+
+## R5.5.6 - 2026-10-10
+
+- Restore dedicated Pattern LUT export names, DDS and Patch ZIP buttons in the floating Pattern window.
+- Include exact matching Pattern LUTs in live and saved-preset exports; DDS exports write companion files, and bulk custom exports retain unchanged associated Patterns.
+- Add Include Pattern LUTs in Exports under Configuration > Exports, default On, with synchronized MCM settings.
+- Add a separate bundled API-2 MDL package alongside modular LLL R30+; maintain BSL, LLL and MDL parity from one source snapshot.
+- Keep the default idle Player Preview in standard builds.
+- Shared Lobby LUT is in testing.
 
 ## R5.5.5 - 2026-10-10
 

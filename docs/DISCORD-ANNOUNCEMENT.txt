@@ -1,10 +1,13 @@
-# EPIC LUT R5.5.5 :goose:
+# EPIC LUT R5.5.6 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 Paint your Helldiver in-game. **F9** for Basic Mode; **F10** for the full LUT Editor.
 
-**R5.5.5 — CURRENT GEAR HOTFIX**
-- Fixed **Load Current Gear** targeting for region highlights and live edits.
+**R5.5.6 — PATTERN EXPORTS & MDL**
+- Restored **Pattern LUT DDS and Patch exports**.
+- Matching Pattern LUTs are included with your LUT exports **by default**.
+- New **Include Pattern LUTs in Exports** option in Configuration, synced with MCM.
+- Dedicated **MDL package**, alongside BSL and LLL.
 - Player Preview keeps its **default idle pose**.
 
 **Shared Lobby LUT is in testing.**
@@ -17,8 +20,8 @@ For his time, patience and continued testing—and for mapping **all 26 bump map
 **[Lytatroan](https://www.nexusmods.com/profile/Lytatroan):** human-made thumbnail.
 Thanks to **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor** for ideas and inspiration.
 
-**Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.5
+**Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
-**BSL** for Arsenal/HD2MM; **LLL** for Live Lua Loader R30+. Nexus hosts BSL; GitHub has both. Enable one copy and turn Match Your Colors matching off. RAR needs 7-Zip.
+**BSL** for Arsenal/HD2MM; **LLL** for Live Lua Loader R30+; **MDL** for API-2 loaders. Nexus has BSL and MDL; GitHub has all three. Enable one copy and turn Match Your Colors matching off. RAR needs 7-Zip.

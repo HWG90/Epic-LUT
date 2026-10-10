@@ -1,22 +1,22 @@
-# Epic LUT R5.5.5
+# Epic LUT R5.5.6
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.5 fixes Load Current Gear targeting for region highlights and live edits. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.6 includes matching Pattern LUTs in exports by default and adds a separate MDL package. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups.
 
-[Download R5.5.5](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5.6](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5.5-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.5-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
-- **MDL:** use the separate MDL package with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5.6-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.6-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
+- **MDL:** use `Epic-LUT-R5.5.6-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
 
 The modular LLL package uses `main.lua` and requires LLL R30+. LLL can also load the MDL-compatible bundled package. MDL needs the bundled package; it cannot use the modular LLL package.
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.5: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon: preview is included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 

@@ -1,3 +1,14 @@
+# Epic LUT R5.5.6
+
+- Restored Pattern LUT DDS and Patch export controls.
+- Matching Pattern LUTs are included with LUT exports by default.
+- Added Include Pattern LUTs in Exports in Configuration, synced with MCM.
+- Added a dedicated MDL package alongside BSL and LLL.
+- Player Preview keeps its default idle pose.
+- Shared Lobby LUT is in testing.
+
+---
+
 # Epic LUT R5.5.5
 
 - Fixed Load Current Gear targeting for region highlights and live edits.
