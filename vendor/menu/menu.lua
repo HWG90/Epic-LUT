@@ -20,6 +20,18 @@ M.palette = {
     enabled = { 118, 207, 177 },
     disabled = { 111, 124, 133 },
 }
+-- Epic typography is opt-in. Other users of this menu keep their original
+-- requested sizes, compact-font behavior and global bold preference.
+function M.text_size(menu, size, role)
+    if menu.epic_typography then
+        local ratio = role == 'heading' and 1.15 or role == 'title' and 1.5 or role == 'hint' and 0.88 or 1
+        return (menu.font_size or 12) * ratio
+    end
+    return menu.compact_fonts and (menu.font_size or 12) or (size or 20)
+end
+function M.text_bold(menu, role)
+    return menu.font_bold and (not menu.epic_typography or role == 'heading' or role == 'title') or false
+end
 -- Custom workspaces use the same surfaces and interaction feedback as MCM.
 -- Accents remain explicit so Load, Save and Export retain their meaning.
 function M.custom_ui(ui)
@@ -42,16 +54,18 @@ function M.custom_ui(ui)
         local enabled = o.enabled ~= false
         local color = ui.surface_color(x, y, w, h, o)
         local hovered = enabled and ui.hovering and ui.hovering(x, y, w, h)
-        local size, pad = o.size or 14, o.padding or 8
+        local size, role = o.size or 14, o.role
+        local pad = ui.spacing and ui.spacing(o.padding or 8) or o.padding or 8
         ui.rect(x, y, w, h, color)
         ui.bounded(
             x + pad,
-            ui.text_y and ui.text_y(y, h, size, label)
+            ui.text_y and ui.text_y(y, h, size, label, role)
                 or y + math.max(2, (h - (ui.text_size and ui.text_size(size) or size)) / 2),
             label,
             size,
             enabled and (o.ink or T.white) or T.disabled,
-            math.max(0, w - pad * 2)
+            math.max(0, w - pad * 2),
+            role
         )
         if enabled and (o.selected or hovered) then
             ui.rect(x, y, 2, h, T.focus, nil, 'control_accent')
@@ -1914,8 +1928,8 @@ function M.new(api, measure, Text)
         local T = M.palette
         local white, muted, accent, selection_text = T.white, T.muted, { 244, 202, 53 }, T.white
         local text_focus = false
-        local function text_metrics(size, label)
-            size = self.compact_fonts and (self.font_size or 12) or size
+        local function text_metrics(size, label, role, resolved)
+            size = resolved and size or M.text_size(self, size, role)
             if Text and self.text_edit and label then
                 local ending = self.text_edit.text .. '|'
                 if tostring(label):sub(-#ending) == ending then
@@ -1937,8 +1951,8 @@ function M.new(api, measure, Text)
             end
             return { min_y = 0, max_y = size, height = size }
         end
-        local function text_y(y, height, size, label)
-            local m = text_metrics(size, label)
+        local function text_y(y, height, size, label, role)
+            local m = text_metrics(size, label, role)
             return y + (height - m.height) / 2 - m.min_y
         end
         local function hovering(x, y, rw, rh)
@@ -2001,11 +2015,13 @@ function M.new(api, measure, Text)
             value = tostring(value)
             return value:sub(-#ending) == ending
         end
-        local function text(x, y, value, size, color, fitted)
-            size = size or 20
-            if self.compact_fonts and not fitted then
-                size = self.font_size or 12
+        local function text(x, y, value, size, color, role, fitted)
+            -- Historical internal calls use a boolean sixth argument to emit
+            -- an already fitted size. Public role strings never resolve twice.
+            if type(role) == 'boolean' then
+                fitted, role = role, nil
             end
+            size = fitted and size or M.text_size(self, size, role)
             if is_field(value) then
                 draw_field(x, y, value, size, color or white)
                 return
@@ -2018,14 +2034,13 @@ function M.new(api, measure, Text)
                 size = size * s,
                 c = color or white,
                 a = 1,
-                bold = self.font_bold,
+                bold = M.text_bold(self, role),
+                text_role = role or 'label',
             }
         end
 
-        local function bounded(x, y, value, size, color, width)
-            if self.compact_fonts then
-                size = self.font_size or 12
-            end
+        local function bounded(x, y, value, size, color, width, role)
+            size = M.text_size(self, size, role)
             if is_field(value) then
                 draw_field(x, y, value, size, color or white, width)
                 return
@@ -2051,7 +2066,7 @@ function M.new(api, measure, Text)
             end
             local result = M.flow(value, width * s, size * s, animate and (elapsed - age.start) or 0, measure)
 
-            text(x, y, result, size, color, true)
+            text(x, y, result, size, color, role, true)
             commands[#commands].full_text = tostring(value)
             commands[#commands].text_width = width * s
         end
@@ -2113,7 +2128,7 @@ function M.new(api, measure, Text)
             e.scroll = math.min(e.scroll, math.max(0, length(e.text) - available + 2))
             local a, b = Text.range(e)
             local low, high = length(e.text:sub(1, a)) - e.scroll, length(e.text:sub(1, b)) - e.scroll
-            local ink = text_metrics(size, e.text ~= '' and e.text or nil)
+            local ink = text_metrics(size, e.text ~= '' and e.text or nil, nil, true)
             local sy = math.max((box.y - oy) / s + 1, y + ink.min_y - 1)
             local sh = math.min(ink.height + 2, (box.y + box.h - oy) / s - sy - 1)
             if high > low then
@@ -2267,16 +2282,31 @@ function M.new(api, measure, Text)
 
         wheel_bounds = { x = ox, y = oy + 196 * s, w = ww * s, h = (wh - 316) * s, split = ox + rail * s }
 
-        text(30, wh - 43, 'EPIC LUT', 28, accent)
+        text(
+            30,
+            self.epic_typography and text_y(wh - 60, 60, 28, 'EPIC LUT', 'title') or wh - 43,
+            'EPIC LUT',
+            28,
+            accent,
+            'title'
+        )
         local mode_switch = self.basic_only and self.open_advanced or self.open_basic
         if mode_switch then
             rect(ww - 224, wh - 58, 140, 30, { 24, 132, 140 })
-            bounded(ww - 214, wh - 49, self.basic_only and 'Advanced Mode' or 'Basic Mode', 14, white, 120)
+            local mode_label = self.basic_only and 'Advanced Mode' or 'Basic Mode'
+            bounded(
+                ww - 214,
+                self.epic_typography and text_y(wh - 58, 30, 14, mode_label) or wh - 49,
+                mode_label,
+                14,
+                white,
+                120
+            )
             hit(ww - 224, wh - 58, 140, 30, mode_switch)
         end
 
         rect(ww - 55, wh - 45, 38, 30, hovering(ww - 55, wh - 45, 38, 30) and T.field_hover or T.field)
-        text(ww - 43, wh - 38, 'X', 20, white)
+        text(ww - 43, self.epic_typography and text_y(wh - 45, 30, 20, 'X') or wh - 38, 'X', 20, white)
 
         hit(ww - 55, wh - 45, 38, 30, function()
             self.visible = false
@@ -2321,7 +2351,16 @@ function M.new(api, measure, Text)
                                 or (hovering(x, wh - 120, width - 6, 38) and T.field_hover or T.field)
                             )
                     )
-                    bounded(x + 10, wh - 108, entry.name:gsub('^%d+%.%s*', ''), 18, white, width - 25)
+                    local tab_label = entry.name:gsub('^%d+%.%s*', '')
+                    bounded(
+                        x + 10,
+                        self.epic_typography and text_y(wh - 120, 38, 18, tab_label, 'heading') or wh - 108,
+                        tab_label,
+                        18,
+                        white,
+                        width - 25,
+                        'heading'
+                    )
                     hit(x, wh - 120, width - 6, 38, function()
                         self.page = target_page
                         self.row = 1
@@ -2333,7 +2372,7 @@ function M.new(api, measure, Text)
                 end
             end
         else
-            text(25, wh - 105, 'MODS', 18, muted)
+            text(25, wh - 105, 'MODS', 18, muted, 'heading')
 
             local sidebar = self.sidebar()
             tree_max = math.max(0, #sidebar - tree_visible)
@@ -2462,8 +2501,8 @@ function M.new(api, measure, Text)
             text(rail + 35, wh - 150, 'No mods registered. See the author example.', 24)
         else
             if not tabbed then
-                bounded(rail + 35, wh - 108, mod.name, 28, accent, ww - 55 - rail)
-                bounded(rail + 35, wh - 146, page.name, 22, white, ww - 55 - rail)
+                bounded(rail + 35, wh - 108, mod.name, 28, accent, ww - 55 - rail, 'title')
+                bounded(rail + 35, wh - 146, page.name, 22, white, ww - 55 - rail, 'heading')
             end
 
             -- Sections are named in the sidebar; no redundant ordinal footer.
@@ -2575,17 +2614,23 @@ function M.new(api, measure, Text)
                             return hovering(x, y, rw, rh)
                         end,
                         scrollbar = scrollbar,
-                        text_size = function(size)
-                            return self.compact_fonts and (self.font_size or 12) or size
+                        text_size = function(size, role)
+                            return M.text_size(self, size, role)
+                        end,
+                        spacing = function(value)
+                            return value * (self.epic_typography and (self.font_size or 12) / 12 or 1)
                         end,
                         text_metrics = text_metrics,
                         text_y = text_y,
-                        control_height = function(size, padding, label)
-                            local resolved = self.compact_fonts and (self.font_size or 12) or size
-                            return text_metrics(size, label).height + 2 * (padding or 5) * resolved / size
+                        control_height = function(size, padding, minimum, role)
+                            local resolved = M.text_size(self, size, role)
+                            local label = type(minimum) == 'string' and minimum or nil
+                            local ratio = self.epic_typography and (self.font_size or 12) / 12 or resolved / size
+                            local height = text_metrics(size, label, role).height + 2 * (padding or 5) * ratio
+                            return math.max(type(minimum) == 'number' and minimum or 0, height)
                         end,
-                        text_width = function(value, size)
-                            size = self.compact_fonts and (self.font_size or 12) or size
+                        text_width = function(value, size, role)
+                            size = M.text_size(self, size, role)
                             local width = 0
                             for glyph in tostring(value):gmatch('[%z\1-\127\194-\244][\128-\191]*') do
                                 width = width + (measure and measure(glyph, size * s) / s or size * 0.62)
@@ -2956,7 +3001,16 @@ function M.new(api, measure, Text)
                         selected_at = #display + 1
                     end
                     if control.type == 'text' and control.text_role ~= 'title' and control.text_role ~= 'selection' then
-                        for _, line in ipairs(M.rich(control.label, row_width * s, 20 * s, measure)) do
+                        for _, line in
+                            ipairs(
+                                M.rich(
+                                    control.label,
+                                    row_width * s,
+                                    (self.epic_typography and M.text_size(self, 20) or 20) * s,
+                                    measure
+                                )
+                            )
+                        do
                             local parts = {}
                             for _, span in ipairs(line.spans) do
                                 parts[#parts + 1] = span.text
@@ -3413,8 +3467,10 @@ function M.new(api, measure, Text)
                 local hx = rail + 35
                 local hw = ww - 40 - hx
 
-                local lines = M.rich(help, hw * s, 18 * s, measure)
-                local visible = 3
+                local help_size = self.epic_typography and M.text_size(self, 18, 'hint') or 18
+                local help_step = self.epic_typography and help_size + 5 or 22
+                local lines = M.rich(help, hw * s, help_size * s, measure)
+                local visible = self.epic_typography and math.max(1, math.min(3, math.floor(64 / help_step))) or 3
 
                 self.help_scroll = math.min(self.help_scroll, math.max(0, #lines - visible))
 
@@ -3429,7 +3485,7 @@ function M.new(api, measure, Text)
                 for index = self.help_scroll + 1, math.min(#lines, self.help_scroll + visible) do
                     local line = lines[index]
                     local tx = hx
-                    local ty = 177 - (index - self.help_scroll - 1) * 22
+                    local ty = 177 - (index - self.help_scroll - 1) * help_step
 
                     for _, span in ipairs(line.spans) do
                         text(
@@ -3437,7 +3493,9 @@ function M.new(api, measure, Text)
                             ty,
                             span.text,
                             line.size / s,
-                            span.style == 'plain' and muted or (span.style == 'emphasis' and white or accent)
+                            span.style == 'plain' and muted or (span.style == 'emphasis' and white or accent),
+                            span.style == 'heading' and 'heading' or 'hint',
+                            self.epic_typography
                         )
                         tx = tx + span.width / s
                     end
@@ -3462,7 +3520,8 @@ function M.new(api, measure, Text)
                 .. ' / Esc Close   Tab Focus   Arrows Navigate / Change   Enter Select   PgUp / PgDn Sections',
             14,
             muted,
-            ww - 380
+            ww - 380,
+            'hint'
         )
         bounded(ww - 320, 36, 'Epic LUT / Goose', 16, { 255, 225, 120 }, 295)
         local portrait = package.loaded['epic.player_preview.v1']
@@ -3478,13 +3537,14 @@ function M.new(api, measure, Text)
                 label .. ' Player Preview  |  Left-drag pan  /  Right-drag rotate  /  Wheel zoom',
                 12,
                 muted,
-                ww - 380
+                ww - 380,
+                'hint'
             )
         end
         if mod and scale_id and scale_value then
             local control = mod.controls[scale_id]
             local value = scale_value
-            bounded(ww - 320, 12, 'UI Scale: ' .. value .. '%', 14, muted, 210)
+            bounded(ww - 320, 12, 'UI Scale: ' .. value .. '%', 14, muted, 210, 'hint')
             rect(ww - 100, 6, 32, 22, T.field)
             text(ww - 89, 12, '<', 14, white)
             rect(ww - 62, 6, 32, 22, T.field)
@@ -3531,7 +3591,7 @@ function M.new(api, measure, Text)
         end
 
         if #notice > 0 then
-            bounded(25, 64, notice, 15, accent, ww - 50)
+            bounded(25, 64, notice, 15, accent, ww - 50, 'hint')
         end
 
         local function resize_hit(edge, x, y, rw, rh)
@@ -3585,7 +3645,15 @@ function M.new(api, measure, Text)
             local first = #commands + 1
             rect(vx, vy, vw, vh, { 20, 25, 30 }, 0.98)
             rect(vx, vy + vh - 40, vw, 40, { 35, 42, 48 })
-            text(vx + 14, vy + vh - 27, pv.title or 'HUD PREVIEW', 18, accent)
+            text(
+                vx + 14,
+                self.epic_typography and text_y(vy + vh - 40, 40, 18, pv.title or 'HUD PREVIEW', 'heading')
+                    or vy + vh - 27,
+                pv.title or 'HUD PREVIEW',
+                18,
+                accent,
+                'heading'
+            )
             text(vx + vw - 33, vy + vh - 28, 'X', 20, white)
             hit(vx, vy, vw, vh, function() end)
             hit(vx, vy + vh - 40, vw - 50, 40, function(mx, my)
@@ -3606,7 +3674,7 @@ function M.new(api, measure, Text)
             else
                 text((px - ox) / s + 15, (py - oy) / s + 200, 'Preview unavailable', 18, muted)
             end
-            text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted)
+            text((px - ox) / s + 14, (py - oy) / s + 14, 'Updates live with your settings', 15, muted, 'hint')
             frame('preview', vx, vy, vw, vh)
             paint_surface(first, 180, 20)
             for i = first, #commands do
@@ -3658,7 +3726,14 @@ function M.new(api, measure, Text)
             hit(fx, fy + f.height - header_height, f.width - 32, header_height, function(mx, my)
                 preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
             end)
-            text(fx + f.width - 20, fy + f.height - 26, 'X', 14, white)
+            text(
+                fx + f.width - 20,
+                self.epic_typography and text_y(fy + f.height - header_height, header_height, 14, 'X')
+                    or fy + f.height - 26,
+                'X',
+                14,
+                white
+            )
             hit(fx + f.width - 32, fy + f.height - header_height, 32, header_height, function()
                 if self.dropdown and self.dropdown.owner and self.dropdown.owner.id == f.id then
                     self.dropdown = nil
@@ -3862,7 +3937,14 @@ function M.new(api, measure, Text)
                 self.text_edit = nil
             end)
 
-            text(px + 20, py + 397, 'COLOR - RGB / HEX / SWATCHES', 22, accent)
+            text(
+                px + 20,
+                self.epic_typography and text_y(py + 385, 45, 22, 'COLOR - RGB / HEX / SWATCHES', 'heading') or py + 397,
+                'COLOR - RGB / HEX / SWATCHES',
+                22,
+                accent,
+                'heading'
+            )
 
             local hue, saturation, brightness = api.rgb_hsv(p.rgb)
 
@@ -4094,17 +4176,19 @@ function M.new(api, measure, Text)
             local first = #commands + 1
             rect(px, py, 440, 190, { 20, 25, 30 }, 0.99)
             rect(px, py + 154, 440, 36, T.field)
+            local dialog_title = dialog.title
+                or (
+                    dialog.phase == 'scope' and 'Save to Armory'
+                    or dialog.phase == 'confirm' and 'Keep This Preset?'
+                    or 'Name This Preset'
+                )
             text(
                 px + 14,
-                py + 164,
-                dialog.title
-                    or (
-                        dialog.phase == 'scope' and 'Save to Armory'
-                        or dialog.phase == 'confirm' and 'Keep This Preset?'
-                        or 'Name This Preset'
-                    ),
+                self.epic_typography and text_y(py + 154, 36, 18, dialog_title, 'heading') or py + 164,
+                dialog_title,
                 18,
-                accent
+                accent,
+                'heading'
             )
             local function cancel()
                 self.outfit_dialog = nil
@@ -4238,7 +4322,7 @@ function M.new(api, measure, Text)
                 local lines = {}
                 local line = ''
                 local width = math.min(360, ww - 24)
-                local size = self.compact_fonts and (self.font_size or 12) or 12
+                local size = M.text_size(self, 12, 'hint')
                 local step = size + 5
                 local maximum = math.max(1, math.floor((wh - 40) / step))
                 for paragraph in (tip .. '\n'):gmatch('(.-)\n') do
@@ -4272,7 +4356,7 @@ function M.new(api, measure, Text)
                 rect(x, y, width, height, T.panel, 0.98)
                 rect(x, y + height - 2, width, 2, accent, nil, 'control_accent')
                 for i, line in ipairs(lines) do
-                    bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20)
+                    bounded(x + 10, y + height - 10 - i * step, line, 12, white, width - 20, 'hint')
                 end
                 frame('tooltip', x, y, width, height, accent)
                 paint_surface(first, 450, 20)

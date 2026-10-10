@@ -663,8 +663,8 @@ function P.new(deps)
         local function draw(x, y, w, h)
             local theme = ui.theme
             local white, muted = theme.white, theme.muted
-            local function label(px, py, text, width)
-                ui.bounded(px, py, text, 13, white, width or w - 24)
+            local function label(px, py, text, width, role)
+                ui.bounded(px, py, text, 13, white, width or w - 24, role)
             end
             local function button(px, py, width, text, id, enabled, callback, active)
                 local featured = enabled ~= false
@@ -695,7 +695,10 @@ function P.new(deps)
             end
             ui.rect(x, y, w, h, theme.panel)
             ui.rect(x, y + h - 40, w, 40, theme.header)
-            label(x + 10, y + h - 27, 'Pattern LUT Editor', w - 40)
+            local heading_size = ui.text_size and ui.text_size(13, 'heading') or 13
+            local title_y = ui.text_y and ui.text_y(y + h - 40, 40, 13, 'Pattern LUT Editor', 'heading')
+                or y + h - 40 + (40 - heading_size) / 2
+            label(x + 10, title_y, 'Pattern LUT Editor', w - 40, 'heading')
             for i, kind in ipairs({ 'armor', 'helmet' }) do
                 local gear = kind
                 button(
@@ -726,8 +729,9 @@ function P.new(deps)
                 y + h - 124,
                 group and deps.resource_id(group.object) or 'No pattern resource selected',
                 12,
-                { 244, 202, 53 },
-                w - 24
+                theme.brass or { 244, 202, 53 },
+                w - 24,
+                'hint'
             )
             local d = self.document
             local sw = (w - 36) / 3
@@ -740,7 +744,7 @@ function P.new(deps)
                     end
                 end
                 local px = x + 12 + (col - 1) * (sw + 6)
-                label(px, y + h - 150, ({ '1: Accent color', '2: Material / opacity', '3: Unknown' })[col], sw)
+                label(px, y + h - 150, ({ '1: Accent color', '2: Material / opacity', '3: Unknown' })[col], sw, 'hint')
                 ui.rect(
                     px - 1,
                     y + h - 211,
@@ -846,7 +850,7 @@ function P.new(deps)
                     end
                 end
             else
-                label(x + 12, cursor, 'Load current patterns to edit. Snapshots may still be loading.')
+                label(x + 12, cursor, 'Load current patterns to edit. Snapshots may still be loading.', nil, 'hint')
             end
             button(x + 12, y + 294, (w - 30) / 2, 'Flash Pattern', 'pattern_flash', d ~= nil)
             button(x + 18 + (w - 30) / 2, y + 294, (w - 30) / 2, 'Stop Flash', 'pattern_stop_flash')
@@ -855,9 +859,9 @@ function P.new(deps)
             button(x + 18 + bw, y + 256, bw, 'Redo', 'pattern_redo', d ~= nil and #self.redo > 0)
             button(x + 24 + bw * 2, y + 256, bw, 'Restore All Patterns', 'pattern_restore')
             ui.rect(x + 12, y + 244, w - 24, 1, theme.line)
-            label(x + 12, y + 222, 'Pattern Import', w - 24)
+            label(x + 12, y + 222, 'Pattern Import', w - 24, 'heading')
             if self.imported then
-                label(x + 12, y + 199, 'Imported:', 80)
+                label(x + 12, y + 199, 'Imported:', 80, 'hint')
                 for col = 1, 3 do
                     local at = (col - 1) * 4
                     local color = {}
@@ -904,7 +908,7 @@ function P.new(deps)
                 'pattern_export_patch',
                 d ~= nil and deps.export_patch ~= nil
             )
-            ui.bounded(x + 12, y + 12, self.status or 'Pattern LUT values apply live.', 11, muted, w - 24)
+            ui.bounded(x + 12, y + 12, self.status or 'Pattern LUT values apply live.', 11, muted, w - 24, 'hint')
         end
         ui.floating('pattern_lut_editor', draw, 580, 700, function()
             self.open = false

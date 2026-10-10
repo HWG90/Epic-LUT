@@ -155,6 +155,7 @@ api.mods.basic_test.pages[1].minimum_height = 780
 local menu = dofile('vendor/menu/menu.lua').new(api, function(t, size)
     return #t * size * 0.5
 end)
+menu.epic_typography = true
 menu.visible = true
 menu.window_width = 1100
 menu.window_height = 780

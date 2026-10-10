@@ -37,9 +37,11 @@ function V.new(deps)
         local right = ui.x + left + 12
         local rightw = ui.w - left - 12
         local top = ui.y + ui.h
-        local header_bottom = top - 27
         local gear_controls = mod.controls.editor_load_armor
         local font_scale = (ui.text_size and ui.text_size(14) or 12) / 12
+        local panel_header_height = math.max(27, ui.control_height and ui.control_height(17, 4, 27, 'heading') or 0)
+        local header_shift = panel_header_height - 27
+        local header_bottom = top - panel_header_height
         local header_height = math.max(26, ui.control_height and ui.control_height(14, 5) or 0)
         local header_gap = 10 * font_scale
         local header_items, header_rows, header_x = {}, 1, 10
@@ -63,6 +65,7 @@ function V.new(deps)
         end
         local extra_header = gear_controls and (header_height + header_rows * (header_height + header_gap) - 26)
             or (self.embedded and -34 or 0)
+        extra_header = extra_header + header_shift
         local footer_inset = 6 * font_scale
         local footer_height = math.max(26 * font_scale, ui.control_height and ui.control_height(14, 5) or 0)
         local footer_band = footer_height + footer_inset * 2
@@ -74,8 +77,17 @@ function V.new(deps)
         local portrait = not self.embedded and package.loaded['epic.player_preview.v1']
         local function panel(x, y, w, height, title, reserved)
             ui.rect(x, y, w, height, dark)
-            ui.rect(x, y + height - 27, w, 27, blue)
-            ui.bounded(x + 8, y + height - 21, title, 17, white, math.max(0, w - 16 - (reserved or 0)))
+            local header_y = y + height - panel_header_height
+            ui.rect(x, header_y, w, panel_header_height, blue)
+            ui.bounded(
+                x + 8 * font_scale,
+                ui.text_y and ui.text_y(header_y, panel_header_height, 17, title, 'heading') or header_y + 6,
+                title,
+                17,
+                white,
+                math.max(0, w - 16 * font_scale - (reserved or 0)),
+                'heading'
+            )
         end
         local function button(x, y, w, label, id, height)
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
@@ -122,11 +134,11 @@ function V.new(deps)
             local copy_label, paste_label = compact and 'Copy' or 'Copy Value', compact and 'Paste' or 'Paste Value'
             local action_width = math.min(110, math.max(46, (rightw - 110) / 2))
             local reserved = actions and action_width * 2 + 10 or 0
-            panel(right, gridbottom, rightw, ui.h - content_bottom, 'Value Editor', reserved)
+            panel(right, gridbottom, rightw, ui.h - content_bottom, compact and 'Values' or 'Value Editor', reserved)
             if actions then
                 local function value_action(id, label, x)
                     local control = mod.controls[id]
-                    ui.button(x, top - 25, action_width, 23, label, function()
+                    ui.button(x, top - panel_header_height + 2, action_width, panel_header_height - 4, label, function()
                         ui.activate(id)
                     end, { enabled = not control.disabled, size = 13, help = control.description })
                 end
@@ -153,12 +165,12 @@ function V.new(deps)
         end
         if not self.embedded then
             ui.rect(ui.x, ui.y, ui.w, footer_band, dark)
-            local function shortcut(x, width, label, action, selected, enabled)
+            local function shortcut(x, width, label, action, selected, enabled, primary)
                 ui.button(x, ui.y + footer_inset, width, footer_height, label, action, {
                     selected = selected,
                     enabled = enabled,
-                    accent = label == 'Tools' and { 244, 202, 53 },
-                    ink = label == 'Tools' and { 25, 28, 31 },
+                    accent = primary and { 244, 202, 53 },
+                    ink = primary and { 25, 28, 31 },
                 })
             end
             local function measured(label, minimum)
@@ -241,7 +253,7 @@ function V.new(deps)
                 fx = fx + gap
                 shortcut(fx, apply_width, apply_label, function()
                     ui.activate(apply_id)
-                end, nil, not mod.controls[apply_id].disabled)
+                end, nil, not mod.controls[apply_id].disabled, true)
                 fx = fx + apply_width
             end
             if stop_width > 0 then
@@ -254,13 +266,13 @@ function V.new(deps)
             self.gear = self.gear == 'helmet' and 'helmet' or 'armor'
             for _, item in ipairs(header_items) do
                 local target = item.kind
-                local featured = target == 'load' or target == 'pattern'
+                local featured = target == 'load'
                 local ready = target == 'load'
                     or target == 'pattern'
                     or target ~= 'pattern' and (not self.can_select_gear or self.can_select_gear(target))
                 ui.button(
                     ui.x + item.x,
-                    top - 32 - header_height - (item.row - 1) * (header_height + header_gap),
+                    top - 32 - header_shift - header_height - (item.row - 1) * (header_height + header_gap),
                     item.width,
                     header_height,
                     item.label,
@@ -289,7 +301,7 @@ function V.new(deps)
                 )
             end
             local selector_x = ui.x + 28
-            local selector_y = top - 32 - header_height - header_rows * (header_height + header_gap)
+            local selector_y = top - 32 - header_shift - header_height - header_rows * (header_height + header_gap)
             header_bottom = selector_y
             local selector_width = math.min(220, left * 0.32)
             ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
@@ -315,15 +327,16 @@ function V.new(deps)
                 end
                 ui.bounded(
                     selector_x + 12 + selector_width,
-                    selector_y + 8,
+                    ui.text_y and ui.text_y(selector_y, 26, 12, resource, 'hint') or selector_y + 8,
                     resource,
                     12,
-                    { 244, 202, 53 },
-                    resource_width
+                    muted,
+                    resource_width,
+                    'hint'
                 )
             end
         elseif d and mod.controls.lut and ui.choice then
-            ui.choice('lut', ui.x + 10, top - 58, math.min(360, left - 24))
+            ui.choice('lut', ui.x + 10, top - 58 - header_shift, math.min(360, left - 24))
         end
         local portrait_width
         if portrait and portrait.dock then
@@ -347,12 +360,13 @@ function V.new(deps)
             local gap, width = 8 * font_scale, left - 24
             local cursor = header_bottom - gap
             local row_height = math.max(26, 26 * font_scale, ui.control_height and ui.control_height(15, 5) or 0)
-            local function message(value, size, color)
+            local function message(value, size, color, role)
                 local lines, line = {}, ''
-                local resolved = ui.text_size and ui.text_size(size) or size
+                local resolved = ui.text_size and ui.text_size(size, role) or size
                 for word in value:gmatch('%S+') do
                     local candidate = line == '' and word or line .. ' ' .. word
-                    local measured = ui.text_width and ui.text_width(candidate, size) or #candidate * resolved * 0.62
+                    local measured = ui.text_width and ui.text_width(candidate, size, role)
+                        or #candidate * resolved * 0.62
                     if line ~= '' and measured > width then
                         lines[#lines + 1], line = line, word
                     else
@@ -363,9 +377,10 @@ function V.new(deps)
                     lines[#lines + 1] = line
                 end
                 for i, text in ipairs(lines) do
-                    local metrics = ui.text_metrics and ui.text_metrics(size, text) or { height = resolved, min_y = 0 }
+                    local metrics = ui.text_metrics and ui.text_metrics(size, text, role)
+                        or { height = resolved, min_y = 0 }
                     cursor = cursor - metrics.height
-                    ui.bounded(ui.x + 12, cursor - metrics.min_y, text, size, color, width)
+                    ui.bounded(ui.x + 12, cursor - metrics.min_y, text, size, color, width, role)
                     if i < #lines then
                         cursor = cursor - 4 * font_scale
                     end
@@ -391,7 +406,7 @@ function V.new(deps)
                 )
                 button(ui.x + 12 + load_width + gap, cursor, browse_width, 'Choose file...', 'browse', row_height)
                 cursor = cursor - gap
-                message('Uses currently worn LUT values; a file import is optional.', 14, muted)
+                message('Uses currently worn LUT values; a file import is optional.', 14, muted, 'hint')
                 overlays()
                 return
             end
@@ -413,7 +428,7 @@ function V.new(deps)
                 ui.choice('lut', ui.x + 12, cursor, math.min(360, width))
                 cursor = cursor - gap
             end
-            message('Uses the applied values from the selected Live LUT.', 14, muted)
+            message('Uses the applied values from the selected Live LUT.', 14, muted, 'hint')
             overlays()
             return
         end
@@ -434,8 +449,6 @@ function V.new(deps)
             ui.button(tool_x(508), top - 92 - extra_header, 142 * toolbar_scale, 26, 'Pattern LUT Editor', function()
                 ui.activate('pattern_open')
             end, {
-                accent = { 244, 202, 53 },
-                ink = { 25, 28, 31 },
                 help = 'Edit separate 3x1 Pattern LUTs.',
             })
         end
@@ -481,7 +494,8 @@ function V.new(deps)
                 'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
                 12,
                 muted,
-                left - 150
+                left - 150,
+                'hint'
             )
             local function navigate(x, label, direction)
                 ui.button(x, gridbottom + 3, 54, 24, label, function()
@@ -499,7 +513,8 @@ function V.new(deps)
                 d.width == 23 and semantics.short_columns[c] or tostring(c),
                 12,
                 muted,
-                cell - 2
+                cell - 2,
+                'hint'
             )
         end
         local row = h.get('edit_row')
@@ -761,27 +776,38 @@ function V.new(deps)
             end
         end
         if show_values then
+            local inspector_button_width = (rightw - 21) / 2
+            local function inspector_label(full, compact)
+                local width = ui.text_width and ui.text_width(full, 15) or #full * 8
+                return width + 16 * font_scale <= inspector_button_width and full or compact
+            end
             if ui.choice then
-                ui.choice('edit_row', right + 8, top - 57, rightw - 16)
+                ui.choice('edit_row', right + 8, top - 57 - header_shift, rightw - 16)
             end
             if can_identify then
                 -- Stop Highlight is kept in the persistent tools bar.
             end
             button(
                 right + 8,
-                top - 86,
-                (rightw - 21) / 2,
-                h.get('group_rows') and 'Group by rows: ON' or 'Selected row only',
+                top - 86 - header_shift,
+                inspector_button_width,
+                inspector_label(
+                    h.get('group_rows') and 'Group by rows: ON' or 'Selected row only',
+                    h.get('group_rows') and 'All rows' or 'One row'
+                ),
                 'group_rows'
             )
             button(
                 right + 13 + (rightw - 21) / 2,
-                top - 86,
-                (rightw - 21) / 2,
-                h.get('unlock') and 'Advanced: ON' or 'Unlock advanced edits',
+                top - 86 - header_shift,
+                inspector_button_width,
+                inspector_label(
+                    h.get('unlock') and 'Advanced: ON' or 'Unlock advanced edits',
+                    h.get('unlock') and 'Advanced' or 'Unlock'
+                ),
                 'unlock'
             )
-            local clip_top, clip_bottom = top - 96, gridbottom + 12
+            local clip_top, clip_bottom = top - 96 - header_shift, gridbottom + 12
             self.value_bounds = { x = right, y = gridbottom, w = rightw, h = ui.h - content_bottom }
             local scroll = self.value_scroll
             local cursor = clip_top + scroll
@@ -791,9 +817,9 @@ function V.new(deps)
             local function words(value)
                 local lines, line = {}, ''
                 local width = rightw - 36
-                local size = ui.text_size and ui.text_size(13) or 13
+                local size = ui.text_size and ui.text_size(13, 'hint') or 13
                 local function fits(value)
-                    return (ui.text_width and ui.text_width(value, 13) or #value * size * 0.62) <= width
+                    return (ui.text_width and ui.text_width(value, 13, 'hint') or #value * size * 0.62) <= width
                 end
                 for word in tostring(value):gmatch('%S+') do
                     if #line > 0 and not fits(line .. ' ' .. word) then
@@ -808,22 +834,34 @@ function V.new(deps)
                 end
                 return lines
             end
+            local row_heading_height = math.max(23, ui.control_height and ui.control_height(14, 4, 23, 'heading') or 0)
+            local column_heading_height =
+                math.max(21, ui.control_height and ui.control_height(14, 3, 21, 'heading') or 0)
             for r = 1, d.height do
                 if h.get('group_rows') or r == row then
                     local selected_row = r
-                    cursor = cursor - 25
-                    if visible(cursor, 23) then
+                    cursor = cursor - row_heading_height - 2 * font_scale
+                    if visible(cursor, row_heading_height) then
                         ui.rect(
                             right + 8,
                             cursor,
                             rightw - 20,
-                            23,
-                            (ui.surface_color(right + 8, cursor, rightw - 20, 23, { selected = r == row }))
+                            row_heading_height,
+                            (
+                                ui.surface_color(
+                                    right + 8,
+                                    cursor,
+                                    rightw - 20,
+                                    row_heading_height,
+                                    { selected = r == row }
+                                )
+                            )
                         )
                         local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
                         ui.text(
                             right + 13,
-                            cursor + 6,
+                            ui.text_y and ui.text_y(cursor, row_heading_height, 14, 'Row ' .. r, 'heading')
+                                or cursor + 6,
                             (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r,
                             14,
                             can_identify
@@ -832,9 +870,10 @@ function V.new(deps)
                                         math.floor(180 + 22 * pulse),
                                         math.floor(140 - 87 * pulse),
                                     }
-                                or white
+                                or white,
+                            'heading'
                         )
-                        ui.hit(right + 8, cursor, can_identify and 24 or rightw - 20, 23, function()
+                        ui.hit(right + 8, cursor, can_identify and 24 or rightw - 20, row_heading_height, function()
                             local expanded = self.open_row ~= selected_row
                             assert(h.set('edit_row', selected_row))
                             self.value_scroll = 0
@@ -842,7 +881,7 @@ function V.new(deps)
                             self.open_row = expanded and selected_row or nil
                         end)
                         if can_identify then
-                            ui.hit(right + 32, cursor, rightw - 44, 23, function()
+                            ui.hit(right + 32, cursor, rightw - 44, row_heading_height, function()
                                 local expanded = self.open_row ~= selected_row
                                 assert(h.set('edit_row', selected_row))
                                 self.value_scroll = 0
@@ -875,28 +914,31 @@ function V.new(deps)
                                     self.focus_value(selected_row, selected_col, channel)
                                 end
                             end
-                            cursor = cursor - 21
-                            if visible(cursor, 17) then
+                            cursor = cursor - column_heading_height
+                            if visible(cursor, column_heading_height) then
                                 ui.bounded(
                                     right + 12,
-                                    cursor + 3,
+                                    ui.text_y and ui.text_y(cursor, column_heading_height, 14, 'Column', 'heading')
+                                        or cursor + 3,
                                     'Column ' .. c .. ': ' .. semantics.columns[c],
                                     14,
                                     white,
-                                    rightw - 58
+                                    rightw - 58,
+                                    'heading'
                                 )
                                 if true then
                                     local index = semantics.index(r, c, 1, d.width, d.height)
+                                    local chip_y = cursor + (column_heading_height - 18) / 2
                                     ui.rect(
                                         right + rightw - 40,
-                                        cursor - 1,
+                                        chip_y,
                                         24,
                                         18,
                                         rgb(d.data, index),
                                         nil,
                                         'swatch_fill'
                                     )
-                                    ui.hit(right + rightw - 40, cursor - 1, 24, 18, function()
+                                    ui.hit(right + rightw - 40, chip_y, 24, 18, function()
                                         prepare()
                                         ui.activate('cell_color')
                                     end)
@@ -907,10 +949,11 @@ function V.new(deps)
                                     words(semantics.hints[c] or 'Unconfirmed shader meaning. Raw values are retained.')
                                 )
                             do
-                                local line_height = math.max(14, (ui.text_size and ui.text_size(13) or 13) + 3)
+                                local line_height =
+                                    math.max(14, (ui.text_size and ui.text_size(13, 'hint') or 13) + 3 * font_scale)
                                 cursor = cursor - line_height
                                 if visible(cursor, line_height) then
-                                    ui.bounded(right + 12, cursor + 2, line, 13, muted, rightw - 36)
+                                    ui.bounded(right + 12, cursor + 2, line, 13, muted, rightw - 36, 'hint')
                                 end
                             end
                             for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
@@ -919,11 +962,20 @@ function V.new(deps)
                                     or (c == 2 and ch == 1 and 'detail_texture')
                                     or (c == 22 and ch == 4 and 'camo_pattern')
                                 local numeric_height = math.max(21, (ui.text_size and ui.text_size(14) or 14) + 8)
-                                local field_height = enum and 26 or numeric_height
+                                local field_height = math.max(
+                                    enum and 26 or numeric_height,
+                                    ui.control_height and ui.control_height(14, 5, 26) or 0
+                                )
                                 cursor = cursor - field_height - 4
                                 if visible(cursor, field_height) then
                                     local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
-                                    ui.text(right + 12, cursor + 6, name:upper(), 13, muted)
+                                    ui.text(
+                                        right + 12,
+                                        ui.text_y and ui.text_y(cursor, field_height, 13, name) or cursor + 6,
+                                        name:upper(),
+                                        13,
+                                        muted
+                                    )
                                     if enum and ui.choice then
                                         ui.choice(enum, right + 29, cursor, rightw - 46, function()
                                             prepare(selected_channel)

@@ -27,15 +27,22 @@ function T.new(deps)
         local h = editor.handle
         local controls = editor.api.mods[h.id].controls
         local d = document()
+        local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
+        local header_padding = ui.spacing and ui.spacing(16) or 16
+        local header_height = math.max(40, heading_size + header_padding)
         local function draw(x, y, w, ht)
             local theme = ui.theme
             local white, muted = theme.white, theme.muted
             local bx, width = x + 14, w - 28
-            local half, top = (width - 8) / 2, y + ht - 118
-            local bh = math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
-            local step = bh + 10
-            local function label(py, text, color)
-                ui.bounded(bx, py, text, 14, color or white, width)
+            local half = (width - 8) / 2
+            local bh = ui.control_height and ui.control_height(14, 6, 28)
+                or math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
+            local gap = ui.spacing and ui.spacing(10) or 10
+            local tab_y = y + ht - header_height - gap - bh
+            local top = tab_y - math.max(40, (ui.text_size and ui.text_size(14, 'hint') or 14) + gap * 2)
+            local step = bh + gap
+            local function label(py, text, color, role)
+                ui.bounded(bx, py, text, 14, color or white, width, role)
             end
             local function button(px, py, bw, text, id, enabled, callback, help)
                 if id and not controls[id] then
@@ -85,18 +92,21 @@ function T.new(deps)
                 end
             end
             ui.rect(x, y, w, ht, theme.panel)
-            ui.rect(x, y + ht - 40, w, 40, theme.header)
-            label(y + ht - 26, 'LUT Editor Tools')
+            ui.rect(x, y + ht - header_height, w, header_height, theme.header)
+            local title_y = ui.text_y
+                    and ui.text_y(y + ht - header_height, header_height, 14, 'LUT Editor Tools', 'heading')
+                or y + ht - header_height + (header_height - heading_size) / 2
+            label(title_y, 'LUT Editor Tools', nil, 'heading')
             local tabw = (width - 24) / #tabs
             for i, tab in ipairs(tabs) do
-                local tx, ty = bx + (i - 1) * (tabw + 6), y + ht - 78
-                ui.button(tx, ty, tabw, 28, labels[tab], function()
+                local tx = bx + (i - 1) * (tabw + 6)
+                ui.button(tx, tab_y, tabw, bh, labels[tab], function()
                     self.tab = tab
                 end, { selected = self.tab == tab })
             end
 
             if self.tab == 'import' then
-                label(top, 'Import a palette, then choose the table to edit or apply.', muted)
+                label(top, 'Import a palette, then choose the table to edit or apply.', muted, 'hint')
                 if controls.populate_worn then
                     action(
                         top - step * 6.5,
@@ -152,7 +162,12 @@ function T.new(deps)
                     action(top - step * 5.3, 'Apply to checked targets', 'apply_editor', d ~= nil)
                 end
             elseif self.tab == 'rows' then
-                label(top, 'Selected row: ' .. h.get('edit_row') .. (d and ' / ' .. d.height or ' / Load a LUT first'))
+                label(
+                    top,
+                    'Selected row: ' .. h.get('edit_row') .. (d and ' / ' .. d.height or ' / Load a LUT first'),
+                    nil,
+                    'heading'
+                )
                 if ui.preset then
                     ui.preset('row_preset', 'row_preset_select', bx, top - step, width)
                 else
@@ -173,7 +188,7 @@ function T.new(deps)
                 button(bx, top - step * 5.3, half, 'Reset row', 'reset_row', d ~= nil)
                 button(bx + half + 8, top - step * 5.3, half, 'Reset cell', 'reset_cell', d ~= nil)
             elseif self.tab == 'export' then
-                label(top, 'Choose what to export. A timestamp is added to each filename.', muted)
+                label(top, 'Choose what to export. A timestamp is added to each filename.', muted, 'hint')
                 action(
                     top - step,
                     'Name: ' .. (ui.input_value and ui.input_value('save_name') or h.get('save_name')),
@@ -201,7 +216,7 @@ function T.new(deps)
                     )
                 end
             else
-                label(top, 'Apply and restoration options for the current gear.', muted)
+                label(top, 'Apply and restoration options for the current gear.', muted, 'hint')
                 action(top - step, 'Load Debug LUT', 'load_debug_lut', true)
                 action(
                     top - step * 2,
@@ -238,7 +253,7 @@ function T.new(deps)
                 action(top - step * 6.3, 'Save applied setup', 'save_setup', true)
             end
         end
-        ui.floating('editor_tools', draw, 620, 540, self.close, 40)
+        ui.floating('editor_tools', draw, 620, 540, self.close, header_height)
     end
     return self
 end

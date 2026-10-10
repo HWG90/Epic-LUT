@@ -98,6 +98,7 @@ api.mods[h.id].tabs_top = true
 menu = dofile('vendor/menu/menu.lua').new(api, function(t, size)
     return #t * size * 0.5
 end)
+menu.epic_typography = true
 menu.visible = true
 local labels = {}
 for _, c in ipairs(menu.compose(1920, 1080)) do
@@ -105,6 +106,12 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
         labels[c.full_text or c.text] = c
     end
 end
+assert(
+    labels['Palette Preview'].text_role == 'heading'
+        and labels['Palette Preview'].size > labels['Save Current Gear Preset'].size
+        and labels['Saved outfit swatches: Armor / Cape | Helmet'].text_role == 'hint',
+    'Armory hierarchy did not distinguish headings, controls and help'
+)
 assert(
     labels.Armor and labels.Helmet and labels['Save Current Gear Preset'],
     'Armory lacks paired preview or save action'

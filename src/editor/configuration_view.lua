@@ -63,14 +63,19 @@ function V.new(deps)
             end
         end
         local size = ui.text_size and ui.text_size(14) or 14
-        local bh, line = math.max(28, size + 12), size + 5
+        local hint_size = ui.text_size and ui.text_size(14, 'hint') or 14
+        local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
+        local padding = ui.spacing and ui.spacing(12) or 12
+        local bh = ui.control_height and ui.control_height(14, 6, 28) or math.max(28, size + padding)
+        local hh = math.max(bh, heading_size + padding)
+        local line, hint_line = size + 5, hint_size + 5
         local gap, width = 20, (ui.w - 20) / 2
         local low, high = ui.y + 24, ui.y + ui.h - 12
         local function lines(text, w)
             local result, current = {}, ''
             for word in tostring(text):gmatch('%S+') do
                 local candidate = current == '' and word or current .. ' ' .. word
-                local measured = ui.text_width and ui.text_width(candidate, 14) or #candidate * size * 0.62
+                local measured = ui.text_width and ui.text_width(candidate, 14, 'hint') or #candidate * hint_size * 0.62
                 if current ~= '' and measured > w then
                     result[#result + 1], current = current, word
                 else
@@ -83,15 +88,17 @@ function V.new(deps)
         local function full(y, h)
             return y >= low and y + h <= high
         end
-        local function button(x, y, w, label, control, click, color)
-            if not full(y, bh) then
+        local function button(x, y, w, label, control, click, color, role, height)
+            height = height or bh
+            if not full(y, height) then
                 return
             end
             local enabled = not control or not control.disabled
-            ui.button(x, y, w, bh, label, click, {
+            ui.button(x, y, w, height, label, click, {
                 enabled = enabled,
                 accent = color,
                 size = 14,
+                role = role,
                 help = control and control.description,
                 ink = control and control.type == 'toggle' and enabled and value(control) and theme.enabled,
             })
@@ -108,12 +115,12 @@ function V.new(deps)
             local function row(control)
                 if control.type == 'text' then
                     local wrapped = lines(control.label, w - 16)
-                    local h = #wrapped * line + 8
+                    local h = #wrapped * hint_line + 8
                     local y = space(h)
                     for i, text in ipairs(wrapped) do
-                        local py = y + h - 8 - i * line
-                        if full(py, size) then
-                            ui.bounded(x + 8, py, text, 14, muted, w - 16)
+                        local py = y + h - 8 - i * hint_line
+                        if full(py, hint_size) then
+                            ui.bounded(x + 8, py, text, 14, muted, w - 16, 'hint')
                         end
                     end
                 elseif control.type == 'slider' or control.type == 'choice' then
@@ -176,14 +183,16 @@ function V.new(deps)
                     end
                 end
                 if #items > 0 then
-                    local y = space(bh + 8)
+                    local y = space(hh + 8)
                     if section.fallback then
                         button(x + 8, y + 4, w - 8, (manual_open and 'v ' or '> ') .. section.label, nil, function()
                             manual_open = not manual_open
-                        end, purple)
-                    elseif full(y + 4, bh) then
-                        ui.rect(x + 8, y + 4, w - 8, bh, theme.header)
-                        ui.bounded(x + 16, y + 4 + (bh - size) / 2, section.label, 14, white, w - 24)
+                        end, purple, 'heading', hh)
+                    elseif full(y + 4, hh) then
+                        ui.rect(x + 8, y + 4, w - 8, hh, theme.header)
+                        local baseline = ui.text_y and ui.text_y(y + 4, hh, 14, section.label, 'heading')
+                            or y + 4 + (hh - heading_size) / 2
+                        ui.bounded(x + 16, baseline, section.label, 14, white, w - 24, 'heading')
                     end
                     if not section.fallback or manual_open then
                         for _, control in ipairs(items) do
@@ -196,7 +205,7 @@ function V.new(deps)
             self.maximum[column] = math.max(0, total - (high - low))
             self.scroll[column] = math.min(self.scroll[column], self.maximum[column])
             if self.maximum[column] > 0 then
-                ui.bounded(x + 8, ui.y + 4, 'Scroll for more settings', 12, muted, w - 16)
+                ui.bounded(x + 8, ui.y + 4, 'Scroll for more settings', 12, muted, w - 16, 'hint')
                 ui.scrollbar(
                     'configuration_' .. column,
                     x + width - 8,

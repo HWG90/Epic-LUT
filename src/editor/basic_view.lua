@@ -34,8 +34,8 @@ function B.new(info, select_row, help)
         local divider = theme.line
         ui.rect(ui.x + left / 2, ui.y + 48, 1, math.max(0, ui.h - 148), divider)
         ui.rect(right - 9, ui.y, 1, ui.h, divider)
-        local function text(x, y, t)
-            ui.bounded(x, y, t, 14, white, ui.w - (x - ui.x) - 10)
+        local function text(x, y, t, role, color)
+            ui.bounded(x, y, t, 14, color or white, ui.w - (x - ui.x) - 10, role)
         end
         local guidance = help.basic or {}
         local function button(x, y, w, label, id, enabled, drawing)
@@ -52,8 +52,17 @@ function B.new(info, select_row, help)
                 help = guidance[id],
             })
         end
-        text(ui.x + 10, top - 20, 'Basic - primary colors only')
-        text(ui.x + 10, top - 44, 'Click a color region to edit. Importing a file is optional.')
+        local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
+        local hint_size = ui.text_size and ui.text_size(14, 'hint') or 14
+        local heading_y = top - math.max(20, heading_size + 6)
+        text(ui.x + 10, heading_y, 'Basic - primary colors only', 'heading')
+        text(
+            ui.x + 10,
+            heading_y - math.max(24, hint_size + 8),
+            'Click a color region to edit. Importing a file is optional.',
+            'hint',
+            muted
+        )
         local panels = state.raw and state.raw.basic
         button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
         local cliptop, clipbottom = top - 142, ui.y + (state.loaded and 102 or 56)
@@ -71,10 +80,11 @@ function B.new(info, select_row, help)
                 kind == 'armor' and 'Armor' or 'Helmet',
                 14,
                 state.palette_ready == false and muted or white,
-                half
+                half,
+                'heading'
             )
             if panel and panel.resource then
-                ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65)
+                ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65, 'hint')
             end
             ui.choice('basic_' .. kind .. '_lut', x, top - 142, half)
             local cursor = top - 153 + self.scroll
@@ -120,12 +130,13 @@ function B.new(info, select_row, help)
                         or (panel and panel.unavailable and 'Original LUT unavailable.' or 'Reading colors...'),
                     12,
                     muted,
-                    half
+                    half,
+                    'hint'
                 )
-                ui.bounded(x, top - 201, 'Try another LUT # or Load Current Colors.', 12, muted, half)
+                ui.bounded(x, top - 201, 'Try another LUT # or Load Current Colors.', 12, muted, half, 'hint')
             end
             if state.loaded then
-                ui.bounded(x, ui.y + 80, 'Single LUT Import', 12, white, half)
+                ui.bounded(x, ui.y + 80, 'Single LUT Import', 12, white, half, 'heading')
                 local filename = state.loaded and (state.loaded.source or ''):gsub('\\', '/'):match('[^/]+$') or 'DDS'
                 local number = panel and panel.label and panel.label:match('LUT (%d+)')
                 -- The per-target selection is exposed separately from the imported source.
@@ -184,11 +195,18 @@ function B.new(info, select_row, help)
             end
         end
         for _, name in ipairs({ 'text', 'bounded' }) do
-            actions[name] = function(x, y, value, size, color, w)
+            actions[name] = function(x, y, value, size, color, w, role)
                 y = y + offset
-                local height = base_ui.text_size and base_ui.text_size(size) or size
+                if name == 'text' then
+                    role = w
+                end
+                local height = base_ui.text_size and base_ui.text_size(size, role) or size
                 if visible(y, height) then
-                    base_ui[name](x, y, value, size, color, w)
+                    if name == 'text' then
+                        base_ui[name](x, y, value, size, color, role)
+                    else
+                        base_ui[name](x, y, value, size, color, w, role)
+                    end
                 end
             end
         end
@@ -211,8 +229,8 @@ function B.new(info, select_row, help)
         local draw_button = button
         do
             local ui = actions
-            local function text(x, y, value)
-                ui.bounded(x, y, value, 14, white, width)
+            local function text(x, y, value, role)
+                ui.bounded(x, y, value, 14, white, width, role)
             end
             local function button(x, y, w, label, id, enabled)
                 draw_button(x, y, w, label, id, enabled, actions)
@@ -220,7 +238,7 @@ function B.new(info, select_row, help)
             for _, position in ipairs(state.loaded and { 260, 393, 430 } or { 150, 283, 320 }) do
                 ui.rect(right, top - position, width, 1, divider)
             end
-            text(right, top - 48, 'Import a palette (optional)')
+            text(right, top - 48, 'Import a palette (optional)', 'heading')
             button(right, top - 85, width, 'Import DDS / ZIP / RAR...', 'browse')
             if state.busy then
                 ui.bounded(
@@ -230,7 +248,8 @@ function B.new(info, select_row, help)
                         .. (state.waiting and '' or ' / ' .. (state.progress or 0) .. '% completed'),
                     12,
                     muted,
-                    width
+                    width,
+                    'hint'
                 )
             else
                 local plan = state.raw and state.raw.matching
@@ -243,7 +262,8 @@ function B.new(info, select_row, help)
                                 0,
                                 (plan.total or state.palette_count or 0) - plan.matched
                             ) .. ' for manual assignment')
-                        or 'Color changes apply live. Region label: identify.'
+                        or 'Color changes apply live. Region label: identify.',
+                    'hint'
                 )
             end
             if (state.palette_count or 0) > 1 then
@@ -291,7 +311,7 @@ function B.new(info, select_row, help)
                 )
             end
             local saved_top = top + (state.loaded and 0 or 110)
-            text(right, saved_top - 274, 'Armory Presets')
+            text(right, saved_top - 274, 'Armory Presets', 'heading')
             ui.choice('outfit_preset', right, saved_top - 307, width)
             button(
                 right,
@@ -324,9 +344,9 @@ function B.new(info, select_row, help)
             else
                 button(right, saved_top - 443, width, 'Restore Arrowhead LUT (Original)', 'restore')
             end
-            ui.bounded(right, saved_top - 468, state.status or '', 13, muted, width)
+            ui.bounded(right, saved_top - 468, state.status or '', 13, muted, width, 'hint')
             ui.rect(right, saved_top - 471, width, 1, theme.line)
-            text(right, saved_top - 495, 'Export')
+            text(right, saved_top - 495, 'Export', 'heading')
             button(
                 right,
                 saved_top - 533,

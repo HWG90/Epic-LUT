@@ -53,8 +53,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         local rx = ui.x + lw + gap
         local rw = ui.w - lw - gap
         local white, muted = theme.white, theme.muted
-        local function text(x, y, value)
-            ui.text(x, y, value, 14, white)
+        local function text(x, y, value, role)
+            ui.text(x, y, value, 14, white, role)
         end
         local guidance = help.imported or {}
         local function button(x, y, w, label, id, enabled, height)
@@ -83,19 +83,24 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         for _, offset in ipairs({ 184 }) do
             ui.rect(rx + 12, top - offset, rw - 24, 1, divider, nil, 'control_accent')
         end
-        ui.rect(ui.x, top - 30, lw, 30, theme.header)
-        ui.rect(rx, top - 30, rw, 30, theme.header)
-        text(ui.x + 12, top - 20, 'LUTs and colors')
-        text(rx + 12, top - 20, 'Import and apply')
+        local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
+        local header_height = math.max(30, heading_size + (ui.spacing and ui.spacing(12) or 12))
+        ui.rect(ui.x, top - header_height, lw, header_height, theme.header)
+        ui.rect(rx, top - header_height, rw, header_height, theme.header)
+        local title_y = ui.text_y and ui.text_y(top - header_height, header_height, 14, 'LUTs and colors', 'heading')
+            or top - header_height + (header_height - heading_size) / 2
+        text(ui.x + 12, title_y, 'LUTs and colors', 'heading')
+        text(rx + 12, title_y, 'Import and apply', 'heading')
         -- Reserve one toolbar row when labels fit; narrow windows use two rows.
         local function text_width(value)
             return ui.text_width and ui.text_width(value, 15) or #value * 15 * 0.62
         end
-        local row_height = math.max(28, (ui.text_size and ui.text_size(15) or 15) + 12)
+        local row_height = ui.control_height and ui.control_height(15, 6, 28)
+            or math.max(28, (ui.text_size and ui.text_size(15) or 15) + 12)
         local available = lw - 24
         local scratch_width = math.min(available, math.max(140, text_width('Quick Scratch') + 18))
         local load_width = available - scratch_width - 8
-        local header_bottom = top - 49 - row_height
+        local header_bottom = top - header_height - 19 - row_height
         local scratch_y = header_bottom
         if load_width < text_width('Load Current Armor & Helmet') + 18 then
             load_width = available
@@ -113,7 +118,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         })
         header_bottom = scratch_y
         if (state.palette_count or 0) > 1 then
-            text(ui.x + 12, header_bottom - 24, 'Imported LUT')
+            text(ui.x + 12, header_bottom - 24, 'Imported LUT', 'heading')
             local selector_width = math.min(280, lw * 0.4)
             local selector_y = header_bottom - 62
             ui.choice('palette', ui.x + 12, selector_y, selector_width)
@@ -143,11 +148,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             local scratchx, scratchw, sh, sy = x, width, height, y
             local scratchtop = y + height
             ui.rect(scratchx, sy, scratchw, sh, theme.panel)
-            ui.rect(scratchx, scratchtop - 28, scratchw, 28, theme.header)
-            text(scratchx + 8, scratchtop - 20, 'Quick Scratch')
-            ui.rect(scratchx + 10, scratchtop - 60, scratchw - 20, 22, self.scratch, nil, 'swatch_fill')
+            ui.rect(scratchx, scratchtop - header_height, scratchw, header_height, theme.header)
+            local scratch_title_y = ui.text_y
+                    and ui.text_y(scratchtop - header_height, header_height, 14, 'Quick Scratch', 'heading')
+                or scratchtop - header_height + (header_height - heading_size) / 2
+            text(scratchx + 8, scratch_title_y, 'Quick Scratch', 'heading')
+            local scratch_swatch_y = scratchtop - header_height - 30
+            ui.rect(scratchx + 10, scratch_swatch_y, scratchw - 20, 22, self.scratch, nil, 'swatch_fill')
             local gx, gy = scratchx + 10, sy + 110
-            local gw, gh = scratchw - 40, sh - 180
+            local gw, gh = scratchw - 40, math.max(40, scratch_swatch_y - 10 - gy)
             local function choose(key, color)
                 self.scratch = color
                 -- The scratch area only chooses a color; palette right-click paints it.
@@ -212,7 +221,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 ui.rect(x, y, slotw - 4, 22, theme.border, nil, 'swatch_border')
                 ui.rect(x + 2, y + 2, slotw - 8, 18, color or theme.panel, nil, 'swatch_fill')
                 if not color then
-                    ui.bounded(x + 5, y + 7, 'Empty ' .. i, 10, muted, slotw - 14)
+                    ui.bounded(x + 5, y + 7, 'Empty ' .. i, 10, muted, slotw - 14, 'hint')
                 end
                 local slot = i
                 ui.hit(x, y, slotw - 4, 22, function()
@@ -243,7 +252,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     .. (self.selected.field or self.selected.column),
                 13,
                 muted,
-                lw - 24
+                lw - 24,
+                'hint'
             )
         end
         local cols = { 1, 3, 6, 7, 13, 15, 17, 18, 19, 20 }
@@ -253,7 +263,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         local function colors(title, kind, offset)
             local x, width = ui.x + offset + 10, lw / 2 - 22
             local font = ui.text_size and ui.text_size(13) or 13
-            local heading_height = math.max(23, font + 10)
+            local heading_font = ui.text_size and ui.text_size(14, 'heading') or 14
+            local heading_height = math.max(23, heading_font + (ui.spacing and ui.spacing(10) or 10))
             local row_step = math.max(18, font + 6)
             local title_height, hash_height, label_height = heading_height, math.max(26, font + 10), row_step
             local listtop = cliptop - heading_height - 8
@@ -261,7 +272,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             local entries = ready and ((state.raw and state.raw[kind]) or state[kind]) or {}
             entries = entries or {}
             ui.rect(x, cliptop - heading_height, width, heading_height, theme.header)
-            ui.bounded(x + 7, cliptop - heading_height + 5, title, 14, ready and white or muted, 80)
+            local heading_y = ui.text_y and ui.text_y(cliptop - heading_height, heading_height, 14, title, 'heading')
+                or cliptop - heading_height + (heading_height - heading_font) / 2
+            ui.bounded(x + 7, heading_y, title, 14, ready and white or muted, 80, 'heading')
             if state.loaded then
                 local target = state[kind .. '_lut']
                     or (ui.input_value and ui.input_value('basic_' .. kind .. '_lut'))
@@ -299,7 +312,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     ready and 'Current colors unavailable or still loading.' or 'Load current gear or import a LUT.',
                     13,
                     muted,
-                    width - 16
+                    width - 16,
+                    'hint'
                 )
             end
             local size = math.min(22, (width - 84) / #cols - 4)
@@ -324,6 +338,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     ui.button(x + 2, cursor, width - 12, title_height, entry.name, choose_table, {
                         selected = selected,
                         size = 14,
+                        role = 'heading',
                         help = 'Select this '
                             .. (entry.kind or kind)
                             .. ' LUT. Selecting does not apply or change its colors.',
@@ -342,7 +357,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 cursor = cursor - label_height
                 if visible(cursor, label_height) then
                     for i, label in ipairs(labels) do
-                        ui.bounded(gx + (i - 1) * step, cursor + 3, label, 12, muted, size)
+                        ui.bounded(gx + (i - 1) * step, cursor + 3, label, 12, muted, size, 'hint')
                     end
                 end
                 -- Only inspect pixel data for rows inside this gear's viewport.
@@ -453,7 +468,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         if state.loaded then
             local path = (state.loaded.source or 'Imported LUT'):gsub('\\', '/')
             local relative = path:match('/Epic LUT/(.*)') or path:match('[^/]+$') or path
-            ui.bounded(rx + 12, top - 98, 'Imported: ' .. (state.import_description or relative), 12, muted, rw - 24)
+            ui.bounded(
+                rx + 12,
+                top - 98,
+                'Imported: ' .. (state.import_description or relative),
+                12,
+                muted,
+                rw - 24,
+                'hint'
+            )
         end
         local y = top - 117
         if state.busy then
@@ -479,7 +502,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 white
             )
         else
-            ui.bounded(rx + 12, y + 5, state.status, 14, muted, rw - 24)
+            ui.bounded(rx + 12, y + 5, state.status, 14, muted, rw - 24, 'hint')
         end
         if state.busy then
             button(rx + 12, top - 161, (rw - 29) / 2, 'Cancel import', 'cancel_import')
@@ -493,7 +516,15 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             'save_palette',
             state.loaded ~= nil and not state.busy
         )
-        ui.bounded(rx + 12, top - 224, 'Overwrites the editor table; does not apply to gear.', 13, muted, rw - 24)
+        ui.bounded(
+            rx + 12,
+            top - 224,
+            'Overwrites the editor table; does not apply to gear.',
+            13,
+            muted,
+            rw - 24,
+            'hint'
+        )
         local preview_height = math.max(44, math.min(200, ui.h - ((state.palette_count or 0) > 1 and 670 or 570)))
         local preview_top = top - 246
         local preview_bottom = preview_top - preview_height
@@ -506,7 +537,8 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         text(
             rx + 12,
             top - 238,
-            'Imported file: ' .. #imported .. ' LUT' .. (#imported == 1 and '' or 's') .. ' / Column 1'
+            'Imported file: ' .. #imported .. ' LUT' .. (#imported == 1 and '' or 's') .. ' / Column 1',
+            'hint'
         )
         self.import_max = math.max(0, #imported * 22 - preview_height)
         self.import_scroll = math.min(self.import_scroll or 0, self.import_max)
@@ -532,11 +564,11 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             end
         end
         if self.import_max > 0 then
-            ui.bounded(rx + 12, preview_bottom - 12, 'Scroll for more imported LUTs', 10, muted, rw - 24)
+            ui.bounded(rx + 12, preview_bottom - 12, 'Scroll for more imported LUTs', 10, muted, rw - 24, 'hint')
         end
         ui.rect(rx + 12, preview_bottom - 18, rw - 24, 1, divider, nil, 'control_accent')
         local actions = preview_bottom - 30
-        text(rx + 12, actions, 'Apply Imported LUT ' .. (state.palette_index or 1))
+        text(rx + 12, actions, 'Apply Imported LUT ' .. (state.palette_index or 1), 'heading')
         local apply_width = (rw - 30) / 2
         local matching = state.raw and state.raw.matching
         if (state.palette_count or 0) > 1 then
@@ -554,7 +586,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             if matching and matching.matched == 0 then
                 summary = matching.total .. ' imported / 0 matched / ' .. matching.total .. ' for manual assignment'
             end
-            ui.bounded(rx + 12, actions - 55, summary, 13, muted, rw - 24)
+            ui.bounded(rx + 12, actions - 55, summary, 13, muted, rw - 24, 'hint')
             ui.choice('palette', rx + 12, actions - 91, rw - 24)
             button(
                 rx + 12,
@@ -590,7 +622,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 'apply_file_helmet',
                 state.loaded ~= nil and not state.busy
             )
-            ui.bounded(rx + 12, actions - 55, 'Applies to every LUT on that gear.', 13, muted, rw - 24)
+            ui.bounded(rx + 12, actions - 55, 'Applies to every LUT on that gear.', 13, muted, rw - 24, 'hint')
         end
         button(
             rx + 12,
@@ -611,7 +643,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         button(rx + 12, actions - 183, (rw - 29) / 2, 'Undo Last Action', 'global_undo')
         button(rx + 17 + (rw - 29) / 2, actions - 183, (rw - 29) / 2, 'Redo Last Action', 'global_redo')
         button(rx + 12, actions - 221, rw - 24, 'Save applied setup', 'save_setup')
-        ui.text(rx + 12, ui.y + 14, 'RAR requires installed 7-Zip. Match Your Colors should be Off.', 13, muted)
+        ui.text(rx + 12, ui.y + 14, 'RAR requires installed 7-Zip. Match Your Colors should be Off.', 13, muted, 'hint')
     end
     return self
 end

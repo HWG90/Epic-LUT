@@ -100,6 +100,7 @@ page.on_wheel = view.wheel
 local menu = menu_factory.new(api, function(t, size)
     return #t * size * 0.5
 end)
+menu.epic_typography = true
 menu.visible = true
 menu.window_width = 1800
 menu.window_height = 1000
@@ -111,6 +112,13 @@ for _, c in ipairs(first) do
         texts[c.full_text or c.text] = c
     end
 end
+assert(
+    texts['LUTs and colors'].text_role == 'heading'
+        and texts['LUTs and colors'].size > texts['Quick Scratch'].size
+        and texts['Overwrites the editor table; does not apply to gear.'].text_role == 'hint'
+        and texts['Overwrites the editor table; does not apply to gear.'].size < texts['Send to LUT Editor'].size,
+    'Import headings, controls and hints lost their distinct text sizes'
+)
 assert(
     texts['Quick Scratch'] and texts['Quick Scratch'].x > texts['Armor LUT 1'].x,
     'Quick Scratch is not beside palette tables'

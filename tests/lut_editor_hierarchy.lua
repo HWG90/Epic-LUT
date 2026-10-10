@@ -140,6 +140,7 @@ for i, page in ipairs(mod.pages) do
 end
 menu.window_height = 1000
 menu.compact_fonts = true
+menu.epic_typography = true
 local function compose()
     local commands = menu.compose(1920, 1080)
     for _, c in ipairs(commands) do
@@ -338,9 +339,11 @@ for _, width in ipairs({ 860, 1100, 1600 }) do
             assert(pattern.open and pattern.gear == 'armor', 'Pattern header control did not use the current gear')
             pattern.open = false
             local tools = control(compose(), 'Tools')
-            assert(tools.c[1] == 244 and tools.c[2] == 202, 'Tools entry lost its gold affordance')
+            assert(tools.c[1] < 80 and tools.c[2] < 100, 'Secondary Tools navigation competes with primary actions')
+            local apply_cape = control(compose(), 'Apply cape')
+            assert(apply_cape.c[1] == 244 and apply_cape.c[2] == 202, 'Primary Apply action lost its gold affordance')
             tap(tools)
-            assert(editor.tools.is_open(), 'Gold Tools button does not open the menu')
+            assert(editor.tools.is_open(), 'Tools button does not open the menu')
             commands = compose()
             local all_armor = label(commands, 'Apply to All Armor LUTs', true)
             local selected_apply = label(commands, 'Apply to Cape LUT 1', true)

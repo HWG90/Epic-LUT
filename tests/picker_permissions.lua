@@ -113,7 +113,8 @@ for _, c in ipairs(inspector) do
         c.type == 'rect'
         and math.abs(c.w - 24 * scale) < 0.1
         and math.abs(c.h - 18 * scale) < 0.1
-        and math.abs(c.y - title.y + 4 * scale) < 0.1
+        and c.ui_role == 'swatch_fill'
+        and math.abs(c.y + c.h / 2 - title.y - title.size / 2) < 0.1
     then
         chip = c
     end

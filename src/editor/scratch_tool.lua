@@ -18,23 +18,36 @@ function S.new(deps)
             return
         end
         local h, d = editor.handle, document()
+        local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
+        local header_height = math.max(40, heading_size + (ui.spacing and ui.spacing(16) or 16))
         local function draw(x, y, w, ht)
             local theme = ui.theme
             local white, muted = theme.white, theme.muted
-            local bx, width, top = x + 14, w - 28, y + ht - 72
-            local bh = math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
+            local bx, width = x + 14, w - 28
+            local bh = ui.control_height and ui.control_height(14, 6, 28)
+                or math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
+            local gap = ui.spacing and ui.spacing(12) or 12
+            local hex_y = y + ht - header_height - gap - bh
+            local swatch_y = hex_y - 40
             local function label(py, value, color)
                 ui.bounded(bx, py, value, 14, color or white, width)
             end
             local function action(py, value, id, enabled)
                 ui.button(bx, py, width, bh, value, function()
                     ui.activate(id)
-                end, { enabled = enabled })
+                end, {
+                    enabled = enabled,
+                    accent = enabled and { 244, 202, 53 },
+                    ink = enabled and { 25, 28, 31 },
+                })
             end
             ui.rect(x, y, w, ht, theme.panel)
-            ui.rect(x, y + ht - 40, w, 40, theme.header)
-            label(y + ht - 26, 'Scratch Pixel')
-            local hex_width, hex_y = (width - 12) / 2, top - 8
+            ui.rect(x, y + ht - header_height, w, header_height, theme.header)
+            local title_y = ui.text_y
+                    and ui.text_y(y + ht - header_height, header_height, 14, 'Scratch Pixel', 'heading')
+                or y + ht - header_height + (header_height - heading_size) / 2
+            ui.bounded(bx, title_y, 'Scratch Pixel', 14, white, width, 'heading')
+            local hex_width = (width - 12) / 2
             ui.button(bx, hex_y, hex_width, bh, 'HEX: ' .. h.get('scratch_color'), function()
                 ui.activate('scratch_color')
             end, { help = 'Edit HEX in the color picker. Ctrl+V pastes in its HEX field.' })
@@ -47,12 +60,12 @@ function S.new(deps)
             end)
             local color = editor.scratch or { 255, 255, 255 }
             local alpha = h.get('scratch_alpha')
-            ui.rect(bx, top - 48, width, 30, color, nil, 'swatch_fill')
-            ui.hit(bx, top - 48, width, 30, function()
+            ui.rect(bx, swatch_y, width, 30, color, nil, 'swatch_fill')
+            ui.hit(bx, swatch_y, width, 30, function()
                 ui.activate('scratch_color')
             end)
             local gx, gy, gw = bx, y + 95, width - 47
-            local gh = math.max(40, top - 60 - gy)
+            local gh = math.max(40, swatch_y - gap - gy)
             local hue = core.rgb_hsv(color)
             if hue ~= scratch_hue then
                 scratch_hue, scratch_colors = hue, {}
@@ -106,7 +119,7 @@ function S.new(deps)
             label(y + 73, string.format('A: %.2f', alpha))
             action(y + 28, 'Paint selected RGB', 'paint_scratch', d ~= nil)
         end
-        ui.floating('editor_scratch', draw, 420, 480, self.close, 40)
+        ui.floating('editor_scratch', draw, 420, 480, self.close, header_height)
     end
     return self
 end

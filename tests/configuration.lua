@@ -205,6 +205,7 @@ local menu = Menu.new(api, function(text, size)
     return #text * size * 0.5
 end)
 menu.visible, menu.selected, menu.page = true, 1, 3
+menu.epic_typography = true
 menu.window_width, menu.window_height, menu.compact_fonts, menu.font_size = 1420, 960, true, 20
 local function compose()
     local commands = menu.compose(1920, 1080)
@@ -238,6 +239,11 @@ local function tap(text)
     end
 end
 assert(label('Appearance') and label('Gear and Player Preview'), 'Configuration groups did not render')
+assert(
+    label('Appearance').text_role == 'heading'
+        and label('Appearance').size > label('[ x ] Include Capes in Armor Exports').size,
+    'Configuration heading metrics did not follow the rendered heading font'
+)
 local left, right = view.bounds[1], view.bounds[2]
 assert(left.x + left.w < right.x and left.h == right.h, 'Settings columns overlap')
 assert(label('Exports'), 'Export settings group did not render')

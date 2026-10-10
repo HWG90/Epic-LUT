@@ -23,9 +23,11 @@ function A.new(info, preview)
         local left = ui.w * 0.37
         local x = ui.x + left + 20
         local width = ui.w - left - 20
-        local bh = math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
-        local line = (ui.text_size and ui.text_size(12) or 12) + 6
-        local heading = (ui.text_size and ui.text_size(18) or 18) + 16
+        local bh = ui.control_height and ui.control_height(14, 6, 28)
+            or math.max(28, (ui.text_size and ui.text_size(14) or 14) + 12)
+        local line = (ui.text_size and ui.text_size(12, 'hint') or 12) + 6
+        local heading_font = ui.text_size and ui.text_size(18, 'heading') or 18
+        local heading = heading_font + 16
         local step, depth = bh + 8, 0
         local lower, upper = ui.y + line * 2 + 10, top - heading
         self.sidebar_bounds = { x = ui.x, y = lower, w = left, h = upper - lower }
@@ -58,7 +60,7 @@ function A.new(info, preview)
         local function label(text)
             local y, visible = position(line + 8)
             if visible then
-                ui.bounded(ui.x + 12, y + 5, text, 12, muted, left - 24)
+                ui.bounded(ui.x + 12, y + 5, text, 12, muted, left - 24, 'hint')
             end
         end
         local function separator()
@@ -67,7 +69,7 @@ function A.new(info, preview)
                 ui.rect(ui.x + 12, y + 4, left - 24, 1, theme.line, nil, 'control_accent')
             end
         end
-        ui.bounded(ui.x + 12, top - heading + 8, 'The Armory - saved palettes', 18, white, left - 24)
+        ui.bounded(ui.x + 12, top - heading + 8, 'The Armory - saved palettes', 18, white, left - 24, 'heading')
         button('Search: ' .. (state.armory_query or 'all presets'), 'armory_search')
         choice('armory_sort')
         choice('outfit_preset')
@@ -111,11 +113,13 @@ function A.new(info, preview)
         self.sidebar_maximum = math.max(0, depth - (upper - lower))
         self.sidebar_scroll = math.min(self.sidebar_scroll, self.sidebar_maximum)
         if self.sidebar_maximum > 0 then
-            ui.bounded(ui.x + 12, ui.y + line + 8, 'Scroll for more Armory controls', 12, muted, left - 24)
+            ui.bounded(ui.x + 12, ui.y + line + 8, 'Scroll for more Armory controls', 12, muted, left - 24, 'hint')
         end
-        ui.bounded(ui.x + 12, ui.y + 8, state.status or '', 12, muted, left - 24)
+        ui.bounded(ui.x + 12, ui.y + 8, state.status or '', 12, muted, left - 24, 'hint')
         ui.rect(x - 10, ui.y, 1, ui.h, theme.line, nil, 'control_accent')
-        ui.bounded(x, top - 22, 'Palette Preview', 18, white, width)
+        ui.bounded(x, top - heading + 8, 'Palette Preview', 18, white, width, 'heading')
+        local preview_gap = math.max(22, heading_font + 8)
+        local preview_top = top - math.max(80, heading + heading_font + preview_gap + 8)
         if outfit then
             if
                 self.outfit ~= outfit
@@ -134,17 +138,18 @@ function A.new(info, preview)
             end
             local half = (width - 14) / 2
             local total = 0
-            self.bounds = { x = x, y = ui.y, w = width, h = ui.h - 40 }
+            self.bounds = { x = x, y = ui.y, w = width, h = preview_top - ui.y }
             for n, docs in ipairs(self.preview_columns) do
                 local px = x + (n - 1) * (half + 14)
-                local cursor = top - 80 + self.scroll
+                local cursor = preview_top + self.scroll
                 ui.bounded(
                     px,
-                    top - 58,
+                    preview_top + preview_gap,
                     n == 1 and (#(outfit.cape or {}) > 0 and 'Armor / Cape' or 'Armor') or 'Helmet',
                     14,
                     white,
-                    half
+                    half,
+                    'heading'
                 )
                 local height = 0
                 for _, item in ipairs(docs) do
@@ -155,7 +160,7 @@ function A.new(info, preview)
                         or { 'Base', 'D1', 'In', 'Out', 'Curv', 'Tint', 'C1', 'C2', 'C3', 'C4' }
                     local cell = math.min(32, (half - 58) / #columns)
                     local block = 48 + doc.height * cell
-                    if cursor <= top - 80 and cursor >= ui.y + 16 then
+                    if cursor <= preview_top and cursor >= ui.y + 16 then
                         ui.bounded(
                             px,
                             cursor,
@@ -164,17 +169,18 @@ function A.new(info, preview)
                                 .. item.index,
                             14,
                             white,
-                            half
+                            half,
+                            'heading'
                         )
                     end
                     for c, label in ipairs(labels) do
-                        if cursor - 22 <= top - 80 and cursor - 22 >= ui.y + 16 then
-                            ui.bounded(px + 58 + (c - 1) * cell, cursor - 22, label, 12, muted, cell - 2)
+                        if cursor - 22 <= preview_top and cursor - 22 >= ui.y + 16 then
+                            ui.bounded(px + 58 + (c - 1) * cell, cursor - 22, label, 12, muted, cell - 2, 'hint')
                         end
                     end
                     for row = 1, doc.height do
                         local y = cursor - 30 - row * cell
-                        if y >= ui.y + 16 and y + cell <= top - 80 then
+                        if y >= ui.y + 16 and y + cell <= preview_top then
                             ui.bounded(px, y + cell * 0.3, 'Row ' .. row, 12, white, 54)
                             for c, column in ipairs(columns) do
                                 local at = ((row - 1) * doc.width + column - 1) * 4
@@ -190,18 +196,18 @@ function A.new(info, preview)
                     height = height + block
                 end
                 if #docs == 0 then
-                    ui.bounded(px, top - 100, 'No LUT saved', 12, muted, half)
+                    ui.bounded(px, preview_top - 20, 'No LUT saved', 12, muted, half, 'hint')
                 end
                 total = math.max(total, height)
             end
-            self.maximum = math.max(0, total - (ui.h - 96))
+            self.maximum = math.max(0, total - (preview_top - ui.y - 16))
             self.scroll = math.min(self.scroll, self.maximum)
             if self.maximum > 0 then
-                ui.bounded(x, ui.y + 2, 'Scroll to preview more saved LUTs', 12, muted, width)
+                ui.bounded(x, ui.y + 2, 'Scroll to preview more saved LUTs', 12, muted, width, 'hint')
             end
             return
         end
-        ui.bounded(x, top - 70, 'Choose a saved Armory preset to preview its LUTs.', 14, muted, width)
+        ui.bounded(x, preview_top + 10, 'Choose a saved Armory preset to preview its LUTs.', 14, muted, width, 'hint')
     end
     return self
 end

@@ -43,6 +43,7 @@ function F.new(m,ctx,deps)
     self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
     self.menu.compact_fonts=true
+    self.menu.epic_typography=true
     function self.open_advanced()
         self.basic_mode=false;self.menu.basic_only=false;self.menu.visible=true;self.opened_once=true
         if self.full_size then self.menu.window_width,self.menu.window_height=unpack(self.full_size)end

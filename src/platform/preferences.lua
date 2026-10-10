@@ -61,7 +61,13 @@ function P.new(storage)
                             step = 1,
                             default = 12,
                         },
-                        { id = 'font_bold', type = 'toggle', label = 'Bold text', default = true },
+                        {
+                            id = 'font_bold',
+                            type = 'toggle',
+                            label = 'Bold headings',
+                            default = true,
+                            description = 'Emphasize titles and section headings. Labels and editable text stay regular weight.',
+                        },
                         {
                             id = 'auto_updates',
                             type = 'toggle',

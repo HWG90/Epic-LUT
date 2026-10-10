@@ -180,6 +180,7 @@ end)
 menu.visible, menu.selected, menu.page = true, 1, 2
 menu.window_width, menu.window_height = 1800, 1000
 menu.compact_fonts = true
+menu.epic_typography = true
 local function compose()
     local commands = menu.compose(1920, 1080)
     for _, command in ipairs(commands) do
@@ -496,10 +497,11 @@ for _, settings in ipairs({ { 12, 1, 1800 }, { 20, 0.85, 1420 }, { 20, 0.85, 110
         local command = commands[i]
         if
             command.type == 'rect'
-            and command.c[1] == 244
-            and command.c[2] == 202
+            and command.c[1] < 80
+            and command.c[2] < 100
             and command.w > 40
             and command.h >= ink.height
+            and command.h <= 60 * menu.window_bounds.scale
             and command.x <= tools_label.x
             and command.x + command.w >= tools_label.x
             and command.y <= tools_label.y + ink.min_y
