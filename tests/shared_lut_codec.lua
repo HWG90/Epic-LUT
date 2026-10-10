@@ -64,7 +64,7 @@ local small = C.new(nil, function(resource)
     return originals[resource]
 end)
 local packet = small.encode(identity, many)
-assert(packet:match('^[23]|') and #packet <= 3600, 'Delta packet failed to fit ten detailed LUTs')
+assert(packet:match('^[23]x?|') and #packet <= 3600, 'Delta packet failed to fit ten detailed LUTs')
 local restored = small.decode(packet)
 for _, entry in ipairs(many) do
     assert(
@@ -118,7 +118,7 @@ dense_edit.data[1] = -1 / math.huge
 originals[dense_base.resource] = dense_base
 local dense_entries = { { key = '0:1:0:0', document = dense_edit, original = dense_base } }
 local dense_packet = small.encode(identity, dense_entries)
-assert(dense_packet:sub(1, 2) == '3|', 'Dense near-baseline data did not select XOR planes')
+assert(dense_packet:match('^3x?|'), 'Dense near-baseline data did not select XOR planes')
 local dense_result = small.decode(dense_packet)
 assert(
     ffi.string(dense_result.entries['0:1:0:0'].document.data, 2944) == ffi.string(dense_edit.data, 2944),
@@ -185,7 +185,7 @@ for n = 1, 172 do
 end
 local transmog_packet = small.encode(identity, transmog)
 assert(
-    transmog_packet:sub(1, 2) == '4|' and #transmog_packet <= C.MAX_TEXT,
+    transmog_packet:match('^4x?|') and #transmog_packet <= C.MAX_TEXT,
     '172 destination packet did not use compact EL4'
 )
 local transmog_result = small.decode(transmog_packet)
@@ -208,9 +208,9 @@ assert(
     'EL4 Pattern representation changed bytes'
 )
 assert(not transmog_packet:match('^([123])|'), 'EL4 incorrectly advertised compatibility with old decoders')
--- Small appearances continue using the old wire format. Their exact native
--- compressor outputs above remain unchanged and all old versions still read.
-assert(codec.encode(identity, entries):match('^[123]|'), 'Small appearance unnecessarily switched protocols')
+-- Small appearances retain the old raw layout. Tagged optional compression
+-- never changes that layout and all untagged old versions still read.
+assert(codec.encode(identity, entries):match('^[123]x?|'), 'Small appearance unnecessarily switched raw protocols')
 local function word(value)
     return ffi.string(ffi.new('uint32_t[1]', value), 4)
 end
@@ -370,4 +370,231 @@ assert(
 assert(ffi.string(doc.data, 2944) == before, 'Oversize rejection altered local colors')
 print(
     'PASS compact EL4:172/173 exact Transmog bindings, Pattern/HDR/signed-zero data,4,096 count representation, legacy compatibility and strict malformed/budget rejection'
+)
+
+-- Native formats share exact raw layouts; only an explicit outer x selects
+-- XPRESS decoding. Force each raw version without depending on which candidate
+-- a given Windows compressor happens to choose as the smallest.
+local native = C.compression()
+local raw_versions = {}
+local capturing = C.new({
+    compress = function(raw)
+        raw_versions[raw:sub(1, 3)] = raw
+        return native.compress(raw, '')
+    end,
+    decompress = function(bytes, size)
+        return native.decompress(bytes, size, '')
+    end,
+})
+assert(capturing.encode(identity, entries))
+local large_simple = {}
+for n = 1, 129 do
+    large_simple[n] = { key = '0:1:' .. math.floor((n - 1) / 4) .. ':' .. (n - 1) % 4, document = doc }
+end
+assert(capturing.encode(identity, large_simple))
+local b64alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local function b64(bytes)
+    local out = {}
+    for at = 1, #bytes, 3 do
+        local a, b, c = bytes:byte(at, at + 2)
+        local bits = a * 65536 + (b or 0) * 256 + (c or 0)
+        local function digit(n)
+            return b64alphabet:sub(n + 1, n + 1)
+        end
+        out[#out + 1] = digit(math.floor(bits / 262144))
+            .. digit(math.floor(bits / 4096) % 64)
+            .. (b and digit(math.floor(bits / 64) % 64) or '=')
+            .. (c and digit(bits % 64) or '=')
+    end
+    return table.concat(out)
+end
+for version = 1, 4 do
+    local raw = assert(raw_versions['EL' .. version])
+    for _, tag in ipairs(native.formats) do
+        local encoded = version .. tag .. '|' .. #raw .. '|' .. b64(native.compress(raw, tag))
+        assert(#encoded <= C.MAX_TEXT)
+        local result = codec.decode(encoded)
+        for _, entry in pairs(result.entries) do
+            assert(ffi.string(entry.document.data, 2944) == pixels, 'Tagged native version changed F32 bytes')
+        end
+        assert(not pcall(codec.decode, encoded .. 'x'), 'Trailing tagged compression data accepted')
+        assert(not pcall(codec.decode, encoded:sub(1, -5)), 'Truncated tagged compressed data accepted')
+    end
+end
+for _, invalid in ipairs({ '1h|17|AAAA', '1xx|17|AAAA', '5x|17|AAAA', '4x|18|AAAA', '1x|999999|AAAA' }) do
+    assert(not pcall(codec.decode, invalid), 'Unsupported/corrupt/tagged-size packet accepted')
+end
+
+-- Optional native probing must fall back MAXIMUM -> STANDARD -> LZNT1 while
+-- avoiding oversized allocation and all unvalidated FFI capacities.
+local function fake_native(maximum, standard, fail_optional)
+    local calls = { compress = 0, decompress = 0, formats = {} }
+    local api = {}
+    function api.EpicLutWorkspace(format, size, fragment)
+        calls.formats[#calls.formats + 1] = format
+        if format == 2 then
+            size[0] = 32
+            fragment[0] = 16
+            return 0
+        end
+        local policy = format == 259 and maximum or standard
+        if policy == 'unavailable' then
+            return -1
+        end
+        size[0] = policy == 'large' and 2 * 1024 * 1024 or 64
+        fragment[0] = 16
+        return 0
+    end
+    function api.EpicLutCompress(format, bytes, size, out, _, _, final)
+        calls.compress = calls.compress + 1
+        local kind = format % 256
+        if kind == 3 and fail_optional then
+            return -1
+        end
+        local encoded = (kind == 3 and 'X' or 'L') .. bytes:sub(1, size)
+        ffi.copy(out, encoded, #encoded)
+        final[0] = #encoded
+        return 0
+    end
+    function api.EpicLutDecompress(format, out, size, bytes, count, final)
+        calls.decompress = calls.decompress + 1
+        local encoded = bytes:sub(1, count)
+        if encoded:sub(1, 1) ~= (format == 3 and 'X' or 'L') then
+            return -1
+        end
+        local raw = encoded:sub(2)
+        if #raw ~= size then
+            return -1
+        end
+        ffi.copy(out, raw, size)
+        final[0] = size
+        return 0
+    end
+    return api, calls
+end
+local api, calls = fake_native('unavailable', 'ok')
+local fallback = C.compression(api)
+assert(fallback.xpress_format == 3 and #fallback.formats == 2, 'Unavailable MAXIMUM did not use XPRESS STANDARD')
+api, calls = fake_native('large', 'unavailable')
+fallback = C.compression(api)
+assert(
+    not fallback.xpress_format and #fallback.formats == 1,
+    'Unavailable/oversized optional workspace did not retain LZNT1'
+)
+local prior_calls = calls.decompress
+for _, size in ipairs({ -1, 0, 0.5, 65537, math.huge, 0 / 0 }) do
+    assert(not pcall(fallback.decompress, 'Lx', size), 'Unsafe capacity reached native decompressor')
+end
+assert(
+    not pcall(fallback.decompress, nil, 17) and not pcall(fallback.decompress, '', 17),
+    'Invalid compressed input reached FFI'
+)
+assert(calls.decompress == prior_calls, 'Rejected capacity invoked native decompressor')
+prior_calls = calls.compress
+assert(
+    not pcall(fallback.compress, nil)
+        and not pcall(fallback.compress, '')
+        and not pcall(fallback.compress, string.rep('x', 65537))
+)
+assert(calls.compress == prior_calls, 'Rejected raw bytes invoked native compressor')
+api, calls = fake_native('ok', 'ok', true)
+fallback = C.compression(api)
+local failed_optional = C.new(fallback)
+local tiny_entries = { { key = 'p:0:1:0:0', document = pattern } }
+local legacy_tiny = failed_optional.encode(identity, tiny_entries)
+assert(
+    legacy_tiny:match('^[123]|') and failed_optional.decode(legacy_tiny),
+    'Optional compression failure blocked valid legacy appearance'
+)
+api, calls = fake_native('ok', 'ok')
+local tagged = C.compression(api)
+local x_only = C.new({ formats = { 'x' }, compress = tagged.compress, decompress = tagged.decompress })
+local tagged_tiny = x_only.encode(identity, tiny_entries)
+assert(tagged_tiny:match('^[123]x|') and x_only.decode(tagged_tiny), 'Explicit optional compression tag failed')
+assert(not pcall(x_only.decode, tagged_tiny:gsub('^([123])x|', '%1|')), 'Untagged XPRESS was decoded as legacy')
+assert(not pcall(x_only.decode, legacy_tiny:gsub('^([123])|', '%1x|')), 'Legacy bytes were decoded as XPRESS')
+for _, bad in ipairs({
+    function()
+        return nil
+    end,
+    function()
+        return ''
+    end,
+    function()
+        return string.rep('x', C.MAX_RAW + 4097)
+    end,
+}) do
+    local invalid = C.new({
+        formats = { '', 'x' },
+        compress = function(raw, tag)
+            if tag == 'x' then
+                return bad()
+            end
+            return native.compress(raw, '')
+        end,
+        decompress = native.decompress,
+    })
+    local accepted, error_text = pcall(invalid.encode, identity, tiny_entries)
+    assert(
+        not accepted and tostring(error_text):find('Invalid compressed LUT output', 1, true),
+        'Invalid optional compressor result escaped its output guard'
+    )
+end
+
+-- Generated repeated-palette workload with one preserved emissive float per
+-- table: LZNT1 cannot match across its4KiB chunks, while XPRESS can. Public,
+-- deterministic data only; no saved user files or review-artifact dependencies.
+local seed = 20261022
+local function random()
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    return seed
+end
+local words = {}
+for n = 1, 10 do
+    words[n] = 0x3f000000 + random() % 0x800000
+end
+words[11], words[12] = 0, 0x3f800000
+local palette = ffi.new('uint32_t[736]')
+for n = 0, 735 do
+    palette[n] = words[math.floor(random() / 16777216) % 12 + 1]
+end
+local generated, generated_entries = {}, {}
+for n = 1, 8 do
+    local pixels = ffi.new('uint32_t[736]')
+    ffi.copy(pixels, palette, 2944)
+    pixels[13 * 4] = 0x3f000000 + random() % 0x800000
+    local d = { width = 23, height = 8, data = ffi.new('float[736]') }
+    ffi.copy(d.data, pixels, 2944)
+    generated[n] = d
+end
+for n = 1, 82 do
+    generated_entries[n] =
+        { key = '0:1:' .. (n - 1) % 64 .. ':' .. math.floor((n - 1) / 64), document = generated[(n - 1) % 8 + 1] }
+end
+local old = C.new({
+    compress = function(raw)
+        return native.compress(raw, '')
+    end,
+    decompress = function(bytes, size)
+        return native.decompress(bytes, size, '')
+    end,
+})
+local legacy_ok, legacy_error = pcall(old.encode, identity, generated_entries)
+assert(
+    not legacy_ok and tostring(legacy_error):find('lobby budget', 1, true),
+    'Generated regression did not exceed old lobby compression budget'
+)
+local improved = codec.encode(identity, generated_entries)
+assert(improved:match('^[123]x|') and #improved <= C.MAX_TEXT, 'Repeated exact palette did not fit with tagged XPRESS')
+local generated_result = codec.decode(improved)
+for _, entry in ipairs(generated_entries) do
+    assert(
+        ffi.string(generated_result.entries[entry.key].document.data, 2944) == ffi.string(entry.document.data, 2944),
+        'Improved compression changed preserved-emissive/F32 bytes'
+    )
+end
+print(
+    'PASS tagged native XPRESS:legacyEL1-4, exact raw/delta/XOR/compact bytes, workspace/error fallback, strict FFI bounds and generated82-binding palette '
+        .. #improved
+        .. ' bytes'
 )

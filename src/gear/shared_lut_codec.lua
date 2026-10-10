@@ -28,27 +28,44 @@ local function unbase64(text)
     end
     return table.concat(out)
 end
-function C.compression()
+function C.compression(native)
     pcall(ffi.cdef, [[
         int32_t EpicLutWorkspace(uint16_t, uint32_t *, uint32_t *) __asm__("RtlGetCompressionWorkSpaceSize");
         int32_t EpicLutCompress(uint16_t, const uint8_t *, uint32_t, uint8_t *, uint32_t, uint32_t, uint32_t *, void *) __asm__("RtlCompressBuffer");
         int32_t EpicLutDecompress(uint16_t, uint8_t *, uint32_t, const uint8_t *, uint32_t, uint32_t *) __asm__("RtlDecompressBuffer");
     ]])
-    local dll = ffi.load('ntdll')
+    local dll = native or ffi.load('ntdll')
     local workspace_size, fragment = ffi.new('uint32_t[1]'), ffi.new('uint32_t[1]')
-    assert(dll.EpicLutWorkspace(2, workspace_size, fragment) == 0 and workspace_size[0] <= 1024 * 1024, 'LUT compression unavailable')
+    assert(dll.EpicLutWorkspace(2, workspace_size, fragment) == 0 and workspace_size[0] > 0 and workspace_size[0] <= 1024 * 1024, 'LUT compression unavailable')
     local workspace = ffi.new('uint8_t[?]', workspace_size[0])
+    local xpress_workspace, xpress_format
+    -- Optional native improvement: MAXIMUM first, STANDARD second. Keep the
+    -- legacy backend available and every workspace bounded to one MiB.
+    for _, format in ipairs({259, 3}) do
+        local ok, status = pcall(dll.EpicLutWorkspace, format, workspace_size, fragment)
+        if ok and status == 0 and workspace_size[0] > 0 and workspace_size[0] <= 1024 * 1024 then
+            xpress_workspace, xpress_format = ffi.new('uint8_t[?]', workspace_size[0]), format
+            break
+        end
+    end
     local output, final = ffi.new('uint8_t[?]', C.MAX_RAW + 4096), ffi.new('uint32_t[1]')
     return {
-        compress = function(bytes)
-            assert(#bytes <= C.MAX_RAW)
-            assert(dll.EpicLutCompress(2, bytes, #bytes, output, C.MAX_RAW + 4096, 4096, final, workspace) == 0, 'LUT compression failed')
-            assert(final[0] <= C.MAX_RAW + 4096)
+        formats = xpress_workspace and {'', 'x'} or {''},
+        xpress_format = xpress_format,
+        compress = function(bytes, tag)
+            assert(type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_RAW,'Invalid LUT compression input')
+            assert(not tag or tag == '' or tag == 'x', 'Unsupported LUT compression format')
+            assert(tag ~= 'x' or xpress_workspace, 'XPRESS compression unavailable')
+            local format, work = tag == 'x' and xpress_format or 2, tag == 'x' and xpress_workspace or workspace
+            assert(dll.EpicLutCompress(format, bytes, #bytes, output, C.MAX_RAW + 4096, 4096, final, work) == 0, 'LUT compression failed')
+            assert(final[0] > 0 and final[0] <= C.MAX_RAW + 4096)
             return ffi.string(output, final[0])
         end,
-        decompress = function(bytes, size)
-            assert(size <= C.MAX_RAW and #bytes <= C.MAX_TEXT)
-            assert(dll.EpicLutDecompress(2, output, size, bytes, #bytes, final) == 0 and final[0] == size, 'Invalid compressed LUT appearance')
+        decompress = function(bytes, size, tag)
+            assert(type(size)=='number' and size>0 and size<=C.MAX_RAW and size%1==0
+                and type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_TEXT,'Invalid LUT decompression bounds')
+            assert(not tag or tag == '' or tag == 'x', 'Unsupported LUT compression format')
+            assert(dll.EpicLutDecompress(tag == 'x' and 3 or 2, output, size, bytes, #bytes, final) == 0 and final[0] == size, 'Invalid compressed LUT appearance')
             return ffi.string(output, size)
         end,
     }
@@ -154,9 +171,17 @@ function C.new(compression, original)
         local function candidate(version, name, representation)
             local raw = 'EL' .. version .. header .. table.concat(representation) .. tail
             if #raw <= C.MAX_RAW then
-                local packed = version .. '|' .. #raw .. '|' .. base64(compression.compress(raw))
-                self.packet_sizes[name] = #packed
-                if not text or #packed < #text then text = packed end
+                for _,tag in ipairs(compression.formats or {''}) do
+                    assert(tag == '' or tag == 'x', 'Unsupported LUT compression format')
+                    local ok,bytes=pcall(compression.compress,raw,tag)
+                    if not ok and tag == '' then error(bytes,0) end
+                    if ok then
+                        assert(type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_RAW+4096,'Invalid compressed LUT output')
+                        local packed = version .. tag .. '|' .. #raw .. '|' .. base64(bytes)
+                        self.packet_sizes[name] = math.min(self.packet_sizes[name] or math.huge,#packed)
+                        if not text or #packed < #text then text = packed end
+                    end
+                end
             end
         end
         candidate(legacy and '1' or '4', 'full', full_docs)
@@ -168,10 +193,10 @@ function C.new(compression, original)
     end
     function self.decode(text)
         assert(type(text) == 'string' and #text <= C.MAX_TEXT, 'Invalid shared LUT packet size')
-        local version, size, encoded = text:match('^([1234])|(%d+)|(.+)$')
+        local version, tag, size, encoded = text:match('^([1234])(x?)|(%d+)|(.+)$')
         size = tonumber(size)
         assert(size and size >= (version == '4' and 18 or 17) and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
-        local raw = compression.decompress(unbase64(encoded), size)
+        local raw = compression.decompress(unbase64(encoded), size, tag)
         assert(#raw == size and raw:sub(1,3) == 'EL' .. version, 'Invalid shared LUT header')
         local at = 4
         local function take(n)

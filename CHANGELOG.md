@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Compare lossless Windows XPRESS compression with the existing sharing compressor and send the smaller packet; preserve exact LUT bytes, all bindings and earlier packet decoding.
 - Remove the old 128-destination sharing cap with a compact extended packet format supporting up to 4,096 bindings; retain the lobby byte budget and exact LUT values.
 - Keep receiving Shared Lobby LUTs when the local appearance cannot be encoded; retain the last shareable appearance only for the same equipped kits and keep the failure visible.
 - End quick swatch picker sessions when closed so double-click editing works after changing LUTs; keep live edits on the selected material through discovery refreshes and reject changed gear or slots.
