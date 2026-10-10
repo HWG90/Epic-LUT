@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Restore dedicated Pattern LUT export names, DDS and Patch ZIP buttons in the floating Pattern window.
 - Add a separately named preview animation test using procedural standing/salute poses, cape sway and Pause/Play on existing garment copies.
 - Resolve salute joints across segmented garments; handle missing update deltas and keep diagnostic single-frame mode from leaking into normal preview openings.
 - Use the actual Helldiver standing and salute clip tracks, including fingers, from a bounded local game cache; keep cape sway separate and ship no animation assets.

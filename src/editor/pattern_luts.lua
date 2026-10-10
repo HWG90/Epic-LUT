@@ -876,14 +876,33 @@ function P.new(deps)
                     )
                 end
             end
-            button(x + 12, y + 80, bw, 'Import', 'browse')
+            button(x + 12, y + 162, bw, 'Import', 'browse')
             button(
                 x + 18 + bw,
-                y + 80,
+                y + 162,
                 bw * 2 + 6,
                 'Apply Imported DDS to Selected Pattern LUT',
                 'pattern_import_apply',
                 self.imported ~= nil and d ~= nil
+            )
+            ui.rect(x + 12, y + 150, w - 24, 1, theme.line)
+            button(
+                x + 12,
+                y + 112,
+                w - 24,
+                'Name: '
+                    .. (ui.input_value and ui.input_value('pattern_export_name') or handle.get('pattern_export_name')),
+                'pattern_export_name'
+            )
+            local half = (w - 30) / 2
+            button(x + 12, y + 76, half, 'Export Pattern DDS', 'pattern_export', d ~= nil)
+            button(
+                x + 18 + half,
+                y + 76,
+                half,
+                'Export Pattern Patch ZIP',
+                'pattern_export_patch',
+                d ~= nil and deps.export_patch ~= nil
             )
             ui.bounded(x + 12, y + 12, self.status or 'Pattern LUT values apply live.', 11, muted, w - 24)
         end

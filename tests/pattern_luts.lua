@@ -40,7 +40,7 @@ local deps = {
     end,
 }
 local session = dofile('src/gear/binding_session.lua').new(deps)
-local exported
+local exported, patched
 local pattern = dofile('src/editor/pattern_luts.lua').new({
     session = session,
     key = deps.key,
@@ -61,7 +61,10 @@ local pattern = dofile('src/editor/pattern_luts.lua').new({
         return '[0x123]'
     end,
     export = function(name, document)
-        exported = { name = name, pixels = ffi.string(document.data, 48) }
+        exported = { name = name, document = document, pixels = ffi.string(document.data, 48) }
+    end,
+    export_patch = function(name, document, original)
+        patched = { name = name, document = document, original = original, pixels = ffi.string(document.data, 48) }
     end,
 })
 local handle = api.register({
@@ -235,6 +238,84 @@ local unchanged = ffi.string(pattern.document.data, 48)
 assert(handle.set('show_alpha', true))
 pattern.popup(ui)
 assert(ffi.string(pattern.document.data, 48) == unchanged, 'Show Alpha changed LUT values')
+-- Export must be reachable through the floating Pattern window. Activating a
+-- registry button directly does not catch controls omitted from the renderer.
+local export_hits, export_labels, activated = {}, {}, {}
+local export_ui = Menu.custom_ui({
+    rect = function() end,
+    bounded = function(_, _, text)
+        export_labels[text] = true
+    end,
+    hit = function(x, y, w, h, callback)
+        export_hits[y .. ':' .. x] = { callback = callback, x = x, y = y, w = w, h = h }
+    end,
+    choice = function() end,
+    number = function() end,
+    input_value = handle.get,
+    activate = function(id)
+        activated[#activated + 1] = id
+        if id == 'pattern_export_name' then
+            assert(handle.set(id, 'Pattern-popup-export'))
+        else
+            assert(handle.activate(id))
+        end
+    end,
+    floating = function(id, draw, w, h)
+        assert(id == 'pattern_lut_editor' and w == 580 and h == 700, 'Pattern export enlarged the floating window')
+        draw(0, 0, w, h)
+    end,
+})
+pattern.popup(export_ui)
+local name_hit, dds_hit, patch_hit = export_hits['112:12'], export_hits['76:12'], export_hits['76:293']
+assert(name_hit and dds_hit and patch_hit, 'Pattern export name/DDS/Patch controls are missing from the popup')
+assert(
+    export_labels['Name: Epic-LUT-pattern']
+        and export_labels['Export Pattern DDS']
+        and export_labels['Export Pattern Patch ZIP']
+)
+local import_hit = assert(export_hits['162:12'], 'Pattern import was lost while adding exports')
+assert(
+    dds_hit.y + dds_hit.h < name_hit.y
+        and name_hit.y + name_hit.h < 150
+        and 150 < import_hit.y
+        and import_hit.y + import_hit.h < 190
+        and dds_hit.y > 12 + 11,
+    'Pattern import/export controls overlap each other, the imported swatches, or status text'
+)
+name_hit.callback()
+pattern.popup(export_ui)
+assert(export_labels['Name: Pattern-popup-export'], 'Pattern export name edit is not displayed')
+local popup_document = pattern.document
+dds_hit.callback()
+patch_hit.callback()
+assert(
+    table.concat(activated, ',') == 'pattern_export_name,pattern_export,pattern_export_patch',
+    'Pattern popup routed an export to the main material editor'
+)
+assert(
+    exported.name == 'Pattern-popup-export'
+        and exported.document == popup_document
+        and exported.document.width == 3
+        and exported.document.height == 1
+        and exported.pixels == ffi.string(popup_document.data, 48),
+    'Pattern DDS popup export used the wrong document or name'
+)
+assert(
+    patched.name == exported.name
+        and patched.document == popup_document
+        and patched.original == source
+        and patched.pixels == exported.pixels,
+    'Pattern patch popup export used the wrong selected 3x1 document or original resource'
+)
+pattern.document = nil
+pattern.popup(export_ui)
+export_hits['76:12'].callback()
+export_hits['76:293'].callback()
+assert(#activated == 3, 'Unloaded Pattern export buttons remained clickable')
+pattern.document = popup_document
+print(
+    'PASS Pattern popup exports: editable name, reachable DDS/Patch actions, exact resource, disabled state and compact layout'
+)
 local samples = {}
 local display = {
     rect = function(x, y, w, h, c, a, role)
@@ -629,7 +710,7 @@ cue.attach(ch, cc)
 cue.show('armor')
 assert(cue.document == nil and cue_scans == 0 and cc.pattern_lut.disabled)
 assert(not cue.switch('helmet') and cue_scans == 0 and cue.gear == 'armor')
-local button_colors, hits = {}, {}
+local button_colors, hits, cue_export_attempts = {}, {}, 0
 local cu = Menu.custom_ui({
     rect = function(x, y, w, h, color)
         if y == 634 then
@@ -639,10 +720,17 @@ local cu = Menu.custom_ui({
     bounded = function() end,
     number = function() end,
     choice = function() end,
-    activate = ch.activate,
+    activate = function(id)
+        if id == 'pattern_export_patch' then
+            cue_export_attempts = cue_export_attempts + 1
+        end
+        return ch.activate(id)
+    end,
     hit = function(x, y, w, h, callback)
         if y == 634 then
             hits[x] = callback
+        elseif y == 76 and x == 293 then
+            hits.patch = callback
         end
     end,
     floating = function(_, draw, w, h)
@@ -664,6 +752,9 @@ assert(cue.ready and cue.document and cue_marks == 1 and cue_seen and not cc.pat
 cue.popup(cu)
 assert(button_colors[12] ~= Menu.palette.panel and button_colors[144] ~= Menu.palette.panel)
 assert(button_colors[284][1] == 244 and button_colors[284][2] == 202, 'Load button did not stay gold after first press')
+assert(hits.patch and cc.pattern_export_patch.disabled, 'Unavailable Pattern patch exporter was not rendered disabled')
+hits.patch()
+assert(cue_export_attempts == 0, 'Pattern popup activated a missing patch exporter')
 for _, gear in ipairs({ 'armor', 'helmet' }) do
     assert(cue.switch(gear))
     for i = 1, 4 do
