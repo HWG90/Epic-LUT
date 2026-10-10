@@ -4,6 +4,37 @@ local Model = {}
 function Model.new(E, host)
     local A, W, U, X = E.Application, E.World, E.Unit, E.Matrix4x4
     local self = {}
+    local function capture_animation_bind(unit, spec)
+        assert(type(U.scene_graph_parent) == 'function', 'Preview animation hierarchy API unavailable')
+        local bind = { parents = { [1] = 0 }, poses = {}, node_count = spec.node_count }
+        -- Read the authored graph only from the newly owned unit, before its
+        -- nodes are flattened. Source graph links can belong to another unit.
+        bind.poses[1] = E.Matrix4x4Box(X.multiply(spec.pose:unbox(), X.inverse(spec.pose:unbox())))
+        for i = 2, spec.node_count do
+            local parent = U.scene_graph_parent(unit, i)
+            if parent == nil then
+                parent = 0
+            end
+            assert(
+                type(parent) == 'number'
+                    and parent % 1 == 0
+                    and parent >= 0
+                    and parent <= spec.node_count
+                    and parent ~= i,
+                'Preview animation parent bounds changed'
+            )
+            bind.parents[i] = parent
+            bind.poses[i] = E.Matrix4x4Box(spec.nodes[i]:unbox())
+        end
+        for i = 2, spec.node_count do
+            local at, visited = i, {}
+            while at ~= 1 and at ~= 0 do
+                assert(not visited[at], 'Preview animation hierarchy contains a cycle')
+                visited[at], at = true, bind.parents[at]
+            end
+        end
+        return bind
+    end
     function self.capture(world, root, pieces)
         assert(U.alive(root), 'Player model disappeared')
         assert(#pieces > 0, 'No equipped garment units')
@@ -76,7 +107,14 @@ function Model.new(E, host)
                 assert(U.alive(spec.source), 'Source changed during preview setup')
                 local unit = assert(W.spawn_unit(world, spec.resource, spec.pose:unbox()))
                 -- Record ownership before any subsequent setup can fail.
-                local piece = { unit = unit, source = spec.source, kind = spec.kind, slot = spec.slot }
+                local piece = {
+                    unit = unit,
+                    source = spec.source,
+                    kind = spec.kind,
+                    slot = spec.slot,
+                    model_pose = spec.pose,
+                    node_count = spec.node_count,
+                }
                 model.pieces[#model.pieces + 1] = piece
                 assert(unit ~= spec.source, 'Preview reused the source unit')
                 U.disable_physics(unit)
@@ -84,6 +122,16 @@ function Model.new(E, host)
                     U.disable_animation_state_machine(unit)
                 end
                 assert(U.num_scene_graph_items(unit) == spec.node_count, 'Preview skeleton differs')
+                if host.animate == true or host.capture_animation == true then
+                    local captured, bind = pcall(capture_animation_bind, unit, spec)
+                    if captured then
+                        piece.animation_bind = bind
+                    else
+                        -- An unsupported hierarchy leaves the existing static
+                        -- garment usable; the optional driver reports why.
+                        piece.animation_error = tostring(bind)
+                    end
+                end
                 -- Source bones may be linked to the player's avatar or another
                 -- garment. Bake their actual world poses under our own root;
                 -- copying local transforms alone retains those dependencies.

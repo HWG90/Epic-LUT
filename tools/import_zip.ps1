@@ -196,26 +196,41 @@ try {
         } finally {$f.Dispose()}
     }
     if($members.ContainsKey('preset.tsv')) {
-        if($members['preset.tsv'].Length -gt 65536) {throw 'Preset manifest budget exceeded'}
+        # Targets can alias a DDS/sidecar without duplicating its extraction cost.
+        # Keep the manifest and selected payload budgets independent and bounded.
+        if($members.Count -gt 8193) {throw 'Shared preset has too many members'}
+        if($members['preset.tsv'].Length -gt 2MB) {throw 'Preset manifest budget exceeded'}
         $manifest=Stage 'preset.tsv';$lines=[IO.File]::ReadAllLines($manifest)
         $version=if($lines[0] -eq "EPIC-OUTFIT`t1"){1}elseif($lines[0] -eq "EPIC-OUTFIT`t2"){2}else{0}
-        if(-not $version -or $lines.Count -lt 2 -or $lines.Count -gt 129) {throw 'Invalid shared preset manifest'}
-        $presetFiles=@{'preset.tsv'=$manifest};$targets=@{}
+        if(-not $version -or $lines.Count -lt 2 -or $lines.Count -gt 4097) {throw 'Invalid shared preset manifest'}
+        $presetFiles=@{'preset.tsv'=$manifest};$targets=@{};$lutShapes=@{};$sharedFiles=@{};$script:sharedPresetBytes=0
+        function Stage-Shared($Name) {
+            if($sharedFiles.ContainsKey($Name)) {return $sharedFiles[$Name]}
+            $entry=$members[$Name]
+            if($script:sharedPresetBytes+$entry.Length -gt 8MB) {throw 'Shared preset extraction budget exceeded'}
+            $path=Stage $Name
+            $script:sharedPresetBytes+=$entry.Length;$sharedFiles[$Name]=$path
+            return $path
+        }
         foreach($line in $lines[1..($lines.Count-1)]) {
+            Check-Owner
             $fields=$line.Split("`t")
             if($fields.Count -ne $(if($version -eq 1){3}else{7}) -or $fields[0] -notin @('armor','helmet','cape') -or $fields[1] -notmatch '^(p:)?[0-9:]+$' -or ($version -eq 1 -and ($fields[1].StartsWith('p:') -or $fields[0] -eq 'cape'))) {throw 'Invalid shared preset target'}
             $key=$fields[0]+':'+$fields[1];if($targets.ContainsKey($key)){throw 'Duplicate shared preset target'};$targets[$key]=$true
             $file=$fields[2]
-            if($file -notmatch '^[A-Za-z0-9 _-]+\.dds$' -or -not $members.ContainsKey($file) -or $members[$file].Length -gt 1MB) {throw 'Invalid shared preset DDS filename or size'}
-            $header=Read-Header $members[$file];$width=U32 $header 16;$height=U32 $header 12
-            if((U32 $header 0) -ne 542327876 -or -not (Test-LutShape $width $height) -or (($width -eq 3) -ne $fields[1].StartsWith('p:'))) {throw 'Invalid shared preset LUT shape'}
-            $presetFiles[$file]=Stage $file
+            if($file.Length -gt 160 -or $file -notmatch '^[A-Za-z0-9 _-]+\.dds$' -or -not $members.ContainsKey($file) -or $members[$file].Length -lt 148 -or $members[$file].Length -gt 1MB) {throw 'Invalid shared preset DDS filename or size'}
+            if(-not $lutShapes.ContainsKey($file)) {
+                $presetFiles[$file]=Stage-Shared $file
+                $header=Read-Range $presetFiles[$file] 0 148;$width=U32 $header 16;$height=U32 $header 12
+                if((U32 $header 0) -ne 542327876 -or -not (Test-LutShape $width $height)) {throw 'Invalid shared preset LUT shape'}
+                $lutShapes[$file]=@{Width=$width;Height=$height}
+            }
+            if(($lutShapes[$file].Width -eq 3) -ne $fields[1].StartsWith('p:')) {throw 'Invalid shared preset LUT shape'}
             if($version -eq 2 -and $fields[3] -ne '-') {
                 $metadata=$fields[6]
-                if($fields[3] -notmatch '^[0-9a-fA-F]{16}$' -or $fields[4] -notmatch '^(3|23)$' -or $fields[5] -notmatch '^([1-9]|[1-5][0-9]|6[0-4])$' -or $metadata -notmatch '^[A-Za-z0-9 _-]+\.patch-source$' -or -not $members.ContainsKey($metadata) -or $members[$metadata].Length -ne 357) {throw 'Invalid shared preset patch metadata'}
-                $presetFiles[$metadata]=Stage $metadata
+                if($fields[3] -notmatch '^[0-9a-fA-F]{16}$' -or $fields[4] -notmatch '^(3|23)$' -or $fields[5] -notmatch '^([1-9]|[1-5][0-9]|6[0-4])$' -or ($fields[4] -eq '3' -and $fields[5] -ne '1') -or $metadata.Length -gt 160 -or $metadata -notmatch '^[A-Za-z0-9 _-]+\.patch-source$' -or -not $members.ContainsKey($metadata) -or $members[$metadata].Length -ne 357) {throw 'Invalid shared preset patch metadata'}
+                $presetFiles[$metadata]=Stage-Shared $metadata
             } elseif($version -eq 2 -and ($fields[4] -ne '-' -or $fields[5] -ne '-' -or $fields[6] -ne '-')) {throw 'Incomplete shared preset patch metadata'}
-            if($selectedBytes -gt 8MB){throw 'Shared preset extraction budget exceeded'}
         }
         New-Item -ItemType Directory -Path $Output -ErrorAction Stop | Out-Null
         foreach($file in $presetFiles.Keys){[IO.File]::Copy($presetFiles[$file],(Join-Path $Output $file))}

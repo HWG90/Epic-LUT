@@ -162,6 +162,10 @@ front.tick(0.1)
 before = native_calls
 focused = false
 assert(front.close() == false and native_calls == before, 'Blur cleanup destroyed native GUI')
+assert(
+    not front.menu.visible and not capture.active and not front.closed,
+    'Deferred cleanup retained menu input or lost its owner'
+)
 focused = true
 width, height = 0, 0
 assert(front.close() == false and native_calls == before, 'Minimized cleanup destroyed native GUI')

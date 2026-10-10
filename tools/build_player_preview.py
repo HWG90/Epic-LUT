@@ -28,10 +28,10 @@ else:
     assert 'Epic LUT' in base and 'on_enable' in base
     assert 'independent player portrait candidate ready' not in base, 'Do not nest preview candidates'
 parts = ['local editor=(function()\n', base, '\nend)()\nlocal m={}\n',
-         'local PREVIEW_INSPECT_ONLY='+str(args.inspect_only).lower()+'\n']
+         'local PREVIEW_INSPECT_ONLY='+str(args.inspect_only).lower()+'\nlocal PREVIEW_ANIMATION_ENABLED=false\n']
 for name, folder in [('bingus_runtime','vendor'),('bingus_memory','vendor'),
                      ('avatar','vendor'),('engine','vendor'),('player_model','src'),
-                     ('player_preview','src'),('player_preview_native','src'),('player_preview_submit','src'),('player_preview_controls','src'),('player_preview_input','src')]:
+                     ('player_animation','src'),('player_preview','src'),('player_preview_native','src'),('player_preview_submit','src'),('player_preview_controls','src'),('player_preview_input','src')]:
     parts.append(f'm.{name}=(function()\n'+(ROOT/source_path(name) if folder=='src'else ROOT/f'{folder}/{name}.lua').read_text(encoding='utf-8')+'\nend)()\n')
 parts.append((ROOT/'src/preview/player_preview_candidate.lua').read_text(encoding='utf-8'))
 candidate = ''.join(parts).encode('utf-8')

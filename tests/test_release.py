@@ -21,7 +21,18 @@ with zipfile.ZipFile(candidate)as z:
     direct=b'direct_lut=true'in body
     if direct:
         assert not any(name.lower().endswith(('.py','.exe','.pyd','.zip','.whl'))for name in z.namelist())
-        assert [name for name in z.namelist()if name.endswith('.ps1')]==['tools/import_zip.ps1','tools/original_snapshots.ps1']
+        authored=b'm.player_authored_source=(function()'in body
+        ps1=['tools/import_zip.ps1','tools/original_snapshots.ps1']
+        cs=['tools/original_snapshots.cs']
+        if authored:
+            ps1.append('tools/authored_preview.ps1');cs.append('tools/authored_preview_reader.cs')
+            model=z.read('armor_lut_editor/mod.lua')
+            for field,path in [('authored_preview_script','tools/authored_preview.ps1'),('authored_preview_reader','tools/authored_preview_reader.cs')]:
+                value=re.search(rb'm\.'+field.encode()+rb"='([0-9a-f]+)'",model)
+                assert value and bytes.fromhex(value[1].decode())==z.read(path)==(root/path).read_bytes(),'Authored helper source differs'
+        assert [name for name in z.namelist()if name.endswith('.ps1')]==ps1
+        assert [name for name in z.namelist()if name.endswith('.cs')]==cs
+        assert not any(name.endswith(('.bin','.animation','.bones','.unit'))for name in z.namelist()),'Game animation resources entered package'
         assert z.read('data/9ba626afa44a3aa3.patch_0.stream')==b''
         assert b'm.service_files='not in body and b'm.runtime_hash='not in body
         assert b'm.catalog='not in body and b'm.kits='not in body and b'm.slim='not in body

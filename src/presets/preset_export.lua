@@ -1,5 +1,8 @@
 -- Export stored Armory bytes, never the currently worn/editor table.
 local E = {
+    MAX_BINDINGS = 4096,
+    MAX_MANIFEST_BYTES = 2 * 1024 * 1024,
+    MAX_PAYLOAD_BYTES = 8 * 1024 * 1024,
     formats = {
         'Shareable Preset ZIP',
         'Selected LUT Patch ZIP',
@@ -40,25 +43,43 @@ function E.lut_choices(preset)
     return #choices > 0 and choices or { 'Choose a saved preset first' }
 end
 function E.bundle(m, preset, include_capes)
-    assert(
-        preset and preset.entries and #preset.entries > 0 and #preset.entries <= 128,
-        'Choose a saved Armory preset first'
-    )
+    assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
+    assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
     local entries = collection(preset, include_capes)
     local manifest, files = { 'EPIC-OUTFIT\t2' }, {}
-    for i, entry in ipairs(entries) do
-        local file = string.format('lut%03d.dds', i)
-        files[#files + 1] = { file, m.dds.encode(entry.document.data, entry.document.width, entry.document.height) }
+    local payloads, sources, payload_count, source_count, bytes = {}, {}, 0, 0, 0
+    for _, entry in ipairs(entries) do
+        local encoded = m.dds.encode(entry.document.data, entry.document.width, entry.document.height)
+        local file = payloads[encoded]
+        if not file then
+            bytes = bytes + #encoded
+            assert(bytes <= E.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
+            payload_count = payload_count + 1
+            file = string.format('lut%03d.dds', payload_count)
+            payloads[encoded] = file
+            files[#files + 1] = { file, encoded }
+        end
+        -- Retain every destination row, even when several targets share exact payload bytes.
         local fields = { entry.kind, entry.key, file, '-', '-', '-', '-' }
         if entry.original and entry.original.resource and entry.original.patch_source then
-            local sidecar = file:gsub('%.dds$', '.patch-source')
-            files[#files + 1] = { sidecar, entry.original.patch_source }
+            local source = entry.original.patch_source
+            local sidecar = sources[source]
+            if not sidecar then
+                bytes = bytes + #source
+                assert(bytes <= E.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
+                source_count = source_count + 1
+                sidecar = string.format('source%03d.patch-source', source_count)
+                sources[source] = sidecar
+                files[#files + 1] = { sidecar, source }
+            end
             fields[4], fields[5], fields[6], fields[7] =
                 entry.original.resource, tostring(entry.original.width), tostring(entry.original.height), sidecar
         end
         manifest[#manifest + 1] = table.concat(fields, '\t')
     end
-    files[#files + 1] = { 'preset.tsv', table.concat(manifest, '\n') }
+    local text = table.concat(manifest, '\n')
+    assert(#text <= E.MAX_MANIFEST_BYTES, 'Preset manifest budget exceeded')
+    files[#files + 1] = { 'preset.tsv', text }
     return files
 end
 function E.new(m, paths, options)
@@ -74,6 +95,7 @@ function E.new(m, paths, options)
     })
     function self.save(name, preset, format, index, naming)
         assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
+        assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
         assert(format >= 1 and format <= #E.formats and format % 1 == 0, 'Choose an Armory export format')
         index = index or 1
         assert(type(index) == 'number' and index % 1 == 0 and preset.entries[index], 'Choose a saved preset LUT')

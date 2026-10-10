@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC LUT R5.5.3[/b][/size]
+[center][size=6][b]EPIC LUT R5.5.5[/b][/size]
 [size=5][b]STYLISH FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
@@ -12,6 +12,18 @@ Tactical pink. Pastel menace. A helmet that finally matches. Paint your Helldive
 
 Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
 [b]Make freedom look good.[/b]
+
+[size=4][b]R5.5.5 - LUT TARGETING HOTFIX[/b][/size]
+[list]
+[*]Fixed Load Current Gear targeting for region highlights and live edits.
+[*]Player Preview retains its default idle pose.
+[/list]
+
+[size=4][b]R5.5.4 - TRANSMOG PRESET HOTFIX[/b][/size]
+[list]
+[*]Saved presets now support 4,096 bindings, with duplicate LUT data stored once.
+[*]Fixed stuck menus during pending cleanup and overlapping empty-editor text.
+[/list]
 
 [size=4][b]R5.5.3 - EDITOR HOTFIX[/b][/size]
 [list]
@@ -41,8 +53,8 @@ Shared Lobby LUT is in testing.
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.3-BSL.zip[/b] and enable its BSL startup option.
-[*][b]Live Lua Loader / compatible API-2 MDL:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.3-LLL.zip[/b] into your loader's Mods directory, then enable it.
+[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.5-BSL.zip[/b] and enable its BSL startup option.
+[*][b]Live Lua Loader R30+ (GitHub):[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.5-LLL.zip[/b] into your loader's Mods directory, then enable it.
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].
 [/list]
 
@@ -67,7 +79,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3]Download R5.5.3[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.5]GitHub downloads[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

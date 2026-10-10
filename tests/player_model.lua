@@ -136,3 +136,67 @@ local defaults = default_model.capture('world', 'root', { { unit = 'armor', kind
 local default_copy = default_model.create('world', defaults)
 default_model.destroy(default_copy)
 U.set_mesh_visibility = old_set_visibility
+
+-- Hierarchy capture is opt-in, reads only an owned copy before flattening,
+-- and keeps independent pose boxes. Unsupported metadata preserves static use.
+local prior_spawn, prior_link = W.spawn_unit, U.scene_graph_link
+local hierarchy_reads, cycle = 0, false
+W.spawn_unit = function(world, resource, pose)
+    local unit = prior_spawn(world, resource, pose)
+    units[unit].parents = {}
+    for i = 2, 10 do
+        units[unit].parents[i] = i - 1
+    end
+    if cycle then
+        units[unit].parents[2], units[unit].parents[3] = 3, 2
+    end
+    return unit
+end
+U.scene_graph_parent = function(unit, index)
+    assert(unit ~= 'armor' and unit ~= 'helmet', 'Borrowed source hierarchy queried')
+    assert(not units[unit].flattened, 'Authored hierarchy was captured after flattening')
+    hierarchy_reads = hierarchy_reads + 1
+    return units[unit].parents[index]
+end
+U.scene_graph_link = function(unit, node, parent)
+    prior_link(unit, node, parent)
+    units[unit].flattened = true
+    units[unit].parents[node] = parent
+end
+local static = M.new(E, { copy_materials = function() end, retain_failed = function() end })
+local static_plan = static.capture('world', 'root', { { unit = 'armor', kind = 'armor' } })
+local still = static.create('world', static_plan)
+assert(hierarchy_reads == 0 and still.pieces[1].animation_bind == nil, 'Static preview acquired new animation APIs')
+static.destroy(still)
+local animated = M.new(E, { animate = true, copy_materials = function() end, retain_failed = function() end })
+local posed = animated.create('world', static_plan)
+local piece = posed.pieces[1]
+assert(hierarchy_reads == 9 and piece.animation_bind.parents[5] == 4 and units[piece.unit].parents[5] == 1)
+assert(piece.animation_bind.poses[5] ~= static_plan.pieces[1].nodes[5], 'Animation retained a mutable plan pose box')
+assert(piece.animation_bind.poses[5]:unbox() == 12 and piece.animation_bind.poses[1]:unbox() == 0)
+static_plan.pieces[1].nodes[5] = E.Matrix4x4Box(999)
+assert(piece.animation_bind.poses[5]:unbox() == 12, 'Public source plan changed immutable animation basis')
+animated.destroy(posed)
+static_plan.pieces[1].nodes[5] = E.Matrix4x4Box(12)
+local parent_api = U.scene_graph_parent
+U.scene_graph_parent = nil
+local unavailable = animated.create('world', static_plan)
+assert(
+    unavailable.pieces[1].animation_bind == nil
+        and unavailable.pieces[1].animation_error:find('API unavailable', 1, true)
+)
+animated.destroy(unavailable)
+U.scene_graph_parent = function(unit, index)
+    if index == 3 then
+        return nil
+    end
+    return parent_api(unit, index)
+end
+local forest = animated.create('world', static_plan)
+assert(forest.pieces[1].animation_bind.parents[3] == 0, 'Authored root node was rejected or given a guessed parent')
+animated.destroy(forest)
+U.scene_graph_parent, cycle = parent_api, true
+local cyclic = animated.create('world', static_plan)
+assert(cyclic.pieces[1].animation_bind == nil and cyclic.pieces[1].animation_error:find('cycle', 1, true))
+animated.destroy(cyclic)
+print('PASS gated owned hierarchy capture, immutable bind poses and static fallback for missing/cyclic animation data')

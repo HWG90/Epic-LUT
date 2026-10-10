@@ -1,7 +1,9 @@
 -- Preview lifecycle adapter shared by integrated builds and the standalone test sidecar.
 local enable, update, disable, cleanup = editor.on_enable, editor.on_update, editor.on_disable, editor.on_cleanup_poll
 local controller, adapter, memory, game, log
+local authored_source
 local activated, base_enabled = false, false
+local frontend_owner
 local wrapper, previous
 local pressed = false
 local elapsed = 0
@@ -22,6 +24,34 @@ local source_elapsed = 0
 local recovery_elapsed = 0
 local close_pending = false
 local suspended = false
+local frame_clock
+local clock_fallback_logged = false
+local function finite_delta(value)
+    return type(value) == 'number' and value == value and value >= 0 and value < math.huge
+end
+local function update_delta(context, delta)
+    local now
+    if memory and type(memory.time) == 'function' then
+        local ok, value = pcall(memory.time)
+        if ok and finite_delta(value) then
+            now = value
+        end
+    end
+    local measured = now and frame_clock and math.min(0.05, math.max(0, now - frame_clock)) or nil
+    frame_clock = now
+    -- Both loader callback forms are supported; a missing delta must not
+    -- silently freeze the portrait's pose and redraw timers.
+    if finite_delta(delta) then
+        return delta
+    elseif finite_delta(context) then
+        return context
+    end
+    if not clock_fallback_logged and log then
+        clock_fallback_logged = true
+        log('preview: missing update delta; using ' .. (now and 'measured frame clock' or 'default frame interval'))
+    end
+    return measured or (now and 0 or 1 / 60)
+end
 local function render_ready()
     local front = package.loaded['dbf.epic_lut.frontend.v1']
     if not front or not front.input.focused() then
@@ -93,6 +123,7 @@ local function close()
     release_input()
     unhook()
     due = false
+    single_frame = false
     capture_requested, debug_requested = false, false
     if controller and #controller.resources > 0 and not render_ready() then
         close_pending = true
@@ -114,7 +145,9 @@ local function reset_transients()
     source_signature = nil
     close_pending = false
     suspended = false
+    frame_clock, clock_fallback_logged = nil, false
     preview_disabled = false
+    authored_source = nil
     dock_request, dock_age, docked = nil, 1, false
     floating_geometry, dock_hidden, floating_on_editor = nil, false, false
     input_bridge = nil
@@ -226,11 +259,17 @@ editor.on_enable = function(ctx)
     assert(not owner or owner == public, 'Player Preview is already owned by another addon instance')
     discard_request()
     assert(close(), 'Player Preview cleanup is pending; wait before re-enabling')
+    assert(not authored_source or authored_source.close(), 'Authored salute worker cleanup is pending')
     reset_transients()
     base_enabled = true
     enable(ctx)
+    frontend_owner = package.loaded['dbf.epic_lut.frontend.v1']
     log = ctx.log
     memory = m.bingus_memory.new(m.bingus_runtime)
+    local authored = PREVIEW_ANIMATION_ENABLED == true and m.preview_animation == 'authored_salute'
+    if authored then
+        authored_source = m.player_authored_source.new(m, { time = memory.time, log = log })
+    end
     game = memory.address(assert(memory.module('game.dll')))
     local native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
     local submit = m.player_preview_submit.new(memory, game, memory.address(assert(memory.module())))
@@ -242,10 +281,18 @@ editor.on_enable = function(ctx)
         submit = submit,
         game = game,
         use_ui_world = true,
+        -- Only a separately named development build enables the garment-pose
+        -- driver. Standard packages keep the established static portrait.
+        animate = PREVIEW_ANIMATION_ENABLED == true,
+        authored = authored,
+        animation_source = authored_source,
         controls = controls,
     })
     controller = m.player_preview.new(adapter)
     activated = true
+    if authored_source and public.is_enabled() then
+        authored_source.start()
+    end
     public.before_editor_close = function()
         recovering = false
         dock_hidden = false
@@ -258,6 +305,9 @@ editor.on_enable = function(ctx)
             return false, why
         end
         local retry_fault = render_fault ~= nil
+        -- Diagnostic one-frame requests apply to that opening only. The
+        -- ordinary UI toggle always returns to a live portrait.
+        single_frame = false
         render_fault = nil
         recovering = false
         recovery_attempts = 0
@@ -322,6 +372,14 @@ editor.on_enable = function(ctx)
         PREVIEW_INSPECT_ONLY and 'preview: read-only model inspector ready'
             or 'preview: independent player portrait candidate ready'
     )
+    log(
+        'preview: build='
+            .. tostring(m.build_label or m.version or 'sidecar')
+            .. '; id='
+            .. tostring(m.dev_build_id or 'unmarked')
+            .. '; animation='
+            .. (PREVIEW_ANIMATION_ENABLED == true and (m.preview_animation or 'garment_poses') or 'static')
+    )
 end
 local function read_request(dt)
     request_elapsed = request_elapsed + (dt or 0)
@@ -338,9 +396,18 @@ local function read_request(dt)
     end
 end
 editor.on_update = function(ctx, dt)
+    if activated then
+        dt = update_delta(ctx, dt)
+    end
     update(ctx, dt)
     if not activated then
         return
+    end
+    if authored_source then
+        if public.is_enabled() then
+            authored_source.start()
+        end
+        authored_source.tick()
     end
     if not render_ready() then
         due = false
@@ -543,6 +610,23 @@ editor.on_update = function(ctx, dt)
         end
     end
     if controller.state == 'ready' then
+        local advanced, changed = true, false
+        if not single_frame or first then
+            advanced, changed = controller.advance(resumed and 0 or dt)
+        end
+        if not advanced then
+            close()
+            dock_hidden = docked
+            log('preview: animation stopped ' .. tostring(changed))
+            if tostring(changed):find('changed', 1, true) or tostring(changed):find('disappeared', 1, true) then
+                recovering = recovery_attempts < 3
+                retry_at = recovery_elapsed + 1
+            end
+            return
+        end
+        if changed then
+            due = true
+        end
         local front = package.loaded['dbf.epic_lut.frontend.v1']
         if not front or not front.menu.visible or not front.input.focused() then
             controls.cancel()
@@ -564,7 +648,7 @@ editor.on_update = function(ctx, dt)
                         close()
                     elseif event == 'dock' then
                         public.toggle()
-                    elseif event == 'move' or event == 'resize' then
+                    elseif event == 'move' or event == 'resize' or event == 'animation' then
                         adapter.layout_panel()
                     elseif event == 'rotate' or event == 'pan' then
                         adapter.rotate(controller.camera, controls.yaw, controls)
@@ -627,8 +711,38 @@ editor.on_update = function(ctx, dt)
         end
     end
 end
+local function dismiss_frontend()
+    local owner = package.loaded['epic.player_preview.v1']
+    local front = package.loaded['dbf.epic_lut.frontend.v1']
+    if not base_enabled or not front or front ~= frontend_owner or (owner and owner ~= public) then
+        return true
+    end
+    if type(front.dismiss) ~= 'function' then
+        return true
+    end
+    local ok, done = pcall(front.dismiss)
+    if not ok then
+        if log then
+            log('preview: editor dismissal pending ' .. tostring(done))
+        end
+        return false
+    end
+    return done ~= false
+end
+local function close_authored_source()
+    if not authored_source then
+        return true
+    end
+    local ok, done = pcall(authored_source.close)
+    return ok and done ~= false
+end
 editor.on_disable = function(...)
-    if not close() then
+    -- Dismiss owned UI before waiting for native retirement. A failed fence
+    -- must retain resource receipts without trapping the editor/cursor.
+    local dismissed = dismiss_frontend()
+    local stopped = close_authored_source()
+    local retired = close()
+    if not dismissed or not stopped or not retired then
         return false
     end
     if package.loaded['epic.player_preview.v1'] == public then
@@ -641,11 +755,15 @@ editor.on_disable = function(...)
     local done = disable(...)
     if done ~= false then
         base_enabled = false
+        frontend_owner = nil
     end
     return done
 end
 editor.on_cleanup_poll = function(...)
-    if not close() then
+    local dismissed = dismiss_frontend()
+    local stopped = close_authored_source()
+    local retired = close()
+    if not dismissed or not stopped or not retired then
         return false
     end
     if package.loaded['epic.player_preview.v1'] == public then
@@ -658,6 +776,7 @@ editor.on_cleanup_poll = function(...)
     local done = cleanup(...)
     if done ~= false then
         base_enabled = false
+        frontend_owner = nil
     end
     return done
 end

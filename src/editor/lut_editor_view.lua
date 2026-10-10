@@ -37,6 +37,7 @@ function V.new(deps)
         local right = ui.x + left + 12
         local rightw = ui.w - left - 12
         local top = ui.y + ui.h
+        local header_bottom = top - 27
         local gear_controls = mod.controls.editor_load_armor
         local font_scale = (ui.text_size and ui.text_size(14) or 12) / 12
         local header_height = math.max(26, ui.control_height and ui.control_height(14, 5) or 0)
@@ -76,7 +77,7 @@ function V.new(deps)
             ui.rect(x, y + height - 27, w, 27, blue)
             ui.bounded(x + 8, y + height - 21, title, 17, white, math.max(0, w - 16 - (reserved or 0)))
         end
-        local function button(x, y, w, label, id)
+        local function button(x, y, w, label, id, height)
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
             if w < 20 then
                 return
@@ -89,7 +90,7 @@ function V.new(deps)
                 or id == 'save_row'
             local control = mod.controls[id]
             local selected = control and control.type == 'toggle' and h.get(id)
-            ui.button(x, y, w, 26, label, function()
+            ui.button(x, y, w, height or 26, label, function()
                 ui.activate(id)
             end, {
                 selected = selected,
@@ -289,6 +290,7 @@ function V.new(deps)
             end
             local selector_x = ui.x + 28
             local selector_y = top - 32 - header_height - header_rows * (header_height + header_gap)
+            header_bottom = selector_y
             local selector_width = math.min(220, left * 0.32)
             ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
             ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
@@ -339,40 +341,79 @@ function V.new(deps)
             end
         end
         if not d then
+            -- Empty documents share the responsive header with loaded ones.
+            -- Flow each block from its predecessor instead of retaining the
+            -- pre-header offsets, and reserve the measured font ink height.
+            local gap, width = 8 * font_scale, left - 24
+            local cursor = header_bottom - gap
+            local row_height = math.max(26, 26 * font_scale, ui.control_height and ui.control_height(15, 5) or 0)
+            local function message(value, size, color)
+                local lines, line = {}, ''
+                local resolved = ui.text_size and ui.text_size(size) or size
+                for word in value:gmatch('%S+') do
+                    local candidate = line == '' and word or line .. ' ' .. word
+                    local measured = ui.text_width and ui.text_width(candidate, size) or #candidate * resolved * 0.62
+                    if line ~= '' and measured > width then
+                        lines[#lines + 1], line = line, word
+                    else
+                        line = candidate
+                    end
+                end
+                if line ~= '' then
+                    lines[#lines + 1] = line
+                end
+                for i, text in ipairs(lines) do
+                    local metrics = ui.text_metrics and ui.text_metrics(size, text) or { height = resolved, min_y = 0 }
+                    cursor = cursor - metrics.height
+                    ui.bounded(ui.x + 12, cursor - metrics.min_y, text, size, color, width)
+                    if i < #lines then
+                        cursor = cursor - 4 * font_scale
+                    end
+                end
+                cursor = cursor - gap
+            end
+            local browse_width = math.min(
+                width,
+                math.max(180, (ui.text_width and ui.text_width('Choose file...', 15) or 112) + 16 * font_scale)
+            )
             local gear = self.api and self.api.mods[self.handle.id].controls.editor_load_armor
             if gear then
-                ui.text(
-                    ui.x + 12,
-                    top - 90 - extra_header,
-                    'Load Current Gear to enable the Armor and Helmet selectors.',
-                    18,
-                    white
-                )
+                message('Load Current Gear to enable the Armor and Helmet selectors.', 18, white)
+                cursor = cursor - row_height
+                local load_width = width - browse_width - gap
                 button(
                     ui.x + 12,
-                    top - 140,
-                    left - 24,
+                    cursor,
+                    load_width,
                     'Load Current ' .. (self.gear == 'armor' and 'Armor' or 'Helmet'),
-                    'editor_load_' .. self.gear
+                    'editor_load_' .. self.gear,
+                    row_height
                 )
-                button(ui.x + 12, top - 180, 180, 'Choose file...', 'browse')
-                ui.text(ui.x + 12, top - 206, 'Uses currently worn LUT values; a file import is optional.', 14, muted)
+                button(ui.x + 12 + load_width + gap, cursor, browse_width, 'Choose file...', 'browse', row_height)
+                cursor = cursor - gap
+                message('Uses currently worn LUT values; a file import is optional.', 14, muted)
                 overlays()
                 return
             end
-            ui.text(ui.x + 12, top - 58, 'Choose a DDS or ZIP to begin.', 18, white)
-            button(ui.x + 12, top - 102, 180, 'Choose file...', 'browse')
-            button(
-                ui.x + 198,
-                top - 102,
-                math.min(360, left - 210),
-                'Populate editor with current applied palette',
-                'populate_applied'
-            )
-            if ui.choice then
-                ui.choice('lut', ui.x + 12, top - 145, math.min(360, left - 24))
+            message('Choose a DDS or ZIP to begin.', 18, white)
+            cursor = cursor - row_height
+            button(ui.x + 12, cursor, browse_width, 'Choose file...', 'browse', row_height)
+            local populate_label = 'Populate editor with current applied palette'
+            local populate_x = ui.x + 12 + browse_width + gap
+            local populate_width = width - browse_width - gap
+            local measured = ui.text_width and ui.text_width(populate_label, 15) or #populate_label * 8
+            if populate_width < measured + 16 * font_scale then
+                cursor = cursor - row_height - gap
+                populate_x, populate_width = ui.x + 12, width
             end
-            ui.text(ui.x + 12, top - 169, 'Uses the applied values from the selected Live LUT.', 14, muted)
+            button(populate_x, cursor, populate_width, populate_label, 'populate_applied', row_height)
+            cursor = cursor - gap
+            if ui.choice then
+                cursor = cursor - 26
+                ui.choice('lut', ui.x + 12, cursor, math.min(360, width))
+                cursor = cursor - gap
+            end
+            message('Uses the applied values from the selected Live LUT.', 14, muted)
             overlays()
             return
         end

@@ -1,12 +1,15 @@
 -- Transactional raw DDS export; all pixels and names validate before creating a folder.
-local B = { formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
+local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
 local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
 function B.new(m, paths)
     local self = {}
     function self.save(prefix, entries, naming)
         naming = naming or 1
         assert(type(naming) == 'number' and naming % 1 == 0 and B.formats[naming], 'Choose a DDS naming format')
-        assert(type(entries) == 'table' and #entries > 0 and #entries <= 128, 'Choose between 1 and 128 LUTs to export')
+        assert(
+            type(entries) == 'table' and #entries > 0 and #entries <= B.MAX_BINDINGS,
+            'Choose between 1 and 4096 LUT bindings to export'
+        )
         -- Reuse shared name validation without touching the filesystem.
         m.lut_files.available_name(prefix, function()
             return false

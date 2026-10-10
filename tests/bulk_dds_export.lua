@@ -110,6 +110,21 @@ local folder = save(
     { 'Reuse LUT3-d3ce605892d5331b.dds' }
 )
 assert_file(folder, 'Reuse LUT3-d3ce605892d5331b.dds', material)
+local transmog = {}
+for i = 1, B.MAX_BINDINGS do
+    transmog[i] = entry(material, 'armor', i, 'd3ce605892d5331b')
+end
+folder = save('Transmog', transmog, 1, { 'Transmog LUT1-d3ce605892d5331b.dds' })
+assert_file(folder, 'Transmog LUT1-d3ce605892d5331b.dds', material)
+local distinct, distinct_names = {}, {}
+for i = 1, 129 do
+    distinct[i] = entry(material, 'armor', i, string.format('%016x', i))
+    distinct_names[i] = 'Distinct LUT' .. i .. '-' .. string.format('%016x', i) .. '.dds'
+end
+folder = save('Distinct', distinct, 1, distinct_names)
+for _, name in ipairs(distinct_names) do
+    assert_file(folder, name, material)
+end
 local unknown_reuse = save('No ID Reuse', {
     entry(material, 'armor', 6),
     entry(material, 'armor', 6),
@@ -168,7 +183,7 @@ assert(not pcall(export.save, 'Bad ID', { entry(material, 'armor', 1, 'not an id
 assert(not pcall(export.save, 'Bad Mode', resources, 6))
 assert(not pcall(export.save, 'Bad Ordinal', { entry(material, 'armor', 0) }, 1))
 local too_many = {}
-for i = 1, 129 do
+for i = 1, B.MAX_BINDINGS + 1 do
     too_many[i] = entry(material, 'armor', i)
 end
 assert(not pcall(export.save, 'Too Many', too_many, 1))
@@ -231,5 +246,5 @@ for _, output in ipairs(published) do
 end
 assert(rmdir(root))
 print(
-    'PASS bulk DDS: five naming formats, exact HDR/signed-zero pixels, uint64 decimals, Pattern names, deterministic dedup/collisions, timestamp folders and owned rollback'
+    'PASS bulk DDS: 4096 bindings, 129 unique IDs, five naming formats, exact HDR/signed-zero pixels, deterministic dedup/collisions and owned rollback'
 )

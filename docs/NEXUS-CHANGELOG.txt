@@ -1,3 +1,20 @@
+# Epic LUT R5.5.5
+
+- Fixed Load Current Gear targeting for region highlights and live edits.
+- Player Preview retains its default idle pose.
+- Shared Lobby LUT is in testing.
+
+---
+
+# Epic LUT R5.5.4
+
+- Raised saved-preset capacity from 128 to 4,096 bindings for Transmog setups.
+- Smaller preset exports by storing identical LUTs once.
+- Fixed stuck menus during pending cleanup and overlapping empty-editor text.
+- Shared Lobby LUT is in testing.
+
+---
+
 # Epic LUT R5.5.3
 
 - Fixed window stacking, overlapping text and disappearing swatches or markers.

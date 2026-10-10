@@ -109,6 +109,83 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
         result=folder/f'bad-preset{index}.txt';completed=run(package,folder/f'bad-preset{index}',result)
         assert completed.returncode!=0 and result.read_text().startswith('error\n'),'Unsafe shared preset accepted'
 
+    # Transmog aliases retain all 4,096 targets while extracting shared payloads once.
+    # Same resource ID with different bytes stays distinct; shared bytes with different
+    # destination metadata also retain the metadata belonging to each manifest row.
+    many_cape=bytearray(tall_dds);struct.pack_into('<e',many_cape,148,.875)
+    alternate_meta=b'fedcba9876543210\n'+bytes(192)+tall_dds[:148]
+    payloads={
+        'armor.dds':tall_dds,'pattern.dds':pattern_dds,'cape.dds':many_cape,
+        'armor.patch-source':tall_meta,'alternate.patch-source':alternate_meta,
+        'pattern.patch-source':pattern_meta,'cape.patch-source':tall_meta,
+    }
+    many_rows=['EPIC-OUTFIT\t2']
+    for index in range(4096):
+        if index%4==0:
+            fields=('armor',f'0:{index}:0:0','armor.dds','0000000000000001','23','64','armor.patch-source')
+        elif index%4==1:
+            fields=('armor',f'0:{index}:0:0','armor.dds','0000000000000003','23','64','alternate.patch-source')
+        elif index%4==2:
+            fields=('helmet',f'p:0:{index}:0:0','pattern.dds','0000000000000002','3','1','pattern.patch-source')
+        else:
+            fields=('cape',f'0:{index}:0:0','cape.dds','0000000000000001','23','64','cape.patch-source')
+        many_rows.append('\t'.join(fields))
+    many_manifest='\n'.join(many_rows)
+    assert len(many_manifest.encode())>65536 and len(tall_dds)*4096>8*1024*1024
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        archive.writestr('preset.tsv',many_manifest)
+        for name,payload in payloads.items():archive.writestr(name,payload)
+    result=folder/'many-preset.txt';completed=run(package,folder/'many-preset',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert result.read_text().splitlines()==['preset','preset.tsv','mod']
+    assert (folder/'many-preset/preset.tsv').read_text()==many_manifest,'Transmog target rows were discarded'
+    assert {file.name for file in (folder/'many-preset').iterdir()}=={'preset.tsv',*payloads}
+    for name,payload in payloads.items():assert (folder/'many-preset'/name).read_bytes()==payload
+
+    # The target, manifest, member and unique extracted-payload bounds fail before
+    # publishing an output folder. Aliased material files cannot bypass Pattern checks.
+    failure_packages=[
+        ('target-overflow',many_manifest+'\narmor\t0:4096:0:0\tarmor.dds\t-\t-\t-\t-',payloads,'Invalid shared preset manifest'),
+        ('manifest-overflow','EPIC-OUTFIT\t2\n'+'x'*(2*1024*1024),{},'Preset manifest budget exceeded'),
+        ('alias-shape','\n'.join((many_rows[0],many_rows[1],many_rows[1].replace('0:0:0:0','p:0:9:0:0'))),payloads,'Invalid shared preset LUT shape'),
+        ('alias-duplicate','\n'.join((many_rows[0],many_rows[1],many_rows[1])),payloads,'Duplicate shared preset target'),
+        ('alias-metadata','\n'.join((many_rows[0],many_rows[3].replace('\t3\t1\t','\t3\t2\t'))),payloads,'Invalid shared preset patch metadata'),
+    ]
+    for name,bad_manifest,members,error in failure_packages:
+        with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+            archive.writestr('preset.tsv',bad_manifest)
+            for member,payload in members.items():archive.writestr(member,payload)
+        result=folder/f'{name}.txt';output=folder/name;completed=run(package,output,result)
+        assert completed.returncode!=0 and error in result.read_text(),(name,completed.stderr,result.read_text())
+        assert not output.exists(),f'{name} published a partially validated preset'
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        archive.writestr('preset.tsv','EPIC-OUTFIT\t1\narmor\t0:0:0:0\tlarge0.dds')
+        for index in range(8192):archive.writestr(f'large{index}.dds',data)
+    result=folder/'members-boundary.txt';completed=run(package,folder/'members-boundary',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert len(list((folder/'members-boundary').iterdir()))==2,'Unreferenced shared preset members were extracted'
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        archive.writestr('preset.tsv','EPIC-OUTFIT\t1\narmor\t0:0:0:0\tlarge0.dds')
+        for index in range(8193):archive.writestr(f'large{index}.dds',data)
+    result=folder/'members-overflow.txt';completed=run(package,folder/'members-overflow',result)
+    assert completed.returncode!=0 and 'Shared preset has too many members' in result.read_text()
+    assert not (folder/'members-overflow').exists()
+    budget_rows=['EPIC-OUTFIT\t1']
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        for index in range(8):
+            name=f'large{index}.dds';budget_rows.append(f'armor\t0:{index}:0:0\t{name}')
+            archive.writestr(name,data+bytes(1024*1024-len(data)))
+        archive.writestr('preset.tsv','\n'.join(budget_rows))
+    result=folder/'payloads-boundary.txt';completed=run(package,folder/'payloads-boundary',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert len(list((folder/'payloads-boundary').iterdir()))==9,'Manifest consumed the independent payload budget'
+    with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED)as archive:
+        for index in range(9):archive.writestr(f'large{index}.dds',data+bytes(1024*1024-len(data)))
+        archive.writestr('preset.tsv','\n'.join((*budget_rows,'armor\t0:8:0:0\tlarge8.dds')))
+    result=folder/'payloads-overflow.txt';completed=run(package,folder/'payloads-overflow',result)
+    assert completed.returncode!=0 and 'Shared preset extraction budget exceeded' in result.read_text()
+    assert not (folder/'payloads-overflow').exists()
+
     # A large texture collection must not consume the LUT extraction budget.
     large_patch=bytearray(PATCH);offset=65*1024*1024
     struct.pack_into('<Q',large_patch,104+32,offset)
@@ -163,4 +240,4 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     completed=run(package,folder/'cancel',result)
     assert result.read_text()=='cancel','Cancellation was not acknowledged'
 
-print('PASS no-Python ZIP worker: exact patch pixels, 65 MB sidecar range, 270 MB irrelevant member ignored, 40 palettes, direct DDS and unsafe path rejection')
+print('PASS no-Python ZIP worker: exact pixels, 4,096 aliased preset targets, per-target metadata, bounded unique extraction, 65 MB sidecar range, 270 MB irrelevant member ignored, 40 palettes and unsafe path rejection')

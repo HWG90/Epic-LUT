@@ -31,6 +31,7 @@ local basic_missing_reported = {}
 local myc_warned = false
 local region_indicator, stop_identification
 local identify_kind
+local checked_editor_target
 local editor_pending
 local history
 local outfits, armory_collection
@@ -553,18 +554,23 @@ local function initialize_editor_state()
 end
 local function identify_region()
     assert(stop_identification(), 'Previous highlight restoration pending')
-    local group = assert(groups[handle.get('lut')], 'Select a live LUT first')
     if frontend.basic_mode then
         assert(basic_selected, 'Click an Armor or Helmet color region first')
-        group = assert(groups[basic_selected.group])
+    end
+    local selected = frontend.basic_mode and basic_selected or edit.editor_target
+    local index = selected and checked_editor_target(selected) or handle.get('lut')
+    local group = assert(groups[index], 'Select a live LUT first')
+    local kind = selected and selected.kind or identify_kind
+    if selected then
+        live_select_suppressed = true
+        local ok, why = handle.set('lut', index)
+        live_select_suppressed = false
+        assert(ok, why)
     end
     local row = handle.get('edit_row')
     local items = {}
     for _, b in ipairs(group.bindings) do
-        if
-            frontend.basic_mode and b[basic_selected.kind]
-            or not frontend.basic_mode and (not identify_kind or b[identify_kind])
-        then
+        if not kind or b[kind] then
             local source = applied_document(b) or (original_luts and original_luts.get(b.original))
             assert(source, 'Original colors unavailable for this target; cannot safely highlight')
             assert(row >= 1 and row <= source.height, 'Selected region does not exist on this target')
@@ -848,6 +854,10 @@ local function populate_worn()
         resource = original and original.resource,
         cape_proof = target.kind == 'cape' and edit.cape_proof or nil,
     }
+    live_select_suppressed = true
+    local ok, why = handle.set('lut', target.group)
+    live_select_suppressed = false
+    assert(ok, why)
     edit.preview_document, edit.preview_revision = edit.loaded, 0
     edit.quick_selection = nil
     identify_kind = target.kind
@@ -1134,14 +1144,29 @@ import_state = function()
         preserve_emissives = handle.get('preserve_emissives'),
     }
 end
-local function checked_editor_target(target)
+checked_editor_target = function(target)
     assert(target, 'Load current gear again')
     if target.kind ~= 'cape' then
-        assert(
-            groups[target.group] and groups[target.group].object == target.object,
-            'Worn gear changed; load current colors again'
-        )
-        return target.group
+        refresh(true)
+        for index, group in ipairs(groups) do
+            if
+                target.object and group.object == target.object
+                or not target.object and target.key == target.kind .. ':' .. tostring(group.object)
+            then
+                for _, b in ipairs(group.bindings) do
+                    if b[target.kind] then
+                        local original = original_luts and original_luts.get(b.original)
+                        assert(
+                            not target.resource or original and original.resource == target.resource,
+                            'Worn resource changed; load current colors again'
+                        )
+                        target.group = index
+                        return index
+                    end
+                end
+            end
+        end
+        error('Worn gear changed; load current colors again')
     end
     local proof = appearance_proof()
     assert(proof and proof.cape == target.cape_proof, 'Cape kit changed; load current Cape colors again')
@@ -3000,6 +3025,9 @@ local function register(current)
     groups = {}
 end
 local function close()
+    -- Loader cleanup polls replace normal updates. Hide retained UI and release
+    -- its input lease before any worker or native cleanup can defer unloading.
+    local dismissed = not frontend or not frontend.dismiss or frontend.dismiss()
     if armory_mirror and not armory_mirror.close() then
         return false
     end
@@ -3043,7 +3071,7 @@ local function close()
     if preferences then
         preferences.close()
     end
-    return not frontend or frontend.close()
+    return dismissed and (not frontend or frontend.close())
 end
 local function reset_transient_state()
     -- Cleanup must finish before these references are replaced. Uploaded backing

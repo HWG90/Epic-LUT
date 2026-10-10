@@ -1,8 +1,21 @@
 -- Floating portrait controls; GUI coordinates have their origin at the bottom.
 local C = {}
 function C.new()
-    local self =
-        { x = 32, y = 150, w = 300, h = 500, fov = 30, yaw = 0, pan_x = 0, pan_y = 0, held = false, right_held = false }
+    local self = {
+        x = 32,
+        y = 150,
+        w = 300,
+        h = 500,
+        fov = 30,
+        yaw = 0,
+        pan_x = 0,
+        pan_y = 0,
+        held = false,
+        right_held = false,
+        animating = true,
+        animation_available = false,
+        animation_pending = false,
+    }
     function self.cancel()
         self.drag = nil
         self.resize = nil
@@ -32,6 +45,15 @@ function C.new()
             elseif y < self.y then
                 if x > self.x + self.w - 24 and not self.docked then
                     self.resize = { x = x, y = y, w = self.w, h = self.h, top = self.y + self.h }
+                elseif
+                    (self.animation_available or self.animation_pending)
+                    and x >= self.x + self.w / 3
+                    and x <= self.x + self.w * 2 / 3
+                then
+                    if self.animation_available then
+                        self.animating = not self.animating
+                        event = 'animation'
+                    end
                 else
                     if x > self.x + self.w / 2 then
                         self.fov = math.max(12, self.fov - 5)

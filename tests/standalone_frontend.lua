@@ -182,31 +182,59 @@ keys[121] = false
 f.tick(0.1)
 local ready = false
 local released = 0
+local preview_attempts = 0
+local preview_error = false
 local prior_release = capture.release
 package.loaded['epic.player_preview.v1'] = {
     before_editor_close = function()
+        preview_attempts = preview_attempts + 1
+        if preview_error then
+            error('test preview retirement failure')
+        end
         return ready
     end,
 }
 capture.release = function()
-    assert(ready, 'Game input restored before preview cleanup')
     released = released + 1
     return prior_release()
 end
 keys[121] = true
 f.tick(0.1)
 assert(
-    f.menu.visible and capture.active and released == 0 and f.preview_close_pending,
-    'Pending preview cleanup did not hold game input'
+    not f.menu.visible and not capture.active and released == 1 and f.preview_close_pending,
+    'Pending preview cleanup trapped the editor or game input'
 )
 keys[121] = false
 f.tick(0.1)
-assert(released == 0)
+assert(released == 1 and preview_attempts == 2 and not f.menu.visible, 'Hidden preview cleanup did not retry')
+keys[121] = true
+f.tick(0.1)
+assert(f.menu.visible and f.preview_close_pending, 'Retiring preview prevented reopening the editor')
+keys[121] = false
+f.tick(0.1)
+preview_error = true
+keys[27] = true
+f.tick(0.1)
+assert(not f.menu.visible and not capture.active and released == 2 and f.preview_close_pending)
+keys[27] = false
+f.tick(0.1)
+assert(not f.menu.visible and f.preview_close_pending, 'Cleanup exception reopened the editor')
+preview_error = false
 ready = true
 f.tick(0.1)
-assert(not f.menu.visible and not capture.active and released == 1 and not f.preview_close_pending)
+assert(not f.menu.visible and not capture.active and released == 2 and not f.preview_close_pending)
 capture.release = prior_release
 package.loaded['epic.player_preview.v1'] = nil
+f.menu.visible = true
+f.tick(0.1)
+local cleared = 0
+view.release = function()
+    cleared = cleared + 1
+    return true
+end
+assert(f.dismiss() and not f.menu.visible and not capture.active and cleared == 1)
+assert(not f.closed and f.render_ready(), 'UI dismissal closed the frontend needed by native cleanup')
+assert(package.loaded['dbf.epic_lut.frontend.v1'] == f, 'UI dismissal discarded its cleanup owner')
 assert(f.preferences.preview_key() == 117)
 assert(f.preferences.handle.set('preview_key', 45))
 assert(f.preferences.preview_key() == 45)
@@ -217,5 +245,5 @@ assert(f.close())
 assert(package.loaded['dbf.epic_lut.frontend.v1'] == nil)
 _G.DBFMCM = prior
 print(
-    'PASS standalone frontend: MCM ignored, own F10 menu, top tabs, blur/held-key safety, capture release and retryable cleanup'
+    'PASS standalone frontend: independent UI dismissal, pending/failed preview retirement, reopening and retryable cleanup'
 )

@@ -1,19 +1,19 @@
-# Epic LUT R5.5.3
+# Epic LUT R5.5.5
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.3 fixes window stacking and retained drawing, folds Cape LUTs into the Armor selector, and adds custom LUT names and optional Cape exports.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.5 fixes Load Current Gear targeting for region highlights and live edits. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups.
 
-[Download R5.5.3](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.5.5](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5.3-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL / compatible MDL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.3-LLL.zip` into your loader's Mods directory. LLL uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Installation details](docs/MDL-LLL.md).
+- **BSL:** import `Epic-LUT-R5.5.5-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.5-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
 
-Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.3: preview is now included.
+Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** test addon before enabling R5.5.5: preview is now included.
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 

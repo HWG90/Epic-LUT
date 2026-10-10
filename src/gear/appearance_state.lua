@@ -1,6 +1,8 @@
 -- Reversible appearance intent, keyed by verified gear/slot/resource identity.
 -- Documents are immutable cached textures; this service never edits or binds them.
-local S = { MAX_RECORDS = 512, MAX_PROFILE = 128 }
+-- Match local setup/preset destination capacity. Texture allocation remains
+-- separately bounded by binding_session's byte and native-resource budgets.
+local S = { MAX_RECORDS = 16384, MAX_PROFILE = 4096 }
 local function token(value)
     return type(value) == 'string' and value ~= '' and #value <= 192 and not value:find('%z') and value or nil
 end
@@ -96,7 +98,9 @@ function S.new()
                         profiles[profile] = (profiles[profile] or 0) + 1
                         assert(
                             profiles[profile] <= S.MAX_PROFILE,
-                            'Appearance profile exceeds 128 LUT slots; restore or clear a profile'
+                            ('Appearance profile exceeds %d LUT destinations; restore or clear a profile'):format(
+                                S.MAX_PROFILE
+                            )
                         )
                     end
                     staged[key] = {
@@ -118,7 +122,9 @@ function S.new()
         end
         assert(
             total + added <= S.MAX_RECORDS,
-            'Appearance history exceeds 512 LUT slots; restore or clear saved appearance intent'
+            ('Appearance history exceeds %d LUT destinations; restore or clear saved appearance intent'):format(
+                S.MAX_RECORDS
+            )
         )
         local remembered = 0
         for key, record in pairs(staged) do
@@ -218,7 +224,10 @@ function S.new()
             assert(key, 'Appearance history requires verified gear, slot and resource IDs')
             assert(not staged[key], 'Duplicate appearance history identity')
             profiles[profile] = (profiles[profile] or 0) + 1
-            assert(profiles[profile] <= S.MAX_PROFILE, 'Appearance history profile exceeds 128 LUT slots')
+            assert(
+                profiles[profile] <= S.MAX_PROFILE,
+                ('Appearance history profile exceeds %d LUT destinations'):format(S.MAX_PROFILE)
+            )
             staged[key] = {
                 save_key = entry.save_key,
                 kind = target,

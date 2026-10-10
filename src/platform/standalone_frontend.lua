@@ -131,18 +131,24 @@ function F.new(m,ctx,deps)
                 if text:find('Cannot acquire input capture',1,true)or text:find('Input capture lost',1,true)or text:find('Window capture unavailable',1,true)then self.view.release();return end
                 error(text,0)
             end
-            if self.preview_close_pending then self.menu.visible=false end
             if process_input then self.menu.tick(self.input,dt)end
             if self.rendered_revision~=self.menu.redraw_revision then
                 if self.view.invalidate then self.view.invalidate()else self.view.clear()end
                 self.rendered_revision=self.menu.redraw_revision;self.draw_elapsed=1
             end
-            if not self.menu.visible and self.capture.active then
+            if not self.menu.visible and (self.capture.active or self.was_visible)then self.preview_close_pending=true end
+            if self.preview_close_pending then
                 local portrait=package.loaded['epic.player_preview.v1']
-                local ready=not portrait or not portrait.before_editor_close or portrait.before_editor_close()
-                if ready then self.preview_close_pending=nil;assert(self.capture.release())
-                else self.preview_close_pending=true;self.menu.visible=true end
+                local ok,ready=true,true
+                if portrait and portrait.before_editor_close then ok,ready=pcall(portrait.before_editor_close)end
+                if ok and ready then self.preview_close_pending=nil;self.preview_close_error=nil
+                elseif not ok and self.preview_close_error~=tostring(ready)then
+                    self.preview_close_error=tostring(ready);ctx.log('Player Preview cleanup pending: '..self.preview_close_error)
+                end
             end
+            -- Retiring preview resources keep their own receipt. They must not
+            -- reopen the editor or hold its cursor lease after a close shortcut.
+            if not self.menu.visible and self.capture.active then assert(self.capture.release())end
             if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
                 self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
             end
@@ -154,15 +160,40 @@ function F.new(m,ctx,deps)
         end)
         if not ok then self.menu.recover();self.capture.release();if self.render_ready()then self.view.release()end;ctx.log('Epic LUT menu closed safely: '..tostring(why))end
     end
+    function self.dismiss()
+        if self.closed then return true end
+        local was_visible=self.menu.visible or self.was_visible
+        self.menu.visible=false;self.menu.capture=false;self.was_visible=false
+        if was_visible and self.preferences and self.preferences.save_size then
+            local saved,why=pcall(self.preferences.save_size,self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)
+            if not saved then ctx.log('Menu size save failed: '..tostring(why))end
+        end
+        local polled,poll_error=pcall(self.input.poll)
+        local attempted,released,why=pcall(self.capture.release)
+        if not attempted then why=released;released=false end
+        local checked,can_draw,w,h=pcall(self.render_ready)
+        can_draw=polled and checked and can_draw;self.view.suspended=not can_draw
+        local cleared=false
+        if can_draw then
+            local composed,reason=pcall(self.menu.compose,w,h)
+            local retired,result=pcall(self.view.release)
+            cleared=retired and result~=false
+            if not composed then return false,reason end
+            if not retired then return false,result end
+        end
+        if not released then return false,why end
+        if not polled then return false,poll_error end
+        if not cleared then return false,'Menu GUI retirement waits for game focus and valid display dimensions'end
+        -- Keep the frontend registered and render-ready until the preview and
+        -- material cleanup stages acknowledge their native resource retirement.
+        return true
+    end
     function self.close()
         if self.closed then return true end
+        local dismissed,reason=self.dismiss()
         if self.mcm_settings then self.mcm_settings.close() end
-        if self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
-        self.menu.visible=false
         local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
-        if not self.render_ready()then return false end
-        self.view.suspended=false
-        if self.view.release()==false then return false end
+        if not dismissed then return false,reason end
         self.closed=true
         if package.loaded['dbf.epic_lut.frontend.v1']==self then package.loaded['dbf.epic_lut.frontend.v1']=nil end
         return true

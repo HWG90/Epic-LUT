@@ -447,4 +447,297 @@ assert(
     'Transparent texture was not assigned to copied gib material'
 )
 retained_probes.black = nil
-print('PASS native preview material copy, shared source refusal and bounded binding reads')
+-- Pose integration retains the session until rendering drains, without
+-- letting a driver error discard the copied garments or native fence.
+local animation_events, sessions = {}, {}
+local fence_failed, driver_cleanup_failed, driver_create_failed = false, false, false
+local copy_destroys, driver_advances = 0, 0
+local worlds = { 'main', 'simulation', 'owned', 'ui' }
+local AE = {
+    Application = {
+        worlds = function()
+            return worlds
+        end,
+        main_world = function()
+            return 'main'
+        end,
+        new_world = function()
+            return 'owned'
+        end,
+        can_get = function()
+            return true
+        end,
+        back_buffer_size = function()
+            return 1920, 1080
+        end,
+    },
+    World = {
+        create_shading_environment = function()
+            return 'environment'
+        end,
+        spawn_unit = function()
+            return 'light'
+        end,
+        update_unit = function() end,
+    },
+    Unit = {
+        alive = function()
+            return true
+        end,
+        light = function()
+            return 'light'
+        end,
+    },
+    Renderer = {
+        create_resource = function()
+            return 'portrait'
+        end,
+    },
+    Gui = {},
+    Viewport = {},
+    Matrix4x4 = {},
+    Light = E.Light,
+    IdString64 = E.IdString64,
+    Vector3 = E.Vector3,
+    Quaternion = E.Quaternion,
+    ShadingEnvironment = { update = function() end },
+}
+local AM = {
+    engine = {
+        create_texture = function()
+            animation_events[#animation_events + 1] = 'fence'
+            if fence_failed then
+                return nil, 'Fence unavailable'
+            end
+            return { handle = 123 }
+        end,
+    },
+    player_model = {
+        new = function()
+            return {
+                create = function(world)
+                    return {
+                        world = world,
+                        pieces = {
+                            {
+                                unit = piece.unit,
+                                source = piece.source,
+                                node_count = 2,
+                                model_pose = {
+                                    unbox = function()
+                                        return 'basis'
+                                    end,
+                                },
+                            },
+                        },
+                    }
+                end,
+                destroy = function()
+                    copy_destroys = copy_destroys + 1
+                    animation_events[#animation_events + 1] = 'copies'
+                end,
+            }
+        end,
+    },
+    player_animation = {
+        new = function()
+            return {
+                create = function(value)
+                    assert(value.world == 'owned' and value.pieces[1].node_count == 2)
+                    assert(
+                        value.pieces[1].model_pose:unbox() == 'basis',
+                        'Driver did not receive the captured garment basis'
+                    )
+                    if driver_create_failed == 'nil' then
+                        return nil
+                    end
+                    if driver_create_failed then
+                        error('Garment hierarchy unavailable')
+                    end
+                    local session = { closes = 0 }
+                    session.advance = function(dt, enabled)
+                        driver_advances = driver_advances + 1
+                        assert(dt == 0.02)
+                        return enabled
+                    end
+                    session.close = function()
+                        session.closes = session.closes + 1
+                        return true
+                    end
+                    sessions[#sessions + 1] = session
+                    return session
+                end,
+                stop = function()
+                    animation_events[#animation_events + 1] = 'stop'
+                end,
+                close = function()
+                    animation_events[#animation_events + 1] = 'driver'
+                    if driver_cleanup_failed then
+                        return false, 'Pose session retirement unavailable'
+                    end
+                    for _, session in ipairs(sessions) do
+                        session.close()
+                    end
+                    return true
+                end,
+            }
+        end,
+    },
+}
+local animated_controls = { x = 32, y = 150, w = 300, h = 500, animating = true }
+local animation_host = {
+    animate = true,
+    controls = animated_controls,
+    memory = {},
+    log = function() end,
+    native = {
+        destroy = function()
+            animation_events[#animation_events + 1] = 'fence destroy'
+        end,
+    },
+}
+local animated = N.new(AE, AM, animation_host)
+assert(animated.create_world() == 'owned')
+animated.create_target()
+local animated_model = animated.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    animated_model.animation == sessions[1]
+        and animated_controls.animation_available
+        and not animated_controls.animation_error
+)
+assert(animated.advance_model(animated_model, 0.02) and driver_advances == 1)
+animated_controls.animating = false
+assert(not animated.advance_model(animated_model, 0.02) and driver_advances == 2, 'Pause did not reach the driver')
+animation_events, fence_failed = {}, true
+assert(not pcall(animated.quiesce))
+assert(
+    table.concat(animation_events, ',') == 'stop,fence' and sessions[1].closes == 0 and copy_destroys == 0,
+    'Driver or copied garments were destroyed before the render fence'
+)
+animation_events, fence_failed, driver_cleanup_failed = {}, false, true
+assert(not pcall(animated.quiesce))
+assert(
+    table.concat(animation_events, ',') == 'stop,fence,fence destroy,driver' and copy_destroys == 0,
+    'Driver cleanup failure discarded render prerequisites'
+)
+animation_events, driver_cleanup_failed = {}, false
+assert(animated.quiesce())
+assert(table.concat(animation_events, ',') == 'stop,driver', 'Pose session retry repeated a completed render fence')
+animated.destroy_model(animated_model)
+assert(copy_destroys == 1 and sessions[1].closes == 2, 'Model retirement omitted idempotent session cleanup')
+
+-- Missing animation capability keeps the functional static portrait, while
+-- failed session cleanup still blocks native retirement and can retry.
+driver_create_failed, driver_cleanup_failed = true, true
+local static = N.new(AE, AM, animation_host)
+local static_model = static.create_model('owned', { plan = { pieces = { piece } } })
+assert(not static_model.animation and not animated_controls.animation_available)
+assert(animated_controls.animation_error:find('Garment hierarchy unavailable', 1, true))
+assert(not static.advance_model(static_model, 0.02) and driver_advances == 2)
+assert(not pcall(static.quiesce) and copy_destroys == 1, 'Static fallback forgot pending animation cleanup')
+driver_cleanup_failed = false
+assert(static.quiesce())
+static.destroy_model(static_model)
+assert(copy_destroys == 2)
+driver_create_failed = 'nil'
+local empty = N.new(AE, AM, animation_host)
+local empty_model = empty.create_model('owned', { plan = { pieces = { piece } } })
+assert(not empty_model.animation and not animated_controls.animation_available)
+assert(animated_controls.animation_error:find('did not initialize', 1, true), 'Nil driver was reported as available')
+assert(empty.quiesce())
+empty.destroy_model(empty_model)
+
+-- A lost UI context skips its copied-unit destructors, but the independently
+-- owned animation session must still close rather than leak a private world.
+driver_create_failed = false
+-- Local resource decoding can finish after a functional static portrait opens.
+local clip_data
+local source = {
+    state = 'loading',
+    get = function()
+        return clip_data
+    end,
+}
+local authored_controls = { x = 32, y = 150, w = 300, h = 500, animating = true }
+local authored_host = {
+    animate = true,
+    authored = true,
+    animation_source = source,
+    controls = authored_controls,
+    memory = {},
+    log = function() end,
+    native = animation_host.native,
+}
+local authored = N.new(AE, AM, authored_host)
+local authored_model = authored.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    not authored_model.animation and authored_controls.animation_pending and not authored_controls.animation_available
+)
+local ready_layouts, before_authored_advances = 0, driver_advances
+authored.layout_panel = function()
+    ready_layouts = ready_layouts + 1
+end
+assert(
+    not authored.advance_model(authored_model, 0.02) and ready_layouts == 0,
+    'Pending clips recreated the driver or panel'
+)
+clip_data, source.state = {}, 'ready'
+assert(authored.advance_model(authored_model, 0.02))
+assert(authored_model.animation and authored_controls.animation_available and not authored_controls.animation_pending)
+assert(
+    ready_layouts == 1 and driver_advances == before_authored_advances + 1,
+    'Decoded clips did not attach once to the existing model'
+)
+assert(authored.quiesce())
+authored.destroy_model(authored_model)
+local lost = N.new(AE, AM, animation_host)
+local lost_model = lost.create_model('owned', { plan = { pieces = { piece } } })
+worlds = { 'main', 'simulation', 'ui' }
+local before_lost_cleanup = copy_destroys
+assert(
+    not pcall(lost.advance_model, lost_model, 0.02) and driver_advances == before_authored_advances + 1,
+    'Lost render lease advanced its private driver'
+)
+lost.destroy_viewport({ world = 'owned', viewport = 'retired' })
+lost.destroy_model(lost_model)
+assert(
+    sessions[#sessions].closes == 1 and copy_destroys == before_lost_cleanup,
+    'Lost UI lease prevented private animation retirement or destroyed stale copies'
+)
+
+-- The dedicated simulation world is not a candidate for either GUI producer.
+worlds = { 'main', 'simulation', 'owned', 'ui' }
+local registry_key = 'epic.preview.animation-worlds.v1'
+local old_registry = package.loaded[registry_key]
+package.loaded[registry_key] = { simulation = true }
+local gui_worlds, primitive_id = {}, 0
+AE.World.create_screen_gui = function(world)
+    assert(world ~= 'simulation', 'GUI selected the private animation world')
+    gui_worlds[#gui_worlds + 1] = world
+    return 'gui'
+end
+AE.World.destroy_gui = function() end
+AE.Gui.material = function()
+    return ffi.cast('void *', 0x100000)
+end
+for _, kind in ipairs({ 'rect', 'text', 'bitmap_uv' }) do
+    AE.Gui[kind] = function()
+        primitive_id = primitive_id + 1
+        return primitive_id
+    end
+end
+AE.Material = { set_resource = function() end }
+AE.Color, AE.Vector2 = function(...)
+    return { ... }
+end, function(...)
+    return { ... }
+end
+local panel_value = animated.create_panel('portrait')
+assert(panel_value.world == 'ui', 'Native panel ignored the ordinary UI world')
+animated.destroy_panel(panel_value)
+local view = dofile('vendor/menu/view.lua').new(AE, true)
+view.draw({ { type = 'rect', x = 0, y = 0, w = 10, h = 10, c = { 1, 2, 3 }, a = 255, layer = 100 } })
+assert(#gui_worlds == 2 and gui_worlds[2] ~= 'simulation', 'Editor GUI used the private driver world')
+view.release()
+package.loaded[registry_key] = old_registry
+print('PASS native preview material isolation, animation lifecycle, fence retries and private world exclusion')

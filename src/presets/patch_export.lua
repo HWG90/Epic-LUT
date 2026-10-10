@@ -1,6 +1,7 @@
 -- Internal, texture-only Stingray patch writer. No converter or subprocess.
 -- Layout reference: HD2SDK Community Edition, TocEntry/StreamToc and StingrayTexture.
-local P = {}
+-- A preset can contain one DDS and one metadata sidecar per binding, plus its manifest.
+local P = { MAX_BINDINGS = 4096, ZIP_MAX_MEMBERS = 8193 }
 -- The original LUT can occur in unrelated tutorial/prop archives. Its source
 -- archive is provenance, not a reliable loaded patch destination. Match the
 -- SDK's PatchBaseArchiveOnly default so one resource replacement is global.
@@ -88,7 +89,7 @@ function P.encode(dds, document, original)
 end
 function P.encode_set(dds, documents)
     assert(
-        type(documents) == 'table' and #documents > 0 and #documents <= 128,
+        type(documents) == 'table' and #documents > 0 and #documents <= P.MAX_BINDINGS,
         'No complete palette to export or too many LUTs'
     )
     local unique, ordered = {}, {}
@@ -240,7 +241,7 @@ function P.zip(patch)
     })
 end
 function P.zip_entries(entries)
-    assert(type(entries) == 'table' and #entries > 0 and #entries <= 512, 'Invalid export ZIP entries')
+    assert(type(entries) == 'table' and #entries > 0 and #entries <= P.ZIP_MAX_MEMBERS, 'Invalid export ZIP entries')
     local local_records, central, offset = {}, {}, 0
     local seen = {}
     for _, entry in ipairs(entries) do

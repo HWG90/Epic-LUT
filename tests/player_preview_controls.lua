@@ -48,4 +48,20 @@ c.pointer(c.x - 1000, c.y - 1000, true, 1920, 1080, false)
 assert(c.pan_x == -0.25 and c.pan_y == -1)
 c.cancel()
 assert(not c.pan)
-print('PASS preview drag, close, zoom limits and pointer isolation')
+c.pointer(0, 0, false, 1920, 1080)
+c.animation_available = true
+local fov = c.fov
+hit, event = c.pointer(c.x + c.w / 2, c.y - 10, true, 1920, 1080)
+assert(hit and event == 'animation' and not c.animating and c.fov == fov, 'Pause changed zoom or missed its footer hit')
+c.pointer(0, 0, false, 1920, 1080)
+hit, event = c.pointer(c.x + c.w / 2, c.y - 10, true, 1920, 1080)
+assert(event == 'animation' and c.animating, 'Play did not resume the preview')
+c.cancel()
+c.pointer(c.x + c.w / 2, c.y - 10, true, 1920, 1080)
+assert(c.animating, 'Focus cancel treated a held button as a new Pause click')
+c.pointer(0, 0, false, 1920, 1080)
+c.animation_available, c.animation_pending = false, true
+local pending_fov = c.fov
+hit, event = c.pointer(c.x + c.w / 2, c.y - 10, true, 1920, 1080)
+assert(hit and event == nil and c.animating and c.fov == pending_fov, 'Loading salute changed zoom or playback')
+print('PASS preview drag, close, zoom limits, Pause/Play and pointer isolation')

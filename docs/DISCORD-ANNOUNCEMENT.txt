@@ -1,9 +1,11 @@
-# EPIC LUT R5.5.3 :goose:
+# EPIC LUT R5.5.5 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 Paint your Helldiver in-game. **F9** for Basic Mode; **F10** for the full LUT Editor.
 
 **Updates since R5.2**
+- Fixed **Load Current Gear** targeting for region highlights and live edits; Player Preview keeps its default idle pose.
+- **4,096 preset bindings** for Transmog setups, smaller preset exports and fixed cleanup menus.
 - Custom colors stay applied through hellpods, missions and ship transitions.
 - **Cape LUTs** now use the **Armor dropdown** and regular editor controls, with an option to exclude Capes from Armor exports.
 - Added **custom LUT names**—click a hash or name to rename it.
@@ -27,8 +29,8 @@ For the enormous amount of testing and continued help that made **Export to Patc
 **[Lytatroan](https://www.nexusmods.com/profile/Lytatroan):** human-made thumbnail.
 Thanks to **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor** for ideas and inspiration.
 
-**Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.3
+**Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.5
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
-Choose **BSL** for Arsenal/HD2MM or **LLL** for Live Lua Loader/compatible MDL. Enable one copy; turn Match Your Colors matching off. RAR needs 7-Zip.
+Choose **BSL** for Arsenal/HD2MM or **LLL** for Live Lua Loader R30+. Nexus hosts BSL; GitHub has both. Enable one copy; turn Match Your Colors matching off. RAR needs 7-Zip.

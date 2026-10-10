@@ -44,6 +44,93 @@ assert(
 )
 local zip = P.zip_entries(files)
 assert(zip:sub(1, 4) == 'PK\3\4' and zip:sub(-22, -19) == 'PK\5\6', 'Shared ZIP is invalid')
+-- Transmog can bind the same few LUTs to thousands of distinct material targets.
+local many = { entries = {} }
+for i = 1, E.MAX_BINDINGS do
+    many.entries[i] = {
+        kind = i % 2 == 0 and 'helmet' or 'armor',
+        key = '0:0:' .. math.floor((i - 1) / 64) .. ':' .. (i - 1) % 64,
+        document = document,
+        original = original(document, string.format('%016x', i)),
+    }
+end
+local compact = E.bundle({ dds = D }, many)
+assert(#compact == 3, 'Exact aliases generated duplicate DDS or sidecar files')
+assert(compact[1][2] == D.encode(document.data, document.width, document.height))
+for _, file in ipairs(compact) do
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+local many_loaded = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Transmog Roundtrip')
+assert(#many_loaded.entries == E.MAX_BINDINGS, 'Shareable preset discarded attached destinations')
+for i, entry in ipairs(many_loaded.entries) do
+    assert(entry.kind == many.entries[i].kind and entry.key == many.entries[i].key)
+    assert(entry.original.resource == string.format('%016x', i), 'Alias substituted another destination ID')
+    assert(ffi.string(entry.document.data, 2944) == ffi.string(document.data, 2944))
+end
+-- DDS and sidecar identities are independent of each destination's metadata.
+local other_source = original(document, '1111111111111111')
+other_source.patch_source = '1111111111111111' .. other_source.patch_source:sub(17)
+other_source.height = 2
+local other_pixels = { width = 23, height = 8, data = ffi.new('float[736]') }
+ffi.copy(other_pixels.data, document.data, 2944)
+other_pixels.data[0] = 0.875
+local aliases = {
+    entries = {
+        many.entries[1],
+        { kind = 'helmet', key = '0:2:0:0', document = document, original = other_source },
+        {
+            kind = 'cape',
+            key = '0:3:0:0',
+            document = other_pixels,
+            original = original(document, many.entries[1].original.resource),
+        },
+    },
+}
+local alias_files = E.bundle({ dds = D }, aliases)
+assert(#alias_files == 5, 'DDS or exact metadata deduplication discarded a distinct value')
+for _, file in ipairs(alias_files) do
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+local alias_roundtrip = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Independent Aliases')
+assert(alias_roundtrip.entries[2].original.height == 2)
+assert(alias_roundtrip.entries[2].original.patch_source == other_source.patch_source)
+assert(alias_roundtrip.entries[3].original.resource == alias_roundtrip.entries[1].original.resource)
+assert(alias_roundtrip.entries[3].document.data[0] == 0.875, 'Shared hash discarded different DDS bytes')
+local over_limit = { entries = {} }
+for i = 1, E.MAX_BINDINGS + 1 do
+    over_limit.entries[i] = many.entries[1]
+end
+assert(not pcall(E.bundle, { dds = D }, over_limit), 'Oversized binding collection exported')
+local budget_source = many.entries[1].original.patch_source
+local full_payload = string.rep('a', E.MAX_PAYLOAD_BYTES - #budget_source)
+local boundary_codec = { dds = {
+    encode = function()
+        return full_payload
+    end,
+} }
+assert(
+    #E.bundle(boundary_codec, { entries = { many.entries[1], many.entries[2] } }) == 3,
+    'Exact payload aliases consumed the serialized payload budget more than once'
+)
+local different_source = original(document, '2222222222222222')
+different_source.patch_source = '2222222222222222' .. budget_source:sub(17)
+local one_sidecar_too_many = {
+    entries = {
+        many.entries[1],
+        { kind = 'armor', key = '0:1:0:0', document = document, original = different_source },
+    },
+}
+assert(not pcall(E.bundle, boundary_codec, one_sidecar_too_many), 'Metadata bytes escaped payload budget')
+local over_bytes = { dds = {
+    encode = function()
+        return full_payload .. 'b'
+    end,
+} }
+assert(not pcall(E.bundle, over_bytes, { entries = { many.entries[1] } }), 'Oversized serialized payload exported')
+local over_manifest = {
+    entries = { { kind = 'armor', key = string.rep('1', E.MAX_MANIFEST_BYTES), document = document } },
+}
+assert(not pcall(E.bundle, { dds = D }, over_manifest), 'Oversized manifest exported')
 local calls = {}
 local bulk_entries, bulk_naming
 local m = {
@@ -83,6 +170,19 @@ local export = E.new(m, {
         return false
     end,
 })
+local actual_codec, actual_io, failed_writes = m.dds, m.file_io, 0
+m.dds = over_bytes.dds
+m.file_io = {
+    write = function()
+        failed_writes = failed_writes + 1
+    end,
+}
+local oversized_ok, oversized_why = pcall(export.save, 'Oversized Payload', { entries = { many.entries[1] } }, 1, 1)
+m.dds, m.file_io = actual_codec, actual_io
+assert(
+    not oversized_ok and tostring(oversized_why):find('payload budget', 1, true) and failed_writes == 0,
+    'Payload budget failure wrote a partial shareable export'
+)
 export.save('Saved Set', loaded, 2, 2)
 assert(
     calls[1][2] == loaded.entries[2].document and calls[1][3].resource == '000000000000002a',
@@ -175,5 +275,5 @@ os.remove(raw)
 os.remove(output)
 os.remove(output2)
 print(
-    'PASS preset export: stored full-float/Pattern bytes, shareable round trip, exact destinations, legacy safety, timestamp collisions'
+    'PASS preset export: 4096 destination compact round trip, independent metadata, exact full-float bytes, shared-ID conflicts, bounded manifests/payloads and legacy safety'
 )

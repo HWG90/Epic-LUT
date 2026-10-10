@@ -40,7 +40,7 @@ for i = 1, 4 do
     d.data[0] = i / 8
     originals[i] = d
 end
-local function actor(generation)
+local function actor(generation, armor_materials)
     units, materials, live = {}, {}, {}
     for i = 1, 2 do
         local unit = generation * 100 + i
@@ -51,6 +51,19 @@ local function actor(generation)
         bound[material] = { [1] = generation * 10000 + i, [2] = generation * 10000 + i + 2 }
         metadata[bound[material][1]] = originals[i]
         metadata[bound[material][2]] = originals[i + 2]
+    end
+    -- Transmog copies share texture payloads but have distinct mesh/material
+    -- destinations; every one must survive application and actor replacement.
+    local armor_unit = units[1].unit
+    for index = 2, armor_materials or 1 do
+        local material = generation * 1000 + 100 + index
+        materials[armor_unit][index] = {
+            mesh = material + 20,
+            material = material,
+            mesh_index = math.floor((index - 1) / 64),
+            material_index = (index - 1) % 64,
+        }
+        bound[material] = { [1] = generation * 10000 + 1, [2] = generation * 10000 + 3 }
     end
 end
 actor(1)
@@ -404,6 +417,28 @@ actor(6)
 runtime.on_update(ctx, 0.5)
 armor, helmet = current()
 assert(bound[armor][1] == 60001 and bound[helmet][1] == 60002, 'Explicit Restore failed to clear redo/recovery intent')
+actor(8, 256)
+runtime.on_update(ctx, 0.5)
+assert(h.set('file', 'material'))
+activate('load')
+activate('apply_file_armor')
+for _, material in ipairs(materials[units[1].unit]) do
+    assert(bound[material.material][1] == owned_material, 'Large Armor application missed a Transmog destination')
+end
+assert(created == allocations, 'Duplicate Transmog destinations allocated duplicate textures')
+history_count, pattern_undo = #history.undo, #pattern.undo
+scene = false
+live = {}
+runtime.on_update(ctx, 0.5)
+actor(9, 256)
+scene = true
+runtime.on_update(ctx, 0.5)
+for _, material in ipairs(materials[units[1].unit]) do
+    assert(bound[material.material][1] == owned_material, 'Large Armor recovery lost a Transmog destination')
+end
+armor, helmet = current()
+assert(bound[helmet][1] == 90002, 'Large Armor recovery recolored an unmatched Helmet')
+unchanged_counts()
 assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'

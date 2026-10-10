@@ -24,6 +24,7 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `outfit_presets.lua`, `direct_setup.lua`: disk formats and validation. Native application belongs to the session controller.
 - `player_preview_input.lua`: owns mouse/wheel wrappers and restores only wrappers it still owns.
 - `player_preview*.lua`: preview model, controls, rendering and lifecycle. It owns copied garments and its render resources, not the borrowed game world's simulation.
+- `player_animation.lua`: applies procedural standing/salute and cape poses to existing independently owned garments, using captured hierarchies and immutable poses. It creates no avatar or simulation world.
 
 ## Working conventions
 
@@ -84,9 +85,13 @@ Tag overlapping rectangle children with `ui_role` through the shared helpers. Al
 
 `preset_export.lua` exports the selected stored Armory preset. Shareable ZIPs include a bounded v2 manifest, exact DDS bytes and original patch-source metadata; v1 presets remain readable. Patch exports require captured original resource IDs, never a guess based on currently worn gear. Import stages validated flat files into the existing worker session, then saves a library entry without applying it.
 
+Local collections preserve up to 4,096 destination rows, with a separate 2 MiB manifest and 8 MiB unique serialized payload budget. Saving and shareable export deduplicate exact DDS bytes and exact patch-source sidecars without dropping target keys or merging different custom values that share a resource ID. Loading caches aliased files once. Appearance intent retains up to 4,096 destinations per verified gear profile and 16,384 overall; native texture allocation and Shared Lobby wire limits remain separate.
+
 `bulk_dds_export.lua` exports current custom gear tables or stored preset entries into a timestamped folder. It validates and encodes every file before staging, formats resource IDs without floating-point conversion, deduplicates identical destinations and rejects conflicting values. Failed batches remove only their own staged files.
 
 Player Preview selects `ui_3d` and renders to its owned portrait output directly. The initialized UI-world lease and queue cleanup fence remain required. [Render path and Transmog comparison](PREVIEW-RENDER-PATH.md) documents the native material differences that still need live acceptance.
+
+[Preview animation](PREVIEW-ANIMATION.md) uses the existing owned garment copies and pose setters. Hierarchies are captured before flattening only for explicitly enabled animation candidates. Its focused update path is separate from material synchronization; Pause/Play shares the portrait footer, and normal renderer-fence cleanup still protects the garments. Standard packages remain static. The previous extra-avatar/simulation-world path was removed after a native component-creation crash.
 
 ## Development references
 

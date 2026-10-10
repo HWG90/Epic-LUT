@@ -1,4 +1,4 @@
--- Native adapter for an owned, frozen visual copy. Optional candidate only.
+-- Native adapter for owned visual copies and optional garment-pose animation.
 local Native = {}
 -- The game's Armory model uses ui_3d's forward layers. The default viewport
 -- includes the gameplay temporal pipeline and writes shared output_target.
@@ -204,6 +204,7 @@ function Native.new(E, m, host)
         end
     end
     local model = m.player_model.new(E, {
+        animate = host.animate == true,
         note = host.log,
         copy_materials = copy_materials,
         apply_palette = host.apply_palette or function(piece)
@@ -214,6 +215,48 @@ function Native.new(E, m, host)
             error(why, 0)
         end,
     })
+    local animations = host.animate
+        and m.player_animation
+        and m.player_animation.new(E, {
+            log = host.log,
+            authored = host.authored == true,
+            clip_module = m.player_authored_clip,
+            clips = host.animation_source and host.animation_source.get,
+        })
+    local function start_animation(result)
+        if result.animation or result.animation_failed or not host.animate then
+            return false
+        end
+        if host.authored and not (host.animation_source and host.animation_source.get()) then
+            if host.controls then
+                host.controls.animation_available = false
+                host.controls.animation_pending = host.animation_source and host.animation_source.state == 'loading'
+                host.controls.animation_error = host.animation_source and host.animation_source.error
+                    or 'Authored salute resources unavailable'
+            end
+            return false
+        end
+        local started, session = pcall(function()
+            assert(animations, 'Preview animation module unavailable')
+            return assert(animations.create(result), 'Preview animation driver did not initialize')
+        end)
+        if host.controls then
+            host.controls.animation_available = started
+            host.controls.animation_pending = false
+            host.controls.animation_error = not started and tostring(session) or nil
+        end
+        if started then
+            result.animation = session
+            host.log(
+                host.authored and 'preview: authored Helldiver salute prepared'
+                    or 'preview: standing/salute garment poses prepared'
+            )
+        else
+            result.animation_failed = true
+            host.log('preview: animation unavailable ' .. tostring(session))
+        end
+        return started
+    end
     local adapter = {}
     local environment
     local ui_constants
@@ -250,7 +293,14 @@ function Native.new(E, m, host)
     local retired = package.loaded['epic.preview.fence.receipts'] or {}
     package.loaded['epic.preview.fence.receipts'] = retired
     function adapter.quiesce()
+        if animations then
+            animations.stop()
+        end
         if not submitted then
+            if animations then
+                local done, why = animations.close()
+                assert(done, why or 'Preview animation cleanup is pending')
+            end
             return true
         end
         host.log('preview: draining submitted render work')
@@ -270,6 +320,10 @@ function Native.new(E, m, host)
         end
         submitted = false
         host.log('preview: render queue drained')
+        if animations then
+            local done, why = animations.close()
+            assert(done, why or 'Preview animation cleanup is pending')
+        end
         return true
     end
     local function prepare_environment(world)
@@ -449,6 +503,9 @@ function Native.new(E, m, host)
             end
             error(why, 0)
         end
+        if host.animate then
+            start_animation(result)
+        end
         return result
     end
     -- Retain the transparent gib mask across reloads while queued reads may
@@ -470,6 +527,10 @@ function Native.new(E, m, host)
     end
     function adapter.destroy_model(value)
         host.log('preview: release copied pieces')
+        if value.animation then
+            local done, why = value.animation.close()
+            assert(done, why or 'Preview animation cleanup is pending')
+        end
         if not context_lost then
             model.destroy(value)
         end
@@ -665,7 +726,16 @@ function Native.new(E, m, host)
             text(host.controls.docked and 'Pop Out' or 'Dock', panel.x + panel.w - 94, panel.y + panel.h + 8)
         end
         text('- Zoom', panel.x + 8, panel.y - 20)
-        text('+ Zoom', panel.x + panel.w / 2 + 8, panel.y - 20)
+        if host.controls and (host.controls.animation_available or host.controls.animation_pending) then
+            text(
+                host.controls.animation_pending and 'Loading...' or (host.controls.animating and 'Pause' or 'Play'),
+                panel.x + panel.w / 2 - 22,
+                panel.y - 20
+            )
+            text('+Zoom', panel.x + panel.w * 2 / 3 + 2, panel.y - 20)
+        else
+            text('+ Zoom', panel.x + panel.w / 2 + 8, panel.y - 20)
+        end
         if not (host.controls and host.controls.docked) then
             text('\\', panel.x + panel.w - 18, panel.y - 20)
         end
@@ -728,8 +798,9 @@ function Native.new(E, m, host)
     function adapter.create_panel(target)
         host.log('preview: create floating panel')
         local world = A.main_world()
+        local animation_worlds = package.loaded['epic.preview.animation-worlds.v1'] or {}
         for _, candidate in ipairs(A.worlds()) do
-            if candidate ~= world and candidate ~= owned_world then
+            if candidate ~= world and candidate ~= owned_world and not animation_worlds[candidate] then
                 world = candidate
                 break
             end
@@ -759,6 +830,21 @@ function Native.new(E, m, host)
     function adapter.apply_luts(value, palettes)
         assert(not owned_world or lease_live(owned_world), 'Preview context disappeared')
         return model.apply(value, palettes)
+    end
+    function adapter.advance_model(value, dt)
+        if host.authored and not value.animation and not value.animation_failed then
+            assert(lease_live(value.world), 'Preview context disappeared')
+            local pending = host.controls and host.controls.animation_pending
+            local started = start_animation(value)
+            if started or (host.controls and pending ~= host.controls.animation_pending) then
+                adapter.layout_panel()
+            end
+        end
+        if not value.animation then
+            return false
+        end
+        assert(lease_live(value.world), 'Preview context disappeared')
+        return value.animation.advance(dt, not host.controls or host.controls.animating ~= false)
     end
     function adapter.debug_target()
         assert(portrait, 'Preview target is closed')

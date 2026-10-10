@@ -70,4 +70,31 @@ assert(not p.close() and p.state == 'closing' and #events == event_count, 'Resou
 assert(not p.open(gear) and #events == event_count, 'New preview spawned while drain pending')
 drained = true
 assert(p.close() and p.state == 'closed', 'Drained preview did not release')
-print('PASS player preview ownership, partial setup, reverse cleanup, retries and LUT revisions')
+-- Animation is optional, advances outside render submission, and preserves
+-- the same cleanup receipts/fence when the driver fails after touching poses.
+assert(not p.advance(0.01), 'Closed preview advanced a model')
+assert(p.open(gear))
+local ok, changed = p.advance(0.01)
+assert(ok and not changed, 'Static adapters require an animation callback')
+local advances, animation_changed, animation_failure = 0, false, false
+a.advance_model = function(model, dt)
+    assert(model == p.model and dt == 0.01, 'Animation received another model or time step')
+    advances = advances + 1
+    assert(not animation_failure, 'Animation driver disappeared')
+    return animation_changed
+end
+ok, changed = p.advance(0.01)
+assert(ok and not changed and advances == 1)
+animation_changed = true
+ok, changed = p.advance(0.01)
+assert(ok and changed and advances == 2, 'Animated pose changes were not reported')
+event_count = #events
+animation_failure, drained = true, false
+ok, changed = p.advance(0.01)
+assert(not ok and tostring(changed):find('Animation driver disappeared', 1, true))
+assert(p.state == 'closing' and #p.resources == 6 and #events == event_count, 'Animation failure freed live receipts')
+assert(not p.advance(0.01) and advances == 3, 'Retiring animation continued to step')
+assert(not p.close() and #events == event_count, 'Animation failure bypassed the render fence')
+drained = true
+assert(p.close() and p.state == 'closed' and #p.resources == 0)
+print('PASS player preview ownership, cleanup retries, LUT revisions and animation failure fencing')

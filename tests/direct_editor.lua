@@ -16,6 +16,7 @@ local bound = { [3] = 100, [4] = 100, [6] = 300, [8] = 400, [9] = 999 }
 local creates = 0
 local gpu_data
 local gpu_object
+local created_textures = {}
 local units = { { unit = 1, type = 0, slot = 1 }, { unit = 2, type = 0, slot = 2 }, { unit = 3, type = 0, slot = 0 } }
 local native = {
     alive = function()
@@ -155,6 +156,7 @@ local m = {
             creates = creates + 1
             gpu_data = data
             gpu_object = 199 + creates
+            created_textures[gpu_object] = data
             return { object = gpu_object, data = data, width = w, height = h }
         end,
         bind = function(_, material, slot, object)
@@ -177,6 +179,14 @@ local m = {
                     return api
                 end,
                 tick = function() end,
+                menu = { visible = true },
+                dismiss = function()
+                    if test_frontend.menu then
+                        test_frontend.menu.visible = false
+                    end
+                    test_frontend.dismissed = (test_frontend.dismissed or 0) + 1
+                    return true
+                end,
                 close = function()
                     return true
                 end,
@@ -253,6 +263,7 @@ m.patch_export = {
     end,
 }
 m.preset_export = dofile('src/presets/preset_export.lua')
+bound[8] = 50 -- A Helmet group sorts before the first Armor group.
 stock_editor.on_enable(ctx)
 stock_editor.on_update(ctx, 0)
 handle = api.mods.epic_direct_lut.handle
@@ -265,6 +276,28 @@ assert(
 )
 assert(bound[3] == 100, 'Population wrote game bindings')
 assert(handle.get('cell_r') == 0.25, 'Stock game pixels did not populate editor')
+assert(handle.get('lut') == 2, 'Load Current Gear left the hidden live selector on Helmet')
+assert(activate('identify_region'):find('Flashing region', 1, true))
+assert(bound[3] ~= 100 and bound[4] == bound[3] and bound[8] == 50 and bound[6] == 300)
+stock_editor.on_update(ctx, 4.1)
+assert(bound[3] == 100 and bound[4] == 100, 'Worn-region flash did not restore its exact bindings')
+-- An unrelated table can move the selected worn object to another group index.
+bound[6] = 75
+activate('refresh')
+assert(activate('identify_region'):find('Flashing region', 1, true))
+assert(handle.get('lut') == 3 and bound[3] ~= 100 and bound[6] == 75 and bound[8] == 50)
+stock_editor.on_update(ctx, 4.1)
+assert(handle.set('cell_color', '#123456'))
+stock_editor.on_update(ctx, 0.1)
+assert(bound[3] ~= 100 and bound[4] == bound[3] and bound[6] == 75 and bound[8] == 50)
+activate('restore')
+bound[3], bound[4] = 777, 777
+local stale_creates = creates
+assert(activate('identify_region'):find('Worn gear changed', 1, true))
+assert(creates == stale_creates and bound[3] == 777 and bound[4] == 777, 'Stale worn target was highlighted')
+bound[3], bound[4], bound[6], bound[8] = 100, 100, 300, 400
+activate('refresh')
+activate('populate_worn')
 assert(
     activate('editor_load_armor'):find('Editor populated from Armor LUT', 1, true),
     'Worn LUT load returned an error after populating'
@@ -449,7 +482,10 @@ assert(
 test_frontend.menu = nil
 activate('identify_region')
 assert(
-    bound[3] ~= old_object and gpu_data[0] == 1 and gpu_data[1] == 0 and gpu_data[2] == 1,
+    bound[3] ~= old_object
+        and created_textures[bound[3]][0] == 1
+        and created_textures[bound[3]][1] == 0
+        and created_textures[bound[3]][2] == 1,
     'Region highlight did not apply magenta'
 )
 assert(stock[0] == 0.25 and handle.get('cell_r') == 0.25, 'Highlight modified editor/source pixels')
@@ -882,6 +918,14 @@ local retained = package.loaded['epic.direct_lut.retained.v1']
 local retained_records, retained_bytes = #retained.records, retained.bytes
 assert(rh.activate('browse'))
 local old_worker = workers[#workers]
+test_frontend.menu.visible = true
+local dismissals = test_frontend.dismissed or 0
+assert(recovery.on_disable(ctx) == false, 'Live import worker did not defer cleanup')
+assert(
+    not test_frontend.menu.visible and test_frontend.dismissed > dismissals,
+    'Pending import cleanup trapped menu UI'
+)
+assert(not old_worker.closed and quick_info().editor == old_document, 'UI dismissal discarded pending import state')
 local counter = package.loaded['epic.import.counter.v1'].value
 local ready, why = pcall(recovery.on_enable, ctx)
 assert(not ready and tostring(why):find('cleanup is still pending', 1, true))

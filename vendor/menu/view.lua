@@ -116,7 +116,8 @@ function M.new(sr,preview_only,diagnostic_log)
         if gui and not live()then gui,world=nil,nil;ids={};preview_guis={}end
         if not gui then
             local main=sr.Application.main_world();world=main
-            for _,w in pairs(sr.Application.worlds() or {})do if w~=main then world=w;break end end
+            local animation_worlds=package.loaded['epic.preview.animation-worlds.v1']or{}
+            for _,w in pairs(sr.Application.worlds() or {})do if w~=main and not animation_worlds[w]then world=w;break end end
             if not world then return end
             gui=sr.World.create_screen_gui(world,'scale',1,1)
         end

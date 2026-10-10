@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Add a separately named preview animation test using procedural standing/salute poses, cape sway and Pause/Play on existing garment copies.
+- Resolve salute joints across segmented garments; handle missing update deltas and keep diagnostic single-frame mode from leaking into normal preview openings.
+- Use the actual Helldiver standing and salute clip tracks, including fingers, from a bounded local game cache; keep cape sway separate and ship no animation assets.
+
+## R5.5.5 - 2026-10-10
+
+- Synchronize the live LUT selector when loading current gear; region highlights use the exact selected Armor, Helmet or Cape LUT.
+- Keep live edits attached to the selected LUT through list reordering and reject stale targets.
+- Keep the default idle Player Preview in standard builds; animation testing remains separate.
+- Shared Lobby LUT is in testing.
+
+## R5.5.4 - 2026-10-10
+
+- Dismiss the editor and release its cursor while preview or import cleanup is pending; keep native retirement retryable without trapping the menu on screen.
+- Fix empty-editor guidance overlapping Load Current Armor/Helmet; keep actions compact, wrap help text and scale spacing beneath the actual header.
+- Replace the 128-binding preset cap with 4,096 destinations across save, import, export and appearance recovery.
+- Store identical LUTs and patch metadata once while preserving every Transmog target and distinct custom value.
+- Remove the extra avatar/simulation-world animation path implicated in the first-run native crash; standard packages keep the static preview.
+
 ## R5.5.3 - 2026-10-09
 
 - Fixed drawing order across independent Pattern, Tools and Scratch windows, dropdowns, pickers and tooltips.

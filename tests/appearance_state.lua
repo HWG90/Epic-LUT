@@ -63,9 +63,14 @@ assert(state.remember({ b }, false, nil, resource) == 0, 'Missing gear proof was
 
 local bounded = State.new()
 local slots = {}
-for n = 1, 129 do
-    slots[n] =
-        { armor = true, save_key = 'slot:' .. n, original = n, texture = a, resource = string.format('%016x', n) }
+for n = 1, State.MAX_PROFILE + 1 do
+    slots[n] = {
+        armor = true,
+        save_key = 'slot:' .. n,
+        original = n + 1000,
+        texture = a,
+        resource = string.format('%016x', n),
+    }
 end
 assert(
     not pcall(bounded.remember, slots, false, proof, resource) and bounded.count() == 0,
@@ -73,14 +78,24 @@ assert(
 )
 table.remove(slots)
 for profile = 1, 4 do
-    assert(bounded.remember(slots, false, { armor = 'body:armor-' .. profile }, resource) == 128)
+    assert(bounded.remember(slots, false, { armor = 'body:armor-' .. profile }, resource) == State.MAX_PROFILE)
 end
-assert(bounded.count() == 512)
+assert(bounded.count() == State.MAX_RECORDS)
 assert(
-    not pcall(bounded.remember, { slots[1] }, false, { armor = 'body:extra' }, resource) and bounded.count() == 512,
+    not pcall(bounded.remember, { slots[1] }, false, { armor = 'body:extra' }, resource)
+        and bounded.count() == State.MAX_RECORDS,
     'Global appearance budget grew unbounded'
 )
-assert(bounded.clear('armor', false) == 512 and bounded.count() == 0)
+-- Large profiles survive snapshots and restore all fresh duplicate instances
+-- through one shared immutable texture, preserving every semantic target.
+local large_snapshot = bounded.entries()
+assert(#large_snapshot == State.MAX_RECORDS)
+assert(bounded.replace(large_snapshot) == State.MAX_RECORDS)
+local batches = bounded.batches(slots, false, { armor = 'body:armor-1' }, resource, function(binding)
+    return binding.original
+end)
+assert(#batches == 1 and #batches[1].targets == State.MAX_PROFILE and batches[1].document == a)
+assert(bounded.clear('armor', false) == State.MAX_RECORDS and bounded.count() == 0)
 
 -- Restore/Undo/Redo swap verified intent snapshots, preserving the exact cached
 -- textures without changing live bindings or accepting a partial bad snapshot.
@@ -119,12 +134,13 @@ assert(
 assert(not pcall(state.replace, { valid[1], valid[1] }), 'Duplicate snapshot identities were accepted')
 assert(not pcall(state.replace, { [1] = valid[1], [3] = valid[2] }), 'Sparse snapshot silently lost intent')
 local overflow = {}
-for i = 1, 129 do
+for i = 1, State.MAX_PROFILE + 1 do
     overflow[i] = copy(valid[1])
     overflow[i].save_key = 'slot:' .. i
 end
 assert(not pcall(state.replace, overflow) and state.count() == 2, 'Profile overflow replacement was not atomic')
-for i = 130, 513 do
+overflow = {}
+for i = 1, State.MAX_RECORDS + 1 do
     overflow[i] = copy(valid[1])
     overflow[i].proof = 'gear:' .. i
 end

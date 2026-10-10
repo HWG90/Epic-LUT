@@ -88,6 +88,22 @@ function Preview.new(adapter)
         self.revision = revision
         return true
     end
+    -- Animation steps in the focused update callback; rendering remains separate.
+    function self.advance(dt)
+        if self.state ~= 'ready' then
+            return false
+        end
+        if not adapter.advance_model then
+            return true, false
+        end
+        local ok, changed = pcall(adapter.advance_model, self.model, dt)
+        if not ok then
+            self.error = tostring(changed)
+            self.state = 'closing'
+            return false, self.error
+        end
+        return true, changed == true
+    end
     -- Called only by the loader's render callback, never its update callback.
     function self.render()
         if self.state ~= 'ready' then

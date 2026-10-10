@@ -95,6 +95,39 @@ assert(
 )
 items[#items + 1] = items[1]
 assert(P.encode_set(D, items).count == 10, 'Shared LUT not deduplicated')
+local transmog = {}
+for i = 1, P.MAX_BINDINGS do
+    transmog[i] = items[(i - 1) % 10 + 1]
+end
+assert(P.encode_set(D, transmog).count == 10, 'Large duplicated binding set failed to deduplicate')
+local distinct = {}
+for i = 1, 129 do
+    local orig = {}
+    for key, value in pairs(original) do
+        orig[key] = value
+    end
+    orig.resource = string.format('%016x', i)
+    distinct[i] = { document = items[1].document, original = orig }
+end
+local large_patch = P.encode_set(D, distinct)
+assert(large_patch.count == 129 and u(large_patch.main, 8) == 129, 'Large unique patch omitted resources')
+for i = 1, 129 do
+    local at = 104 + (i - 1) * 80
+    assert(u(large_patch.main, at) == i, 'Large patch substituted a texture ID')
+    local gpu_at, size = u(large_patch.main, at + 32), u(large_patch.main, at + 64)
+    assert(large_patch.gpu:sub(gpu_at + 1, gpu_at + size) == ffi.string(items[1].document.data, size))
+end
+transmog[#transmog + 1] = items[1]
+assert(not pcall(P.encode_set, D, transmog), 'Oversized patch binding collection accepted')
+local zip_members = {}
+for i = 1, P.ZIP_MAX_MEMBERS do
+    zip_members[i] = { 'member' .. i .. '.dds', '' }
+end
+local full_zip = P.zip_entries(zip_members)
+local member_low, member_high = full_zip:byte(#full_zip - 11, #full_zip - 10)
+assert(member_low + member_high * 256 == P.ZIP_MAX_MEMBERS, 'ZIP member count overflowed')
+zip_members[#zip_members + 1] = { 'overflow.dds', '' }
+assert(not pcall(P.zip_entries, zip_members), 'ZIP member boundary accepted overflow')
 local conflict = { document = items[2].document, original = items[1].original }
 items[#items + 1] = conflict
 assert(not pcall(P.encode_set, D, items), 'Conflicting shared LUT silently overwritten')
@@ -180,7 +213,7 @@ os.remove(zip_path)
 rmdir(destination)
 rmdir(root)
 print(
-    'PASS patch export: exact 64-bit IDs, native wrapper, float pixel round trip, complete triplet, no overwrite, rollback and malformed-input rejection'
+    'PASS patch export: 4096 bindings, 129 unique exact IDs, ZIP8193-member boundary, native wrapper, full-float bytes, complete triplet and rollback'
 )
 
 local custom_pixels = ffi.new('float[?]', 23 * 64 * 4)

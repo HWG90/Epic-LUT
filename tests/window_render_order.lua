@@ -437,6 +437,22 @@ role_view.draw(role_commands)
 assert(not items[old_rect], 'Recreated role rect leaked its old primitive')
 role_view.release()
 assert(next(items) == nil, 'Role GUI retirement left native primitives')
+-- A new animation world must never become an editor GUI's host just because
+-- it appears before the real UI world in Application.worlds().
+local simulation, ui_world, selected = {}, {}, nil
+sr.Application.worlds = function()
+    return { simulation, ui_world, world }
+end
+sr.World.create_screen_gui = function(host)
+    selected = host
+    return {}
+end
+package.loaded['epic.preview.animation-worlds.v1'] = { [simulation] = true }
+local isolated_view = View.new(sr, true)
+isolated_view.draw({ { type = 'rect', x = 0, y = 0, w = 10, h = 10, a = 1, c = { 1, 2, 3 } } })
+assert(selected == ui_world, 'Editor GUI was attached to the private animation world')
+isolated_view.release()
+package.loaded['epic.preview.animation-worlds.v1'] = nil
 print(
     'PASS native window ordering: independent surfaces, retained accents/markers/text planes, dense range bounds, unchanged depth, focus/drag overlays and correct GUI ownership'
 )
