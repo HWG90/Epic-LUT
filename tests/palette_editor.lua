@@ -122,10 +122,56 @@ for i, name in ipairs(choices) do
     end
 end
 assert(selected, 'New row preset did not appear in the dropdown')
+local saved_preset = m.file_io.read('tests/tmp/presets/row-new-test-row.dds', m.dds.MAX_BYTES)
+local saved_row = ffi.string(d.data + (h.get('edit_row') - 1) * d.width * 4, d.width * 16)
+local before_new = ffi.string(d.data, d.width * d.height * 16)
+local undo_before_new, redo_before_new = #editor.undo, #editor.redo
 assert(h.set('row_preset', 'different-name'))
 assert(h.set('row_preset_select', 1))
+assert(h.get('row_preset') == '', 'New preset kept the previous editable name')
+local empty_saved, empty_error = h.activate('save_row')
+assert(
+    not empty_saved and tostring(empty_error):find('Invalid DDS preset name', 1, true),
+    'Empty preset name was saved'
+)
+assert(
+    ffi.string(d.data, d.width * d.height * 16) == before_new
+        and #editor.undo == undo_before_new
+        and #editor.redo == redo_before_new,
+    'New preset or rejected empty Save changed the palette/history'
+)
+assert(
+    m.file_io.read('tests/tmp/presets/row-new-test-row.dds', m.dds.MAX_BYTES) == saved_preset,
+    'Rejected empty Save overwrote the existing preset'
+)
+assert(h.set('edit_row', 6))
+local before_selection = ffi.string(d.data, d.width * d.height * 16)
+assert(
+    ffi.string(d.data + 5 * d.width * 4, d.width * 16) ~= saved_row,
+    'Preset Apply fixture needs a different target row'
+)
 assert(h.set('row_preset_select', selected))
 assert(h.get('row_preset') == 'new-test-row', 'Dropdown selection did not fill the editable preset name')
+assert(
+    ffi.string(d.data, d.width * d.height * 16) == before_selection and #editor.undo == undo_before_new,
+    'Selecting a saved preset applied it without the explicit Apply action'
+)
+assert(h.activate('load_row'))
+assert(
+    ffi.string(d.data + 5 * d.width * 4, d.width * 16) == saved_row and #editor.undo == undo_before_new + 1,
+    'Explicit Apply did not load the preset as one undoable operation'
+)
+assert(
+    ffi.string(d.data, 5 * d.width * 16) == before_selection:sub(1, 5 * d.width * 16)
+        and ffi.string(d.data + 6 * d.width * 4, 2 * d.width * 16) == before_selection:sub(6 * d.width * 16 + 1),
+    'Row preset Apply changed another row'
+)
+assert(h.activate('undo'))
+assert(
+    ffi.string(d.data, d.width * d.height * 16) == before_selection,
+    'Row preset Apply Undo did not restore the target'
+)
+assert(h.set('edit_row', 5))
 local commands, hits = {}, {}
 local function command(t)
     commands[#commands + 1] = t

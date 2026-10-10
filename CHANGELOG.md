@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Size editable preset-name hit areas to their text, preserve a large dropdown opening area, and enlarge dropdown/step controls; keep the caret inside its own field.
+- Clear the previous row-preset name when choosing New preset and reject blank saves before modifying a saved row.
 - Add an explicit Apply Cape action for imported palettes; isolate Cape material bindings from Armor, Helmet and the separate tint slot.
 - Preserve complete RGBA, material and camo controls when pasting swatches or rows without Advanced mode; keep typed advanced edits protected.
 - Apply paired Pattern DDS files through Apply Matching LUTs when their exact resource IDs match the worn gear.

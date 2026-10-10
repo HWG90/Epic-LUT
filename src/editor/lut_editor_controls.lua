@@ -290,7 +290,13 @@ function C.new(deps)
                             return self.reset_part(false)
                         end,
                     },
-                    { id = 'row_preset', type = 'input', label = 'Row preset name', default = 'my-row' },
+                    {
+                        id = 'row_preset',
+                        type = 'input',
+                        label = 'Row preset name',
+                        default = 'my-row',
+                        allow_empty = true,
+                    },
                     {
                         id = 'row_preset_select',
                         type = 'choice',

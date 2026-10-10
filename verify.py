@@ -22,7 +22,7 @@ TESTS = (
     'frontend', 'frontend_suspension', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'appearance_state', 'appearance_persistence', 'direct_appearance_runtime', 'cape_editor', 'direct_editor', 'palette_editor', 'standalone_frontend',
     'import_view', 'table_groups', 'original_luts', 'basic_view', 'update_check',
-    'editor_state', 'direct_setup', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'pattern_import_matching', 'floating_dropdown', 'slider_preview', 'input_preview', 'editor_layout', 'mcm_ui_port', 'mcm_settings', 'preset_export', 'export_pairing', 'bulk_dds_export', 'armory_mirror', 'limb_caps',
+    'editor_state', 'direct_setup', 'outfit_presets', 'armory_view', 'import_matches', 'import_protocol', 'configuration', 'import_job', 'armory_collection', 'gear_catalog', 'file_io', 'table_index', 'lut_files', 'patch_export', 'shared_lut_codec', 'shared_appearance', 'lobby_sync', 'pattern_luts', 'pattern_import_matching', 'floating_dropdown', 'preset_dropdown', 'slider_preview', 'input_preview', 'editor_layout', 'mcm_ui_port', 'mcm_settings', 'preset_export', 'export_pairing', 'bulk_dds_export', 'armory_mirror', 'limb_caps',
 )
 runner = LuaRunner()
 for path in sorted([*ROOT.glob('src/**/*.lua'), *ROOT.glob('vendor/*.lua'), *ROOT.glob('vendor/menu/*.lua')]):

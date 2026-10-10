@@ -251,33 +251,45 @@ function M.choice(ui, control, value, x, y, width, change, open)
     ui.rect(x, y, 2, 26, disabled and T.line or T.focus, nil, 'control_accent')
     local presentation = control.presentation or 'combined'
     local dropdown, selector = presentation == 'dropdown', presentation == 'selector'
-    local reserved = dropdown and 32 or (selector and 62 or 88)
+    local step_width = dropdown and 0 or math.min(32, width / (selector and 2 or 3))
+    local open_width = math.max(0, width - step_width * 2)
+    local indicator_width = selector and 0 or math.min(44, open_width)
+    local reserved = step_width * 2 + indicator_width + 16
     local function baseline(size, label)
         return ui.text_y and ui.text_y(y, 26, size, label) or y + 5
     end
     if not dropdown then
-        ui.text(x + width - 43, baseline(16, '<'), '<', 16, color)
-        ui.text(x + width - 17, baseline(16, '>'), '>', 16, color)
-        ui.hit(x + width - 50, y, 24, 26, function()
+        ui.text(x + open_width + (step_width - 10) / 2, baseline(16, '<'), '<', 16, color)
+        ui.text(x + open_width + step_width + (step_width - 10) / 2, baseline(16, '>'), '>', 16, color)
+        ui.hit(x + open_width, y, step_width, 26, function()
             if not control.disabled then
                 change(-1)
             end
         end)
-        ui.hit(x + width - 24, y, 24, 26, function()
+        ui.hit(x + open_width + step_width, y, step_width, 26, function()
             if not control.disabled then
                 change(1)
             end
         end)
     end
     if not selector then
-        ui.text(x + width - (dropdown and 18 or 70), baseline(16, 'v'), 'v', 16, color)
+        ui.rect(
+            x + open_width - indicator_width,
+            y,
+            indicator_width,
+            26,
+            disabled and T.panel or T.field_hover,
+            nil,
+            'control_accent'
+        )
+        ui.text(x + open_width - (indicator_width + 10) / 2, baseline(16, 'v'), 'v', 16, color)
     end
     local label = tostring(control.choices[value] or '')
     ui.bounded(x + 8, baseline(15, label), label, 15, color, math.max(0, width - reserved))
     ui.hit(
         x,
         y,
-        dropdown and width or width - 52,
+        open_width,
         26,
         function()
             if not control.disabled then
@@ -2148,6 +2160,16 @@ function M.new(api, measure, Text)
                 end
             end
             box = box or { x = ox + (x - 5) * s, y = oy + (y - 5) * s, w = (width or 180) * s, h = (size + 10) * s }
+            -- A bounded editable label owns only its allotted viewport. The
+            -- surrounding control may also contain dropdown/step buttons.
+            if width then
+                box = {
+                    x = box.x,
+                    y = box.y,
+                    w = math.max(1, math.min(box.w, ox + (x + width + 5) * s - box.x)),
+                    h = box.h,
+                }
+            end
             local label = tostring(value)
             local prefix = label:sub(1, #label - #e.text - 1)
             local cache_key = e.text .. ':' .. size .. ':' .. s .. ':' .. (self.font_metric_key or '')
@@ -2997,23 +3019,82 @@ function M.new(api, measure, Text)
                                 owner = owner,
                             }
                             choice.input_control = input
-                            rect(x, y, width, 26, editing and T.field_hover or T.field, nil, 'control_fill')
+                            local name = editing and self.text_edit.text or mod.handle.get(input_id)
+                            local size = M.text_size(self, 14)
+                            local measured
+                            if self.measure_text or measure then
+                                local ok, pixels = pcall(self.measure_text or measure, name .. '|', size * s)
+                                if ok and type(pixels) == 'number' and pixels >= 0 and pixels < math.huge then
+                                    measured = pixels / s
+                                end
+                            end
+                            if not measured then
+                                measured = 0
+                                for _ in tostring(name .. '|'):gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                                    measured = measured + size * 0.62
+                                end
+                            end
+                            local step_width = math.min(32, width / 4)
+                            local available = math.max(0, width - step_width * 2)
+                            local min_open = math.min(44, available / 2)
+                            local name_width = math.min(available - min_open, math.max(64, measured + 24))
+                            local open_x, open_width = x + name_width, available - name_width
+                            local indicator_width = math.min(44, open_width)
+                            rect(x, y, name_width, 26, editing and T.field_hover or T.field, nil, 'control_fill')
                             rect(x, y, 2, 26, T.focus, nil, 'control_accent')
                             bounded(
                                 x + 8,
-                                y + 5,
-                                editing and self.text_edit.text .. '|' or mod.handle.get(input_id),
+                                text_y(y, 26, 14, name),
+                                editing and name .. '|' or name,
                                 14,
                                 white,
-                                width - 90
+                                math.max(0, name_width - 13)
                             )
-                            text(x + width - 70, y + 5, 'v', 16, white)
-                            text(x + width - 43, y + 5, '<', 16, white)
-                            text(x + width - 17, y + 5, '>', 16, white)
-                            hit(x, y, width - 82, 26, function()
+                            rect(
+                                open_x,
+                                y,
+                                open_width,
+                                26,
+                                hovering(open_x, y, open_width, 26) and T.field_hover or T.field,
+                                nil,
+                                'control_fill'
+                            )
+                            rect(open_x, y, 1 / s, 26, T.line, nil, 'control_border')
+                            if open_width >= 100 then
+                                bounded(
+                                    open_x + 10,
+                                    text_y(y, 26, 14, 'Presets'),
+                                    'Presets',
+                                    14,
+                                    muted,
+                                    open_width - 54
+                                )
+                            end
+                            rect(
+                                x + available - indicator_width,
+                                y,
+                                indicator_width,
+                                26,
+                                T.field_hover,
+                                nil,
+                                'control_accent'
+                            )
+                            text(x + available - (indicator_width + 10) / 2, text_y(y, 26, 16, 'v'), 'v', 16, white)
+                            text(x + available + (step_width - 10) / 2, text_y(y, 26, 16, '<'), '<', 16, white)
+                            text(
+                                x + available + step_width + (step_width - 10) / 2,
+                                text_y(y, 26, 16, '>'),
+                                '>',
+                                16,
+                                white
+                            )
+                            hit(x, y, name_width, 26, function()
                                 change(input, 0)
                             end)
-                            hit(x + width - 82, y, 28, 26, function()
+                            hit(open_x, y, open_width, 26, function()
+                                if choice.disabled or choice.read_only then
+                                    return
+                                end
                                 self.open_dropdown({
                                     mod = mod,
                                     control = choice,
@@ -3025,10 +3106,10 @@ function M.new(api, measure, Text)
                                     owner = owner,
                                 })
                             end)
-                            hit(x + width - 50, y, 24, 26, function()
+                            hit(x + available, y, step_width, 26, function()
                                 change(choice, -1)
                             end)
-                            hit(x + width - 24, y, 24, 26, function()
+                            hit(x + available + step_width, y, step_width, 26, function()
                                 change(choice, 1)
                             end)
                         end,
@@ -3199,7 +3280,7 @@ function M.new(api, measure, Text)
                             value_label = c.type == 'choice' and tostring(c.choices[current])
                                 or (c.button_label or c.label or 'Activate')
                             local presentation = c.presentation or 'combined'
-                            local arrows = c.type == 'choice' and presentation ~= 'dropdown' and 60 or 0
+                            local arrows = c.type == 'choice' and presentation ~= 'dropdown' and 68 or 0
                             local padding = c.type == 'button' and 24 or (presentation == 'selector' and 20 or 55)
                             local minimum = c.type == 'button' and 175 or (presentation == 'dropdown' and 280 or 220)
                             -- Width budgets are logical units; native measurements are pixels.
@@ -3213,7 +3294,7 @@ function M.new(api, measure, Text)
                             ) / s
                         end
                         local reserved = value_width
-                                and (value_width + (c.type == 'choice' and (c.presentation or 'combined') ~= 'dropdown' and 60 or 0) + 12)
+                                and (value_width + (c.type == 'choice' and (c.presentation or 'combined') ~= 'dropdown' and 68 or 0) + 12)
                             or 290
                         local label_width = informational and row_width or math.max(0, row_width - reserved)
 
@@ -3455,22 +3536,22 @@ function M.new(api, measure, Text)
                                 local arrow_bg = c.disabled and T.line or T.field_hover
 
                                 local cw = value_width
-                                local cx = vx + 525 - (presentation ~= 'dropdown' and 60 or 0) - cw
+                                local cx = vx + 525 - (presentation ~= 'dropdown' and 68 or 0) - cw
                                 choice_bounds[c] = { x = cx, top = y - 8, width = cw }
 
                                 if presentation ~= 'dropdown' then
-                                    rect(cx + cw + 3, y - 5, 27, 29, arrow_bg, nil, 'control_fill')
-                                    text(cx + cw + 10, y, '<', 18, symbol)
+                                    rect(cx + cw + 2, y - 5, 32, 29, arrow_bg, nil, 'control_fill')
+                                    text(cx + cw + 13, y, '<', 18, symbol)
 
-                                    rect(cx + cw + 33, y - 5, 27, 29, arrow_bg, nil, 'control_fill')
-                                    text(cx + cw + 40, y, '>', 18, symbol)
+                                    rect(cx + cw + 36, y - 5, 32, 29, arrow_bg, nil, 'control_fill')
+                                    text(cx + cw + 47, y, '>', 18, symbol)
 
-                                    hit(cx + cw + 3, y - 5, 27, 29, function()
+                                    hit(cx + cw + 2, y - 5, 32, 29, function()
                                         select()
                                         change(control, -1)
                                     end)
 
-                                    hit(cx + cw + 33, y - 5, 27, 29, function()
+                                    hit(cx + cw + 36, y - 5, 32, 29, function()
                                         select()
                                         change(control, 1)
                                     end)
@@ -3500,8 +3581,8 @@ function M.new(api, measure, Text)
                                 if presentation ~= 'selector' then
                                     -- Reserve an opaque indicator cell above the value text.
 
-                                    rect(cx + cw - 32, y - 5, 32, 29, arrow_bg, nil, 'control_accent')
-                                    text(cx + cw - 20, y, 'v', 18, symbol)
+                                    rect(cx + cw - 44, y - 5, 44, 29, arrow_bg, nil, 'control_accent')
+                                    text(cx + cw - 28, y, 'v', 18, symbol)
 
                                     hit(cx, y - 5, cw, 29, function()
                                         if control.disabled then
