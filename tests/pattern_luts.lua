@@ -785,3 +785,123 @@ assert(cue.document and cue.gear == 'helmet')
 print(
     'PASS Pattern startup guidance: manual readiness, gray selectors, resettable gold cue, automatic populate, exact eight-table caches'
 )
+
+-- The Quick strip initializes from already loaded material targets during
+-- update, including delayed snapshots. Drawing never starts native discovery.
+do
+    local ready, kind, focus = false, 'armor', '20'
+    local objects, cached, created, writes, discovery, reads = { [10] = 10, [20] = 20, [30] = 30 }, {}, 40, 0, 0, 0
+    local targets = {
+        { material = 10, armor = true },
+        { material = 20, armor = true },
+        { material = 30, helmet = true },
+    }
+    local function original(r, g, b)
+        local data = ffi.new('float[12]')
+        data[0], data[1], data[2], data[3] = r, g, b, 1
+        data[4], data[5], data[6], data[7] = 0.25, 0.5, 0.75, 1
+        data[8], data[9], data[10], data[11] = 0.123, -7, 8, 9
+        return { width = 3, height = 1, data = data }
+    end
+    local red, blue, green = original(1, 0, 0), original(0, 0, 1), original(0, 1, 0)
+    cached[10], cached[30] = red, green
+    local session = { owned = {} }
+    session.apply = function(document, bindings)
+        for _, b in ipairs(bindings) do
+            created, writes = created + 1, writes + 1
+            objects[b.material], b.current, b.document = created, created, document
+            session.owned = { b }
+        end
+    end
+    local colors = {}
+    local quick = dofile('src/editor/pattern_luts.lua').new({
+        session = session,
+        key = function(b)
+            return tostring(b.material)
+        end,
+        binding = function(b)
+            return objects[b.material]
+        end,
+        discover = function()
+            discovery = discovery + 1
+            error('Quick strip attempted full discovery')
+        end,
+        original = function()
+            reads = reads + 1
+            error('Quick strip requested an uncached original')
+        end,
+        cached_original = function(object)
+            return cached[object]
+        end,
+        quick_bindings = function()
+            if ready then
+                return kind, kind == 'armor' and { targets[1], targets[2] } or { targets[3] }, focus
+            end
+        end,
+        gear_signature = function()
+            error('Quick drawing rediscovered gear identity')
+        end,
+        resource_id = tostring,
+        note = function(text)
+            return text
+        end,
+        rgb = palette.rgb,
+        swatch = function(_, _, _, _, _, color)
+            colors[#colors + 1] = color
+        end,
+    })
+    local list = quick.controls()
+    list[#list + 1] = { id = 'show_alpha', type = 'toggle', label = 'Alpha', default = false }
+    local h = api.register({
+        id = 'pattern_quick_init',
+        name = 'Quick',
+        pages = { { id = 'p', name = 'Pattern', controls = list } },
+    })
+    quick.attach(h, api.mods[h.id].controls)
+    local ui = {
+        theme = { muted = { 80, 80, 80 }, white = { 255, 255, 255 } },
+        bounded = function() end,
+        rect = function() end,
+        hit = function() end,
+    }
+    local bounds = { x = 0, y = 0, w = 300, h = 60, cell_width = 28, row_height = 28 }
+    quick.quick(ui, bounds, 'armor')
+    quick.tick(0)
+    assert(discovery == 0 and reads == 0 and not quick.requested and quick.document == nil)
+    assert(colors[1][1] == 80, 'Unloaded Quick strip showed a fake black palette')
+    ready = true
+    quick.tick(0)
+    assert(quick.waiting and not quick.document and not quick.is_open())
+    cached[20] = blue
+    quick.tick(0.25)
+    assert(quick.document and quick.document.data[2] == 1 and h.get('pattern_lut') == 2)
+    assert(writes == 0 and reads == 0 and discovery == 0, 'Quick initialization wrote gear or started discovery')
+    colors = {}
+    quick.quick(ui, bounds, 'armor')
+    assert(#colors == 2 and colors[1][3] == 255 and colors[2][2] == 128)
+    assert(h.set('pattern_color', '#FFFF00'))
+    local edited, undo = quick.document, quick.undo
+    quick.tick(0.5)
+    assert(quick.document == edited and quick.undo == undo and #undo == 1, 'Quick hydration discarded cached edits')
+    assert(ffi.string(quick.document.data + 8, 16) == ffi.string(blue.data + 8, 16))
+    kind, focus = 'helmet', '30'
+    quick.color_session = {}
+    quick.tick(0.5)
+    assert(quick.document == edited, 'Quick hydration replaced a live color-picker document')
+    quick.color_session = nil
+    quick.tick(0.5)
+    assert(quick.gear == 'helmet' and quick.document.data[1] == 1)
+    colors = {}
+    quick.quick(ui, bounds, 'armor')
+    assert(colors[1][1] == 80, 'Quick drawing showed another gear family before update')
+    kind, focus = 'armor', '10'
+    quick.tick(0.5)
+    assert(quick.document.data[0] == 1 and quick.document.data[1] == 0 and h.get('pattern_lut') == 1)
+    focus = '20'
+    quick.tick(0.5)
+    assert(quick.document == edited and quick.undo == undo and h.get('pattern_lut') == 2)
+    assert(writes == 1 and reads == 0 and discovery == 0 and not quick.is_open())
+end
+print(
+    'PASS Pattern Quick initialization: cached snapshots, async readiness, selected slot/gear, edits/history and no draw discovery'
+)

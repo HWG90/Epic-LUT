@@ -5549,6 +5549,44 @@ return {
                 original = function(object)
                     return original_luts and original_luts.get(object)
                 end,
+                cached_original = function(object)
+                    return original_luts and original_luts.snapshots and original_luts.snapshots[object]
+                end,
+                quick_bindings = function()
+                    if not edit.loaded or not original_luts or not original_luts.loaded then
+                        return
+                    end
+                    local kind = edit.editor_target and edit.editor_target.kind
+                        or palette_editor and palette_editor.gear
+                        or 'armor'
+                    if kind == 'cape' then
+                        return
+                    end
+                    local out, focus = {}, nil
+                    local target = edit.editor_target and edit.editor_target.group or handle.get('lut')
+                    for index, group in ipairs(groups) do
+                        for _, b in ipairs(group.bindings) do
+                            local pattern = {
+                                unit = b.unit,
+                                mesh = b.mesh,
+                                material = b.material,
+                                slot = m.engine.PATTERN_SLOT,
+                                armor = b.armor,
+                                helmet = b.helmet,
+                                cape = b.cape,
+                                save_key = b.save_key,
+                            }
+                            local object = binding(pattern)
+                            if object and object ~= 0 then
+                                out[#out + 1] = pattern
+                                if index == target and b[kind] and not focus then
+                                    focus = material_key(pattern)
+                                end
+                            end
+                        end
+                    end
+                    return kind, out, focus
+                end,
                 discover = function()
                     local identity = assert(m.avatar.resolve_live(memory, game), 'Worn gear not ready')
                     local out = {}

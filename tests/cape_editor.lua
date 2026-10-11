@@ -165,6 +165,7 @@ local m = {
         new = function()
             return {
                 loaded = true,
+                snapshots = originals,
                 status = 'Ready',
                 start = function() end,
                 tick = function() end,
@@ -919,6 +920,15 @@ do
     runtime.on_update(ctx, 0)
     h = api.mods.epic_direct_lut.handle
     assert(#primed == 0, 'Startup populated Pattern values without an explicit Load Current Gear request')
+    local before_quick = created
+    assert(h.set('auto_populate_worn', true))
+    runtime.on_update(ctx, 1.1)
+    assert(
+        #primed == 0 and pattern_model.document and pattern_model.document.data[0] == 0.125,
+        'Automatic material loading did not hydrate its cached Quick Pattern values'
+    )
+    assert(not pattern_model.is_open() and created == before_quick, 'Quick initialization opened or wrote gear')
+    assert(h.set('auto_populate_worn', false))
     activate('populate_worn')
     assert(#primed == 1 and primed[1] == 'armor' and not pattern_model.is_open())
     do

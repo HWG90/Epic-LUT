@@ -91,7 +91,7 @@ function P.new(deps)
         self.busy = false
         assert(ok, why)
     end
-    function self.scan(background)
+    function self.scan(background, discovered)
         if deps.indicator then
             assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
         end
@@ -111,7 +111,7 @@ function P.new(deps)
             end
         end
         local groups, ordered, seen = {}, {}, {}
-        for _, b in ipairs(deps.discover()) do
+        for _, b in ipairs(discovered or deps.discover()) do
             local key = deps.key(b)
             local prior = existing[key]
             if prior and deps.binding(b) == prior.current then
@@ -189,7 +189,7 @@ function P.new(deps)
         end
         return #ordered
     end
-    function self.load(force)
+    function self.load(force, cached_only)
         if deps.indicator then
             assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
         end
@@ -208,7 +208,8 @@ function P.new(deps)
             return note('Loaded cached current Pattern LUT values.')
         end
         local first = group.bindings[1]
-        local original = deps.original(group.object)
+        local original = cached_only and deps.cached_original and deps.cached_original(group.object)
+            or not cached_only and deps.original(group.object)
         local source = bound ~= first.original
                 and bound == first.current
                 and ((first.texture and first.texture.object == bound and first.texture) or first.document)
@@ -217,7 +218,8 @@ function P.new(deps)
             self.document = nil
             sync()
             self.waiting = self.waiting and self.waiting.key == key and self.waiting
-                or { age = 0, elapsed = 0, key = key }
+                or { age = 0, elapsed = 0, key = key, cached_only = cached_only }
+            self.waiting.cached_only = cached_only
             return note('Loading current Pattern LUT values automatically...')
         end
         validate(source)
@@ -575,6 +577,40 @@ function P.new(deps)
     function self.flashing()
         return deps.indicator and deps.indicator.job ~= nil or false
     end
+    function self.hydrate(kind, discovered, focus)
+        if self.open or self.color_session or self.flashing() or (kind ~= 'armor' and kind ~= 'helmet') then
+            return false
+        end
+        -- Material loading already established these live targets. Hydrate the
+        -- Quick strip from their cached snapshots without discovering new gear.
+        local identity = { kind, tostring(focus or '') }
+        for _, b in ipairs(discovered) do
+            identity[#identity + 1] = deps.key(b) .. ':' .. tostring(deps.binding(b) or 0)
+        end
+        identity = table.concat(identity, '|')
+        if identity == self.quick_identity and (self.document or self.waiting) then
+            return true
+        end
+        local previous_focus = self.quick_focus
+        self.quick_identity, self.quick_focus = identity, kind .. ':' .. tostring(focus or '')
+        self.gear, self.requested = kind, true
+        if self.scan(false, discovered) == 0 then
+            return false
+        end
+        if previous_focus ~= self.quick_focus then
+            for _, group in ipairs(self.groups) do
+                for _, b in ipairs(group.bindings) do
+                    if deps.key(b) == focus then
+                        self.selections[kind] = group.object
+                    end
+                end
+            end
+            self.filter(kind)
+        end
+        self.ready = true
+        self.load(false, true)
+        return self.document ~= nil
+    end
     function self.tick(dt)
         dt = math.max(0, tonumber(dt) or 0)
         if self.open then
@@ -582,6 +618,16 @@ function P.new(deps)
         end
         if deps.indicator then
             deps.indicator.tick(dt, self.open == true)
+        end
+        if not self.open and deps.quick_bindings then
+            self.quick_elapsed = (self.quick_elapsed or 0) + dt
+            if not self.requested or self.quick_elapsed >= 0.5 then
+                self.quick_elapsed = 0
+                local kind, discovered, focus = deps.quick_bindings()
+                if kind and discovered then
+                    self.hydrate(kind, discovered, focus)
+                end
+            end
         end
         if self.open and self.requested and deps.gear_signature then
             self.gear_elapsed = (self.gear_elapsed or 0) + math.max(0, dt or 0)
@@ -622,7 +668,7 @@ function P.new(deps)
         end
         if pending.elapsed >= 0.25 then
             pending.elapsed = 0
-            local ok, why = pcall(self.load)
+            local ok, why = pcall(self.load, false, pending.cached_only)
             if not ok then
                 self.waiting = nil
                 note(tostring(why))
@@ -749,9 +795,12 @@ function P.new(deps)
         assert(ok, message)
         ui.activate('pattern_picker')
     end
-    local function swatch(ui, x, y, width, height, column, quick)
+    local function swatch(ui, x, y, width, height, column, quick, kind)
         local d, at = self.document, (column - 1) * 4
-        local color = { 0, 0, 0 }
+        if quick and kind ~= self.gear then
+            d = nil
+        end
+        local color = quick and not d and (ui.theme.disabled or ui.theme.muted) or { 0, 0, 0 }
         if d then
             for channel = 1, 3 do
                 color[channel] = math.floor(math.max(0, math.min(1, d.data[at + channel - 1])) * 255 + 0.5)
@@ -785,8 +834,8 @@ function P.new(deps)
             function()
                 self.column = column
                 if quick then
-                    if not self.document or column == 3 and not self.raw then
-                        self.show(self.gear)
+                    if not d or column == 3 and not self.raw then
+                        self.show(kind or self.gear)
                     else
                         picker(ui, column)
                     end
@@ -796,7 +845,11 @@ function P.new(deps)
             nil,
             quick and 'Edit this Pattern LUT swatch.' or 'Double-click to edit this Pattern LUT swatch.',
             function()
-                picker(ui, column)
+                if quick and not d then
+                    self.show(kind or self.gear)
+                else
+                    picker(ui, column)
+                end
             end
         )
     end
@@ -852,23 +905,12 @@ function P.new(deps)
             return
         end
         kind = kind == 'helmet' and 'helmet' or 'armor'
-        -- A drawing pass must never discover gear before the user's first load.
-        local signature = self.gear_signature
-        if self.requested and deps.gear_signature then
-            local ok, value = pcall(deps.gear_signature)
-            if ok then
-                signature = value
-            end
-        end
-        if self.ready and (self.gear ~= kind or signature ~= self.gear_signature) then
-            self.switch(kind)
-        else
-            self.gear = kind
-        end
-        if self.ready and #self.groups > 0 and not self.document and not self.waiting then
+        -- The update pass hydrates known targets. Drawing must not rediscover
+        -- native gear or turn an unavailable snapshot into a black palette.
+        if self.gear == kind and self.ready and #self.groups > 0 and not self.document and not self.waiting then
             -- Save/apply may refresh bindings with scan(), which clears only
             -- the selected view. Reuse its matching cached owned document.
-            local ok, why = pcall(self.load)
+            local ok, why = pcall(self.load, false, deps.cached_original ~= nil)
             if not ok then
                 note(tostring(why))
             end
@@ -886,7 +928,7 @@ function P.new(deps)
         local bottom = bounds.y + gap
         for column = 1, 2 do
             local x = bounds.x + (column - 1) * (width + gap)
-            swatch(ui, x, bottom, width, height, column, true)
+            swatch(ui, x, bottom, width, height, column, true, kind)
         end
     end
     function self.workspace(ui, bounds)
