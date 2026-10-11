@@ -56,7 +56,7 @@ Press **F9**, then **Load Current Armor & Helmet**. Choose the LUT above either 
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
-- Development builds add **Camo** beneath each column. **Off / Pattern 0–5** changes every region in that selected LUT as one undoable edit. Existing camo colors, scale and material effects stay intact; zero camo colors or scale can leave a pattern invisible. Neutral thumbnails use the actual game masks. Weapon paint names such as Arctic and Desert are not yet mapped to these Armor pattern indices.
+- Development builds add **Camo** beneath each column. **Off / Pattern 0–5** changes every region in that selected LUT as one undoable edit. Choose a generated **Jungle, Desert, Urban or Arctic** colorway, or edit the four camo swatches individually and press Apply in the picker. Each color applies to every region in the selected LUT; alpha, pattern, scale and other material effects stay intact. These colorways are inspired by weapon camouflage, rather than extracted game paint values. Neutral thumbnails use the actual game masks. Existing shader mode and zero camo scale can still leave a pattern invisible.
 - **Advanced Mode** in the header opens the full editor; **Basic Mode** brings you back.
 - Hover for guidance. Extra import controls appear only after loading a file.
 
@@ -99,7 +99,7 @@ Click the texture ID beside the LUT dropdown to give it a custom name. Names are
 
 Use **Tools → Rows → Import Paydex JSON...** to choose a Paydex row-presets JSON file. Imported rows appear immediately in the preset selector. Choose a destination row and press **Apply preset to row** separately. The importer preserves full RGBA/material values, reuses identical existing presets, and gives conflicting names a suffix instead of overwriting them.
 
-Use **Dock / Undock** in Tools to place its tabs below the swatches inside the LUT Editor or return them to a floating window. Drag the horizontal divider between the table and Tools up or down to adjust their space; the split is retained when resizing or redocking. The docked Tools body scrolls independently when space is limited.
+Tools initially opens docked below the swatches, then remembers your last **Dock / Undock** choice across reloads. Drag the horizontal divider between the table and Tools up or down to adjust their space; the split is retained when resizing or redocking. The docked Tools body scrolls independently when space is limited.
 
 Select multiple rows through their row labels, or select their first-column cells, then **Apply preset to selected rows** to fill every selected row with the preset as one undoable edit. Use the **X** beside a saved row, palette or Armory preset to remove it from the library. Removed files remain recoverable; the applied appearance is preserved.
 
@@ -131,7 +131,9 @@ Preview uses the game's lighter **Game Default UI pipeline**, with an independen
 
 Select a preset to preview it. Name-selector swatches give a quick glance; the full preview shows every saved LUT. Apply either half separately to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
 
-Development builds also provide **Apply Preset Cape LUTs** for saved Cape material and Pattern entries matching the current Cape. This leaves Armor and Helmet untouched. The combined Armor action reads **Armor + Cape** when the preset includes Cape data. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
+Development builds provide separate **Apply Preset Armor LUTs**, **Apply Preset Helmet LUTs** and **Apply Preset Cape LUTs** actions. Each affects only that gear kind. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
+
+If the current piece has an extra LOD mesh, an unmatched destination can use the saved piece/material palette only when every saved mesh in that family has identical palette bytes and an exact live match confirms the current texture resource and dimensions. Conflicting palettes and unproved destinations stay unchanged. Application logs distinguish exact and adapted mesh matches after binding readback succeeds.
 
 Presets live in `%LOCALAPPDATA%/Epic LUT/presets`. Library changes leave worn colors unchanged.
 

@@ -76,23 +76,25 @@ function A.new(info, preview)
         label('Saved outfit swatches: Armor / Cape | Helmet')
         button('Save Current Gear Preset', 'save_setup')
         local outfit = state.raw and state.raw.outfit
-        local armor_count = outfit and (#outfit.armor + #(outfit.cape or {})) or 0
-        button(
-            outfit and (#(outfit.cape or {}) > 0 or state.armory_cape_available) and 'Apply Preset Armor + Cape LUTs'
-                or 'Apply Preset Armor LUTs',
-            'outfit_apply_armor',
-            armor_count > 0
-        )
+        local armor_count = outfit and #outfit.armor or 0
+        local cape_count = outfit and #(outfit.cape or {}) or 0
+        button('Apply Preset Armor LUTs', 'outfit_apply_armor', armor_count > 0)
         button('Apply Preset Helmet LUTs', 'outfit_apply_helmet', outfit ~= nil and #outfit.helmet > 0)
-        button('Apply Preset Cape LUTs', 'outfit_apply_cape', state.armory_cape_available == true)
+        button('Apply Preset Cape LUTs', 'outfit_apply_cape', outfit ~= nil and state.armory_cape_available == true)
         separator()
         button('Rename Preset', 'outfit_rename', outfit ~= nil)
         button('Delete Preset', 'outfit_delete', outfit ~= nil)
         if outfit then
+            local scopes = {}
+            for _, entry in ipairs({ { 'Armor', armor_count }, { 'Cape', cape_count }, { 'Helmet', #outfit.helmet } }) do
+                if entry[2] > 0 then
+                    scopes[#scopes + 1] = entry[1]
+                end
+            end
             label(
-                (armor_count > 0 and (#outfit.helmet > 0 and 'Armor + Helmet' or 'Armor Only') or 'Helmet Only')
+                (#scopes == 0 and 'Empty preset' or table.concat(scopes, ' + ') .. (#scopes == 1 and ' Only' or ''))
                     .. ' / '
-                    .. (armor_count + #outfit.helmet)
+                    .. (armor_count + cape_count + #outfit.helmet)
                     .. ' LUTs'
             )
         end

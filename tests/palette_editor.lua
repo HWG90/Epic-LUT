@@ -340,6 +340,7 @@ menu.page = 2
 menu.window_width = 1800
 menu.window_height = 1000
 menu.compact_fonts = true
+editor.tools.set_docked(false) -- Render the complete floating tool tabs in this fixture.
 editor.tools.open('options')
 local rendered = menu.compose(1920, 1080)
 local grid = false

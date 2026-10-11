@@ -27,6 +27,7 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `lut_editor_view.lua`: grid, row controls and panels; receives only the editor operations and semantic/render helpers it uses.
 - `lut_editor_controls.lua`: registry schema and callbacks that delegate to the editor operations.
 - `outfit_presets.lua`, `direct_setup.lua`: disk formats and validation. Native application belongs to the session controller.
+- `outfit_targets.lua`: exact preset destinations plus conservative extra-mesh matching. Fallback requires identical saved family palettes, an exact live anchor, and the same current resource/dimensions; it never infers a global mesh-index offset or a Cape from an Armor family.
 - `player_preview_input.lua`: owns mouse/wheel wrappers and restores only wrappers it still owns.
 - `player_preview*.lua`: preview model, controls, rendering and lifecycle. It owns copied garments and its render resources, not the borrowed game world's simulation.
 - `player_animation.lua`: samples selected authored emote poses on existing independently owned garments, using captured hierarchies and immutable poses. It creates no avatar or simulation world.
@@ -38,6 +39,8 @@ Use module-local state for a service instance. Keep dependency injection at cons
 Native writes must validate liveness and ownership first. Roll back only writes owned by the operation. Never free queued texture buffers or borrowed worlds to reduce memory usage. Treat callback failures as actionable errors; keep retry state when cleanup cannot safely fiDo nish.
 
 The immutable texture cache is bounded to 64 MiB of retained pixels and 16,384 allocation records. Texture cache hits remain usable at the cap. Restore alone preserves textures for Undo/Redo. Complete addon cleanup can reclaim a new activation's allocations only after every touched binding has been proved restored, preview copies are retired, and two render fences separate detachment, owned handle destruction and backing-buffer release. Legacy allocations, inaccessible or foreign bindings, uncertain native failures and lost preview contexts remain quarantined until a game restart. This byte bound excludes native descriptors and cached string-key overhead. Continuous editing is coalesced before allocation; retained buffers remain immutable.
+
+During cleanup, dismiss the menu and release input first, then restore bindings and retire preview resources. Keep the frontend registered so its render-readiness probe can authorize both texture fences. Close the frontend only after texture retirement completes; closing it earlier permanently makes that probe return false.
 
 UI draws should be read-only apart from view-local layout state. Reuse immutable labels and descriptions. Preserve stable IDs, stored settings and native resource identity during refactors. Avoid introducing aliases that become a second authority for the same preference.
 
@@ -86,7 +89,7 @@ The native [Stingray Gui API](https://help.autodesk.com/cloudhelp/ENU/Stingray-H
 
 The Value Editor uses `ui.viewport` for positive font-ink intersection: text keeps its original baseline until fully outside the body. Rectangles, hit targets and active text-field bounds are intersected with the body rectangle. Opaque edge masks on body plane 110 hide overflowing text; the complete fixed header, options, footer and scrollbar use plane 130. Embedded views retain those relative offsets inside their owning floating window. This uses the existing screen GUI and native text path. `tests/viewport_clipping.lua` checks both edges, retained redraws, input bounds and overlapping floating/dropdown surfaces.
 
-The docked Tools divider stores a normalized split in the Tools instance after the first drag. Composition clamps that preference to usable table and Tools bounds without rewriting it during resize. Its drag lease ends on release, Escape, focus loss, source/page changes, or closing/undocking Tools. Grid and Tools scroll independently; resizing does not edit a document or write gear bindings.
+Tools starts docked when the authoritative `epic_lut_preferences.tools_docked` setting is absent. Dock/Undock saves that setting before publishing a layout change; restoring it does not write settings, and failed saves retain the current layout. The docked Tools divider stores a normalized split in the Tools instance after the first drag. Composition clamps that preference to usable table and Tools bounds without rewriting it during resize. Its drag lease ends on release, Escape, focus loss, source/page changes, or closing/undocking Tools. Grid and Tools scroll independently; resizing does not edit a document or write gear bindings.
 
 Tag overlapping rectangle children with `ui_role` through the shared helpers. Allocation order is insufficient: unchanged native GUI IDs are retained while hover backgrounds, selected borders or gradient cells are recreated. `tests/window_render_order.lua` uses the actual composer and retained renderer to check native depth and allocation order together; `tests/render_order.lua` covers unchanged swatch fills under recreated selection borders.
 

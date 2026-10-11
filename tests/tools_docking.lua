@@ -1,7 +1,21 @@
 -- Actual menu/controller coverage for the shared floating and docked Tools.
 local ffi = require('ffi')
 local Core, Menu = dofile('vendor/menu/core.lua'), dofile('vendor/menu/menu.lua')
-local api = Core.new()
+local disk, writes, fail_save, notes = {}, 0, false, {}
+local store = {
+    load = function(id)
+        return disk[id] or {}
+    end,
+    save = function(id, values)
+        if fail_save and id == 'epic_lut_preferences' then
+            return false, 'Preference save unavailable'
+        end
+        writes = writes + 1
+        disk[id] = values
+        return true
+    end,
+}
+local api = Core.new(store)
 local document = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4) }
 for i = 0, 23 * 64 * 4 - 1 do
     document.data[i] = (i % 17) / 16
@@ -26,6 +40,7 @@ local imports = 0
 local editor = dofile('src/editor/lut_editor.lua').new(modules, function()
     return document
 end, function(value)
+    notes[#notes + 1] = value
     return value
 end, function()
     return true
@@ -100,6 +115,29 @@ import_control.on_activate = function()
 end
 local handle = api.register({ id = 'dock_test', name = 'Epic LUT', pages = pages })
 editor.attach(api, handle)
+local preferences = dofile('src/platform/preferences.lua').new()
+local mount_writes = writes
+preferences.mount(api)
+editor.tools.mount_preferences(preferences)
+assert(preferences.tools_docked() and writes == mount_writes, 'Default Tools layout read/mount wrote preferences')
+local function restored_layout(expected)
+    local count = writes
+    local restored_preferences = dofile('src/platform/preferences.lua').new()
+    restored_preferences.mount(Core.new(store))
+    local restored_tools = modules.editor_tools.new({
+        editor = editor,
+        document = function()
+            return document
+        end,
+    })
+    restored_tools.mount_preferences(restored_preferences)
+    restored_tools.open('rows')
+    assert(
+        restored_preferences.tools_docked() == expected and restored_tools.is_docked() == expected,
+        'Tools layout did not survive a new preferences/controller instance'
+    )
+    assert(writes == count, 'Reading/restoring Tools layout wrote or replaced the saved choice')
+end
 local mod = api.mods[handle.id]
 import_control = mod.controls.import_paydex_rows
 mod.tabs_top = true
@@ -222,7 +260,7 @@ local function click_icon(popup, mode)
         helped = helped or c.type == 'text' and (c.full_text or c.text or ''):find('^' .. mode .. ':') ~= nil
     end
     assert(helped, 'Docking icon hover lost its action tooltip: ' .. mode)
-    local position = menu.floating_positions.editor_tools
+    local position = menu.floating_positions and menu.floating_positions.editor_tools
     local old_x, old_y = position and position.x, position and position.y
     tap(x, y)
     assert(
@@ -233,7 +271,31 @@ local function click_icon(popup, mode)
 end
 local initial_pixels = ffi.string(document.data, document.width * document.height * 16)
 editor.tools.open('rows')
-assert(not editor.tools.is_docked(), 'Tools no longer defaults to its independent window')
+assert(editor.tools.is_docked(), 'Tools did not start docked by default')
+compose()
+local initial_bounds = assert(editor.tools.bounds)
+local before_layout = writes
+fail_save = true
+click_icon(false, 'Undock')
+assert(
+    editor.tools.is_docked() and writes == before_layout and preferences.tools_docked(),
+    'Failed Tools layout save changed or persisted the layout'
+)
+assert(
+    notes[#notes] == 'Could not save Tools layout: Preference save unavailable'
+        and editor.tools.bounds.x == initial_bounds.x
+        and editor.tools.bounds.y == initial_bounds.y
+        and editor.tools.bounds.w == initial_bounds.w
+        and editor.tools.bounds.h == initial_bounds.h,
+    'Failed Tools layout save lost its error or changed geometry'
+)
+fail_save = false
+click_icon(false, 'Undock')
+assert(
+    writes == before_layout + 1 and disk.epic_lut_preferences.tools_docked == false,
+    'Actual Undock icon did not persist exactly one choice'
+)
+restored_layout(false)
 do
     local floating_rows = compose()
     local icon = docking_icon(floating_rows, true)
@@ -262,6 +324,11 @@ do
     end
 end
 click_icon(true, 'Dock')
+assert(
+    writes == before_layout + 2 and disk.epic_lut_preferences.tools_docked == true,
+    'Actual Dock icon did not persist exactly one choice'
+)
+restored_layout(true)
 local commands = compose()
 tab_sets(commands, 1, 0)
 assert(editor.tools.is_open() and editor.tools.is_docked() and editor.tools.bounds, 'Dock did not retain active Tools')
@@ -502,5 +569,5 @@ assert(
 assert(not editor.tools.bounds, 'Closed Tools retained dock wheel ownership')
 package.loaded['epic.player_preview.v1'] = prior_preview
 print(
-    'PASS Tools docking: actual window icons/header tooltips, shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
+    'PASS Tools docking: persisted docked default and icon choices, no-write restoration/save failure, actual window icons/header tooltips, shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
 )

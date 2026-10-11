@@ -297,6 +297,7 @@ local function tab_color(text)
     end
     error('No shortcut surface: ' .. text)
 end
+editor.tools.set_docked(false) -- This section exercises independent floating windows.
 tap_label('Tools')
 commands = compose()
 assert(editor.tools.is_open() and menu.floating_bounds, 'Tools button did not open an actual floating window')

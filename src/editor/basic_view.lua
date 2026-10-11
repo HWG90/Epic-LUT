@@ -42,12 +42,12 @@ function B.new(info, select_row, help)
             ui.bounded(x, y, t, 14, color or white, ui.w - (x - ui.x) - 10, role)
         end
         local guidance = help.basic or {}
-        local function button(x, y, w, label, id, enabled, drawing)
+        local function button(x, y, w, label, id, enabled, drawing, height)
             local ui = drawing or ui
             local featured = enabled ~= false
                 and (id == 'populate_worn' or id == 'export_selected' or id == 'save_dds' or id == 'save_setup')
             local accent = featured and (id == 'populate_worn' and ui.load_color(state.load_seen) or { 244, 202, 53 })
-            ui.button(x, y, w, 28, label, function()
+            ui.button(x, y, w, height or 28, label, function()
                 ui.activate(id)
             end, {
                 enabled = enabled,
@@ -70,8 +70,13 @@ function B.new(info, select_row, help)
         local panels = state.raw and state.raw.basic
         button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
         local gap = ui.spacing and ui.spacing(4) or 4
-        local camo_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
-        local camo_heading_y = camo_y + 26 + gap
+        local control_height = ui.control_height and ui.control_height(14, 4, 28) or 28
+        local color_label_height = ui.control_height and ui.control_height(12, 1, 14) or 14
+        local color_height = math.max(22, control_height - gap)
+        local color_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
+        local colorway_y = color_y + color_height + color_label_height + gap * 2
+        local camo_y = colorway_y + control_height + gap
+        local camo_heading_y = camo_y + control_height + gap
         local cliptop, clipbottom = top - 142, camo_heading_y + math.max(heading_size, hint_size) + gap
         local region_height = math.max(0, cliptop - clipbottom)
         local half = (left - 26) / 2
@@ -80,7 +85,7 @@ function B.new(info, select_row, help)
             local panel = state.raw and state.raw.basic and state.raw.basic[kind]
             local document = state.palette_ready ~= false and panel and panel.document
             local rows = document and document.height or 0
-            local maximum = math.max(0, rows * 29 + 11 - region_height)
+            local maximum = math.max(0, math.ceil(rows * 29 + 11 - region_height))
             local scroll = math.min(self.region_scroll[kind] or 0, maximum)
             self.region_maximum[kind], self.region_scroll[kind] = maximum, scroll
             self.region_bounds[kind] = { x = x, y = clipbottom, w = half, h = region_height }
@@ -156,6 +161,27 @@ function B.new(info, select_row, help)
                 'hint'
             )
             ui.choice('basic_' .. kind .. '_camo', x, camo_y, half)
+            ui.choice('basic_' .. kind .. '_camo_colorway', x, colorway_y, half)
+            local camo_editable = document and document.width >= 23 and document.height > 0 and not state.busy
+            local color_width = (half - gap * 3) / 4
+            for color = 1, 4 do
+                local cx = x + (color - 1) * (color_width + gap)
+                local rgb = { 65, 68, 67 }
+                if camo_editable then
+                    for channel = 0, 2 do
+                        local value = document.data[(15 + color) * 4 + channel]
+                        rgb[channel + 1] = math.floor(math.max(0, math.min(1, value)) * 255 + 0.5)
+                    end
+                end
+                ui.bounded(cx, color_y + color_height + gap, tostring(color), 12, muted, color_width, 'hint')
+                ui.rect(cx, color_y, color_width, color_height, rgb)
+                if camo_editable then
+                    local control = 'basic_' .. kind .. '_camo_color_' .. color
+                    ui.hit(cx, color_y, color_width, color_height, function()
+                        ui.activate(control, nil, 1)
+                    end, nil, nil, 'Edit Camo color ' .. color .. ' for all regions in this LUT.')
+                end
+            end
             if ui.scrollbar and maximum > 0 and region_height > 0 then
                 ui.scrollbar(
                     'basic_' .. kind .. '_regions',
@@ -208,211 +234,223 @@ function B.new(info, select_row, help)
         if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
             ui.button(right, ui.y - 24, 150, 28, 'Player Preview', portrait.toggle)
         end
-        -- Keep the action pane reachable at Basic's compact window height.
+        -- Lay out the action column from its measured content. Status and dirty
+        -- guidance belong to the same scroll range as the controls they describe.
+        -- A fixed footer notice used to paint over Open Export Location.
         local clip_top, clip_bottom = top - 30, ui.y + 12
-        local viewport = clip_top - clip_bottom
-        self.action_bounds = { x = right, y = clip_bottom, w = width + 8, h = viewport }
-        self.action_maximum = math.max(0, (state.loaded and 601 or 491) + (bulk_dds and 34 or 0) - ui.h + 12)
-        self.action_scroll = math.min(self.action_scroll, self.action_maximum)
-        local base_ui, offset = ui, self.action_scroll
-        local function visible(y, height)
-            return y >= clip_bottom and y + height <= clip_top
+        local viewport = math.max(1, clip_top - clip_bottom)
+        local rows, depth = {}, 0
+        local function add(height, draw, after)
+            rows[#rows + 1] = { depth = depth, height = height, draw = draw }
+            depth = depth + height + (after == nil and gap * 1.5 or after)
         end
-        local actions = setmetatable({}, { __index = ui })
-        actions.rect = function(x, y, w, height, color, alpha)
-            y = y + offset
-            local bottom, upper = math.max(clip_bottom, y), math.min(clip_top, y + height)
-            if upper > bottom then
-                base_ui.rect(x, bottom, w, upper - bottom, color, alpha)
+        local function measure(value, size, role)
+            if ui.text_width then
+                return ui.text_width(value, size, role)
             end
+            return #value * (ui.text_size and ui.text_size(size, role) or size) * 0.62
         end
-        for _, name in ipairs({ 'text', 'bounded' }) do
-            actions[name] = function(x, y, value, size, color, w, role)
-                y = y + offset
-                if name == 'text' then
-                    role = w
-                end
-                local height = base_ui.text_size and base_ui.text_size(size, role) or size
-                if visible(y, height) then
-                    if name == 'text' then
-                        base_ui[name](x, y, value, size, color, role)
+        local function paragraph(value, role, color, after)
+            value = tostring(value or '')
+            if value == '' then
+                return
+            end
+            local size = role == 'heading' and 14 or 13
+            local line_height = ui.control_height and ui.control_height(size, 1, 0, role)
+                or (ui.text_size and ui.text_size(size, role) or size) + gap
+            local lines = {}
+            for source in (value .. '\n'):gmatch('(.-)\n') do
+                local line = ''
+                for word in source:gmatch('%S+') do
+                    local candidate = line == '' and word or line .. ' ' .. word
+                    if line ~= '' and measure(candidate, size, role) > width - 4 then
+                        lines[#lines + 1], line = line, word
                     else
-                        base_ui[name](x, y, value, size, color, w, role)
+                        line = candidate
                     end
                 end
+                lines[#lines + 1] = line
             end
-        end
-        actions.hit = function(x, y, w, height, ...)
-            y = y + offset
-            if visible(y, height) then
-                base_ui.hit(x, y, w, height, ...)
-            end
-        end
-        actions.choice = function(id, x, y, w)
-            y = y + offset
-            if visible(y, 26) then
-                base_ui.choice(id, x, y, w)
-            end
-        end
-        actions.hovering = function(x, y, w, h)
-            return visible(y + offset, h) and base_ui.hovering(x, y + offset, w, h)
-        end
-        ui.decorate(actions)
-        local draw_button = button
-        do
-            local ui = actions
-            local function text(x, y, value, role)
-                ui.bounded(x, y, value, 14, white, width, role)
-            end
-            local function button(x, y, w, label, id, enabled)
-                draw_button(x, y, w, label, id, enabled, actions)
-            end
-            for _, position in ipairs(state.loaded and { 260, 393, 430 } or { 150, 283, 320 }) do
-                ui.rect(right, top - position, width, 1, divider)
-            end
-            text(right, top - 48, 'Import a palette (optional)', 'heading')
-            button(right, top - 85, width, 'Import DDS / ZIP / RAR...', 'browse')
-            if state.busy then
-                ui.bounded(
-                    right,
-                    top - 115,
-                    (state.import_detail or state.phase or 'Importing...')
-                        .. (state.waiting and '' or ' / ' .. (state.progress or 0) .. '% completed'),
-                    12,
-                    muted,
-                    width,
-                    'hint'
-                )
-            else
-                local plan = state.raw and state.raw.matching
-                text(
-                    right,
-                    top - 115,
-                    state.loaded
-                            and plan
-                            and ((plan.total or state.palette_count or 0) .. ' imported / ' .. plan.matched .. ' matched / ' .. math.max(
-                                0,
-                                (plan.total or state.palette_count or 0) - plan.matched
-                            ) .. ' for manual assignment')
-                        or 'Color changes apply live. Region label: identify.',
-                    'hint'
-                )
-            end
-            if (state.palette_count or 0) > 1 then
-                local plan = state.raw and state.raw.matching
-                button(
-                    right,
-                    top - 150,
-                    width,
-                    'Apply Matching LUTs',
-                    'apply_matching',
-                    plan and plan.matched > 0 and not state.busy
-                )
-            end
-            if state.loaded then
-                local document = state.loaded
-                local size = math.min(28, width / document.height)
-                for row = 1, document.height do
-                    local at = (row - 1) * document.width * 4
-                    local color = {}
-                    for ch = 0, 2 do
-                        color[#color + 1] = math.floor(math.max(0, math.min(1, document.data[at + ch])) * 255 + 0.5)
-                    end
-                    ui.rect(right + (row - 1) * size, top - 177, size - 2, 14, color)
+            if ui.text_metrics then
+                for _, line in ipairs(lines) do
+                    local ink = ui.text_metrics(size, line, role)
+                    line_height = math.max(line_height, ink.height + gap / 2)
                 end
             end
-            if state.loaded then
-                ui.choice('palette', right, top - 207, width)
-                local source = state.loaded ~= nil and not state.busy
-                local index = state.palette_index or 1
-                button(
-                    right,
-                    top - 241,
-                    (width - 6) / 2,
-                    'Apply LUT ' .. index .. ' to All Armor',
-                    'apply_file_armor',
-                    source
-                )
-                button(
-                    right + (width + 6) / 2,
-                    top - 241,
-                    (width - 6) / 2,
-                    'Apply LUT ' .. index .. ' to All Helmet',
-                    'apply_file_helmet',
-                    source
-                )
-            end
-            local saved_top = top + (state.loaded and 0 or 110)
-            text(right, saved_top - 274, 'Armory Presets', 'heading')
-            ui.choice('outfit_preset', right, saved_top - 307, width)
-            button(
-                right,
-                saved_top - 341,
-                (width - 6) / 2,
-                'Apply Preset Armor',
-                'outfit_apply_armor',
-                state.raw and state.raw.outfit and #state.raw.outfit.armor > 0
-            )
-            button(
-                right + (width + 6) / 2,
-                saved_top - 341,
-                (width - 6) / 2,
-                'Apply Preset Helmet',
-                'outfit_apply_helmet',
-                state.raw and state.raw.outfit and #state.raw.outfit.helmet > 0
-            )
-            button(right, saved_top - 375, width, 'Save to Armory', 'save_setup')
-            button(right, saved_top - 409, (width - 6) / 2, 'Undo', 'undo')
-            button(right + (width + 6) / 2, saved_top - 409, (width - 6) / 2, 'Redo', 'redo')
-            if state.loaded then
-                button(right, saved_top - 443, (width - 6) / 2, 'Restore Imported', 'restore_imported')
-                button(
-                    right + (width + 6) / 2,
-                    saved_top - 443,
-                    (width - 6) / 2,
-                    'Restore Arrowhead LUT (Original)',
-                    'restore'
-                )
-            else
-                button(right, saved_top - 443, width, 'Restore Arrowhead LUT (Original)', 'restore')
-            end
-            ui.bounded(right, saved_top - 468, state.status or '', 13, muted, width, 'hint')
-            ui.rect(right, saved_top - 471, width, 1, theme.line)
-            text(right, saved_top - 495, 'Export', 'heading')
-            button(
-                right,
-                saved_top - 533,
-                width,
-                'Name: ' .. (ui.input_value and ui.input_value('save_name') or state.export_name or 'Epic-LUT-edited'),
-                'save_name'
-            )
-            button(
-                right,
-                saved_top - 567,
-                width * 0.35 - 3,
-                'Export...',
-                'export_selected',
-                (state.editor ~= nil or state.export_format == 3 or bulk_dds) and not state.busy
-            )
-            ui.choice('export_format', right + width * 0.35 + 3, saved_top - 567, width * 0.65 - 3)
-            if bulk_dds then
-                ui.choice('dds_naming', right, saved_top - 601, width)
-            end
-            button(right, saved_top - (bulk_dds and 635 or 601), width, 'Open Export Location', 'open_export')
+            add(#lines * line_height, function(drawing, y)
+                for index, line in ipairs(lines) do
+                    local ly = y + (#lines - index) * line_height
+                    local baseline = drawing.text_y and drawing.text_y(ly, line_height, size, line, role) or ly
+                    drawing.bounded(right, baseline, line, size, color or white, width, role)
+                end
+            end, after)
         end
-        if self.action_maximum > 0 then
-            local thumb = math.max(24, viewport * viewport / (viewport + self.action_maximum))
-            ui.rect(right + width + 3, clip_bottom, 4, viewport, divider)
-            ui.rect(
-                right + width + 2,
-                clip_top - thumb - (viewport - thumb) * self.action_scroll / self.action_maximum,
-                6,
-                thumb,
+        local function buttons(items, after)
+            add(control_height, function(drawing, y)
+                local count = #items
+                local w = (width - gap * (count - 1)) / count
+                for index, item in ipairs(items) do
+                    button(right + (index - 1) * (w + gap), y, w, item[1], item[2], item[3], drawing, control_height)
+                end
+            end, after)
+        end
+        local function choice(id, after)
+            add(control_height, function(drawing, y)
+                drawing.choice(id, right, y, width)
+            end, after)
+        end
+        local function divider_row()
+            add(1, function(drawing, y)
+                drawing.rect(right, y, width, 1, divider)
+            end, gap * 2)
+        end
+        paragraph('Import a palette (optional)', 'heading')
+        buttons({ { 'Import DDS / ZIP / RAR...', 'browse' } })
+        local plan = state.raw and state.raw.matching
+        if state.busy then
+            paragraph(
+                (state.import_detail or state.phase or 'Importing...')
+                    .. (state.waiting and '' or ' / ' .. (state.progress or 0) .. '% completed'),
+                'hint',
+                muted
+            )
+        else
+            paragraph(
+                state.loaded
+                        and plan
+                        and ((plan.total or state.palette_count or 0) .. ' imported / ' .. plan.matched .. ' matched / ' .. math.max(
+                            0,
+                            (plan.total or state.palette_count or 0) - plan.matched
+                        ) .. ' for manual assignment')
+                    or 'Color changes apply live. Region label: identify.',
+                'hint',
                 muted
             )
         end
+        if (state.palette_count or 0) > 1 then
+            buttons({ { 'Apply Matching LUTs', 'apply_matching', plan and plan.matched > 0 and not state.busy } })
+        end
+        if state.loaded then
+            local document = state.loaded
+            add(14, function(drawing, y)
+                local size = math.min(28, width / document.height)
+                for row = 1, document.height do
+                    local at, color = (row - 1) * document.width * 4, {}
+                    for channel = 0, 2 do
+                        color[#color + 1] =
+                            math.floor(math.max(0, math.min(1, document.data[at + channel])) * 255 + 0.5)
+                    end
+                    drawing.rect(right + (row - 1) * size, y, size - 2, 14, color)
+                end
+            end)
+            choice('palette')
+            local index, source = state.palette_index or 1, not state.busy
+            buttons({
+                { 'Apply LUT ' .. index .. ' to All Armor', 'apply_file_armor', source },
+                { 'Apply LUT ' .. index .. ' to All Helmet', 'apply_file_helmet', source },
+            })
+        end
+        divider_row()
+        paragraph('Armory Presets', 'heading')
+        choice('outfit_preset')
+        buttons({
+            {
+                'Apply Preset Armor',
+                'outfit_apply_armor',
+                state.raw and state.raw.outfit and #state.raw.outfit.armor > 0,
+            },
+            {
+                'Apply Preset Helmet',
+                'outfit_apply_helmet',
+                state.raw and state.raw.outfit and #state.raw.outfit.helmet > 0,
+            },
+        })
+        buttons({ { 'Save to Armory', 'save_setup' } })
+        buttons({ { 'Undo', 'undo' }, { 'Redo', 'redo' } })
+        if state.loaded then
+            buttons(
+                { { 'Restore Imported', 'restore_imported' }, { 'Restore Arrowhead LUT (Original)', 'restore' } },
+                gap * 2
+            )
+        else
+            buttons({ { 'Restore Arrowhead LUT (Original)', 'restore' } }, gap * 2)
+        end
+        paragraph(state.status, 'hint', muted, gap * 2)
+        divider_row()
+        paragraph('Export', 'heading')
+        buttons({
+            {
+                'Name: ' .. (ui.input_value and ui.input_value('save_name') or state.export_name or 'Epic-LUT-edited'),
+                'save_name',
+            },
+        })
+        add(control_height, function(drawing, y)
+            button(
+                right,
+                y,
+                width * 0.35 - gap / 2,
+                'Export...',
+                'export_selected',
+                (state.editor ~= nil or state.export_format == 3 or bulk_dds) and not state.busy,
+                drawing,
+                control_height
+            )
+            drawing.choice('export_format', right + width * 0.35 + gap / 2, y, width * 0.65 - gap / 2)
+        end)
+        if bulk_dds then
+            choice('dds_naming')
+        end
+        buttons({ { 'Open Export Location', 'open_export' } }, state.dirty and gap * 2 or gap)
         if state.dirty then
-            text(right, ui.y + 20, 'Modified - save or export to keep your colors.')
+            paragraph('Modified - save or export to keep your colors.', 'hint', muted, gap)
+        end
+        self.action_bounds = { x = right, y = clip_bottom, w = width, h = viewport }
+        self.action_maximum = math.max(0, depth - viewport)
+        self.action_scroll = math.max(0, math.min(self.action_scroll, self.action_maximum))
+        local base_ui, offset = ui, self.action_scroll
+        local actions = setmetatable({}, { __index = ui })
+        actions.rect = function(x, y, w, height, ...)
+            base_ui.rect(x, y + offset, w, height, ...)
+        end
+        actions.text = function(x, y, ...)
+            base_ui.text(x, y + offset, ...)
+        end
+        actions.bounded = function(x, y, ...)
+            base_ui.bounded(x, y + offset, ...)
+        end
+        actions.hit = function(x, y, ...)
+            base_ui.hit(x, y + offset, ...)
+        end
+        actions.choice = function(id, x, y, ...)
+            base_ui.choice(id, x, y + offset, ...)
+        end
+        actions.hovering = function(x, y, w, h)
+            return y + offset < clip_top and y + offset + h > clip_bottom and base_ui.hovering(x, y + offset, w, h)
+        end
+        ui.decorate(actions)
+        local function draw_actions()
+            for _, row in ipairs(rows) do
+                row.draw(actions, clip_top - row.depth - row.height)
+            end
+        end
+        if ui.viewport then
+            ui.viewport(self.action_bounds, draw_actions, { top = top, bottom = ui.y, color = theme.background })
+        else
+            draw_actions()
+        end
+        if ui.scrollbar then
+            ui.scrollbar(
+                'basic_actions',
+                right + width + 3,
+                clip_bottom,
+                viewport,
+                depth,
+                viewport,
+                self.action_scroll,
+                function(value)
+                    self.action_scroll = value
+                end
+            )
         end
     end
     return self

@@ -12,6 +12,8 @@ The current game's ArmorTemplate binds `CustomizationCamoTilerArray` (slot `0f5f
 
 SDK inspection at commit `5a886256e54db52b5d228335eae20ce796f87fc0` also finds weapon `PaintSchemeArctic`, `PaintSchemeArcticCamo`, `PaintSchemeDesert`, `PaintSchemeDesertCamo`, `PaintSchemeForest`, `PaintSchemeForestCamo`, `PaintSchemeUrban` and `PaintSchemeUrbanCamo` shader variables. Their palettes and mappings to Armor mask indices are unverified, so the selector keeps numeric pattern names.
 
+Basic's Jungle, Desert, Urban and Arctic colorways are generated, weapon-inspired RGB palettes, not extracted PaintScheme values. They change only columns 17–20 RGB across the selected LUT's rows, using the same normalized raw RGB convention as existing color controls. All alpha, the chosen mask and scale remain intact. Individual swatches edit one of those RGB columns across all rows; a mixed table displays the first row's color until it is applied. Picker changes commit once when Apply is pressed, rather than uploading a texture for every drag frame.
+
 ## Emission
 
 The current research mapping describes column 14 R as emission strength (small values around 0.001–0.06); other channels and dependencies are uncertain. It is **not a confirmed RGB emission-color picker**. Effect protection makes it read-only and disables the irrelevant color picker. Deliberately unlock material effects to experiment with raw strength; this does not establish that every shader consumes it the same way.

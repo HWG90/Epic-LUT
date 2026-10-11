@@ -277,14 +277,35 @@ do
     state.raw.outfit = { armor = { document }, cape = { document }, helmet = { document } }
     state.armory_cape_available = true
     view.sidebar_scroll = 0
-    assert(composed('Apply Preset Armor + Cape LUTs'), 'Armory combined action hides its Cape scope')
+    assert(composed('Apply Preset Armor LUTs'), 'Armory Armor apply action is missing')
+    assert(not composed('Apply Preset Armor + Cape LUTs'), 'Armory Armor action duplicates the separate Cape label')
+    tap_label('Apply Preset Armor LUTs')
+    assert(actions[#actions] == 'outfit_apply_armor', 'Armory Armor action used a Cape callback')
     tap_label('Apply Preset Cape LUTs')
     assert(actions[#actions] == 'outfit_apply_cape', 'Armory Cape action used an Armor/Helmet callback')
+    state.raw.outfit = { armor = {}, cape = { document }, helmet = {} }
+    local cape_only = #actions
+    tap_label('Apply Preset Armor LUTs')
+    assert(#actions == cape_only, 'Cape-only preset incorrectly enabled Apply Armor')
+    tap_label('Apply Preset Cape LUTs')
+    assert(
+        actions[#actions] == 'outfit_apply_cape' and #actions == cape_only + 1,
+        'Cape-only preset lost its separate Cape action'
+    )
+    menu.compose(1920, 1080)
+    view.sidebar_scroll = view.sidebar_maximum
+    assert(composed('Cape Only / 1 LUTs'), 'Cape-only preset was counted as Armor')
+    state.raw.outfit = { armor = { document }, cape = { document }, helmet = { document } }
+    menu.compose(1920, 1080)
+    view.sidebar_scroll = view.sidebar_maximum
+    assert(composed('Armor + Cape + Helmet / 3 LUTs'), 'Saved Cape count was hidden in Armor count')
+    view.sidebar_scroll = 0
     state.armory_cape_available = false
     local count = #actions
     tap_label('Apply Preset Cape LUTs')
     assert(#actions == count, 'Armory Cape action stays clickable without a matching current Cape')
     state.raw.outfit = nil
+    state.armory_cape_available = true
     tap_label('Apply Preset Cape LUTs')
     assert(#actions == count, 'Armory Cape action stays clickable without a selected preset')
     state.raw.outfit, state.armory_cape_available = previous, nil

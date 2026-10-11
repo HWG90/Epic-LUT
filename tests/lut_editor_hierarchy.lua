@@ -115,6 +115,7 @@ local handle = api.register({ id = 'hierarchy', name = 'Epic LUT', pages = pages
 local mod = api.mods[handle.id]
 mod.tabs_top = true
 editor.attach(api, handle)
+editor.tools.set_docked(false) -- Popup hierarchy checks use the floating toolbox.
 pattern.attach(handle, mod.controls)
 editor.pattern_editor = pattern
 editor.can_select_gear = function()

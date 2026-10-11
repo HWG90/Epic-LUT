@@ -22,6 +22,7 @@ function P.new(storage)
                     controls = {
                         { id = 'load_current_seen', type = 'toggle', label = 'Load current cue seen', default = false },
                         { id = 'pattern_load_seen', type = 'toggle', label = 'Pattern load cue seen', default = false },
+                        { id = 'tools_docked', type = 'toggle', label = 'Dock LUT Editor Tools', default = true },
                         {
                             id = 'basic_key',
                             type = 'keybind',
@@ -123,6 +124,15 @@ function P.new(storage)
     end
     function self.load_seen(pattern)
         return self.handle and self.handle.get(pattern and 'pattern_load_seen' or 'load_current_seen') == true or false
+    end
+    function self.tools_docked()
+        return not self.handle or self.handle.get('tools_docked') ~= false
+    end
+    function self.save_tools_docked(value)
+        if self.handle then
+            return self.handle.set('tools_docked', value)
+        end
+        return false, 'Tools preferences are unavailable'
     end
     function self.mark_load_seen(pattern)
         if self.handle then

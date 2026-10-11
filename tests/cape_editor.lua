@@ -231,6 +231,7 @@ local m = {
         end,
     },
     armory_collection = dofile('src/presets/armory_collection.lua'),
+    outfit_targets = dofile('src/presets/outfit_targets.lua'),
     outfit_presets = {
         new = function()
             return {
@@ -420,9 +421,12 @@ assert(
 activate('restore')
 activate('outfit_apply_armor')
 assert(
-    bound[armor][1] ~= 1001 and bound[cape][1] == custom and bound[helmet][1] == 1002,
-    'Saved Armor+Cape preset did not apply separate same-hash destinations'
+    bound[armor][1] ~= 1001 and bound[cape][1] == 1001 and bound[helmet][1] == 1002,
+    'Armor preset action applied the separately controlled Cape/Helmet'
 )
+local armory_armor = bound[armor][1]
+activate('outfit_apply_cape')
+assert(bound[armor][1] == armory_armor and bound[cape][1] == custom and bound[helmet][1] == 1002)
 local before = saved_outfit
 gear_ready = false
 activate('save_setup')
@@ -611,6 +615,70 @@ do
             saved_outfit[entry.kind][#saved_outfit[entry.kind] + 1] = entry.document
         end
         assert(h.set('outfit_preset', 1) and h.set('outfit_preset', 2))
+    end
+    -- V1 mesh families can gain one LOD destination. Expand only a uniform
+    -- saved family; conflicting saved palettes cannot invent the fourth tint.
+    do
+        local armor_unit = units[1].unit
+        local prior_materials, prior_log = materials[armor_unit], ctx.log
+        local family, entries = {}, {}
+        local family_doc = m.basic_state.clone(stock)
+        family_doc.data[0] = 0.625
+        materials[armor_unit] = {}
+        for mesh = 1, 4 do
+            local material = armor + 40 + mesh
+            family[mesh] = material
+            materials[armor_unit][mesh] = {
+                mesh = material + 10,
+                material = material,
+                mesh_index = mesh,
+                material_index = 0,
+            }
+            bound[material] = { [1] = 4001, [3] = 0 }
+            entries[mesh] = { kind = 'armor', key = '0:2:' .. (mesh - 1) .. ':0', document = family_doc }
+        end
+        activate('populate_worn')
+        local extra_logs = 0
+        ctx.log = function(text)
+            if text:find('ARMORY_APPLY', 1, true) and text:find('slot=0:2:4:0 ', 1, true) then
+                assert(
+                    bound[family[4]][1] ~= 4001 and text:find('match=mesh-family verified=true', 1, true),
+                    'Extra-LOD success log preceded its verified native application'
+                )
+                extra_logs = extra_logs + 1
+            end
+        end
+        choose(entries)
+        activate('outfit_apply_armor')
+        local family_object = bound[family[1]][1]
+        for _, material in ipairs(family) do
+            assert(
+                bound[material][1] == family_object and family_object ~= 4001,
+                'Uniform saved family missed a live LOD'
+            )
+        end
+        assert(
+            extra_logs == 1 and bound[cape][1] == 4001 and bound[helmet][1] == 4002,
+            'LOD family expansion changed Cape/Helmet or lacked its verified match log'
+        )
+        activate('restore')
+        local conflicting = m.basic_state.clone(family_doc)
+        conflicting.data[0] = 0.875
+        entries[4] = { kind = 'armor', key = '0:2:3:0', document = conflicting }
+        choose(entries)
+        activate('outfit_apply_armor')
+        assert(
+            bound[family[1]][1] ~= 4001
+                and bound[family[3]][1] ~= 4001
+                and bound[family[4]][1] == 4001
+                and extra_logs == 1
+                and bound[cape][1] == 4001
+                and bound[helmet][1] == 4002,
+            'Conflicting saved mesh colors expanded onto an unmatched LOD'
+        )
+        activate('restore')
+        ctx.log, materials[armor_unit] = prior_log, prior_materials
+        activate('populate_worn')
     end
     choose({
         { kind = 'armor', key = '0:1:0:0', document = legacy_doc },
@@ -986,6 +1054,102 @@ do
         bound[armor][1] == armor_camo and bound[cape][1] == 6001 and bound[other][1] == 6003,
         'Helmet camo changed Armor/Cape/other resource'
     )
+    local function tinted(source, palette)
+        local values = ffi.new('float[736]')
+        ffi.copy(values, source, #source)
+        for color, hex in pairs(palette) do
+            for row = 1, 8 do
+                for channel = 0, 2 do
+                    values[((row - 1) * 23 + 15 + color) * 4 + channel] = tonumber(
+                        hex:sub(channel * 2 + 1, channel * 2 + 2),
+                        16
+                    ) / 255
+                end
+            end
+        end
+        return ffi.string(values, #source)
+    end
+    local helmet_object, color_history = bound[helmet][1], #action_history.undo
+    assert(h.set('basic_armor_camo_colorway', 3))
+    local colorway_object = bound[armor][1]
+    local colorway_bytes = tinted(bytes, m.basic_camo.COLORWAYS[2].colors)
+    assert(
+        uploads[colorway_object] == colorway_bytes
+            and ffi.string(basic_info().raw.basic.armor.document.data, #before) == colorway_bytes
+            and ffi.string(applied.data, #before) == bytes
+            and bound[same][1] == colorway_object
+            and bound[other][1] == 6003
+            and bound[cape][1] == 6001
+            and bound[helmet][1] == helmet_object,
+        'Basic colorway escaped its selected resource/kind or changed pattern/alpha/material bytes'
+    )
+    assert(#action_history.undo == color_history + 1, 'Whole-table colorway split its history action')
+    activate('global_undo')
+    assert(
+        bound[armor][1] == armor_camo
+            and bound[same][1] == armor_camo
+            and ffi.string(basic_info().raw.basic.armor.document.data, #before) == bytes,
+        'Colorway Undo did not restore its exact previous table'
+    )
+    activate('global_redo')
+    assert(bound[armor][1] == colorway_object and uploads[bound[same][1]] == colorway_bytes)
+    assert(h.set('basic_armor_camo_color_1', '#0A80FF'))
+    local c1_bytes = tinted(colorway_bytes, { [1] = '0A80FF' })
+    assert(
+        uploads[bound[armor][1]] == c1_bytes
+            and bound[same][1] == bound[armor][1]
+            and bound[other][1] == 6003
+            and bound[cape][1] == 6001
+            and bound[helmet][1] == helmet_object,
+        'C1 edit changed another tint, alpha, pattern or gear resource'
+    )
+    local mixed = basic_info().raw.basic.armor.document
+    for row = 2, mixed.height do
+        mixed.data[((row - 1) * 23 + 16) * 4] = 0.25
+    end
+    mixed.revision = mixed.revision + 1
+    basic_info()
+    assert(h.get('basic_armor_camo_color_1') == '#0A80FF')
+    local c1 = api.mods[h.id].controls.basic_armor_camo_color_1
+    assert(c1.can_open_picker())
+    frontend.menu.color_picker = { control = c1 }
+    color_history = #action_history.undo
+    local committed = c1.picker_commit('#0A80FF')
+    assert(
+        committed
+            and uploads[bound[armor][1]] == c1_bytes
+            and ffi.string(basic_info().raw.basic.armor.document.data, #before) == c1_bytes
+            and #action_history.undo == color_history + 1,
+        'Unchanged first-row picker value did not unify mixed lower rows in one action'
+    )
+    local old_color = basic_info().raw.basic.armor.document
+    local old_color_object = bound[armor][1]
+    color_history = #action_history.undo
+    fail_next = true
+    assert(c1.picker_commit('#010203') == false)
+    assert(
+        basic_info().raw.basic.armor.document == old_color
+            and ffi.string(old_color.data, #before) == c1_bytes
+            and bound[armor][1] == old_color_object
+            and bound[same][1] == old_color_object
+            and #action_history.undo == color_history,
+        'Failed camo color write published a new draft/history or lost its live table'
+    )
+    local other_choice
+    for index, target in ipairs(api.mods[h.id].controls.basic_armor_lut.choice_targets) do
+        if target.binding.original == 6003 then
+            other_choice = index
+        end
+    end
+    local count_before_switch = created
+    assert(h.set('basic_armor_lut', assert(other_choice)))
+    local allowed, reason = c1.can_open_picker()
+    assert(
+        not allowed and reason:find('selected LUT changed', 1, true) and created == count_before_switch,
+        'Open camo picker followed a changed selected resource'
+    )
+    frontend.menu.color_picker = nil
+    assert(h.set('basic_armor_lut', 1))
     assert(basic_select(1, 'helmet'))
     helmet_doc = basic_info().raw.basic.helmet.document
     local interacting, was_interacting = true, frontend.menu.is_interacting
@@ -1096,6 +1260,7 @@ do
     actor(8)
     armor, cape, helmet = current()
     local events, lut_handle = {}, nil
+    local frontend_closed, render_allowed, dismissed = false, false, false
     local retire = package.loaded['epic.direct_lut.retained.v1']
     local previous_records, previous_bytes = #retire.records, retire.bytes
     m.engine.create_texture = function(_, width, height, data)
@@ -1104,6 +1269,7 @@ do
             { handle = 100000 + created, object = 200000 + created, data = data, width = width, height = height }
         if width == 1 then
             assert(bound[armor][1] == 8001, 'Render drain preceded original binding restoration')
+            assert(not frontend_closed, 'Frontend closed before its texture retirement fence')
             events[#events + 1] = 'fence'
         else
             assert(width == 23 and height == 8)
@@ -1117,6 +1283,18 @@ do
     runtime.on_enable(ctx)
     runtime.on_update(ctx, 0)
     h = api.mods.epic_direct_lut.handle
+    frontend.render_ready = function()
+        return not frontend_closed and render_allowed
+    end
+    frontend.dismiss = function()
+        dismissed, frontend.menu.visible = true, false
+        return true
+    end
+    frontend.close = function()
+        frontend_closed = true
+        events[#events + 1] = 'close frontend'
+        return true
+    end
     activate('populate_worn')
     frontend.basic_mode = true
     api.focus_page(h.id, 'basic')
@@ -1130,12 +1308,25 @@ do
             return preview_closed
         end,
     }
+    frontend.menu.visible = true
+    local registered = api.mods[h.id]
     assert(runtime.on_disable(ctx) == false and #events == 0, 'Texture disposal ran while preview cleanup was pending')
+    assert(
+        dismissed and not frontend.menu.visible and not frontend_closed and api.mods[h.id] == registered,
+        'Pending cleanup closed/unregistered the frontend instead of dismissing it'
+    )
     preview_closed = true
+    assert(
+        runtime.on_disable(ctx) == false and #events == 0 and not frontend_closed and api.mods[h.id] == registered,
+        'Waiting for render readiness closed the probe required to drain queued textures'
+    )
+    render_allowed = true
     assert(runtime.on_disable(ctx) ~= false)
     package.loaded['epic.player_preview.v1'] = nil
     assert(
-        table.concat(events, ',') == 'fence,destroy fence,destroy LUT,fence,destroy fence',
+        table.concat(events, ',') == 'fence,destroy fence,destroy LUT,fence,destroy fence,close frontend'
+            and frontend_closed
+            and not api.mods[h.id],
         'Complete cleanup omitted or reordered a texture retirement fence'
     )
     assert(

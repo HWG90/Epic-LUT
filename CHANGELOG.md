@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep Armor and Cape preset application separate. Adapt unmatched LOD meshes only when the saved piece/material family has identical palettes and an exact live match proves the current resource and dimensions; log successful preset binds after readback.
+- Finish texture retirement before closing the frontend's render-readiness service, preventing a cleanup deadlock that blocked LLL reloads.
 - Reclaim eligible owned LUT textures after complete addon cleanup using binding readback and two render fences; retain uncertain or legacy allocations. Give editing a bounded 64 MiB / 16,384-record budget and coalesce continuous material edits to 15 live uploads per second, flushing the final value when editing ends.
 - Restore owned material and Pattern LUTs together through action Undo/Redo, preflight both slots and roll back partial failures without overwriting another mod's bindings.
 - Add independent Apply Cape in The Armory, matching saved Cape material and Pattern entries to current Cape destinations, with support for older Armor-labelled Cape entries.
@@ -9,6 +11,9 @@
 - Select held Idle, Salute, Wave, Taunt and High Five poses in Player Preview; keep Idle as the default and load real game emote tracks only when selected.
 - Replace Tools' Dock/Undock text controls with opposing window icons beside Close; preserve tooltips and a separate draggable title area.
 - Begin controller refactoring by separating file-picker requests, retries, progress and worker polling into `import_picker`; preserve result acceptance and native ownership in the editor.
+- Start Tools docked and remember the last Dock/Undock choice across reloads.
+- Add generated Jungle, Desert, Urban and Arctic colorways and four editable camo colors to Basic Mode; preserve the pattern, scale and all material alpha values.
+- Place Basic's modified-color notice inside the scrolling action pane and measure wrapped content to prevent overlapping export controls.
 - Resize docked Tools vertically with a draggable divider; retain the split across window resizing and redocking without changing LUT data.
 - Keep partially visible Value Editor text rendering at both scroll edges, with clipped controls and fixed chrome above the scrolling content.
 - Align Value Editor labels and numeric fields to measured font bounds; add thumb/track dragging and finer scrolling without clipping beneath its header.

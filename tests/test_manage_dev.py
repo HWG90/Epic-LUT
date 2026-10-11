@@ -395,10 +395,11 @@ class ManagedDevelopment(unittest.TestCase):
         old_defaults = b'{"preferences":{"menu_key":121,"include_capes_in_armor_exports":true},"other":{"keep":[false,1,"x"]}}\n'
         updated = json.loads(old_defaults)
         updated['preferences']['include_patterns_in_exports'] = True
+        updated['preferences']['tools_docked'] = True
         new_defaults = (json.dumps(updated, indent=2)+'\n').encode()
         before = self.install_modular_fixture(defaults=old_defaults)
         settings = self.target/'config/settings.cfg'
-        settings.write_bytes(b'{"preferences":{"menu_key":45,"include_patterns_in_exports":false}}\n')
+        settings.write_bytes(b'{"preferences":{"menu_key":45,"include_patterns_in_exports":false,"tools_docked":false}}\n')
         settings_before = settings.read_bytes()
         candidate = dev.read_package(modular_package(self.root/'pattern-default.zip', 'static', 'e'*32, defaults=new_defaults))
         preflight = dev.deploy(self.root, candidate, 'static', target=self.target)
@@ -428,11 +429,11 @@ class ManagedDevelopment(unittest.TestCase):
         self.assertEqual(dev.deploy(self.root, candidate, 'static', target=self.target)['changed_files'], [])
 
     def test_pattern_default_partial_failure_restores_defaults_and_inventory(self):
-        old_defaults = b'{"preferences":{"menu_key":121}}\n'
-        new_defaults = b'{"preferences":{"menu_key":121,"include_patterns_in_exports":true}}\n'
+        old_defaults = b'{"preferences":{"menu_key":121,"include_patterns_in_exports":true}}\n'
+        new_defaults = b'{"preferences":{"menu_key":121,"include_patterns_in_exports":true,"tools_docked":true}}\n'
         before = self.install_modular_fixture(defaults=old_defaults)
         settings = self.target/'config/settings.cfg'
-        settings.write_bytes(b'{"preferences":{"include_capes_in_armor_exports":false}}\n')
+        settings.write_bytes(b'{"preferences":{"include_capes_in_armor_exports":false,"tools_docked":false}}\n')
         settings_before = settings.read_bytes()
         candidate = dev.read_package(modular_package(self.root/'failed-pattern-default.zip', 'animation', 'f'*32, defaults=new_defaults))
         original_replace = dev.replace_pair
@@ -462,6 +463,7 @@ class ManagedDevelopment(unittest.TestCase):
         def variant(change):
             value = json.loads(json.dumps(baseline))
             value['preferences']['include_patterns_in_exports'] = True
+            value['preferences']['tools_docked'] = True
             change(value)
             variants.append(value)
         variant(lambda v: v['preferences'].update(menu_key=45))
@@ -473,19 +475,23 @@ class ManagedDevelopment(unittest.TestCase):
         variant(lambda v: v['other']['keep'].__setitem__(0, 0))
         variant(lambda v: v['preferences'].update(include_patterns_in_exports=False))
         variant(lambda v: v['preferences'].update(include_patterns_in_exports=1))
+        variant(lambda v: v['preferences'].update(tools_docked=False))
+        variant(lambda v: v['preferences'].update(tools_docked=1))
         for index, defaults in enumerate(variants):
             with self.subTest(index=index):
                 candidate = dev.read_package(modular_package(self.root/f'rejected-{index}.zip', 'static', defaults=json.dumps(defaults).encode()))
                 with self.assertRaisesRegex(RuntimeError, 'Protected modular defaults'):
                     dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
                 self.assertEqual(dev.installed_files(self.target), before)
-        existing = {'preferences': {'include_patterns_in_exports': False}}
-        before = self.install_modular_fixture(defaults=json.dumps(existing).encode())
-        existing['preferences']['include_patterns_in_exports'] = True
-        candidate = dev.read_package(modular_package(self.root/'changed-pattern.zip', 'static', defaults=json.dumps(existing).encode()))
-        with self.assertRaisesRegex(RuntimeError, 'may only add'):
-            dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
-        self.assertEqual(dev.installed_files(self.target), before)
+        for key in ('include_patterns_in_exports', 'tools_docked'):
+            with self.subTest(existing_false=key):
+                existing = {'preferences': {key: False}}
+                before = self.install_modular_fixture(defaults=json.dumps(existing).encode())
+                existing['preferences'][key] = True
+                candidate = dev.read_package(modular_package(self.root/f'changed-{key}.zip', 'static', defaults=json.dumps(existing).encode()))
+                with self.assertRaisesRegex(RuntimeError, 'may only add'):
+                    dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+                self.assertEqual(dev.installed_files(self.target), before)
 
 
 if __name__ == '__main__':

@@ -28,7 +28,7 @@ end
 
 function T.new(deps)
     local editor, document = deps.editor, deps.document
-    local self = { tab = 'import', docked = false, scroll = 0 }
+    local self = { tab = 'import', docked = true, scroll = 0 }
     local opened = false
 
     function self.open(tab)
@@ -49,9 +49,30 @@ function T.new(deps)
     function self.is_docked()
         return self.docked
     end
+    function self.mount_preferences(preferences)
+        self.preferences = preferences
+        if preferences and preferences.tools_docked then
+            self.docked = preferences.tools_docked() ~= false
+            self.bounds = nil
+        end
+    end
     function self.set_docked(value)
-        self.docked = not not value
+        value = not not value
+        if value == self.docked then
+            return true
+        end
+        if self.preferences and self.preferences.save_tools_docked then
+            local ok, why = self.preferences.save_tools_docked(value)
+            if not ok then
+                if deps.note then
+                    deps.note('Could not save Tools layout: ' .. tostring(why))
+                end
+                return false, why
+            end
+        end
+        self.docked = value
         self.bounds = nil
+        return true
     end
     function self.wheel(x, y, delta)
         local b = self.bounds

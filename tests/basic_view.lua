@@ -70,6 +70,22 @@ for _, kind in ipairs({ 'armor', 'helmet' }) do
         choices = { 'Off', 'Pattern 0', 'Pattern 1' },
         default = 1,
     }
+    controls[#controls + 1] = {
+        id = 'basic_' .. kind .. '_camo_colorway',
+        type = 'choice',
+        presentation = 'dropdown',
+        label = kind .. ' Camo colorway',
+        choices = { 'Current / custom', 'Jungle', 'Desert', 'Urban', 'Arctic' },
+        default = 1,
+    }
+    for color = 1, 4 do
+        controls[#controls + 1] = {
+            id = 'basic_' .. kind .. '_camo_color_' .. color,
+            type = 'color',
+            label = 'Camo color ' .. color,
+            default = '#808080',
+        }
+    end
 end
 for _, kind in ipairs({ 'armor', 'helmet' }) do
     controls[#controls + 1] = {
@@ -204,7 +220,21 @@ assert(
         and imported_labels['Single LUT Import'],
     'Loaded import controls missing'
 )
-assert(regions == 16 and row8, 'Basic did not fit both eight-region palettes: ' .. regions)
+assert(regions >= 2, 'Basic did not show both region palettes: ' .. regions)
+-- Whole-LUT camo controls stay readable instead of shrinking the region rows.
+-- Compact Basic can scroll either gear column to expose the final region.
+for _, kind in ipairs({ 'armor', 'helmet' }) do
+    local bounds = view.region_bounds[kind]
+    view.wheel(bounds.x + 5, bounds.y + 5, -12000)
+    local last = false
+    for _, c in ipairs(menu.compose(1920, 1080)) do
+        if c.full_text == 'Region 8' then
+            last = true
+            row8 = c
+        end
+    end
+    assert(last, 'Compact Basic final region is not scrollable')
+end
 state.palette_count = 2
 state.raw.matching = { matched = 1, unmatched = 1, unidentified = 0, ambiguous = 0 }
 local matching = false
@@ -227,6 +257,8 @@ assert(
 for _, resolution in ipairs({ { 1920, 1080 }, { 1280, 720 } }) do
     for _, font in ipairs({ 12, 20 }) do
         menu.compact_fonts, menu.font_size = true, font
+        menu.compose(unpack(resolution))
+        view.action_scroll = view.action_maximum
         local export_labels = {}
         for _, c in ipairs(menu.compose(unpack(resolution))) do
             if c.full_text then
@@ -488,9 +520,134 @@ assert(
 api.mods.basic_test.controls.basic_helmet_camo.disabled = true
 tap(assert(column_label(menu.compose(1920, 1080), 'helmet', 'Off')))
 assert(not menu.dropdown, 'Registry-disabled Camo opened an editable dropdown')
+
+-- Camo colorways and four independent RGB pickers share the per-gear footer.
+-- Their swatches read the camo tint columns, never the primary color or alpha.
+for color = 1, 4 do
+    local at = (15 + color) * 4
+    camo_data[at], camo_data[at + 1], camo_data[at + 2], camo_data[at + 3] = color / 5, 0.3, 0.4, 0.91
+end
+local tint_commands = menu.compose(1920, 1080)
+for _, kind in ipairs({ 'armor', 'helmet' }) do
+    tap(assert(column_label(tint_commands, kind, 'Current / custom')))
+    assert(menu.dropdown and menu.dropdown.control.id == 'basic_' .. kind .. '_camo_colorway')
+    menu.key(27)
+    for color = 1, 4 do
+        local label = assert(column_label(menu.compose(1920, 1080), kind, tostring(color)))
+        local scale = menu.window_bounds.scale
+        local swatch
+        for _, c in ipairs(menu.compose(1920, 1080)) do
+            if
+                c.type == 'rect'
+                and math.abs(c.x - label.x) < 0.01
+                and c.y < label.y
+                and c.c[1] == math.floor(color / 5 * 255 + 0.5)
+                and c.c[2] == 77
+                and c.c[3] == 102
+            then
+                swatch = c
+            end
+        end
+        assert(swatch, 'Camo RGB swatch read the wrong column')
+        tap({ x = swatch.x + 2 * scale, y = swatch.y + 2 * scale })
+        assert(
+            menu.color_picker and menu.color_picker.control.id == 'basic_' .. kind .. '_camo_color_' .. color,
+            'Camo swatch opened the wrong RGB picker'
+        )
+        menu.close_color(false)
+    end
+end
+state.raw.basic.helmet.document = { data = ffi.new('float[?]', 16 * 5 * 4), width = 16, height = 5 }
+local narrow = menu.compose(1920, 1080)
+local narrow_label = assert(column_label(narrow, 'helmet', '1'))
+tap({ x = narrow_label.x + 2, y = narrow_label.y - 16 * menu.window_bounds.scale })
+assert(not menu.color_picker, 'Unsupported 16-column Cape exposed a Camo tint picker')
+state.raw.basic.helmet.document = camo_document
+
+-- Dirty guidance is content below the folder button, with its own measured
+-- rows. Long native-font status text expands the scroll range rather than
+-- overlapping controls or the fixed Basic footer.
+state.dirty = true
+state.status =
+    'Applied Jungle colorway to all 64 regions in this Armor LUT. Exact colors are preserved when exported; save this appearance before switching to another preset.'
+local dirty_notice = 'Modified - save or export to keep your colors.'
+for _, loaded in ipairs({ false, true }) do
+    state.loaded = loaded and saved_editor or nil
+    for _, font in ipairs({ 12, 20 }) do
+        for _, resolution in ipairs({ { 1280, 720 }, { 1920, 1080 } }) do
+            menu.font_size = font
+            menu.compose(unpack(resolution))
+            local maximum = view.action_maximum
+            state.dirty = false
+            menu.compose(unpack(resolution))
+            assert(maximum > view.action_maximum, 'Dirty notice did not reserve its own scroll space')
+            state.dirty = true
+            menu.compose(unpack(resolution))
+            view.action_scroll = view.action_maximum
+            local commands = menu.compose(unpack(resolution))
+            local folder, dirty_lines, scrollbar = nil, {}, nil
+            for _, c in ipairs(commands) do
+                local value = c.full_text or c.text
+                if value == 'Open Export Location' then
+                    folder = c
+                elseif c.text_role == 'hint' and value and dirty_notice:find(value, 1, true) then
+                    dirty_lines[#dirty_lines + 1] = c
+                end
+                if c.scrollbar == 'basic_actions' then
+                    scrollbar = c
+                end
+            end
+            assert(folder and #dirty_lines > 0 and scrollbar, 'Scrolled Basic dirty/footer content unreachable')
+            local window, bounds = menu.window_bounds, view.action_bounds
+            local lower = window.y + bounds.y * window.scale
+            for _, c in ipairs(dirty_lines) do
+                assert(c.y + 0.85 * c.size < folder.y - 0.2 * folder.size, 'Dirty notice overlaps Open Export Location')
+                assert(c.y - 0.2 * c.size >= lower, 'Dirty notice escaped the action viewport into footer')
+                assert(c.viewport, 'Dirty guidance lacks action viewport clipping')
+            end
+            local before_scroll = view.action_scroll
+            local sx, sy = scrollbar.x + 2, scrollbar.y + scrollbar.h / 2
+            menu.tick({
+                down = function(key)
+                    return key == 1
+                end,
+                mouse = function()
+                    return sx, sy
+                end,
+                wheel = function()
+                    return 0
+                end,
+            })
+            menu.tick({
+                down = function(key)
+                    return key == 1
+                end,
+                mouse = function()
+                    return sx, sy + 16
+                end,
+                wheel = function()
+                    return 0
+                end,
+            })
+            menu.tick({
+                down = function()
+                    return false
+                end,
+                mouse = function()
+                    return sx, sy + 16
+                end,
+                wheel = function()
+                    return 0
+                end,
+            })
+            assert(view.action_scroll < before_scroll, 'Basic action scrollbar did not drag')
+        end
+    end
+end
+state.dirty, state.status = false, 'Ready'
 print(
-    'PASS Basic Camo: fixed per-gear chooser, native font clearance, independent 64-row scrolling and clicks, imported footer separation, scaled layout and registry-disabled behavior'
+    'PASS Basic Camo: per-gear pattern/colorway choices and RGB pickers, unsupported Cape guard, independent 64-row scrolling, native font clearance and disabled behavior'
 )
 print(
-    'PASS Basic: eight primary regions at compact size, standard color picker, import/export/preset controls, no advanced fields'
+    'PASS Basic: primary color pickers, measured wrapped action content, dirty-notice separation, draggable scrolling and compact/scaled footer containment'
 )

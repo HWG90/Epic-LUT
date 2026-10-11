@@ -74,6 +74,7 @@ local tools = dofile('src/editor/editor_tools.lua').new({
         return { height = 8 }
     end,
 })
+tools.set_docked(false) -- This fixture renders the floating toolbox surface.
 api.mods[handle.id].tabs_top = true
 api.mods[handle.id].pages[1].render_layout = tools.popup
 local menu = Menu.new(api, function(value, size)

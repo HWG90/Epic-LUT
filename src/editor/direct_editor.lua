@@ -1192,16 +1192,28 @@ import_state = function()
                 unavailable = not doc and original_luts and original_luts.loaded and key ~= nil,
             }
             if m.basic_camo then
-                local camo = api.mods[handle.id].controls['basic_' .. container .. '_camo']
-                if camo then
-                    local disabled = pending ~= nil or not m.basic_camo.available(doc) or not group
-                    camo.disabled = false
-                    camo.choice_pattern_previews = operations.camo_thumbnails
-                    operations.syncing_basic_camo = true
-                    local called, ok, why = pcall(handle.set, camo.id, m.basic_camo.selection(doc))
-                    operations.syncing_basic_camo = false
-                    camo.disabled = disabled
-                    assert(called and ok, why or ok)
+                local prefix = 'basic_' .. container .. '_camo'
+                local values = { [prefix] = m.basic_camo.selection(doc) }
+                if m.basic_camo.colorway_selection then
+                    values[prefix .. '_colorway'] = m.basic_camo.colorway_selection(doc)
+                    for color = 1, 4 do
+                        values[prefix .. '_color_' .. color] = m.basic_camo.color(doc, color)
+                    end
+                end
+                for id, value in pairs(values) do
+                    local camo = api.mods[handle.id].controls[id]
+                    if camo then
+                        local disabled = pending ~= nil or not m.basic_camo.available(doc) or not group
+                        camo.disabled = false
+                        if id == prefix then
+                            camo.choice_pattern_previews = operations.camo_thumbnails
+                        end
+                        operations.syncing_basic_camo = true
+                        local called, ok, why = pcall(handle.set, camo.id, value)
+                        operations.syncing_basic_camo = false
+                        camo.disabled = disabled
+                        assert(called and ok, why or ok)
+                    end
                 end
             end
             if doc then
@@ -1383,7 +1395,7 @@ checked_editor_target = function(target)
     error('Cape material changed; load current Cape colors again')
 end
 operations.checked_editor_target = checked_editor_target
-local function apply_basic_camo(container, choice)
+local function apply_basic_camo(container, choice, mode, color)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
     local panel = import_state().raw.basic[container]
@@ -1398,7 +1410,7 @@ local function apply_basic_camo(container, choice)
     end
     assert(#targets > 0, 'Selected LUT has no current material bindings')
     local document = m.basic_state.copier().copy(panel.document)
-    local rows = m.basic_camo.apply(document, choice)
+    local rows, label = m.basic_camo.apply(document, choice, mode, color)
     local previous = operations.camo_write_target
     operations.camo_write_target = target
     local ok, count = pcall(apply_bindings, document, targets)
@@ -1421,7 +1433,7 @@ local function apply_basic_camo(container, choice)
     end
     return message(
         'Applied '
-            .. m.basic_camo.CHOICES[choice]
+            .. (label or m.basic_camo.CHOICES[choice])
             .. ' to all '
             .. rows
             .. ' regions in this '
@@ -1432,6 +1444,26 @@ local function apply_basic_camo(container, choice)
     )
 end
 operations.apply_basic_camo = apply_basic_camo
+function operations.basic_camo_picker_guard(control, container)
+    return function()
+        local panel = import_state().raw.basic[container]
+        if not panel or not m.basic_camo.available(panel.document) then
+            return false, 'Load a current material LUT first.'
+        end
+        local picker = frontend.menu and frontend.menu.color_picker
+        if picker and picker.control == control then
+            if control.camo_key ~= panel.key then
+                return false, 'The selected LUT changed; reopen the camo color picker.'
+            end
+            checked_editor_target(control.camo_target)
+        else
+            control.camo_key = panel.key
+            control.camo_target = import_target(panel.kind, panel.group)
+            checked_editor_target(control.camo_target)
+        end
+        return true
+    end
+end
 local function update_camo_previews()
     if not m.camo_patterns or not m.basic_camo or not frontend or not frontend.menu or not handle then
         return
@@ -2360,6 +2392,31 @@ local function keep_outfit(name, save_kind)
     )
 end
 function operations.outfit_documents(preset)
+    if m.outfit_targets then
+        local resolver = m.outfit_targets.new(preset, {
+            document_bytes = function(d)
+                return m.dds.encode(d.data, d.width, d.height)
+            end,
+        })
+        local live = {}
+        for _, collection in ipairs({ groups, pattern_editor and pattern_editor.all_groups or {} }) do
+            local pattern = collection ~= groups
+            for _, group in ipairs(collection) do
+                for _, b in ipairs(group.bindings) do
+                    if present(b) and binding(b) == b.current then
+                        live[#live + 1] = {
+                            kind = m.gear_catalog.kind(b),
+                            binding = b,
+                            pattern = pattern,
+                            original = original_luts and original_luts.get(b.original),
+                        }
+                    end
+                end
+            end
+        end
+        resolver.prepare(live)
+        return resolver
+    end
     local exact = {}
     for _, entry in ipairs(preset and preset.entries or {}) do
         exact[entry.kind .. ':' .. entry.key] = entry.document
@@ -2367,6 +2424,9 @@ function operations.outfit_documents(preset)
     return exact
 end
 function operations.outfit_document(exact, b, pattern)
+    if exact.resolve then
+        return exact.resolve(m.gear_catalog.kind(b), b, pattern, original_luts and original_luts.get(b.original))
+    end
     local key = (pattern and 'p:' or '') .. b.save_key
     -- Early presets recorded every non-Helmet mount as Armor. Only a currently
     -- recognized Cape at the exact saved destination can use that legacy entry.
@@ -2406,7 +2466,7 @@ local function apply_outfit(kind)
     if pattern_editor then
         assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
     end
-    if kind == 'cape' or kind == 'armor' then
+    if kind == 'cape' then
         for _, session in ipairs({ bindings, operations.pattern_session or {} }) do
             for _, b in ipairs(session.owned or {}) do
                 assert(
@@ -2417,41 +2477,29 @@ local function apply_outfit(kind)
         end
     end
     refresh(true)
+    if pattern_editor then
+        pattern_editor.scan()
+    end
     local exact = operations.outfit_documents(selected_outfit)
     local has_saved = false
     for _, entry in ipairs(selected_outfit.entries) do
-        if
-            entry.kind == kind
-            or (kind == 'armor' and entry.kind == 'cape')
-            or (kind == 'cape' and entry.kind == 'armor')
-        then
+        if entry.kind == kind or (kind == 'cape' and entry.kind == 'armor') then
             has_saved = true
         end
     end
     assert(has_saved, 'This preset has no ' .. kind .. ' palette')
-    local batches, skipped = {}, 0
+    local batches, skipped, matches = {}, 0, {}
     for _, group in ipairs(groups) do
         for _, b in ipairs(group.bindings) do
-            if b[kind] or (kind == 'armor' and b.cape) then
+            if b[kind] then
                 assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear again')
-                local d = operations.outfit_document(exact, b, false)
+                local d, match = operations.outfit_document(exact, b, false)
                 if d then
                     assert(d.width == 23, 'Saved material LUT must have 23 columns')
                     assert(not b.cape or appearance_resource(b), 'Current Cape resource identity unavailable')
                     batches[d] = batches[d] or {}
                     table.insert(batches[d], b)
-                    if ctx.log then
-                        ctx.log(
-                            'ARMORY_APPLY preset='
-                                .. selected_outfit.name
-                                .. ' kind='
-                                .. kind
-                                .. ' slot='
-                                .. b.save_key
-                                .. ' resource='
-                                .. resource_id(b.original)
-                        )
-                    end
+                    matches[b] = match or 'exact'
                 else
                     skipped = skipped + 1
                     if ctx.log then
@@ -2470,16 +2518,19 @@ local function apply_outfit(kind)
     end
     local patterns = {}
     if pattern_editor then
-        pattern_editor.scan()
         for _, group in ipairs(pattern_editor.all_groups or {}) do
             for _, b in ipairs(group.bindings) do
-                local d = (b[kind] or (kind == 'armor' and b.cape)) and operations.outfit_document(exact, b, true)
+                local d, match
+                if b[kind] then
+                    d, match = operations.outfit_document(exact, b, true)
+                end
                 if d then
                     assert(d.width == 3 and d.height == 1, 'Saved Pattern LUT must be 3 x 1')
                     assert(not b.cape or appearance_resource(b), 'Current Cape resource identity unavailable')
                     assert(present(b) and binding(b) == b.current, 'Pattern gear changed; load current gear again')
                     patterns[d] = patterns[d] or {}
                     patterns[d][#patterns[d] + 1] = b
+                    matches[b] = match or 'exact'
                 end
             end
         end
@@ -2523,8 +2574,30 @@ local function apply_outfit(kind)
     resume_done = true
     resume_job = nil
     local count = 0
+    local function log_applied(targets, pattern)
+        if not ctx.log then
+            return
+        end
+        for _, b in ipairs(targets) do
+            ctx.log(
+                'ARMORY_APPLY preset='
+                    .. selected_outfit.name
+                    .. ' kind='
+                    .. kind
+                    .. ' slot='
+                    .. (pattern and 'p:' or '')
+                    .. b.save_key
+                    .. ' resource='
+                    .. resource_id(b.original)
+                    .. ' match='
+                    .. matches[b]
+                    .. ' verified=true'
+            )
+        end
+    end
     for d, targets in pairs(batches) do
         count = count + apply_batch(bindings, d, targets, false)
+        log_applied(targets, false)
         for _, b in ipairs(targets) do
             basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
         end
@@ -2532,6 +2605,7 @@ local function apply_outfit(kind)
     for d, targets in pairs(patterns) do
         count = count
             + apply_batch(assert(operations.pattern_session, 'Pattern application unavailable'), d, targets, true)
+        log_applied(targets, true)
     end
     assert(count > 0, 'No worn gear bindings available for this preset')
     edit.remember_application = true
@@ -3383,11 +3457,18 @@ local function register(current)
             id = 'basic',
             name = 'Basic',
             require_confirmation = false,
-            controls = m.basic_camo and m.basic_camo.controls(function(kind, value)
+            controls = m.basic_camo and m.basic_camo.controls(function(kind, value, mode, color)
                 if not operations.syncing_basic_camo then
-                    return action(function()
-                        return operations.apply_basic_camo(kind, value)
+                    local completed
+                    local result = action(function()
+                        local message = operations.apply_basic_camo(kind, value, mode, color)
+                        completed = true
+                        return message
                     end)
+                    if mode == 'color' then
+                        return completed == true, result
+                    end
+                    return result
                 end
             end) or {},
         })
@@ -3482,6 +3563,19 @@ local function register(current)
             return edit.load_seen or (preferences and preferences.load_seen and preferences.load_seen(false)) or false
         end
         palette_editor.attach(api, handle)
+        if palette_editor.tools and palette_editor.tools.mount_preferences then
+            palette_editor.tools.mount_preferences(preferences)
+        end
+        if m.basic_camo then
+            for _, container in ipairs({ 'armor', 'helmet' }) do
+                for color = 1, 4 do
+                    local control = api.mods[handle.id].controls['basic_' .. container .. '_camo_color_' .. color]
+                    if control then
+                        control.can_open_picker = operations.basic_camo_picker_guard(control, container)
+                    end
+                end
+            end
+        end
         local quick = api.mods[handle.id].controls.quick_color
         local cell = api.mods[handle.id].controls.cell_color
         if quick and cell then
@@ -3685,7 +3779,7 @@ local function close()
     if not restore() then
         return false
     end
-    if not dismissed or frontend and not frontend.close() then
+    if not dismissed then
         return false
     end
     if operations.texture_lifetime then
@@ -3716,6 +3810,11 @@ local function close()
             retain.cohort = nil
         end
     end
+    -- Fences still need the frontend's live render-readiness probe. Dismiss
+    -- releases input immediately; unregister only after texture retirement.
+    if frontend and not frontend.close() then
+        return false
+    end
     -- Only complete addon cleanup discards history and dormant appearance
     -- references. Pending cleanup and ordinary Restore keep Undo/Redo intact.
     history = nil
@@ -3745,6 +3844,7 @@ local function reset_transient_state()
         selected_export_bindings = operations.selected_export_bindings,
         export_pattern_entries = operations.export_pattern_entries,
         apply_basic_camo = operations.apply_basic_camo,
+        basic_camo_picker_guard = operations.basic_camo_picker_guard,
         update_camo_previews = operations.update_camo_previews,
         outfit_documents = operations.outfit_documents,
         outfit_document = operations.outfit_document,

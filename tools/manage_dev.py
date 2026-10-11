@@ -332,7 +332,7 @@ def hashes(files):
 
 
 def authorize_pattern_default(before, candidate):
-    """Allow only the requested additive Pattern-export default, never settings."""
+    """Allow requested additive preference defaults, never saved settings."""
     def object_pairs(pairs):
         result = {}
         for key, value in pairs:
@@ -362,12 +362,14 @@ def authorize_pattern_default(before, candidate):
     require(type(previous) is dict and type(updated) is dict
             and type(previous.get('preferences')) is dict and type(updated.get('preferences')) is dict,
             'Protected modular defaults lack the preferences schema')
-    key = 'include_patterns_in_exports'
-    require(key not in previous['preferences'] and updated['preferences'].get(key) is True,
-            'Protected modular defaults may only add preferences.include_patterns_in_exports=true')
+    additions = updated['preferences'].keys() - previous['preferences'].keys()
+    require(additions and additions <= {'include_patterns_in_exports', 'tools_docked'}
+            and all(updated['preferences'][key] is True for key in additions),
+            'Protected modular defaults may only add requested preferences.include_patterns_in_exports=true or preferences.tools_docked=true')
     remaining = dict(updated)
     remaining['preferences'] = dict(updated['preferences'])
-    del remaining['preferences'][key]
+    for key in additions:
+        del remaining['preferences'][key]
     require(same_typed(previous, remaining), 'Protected modular defaults contain unrelated key, value or type changes')
 
 
@@ -493,7 +495,7 @@ def mutation_lock(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', action='store_true', help='Build and verify six Static/Animation BSL+LLL+MDL archives')
-    parser.add_argument('--install', action='store_true', help='Update runtime code/metadata and the authorized additive Pattern default; preserve native libraries, existing defaults and settings')
+    parser.add_argument('--install', action='store_true', help='Update runtime code/metadata and authorized additive preference defaults; preserve native libraries, existing defaults and settings')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--static', action='store_true', help='Select current verified static development build (default)')
     modes.add_argument('--animation', action='store_true', help='Explicitly select the experimental animation development build')
