@@ -448,6 +448,171 @@ local function record_map(result)
     end
     return out, changed
 end
+-- A kit override keeps its selected payload on the original texture ID.
+-- Other assignments receive local forks; the kit/material bytes stay pristine.
+do
+    local kit_material = source(
+        'fedcba9876543210',
+        B.MATERIAL,
+        replace(material_main, 144, hash(untouched)),
+        material.gpu,
+        material.stream
+    )
+    local kit_main = replace(unit_main, 816, hash(kit_material.resource))
+    local kit_unit = source(unit_id, B.UNIT, kit_main, unit.gpu, unit.stream)
+    local fixed_entries = {
+        entry('armor', 'p:0:2:0:0', a, 101),
+        entry('helmet', 'p:0:0:1:0', b, 102),
+        entry('armor', 'p:0:2:2:0', { width = 3, height = 1, data = ffi.new('float[12]') }, 103),
+    }
+    for _, value in ipairs(fixed_entries) do
+        value.binding_source.unit = kit_unit
+    end
+    local fixed = fixed_entries[1].binding_source
+    fixed.material, fixed.kit_override, fixed.kit = kit_material, true, { matches = 1, override_texture = old_texture }
+    local forced_options = {
+        binding_writer = B,
+        unit_layout = L,
+        id_available = options.id_available,
+        original_patch = options.original_patch,
+    }
+    local pinned = P.encode_set(D, fixed_entries, forced_options)
+    local pinned_records, pinned_unit = record_map(pinned)
+    local pinned_layout = L.parse(pinned_unit.main)
+    assert(
+        pinned.count == 6
+            and pinned_records[B.TEXTURE .. ':' .. old_texture].gpu == P.encode(D, a, fixed_entries[1].original).gpu
+            and u(pinned_unit.main, 320) == 101
+            and pinned_layout.section_by_id[101].material == kit_material.resource
+            and not pinned_records[B.MATERIAL .. ':' .. kit_material.resource],
+        'Kit-fixed payload lost its original texture ID or rewrote the kit-bound material'
+    )
+    for _, index in ipairs({ 2, 3 }) do
+        local section = u(pinned_unit.main, mesh_offsets[index] + 128)
+        local material_id = pinned_layout.section_by_id[section].material
+        local target = pinned_records[B.MATERIAL .. ':' .. material_id]
+        local texture_id = hex_at(target.main, 144)
+        assert(
+            section ~= 100 + index
+                and texture_id ~= old_texture
+                and pinned_records[B.TEXTURE .. ':' .. texture_id].gpu
+                    == P.encode(D, fixed_entries[index].document, fixed_entries[index].original).gpu,
+            'Non-kit assignment did not fork away from the forced original-ID payload'
+        )
+    end
+    local reversed = P.encode_set(D, { fixed_entries[3], fixed_entries[2], fixed_entries[1] }, forced_options)
+    assert(pinned.main == reversed.main and pinned.gpu == reversed.gpu, 'Kit baseline depends on enumeration order')
+    local other = fixed_entries[2].binding_source
+    other.kit_override, other.kit = true, { matches = 1, override_texture = old_texture }
+    local ok, why = pcall(P.encode_set, D, fixed_entries, forced_options)
+    assert(
+        not ok and tostring(why):find('different kit-fixed palettes', 1, true),
+        'Distinct fixed palettes collapsed silently'
+    )
+    local second_document = fixed_entries[2].document
+    fixed_entries[2].document = a
+    local agreed = P.encode_set(D, fixed_entries, forced_options)
+    local agreed_records, agreed_unit = record_map(agreed)
+    assert(
+        agreed.count == 4
+            and u(agreed_unit.main, 320) == 101
+            and u(agreed_unit.main, 512) == 102
+            and agreed_records[B.TEXTURE .. ':' .. old_texture].gpu == P.encode(D, a, fixed_entries[1].original).gpu,
+        'Agreeing kit-fixed palettes were refused or retargeted'
+    )
+    fixed_entries[2].document = second_document
+    other.kit_override, other.kit = false, nil
+    fixed.kit.override_texture = untouched
+    assert(not pcall(P.encode_set, D, fixed_entries, forced_options), 'Kit override ID mismatch passed certification')
+    fixed.kit_override, fixed.fixed_texture, fixed.kit = false, true, { matches = 0 }
+    local conservative = P.encode_set(D, fixed_entries, forced_options)
+    assert(
+        conservative.main == pinned.main and conservative.gpu == pinned.gpu,
+        'Unmatched kit binding was unsafely retargeted'
+    )
+    fixed.kit.matches = 1
+    assert(
+        not pcall(P.encode_set, D, fixed_entries, forced_options),
+        'Matching/ambiguous kit was accepted as unmatched'
+    )
+    assert(
+        kit_material.main == replace(material_main, 144, hash(untouched)) and kit_unit.main == kit_main,
+        'Kit-aware export mutated pristine sources'
+    )
+    -- A serialized LOD material absent from the selected live bindings must
+    -- retain its authentic original payload, rather than the kit-pinned one.
+    local lod_material = source('aabbccddeeff0011', B.MATERIAL, material_main, material.gpu, material.stream)
+    local lod_main = replace(kit_main, 832, hash(lod_material.resource))
+    local lod_unit = source(unit_id, B.UNIT, lod_main, unit.gpu, unit.stream)
+    local lod_entries = { entry('armor', 'p:0:2:0:0', a, 101), entry('helmet', 'p:0:0:1:0', b, 102) }
+    for _, value in ipairs(lod_entries) do
+        value.binding_source.unit = lod_unit
+    end
+    lod_entries[1].binding_source.material, lod_entries[1].binding_source.kit_override, lod_entries[1].binding_source.kit =
+        kit_material, true, { matches = 1, override_texture = old_texture }
+    local fallback_reads = 0
+    forced_options.material_source = function(resource)
+        assert(resource == lod_material.resource)
+        fallback_reads = fallback_reads + 1
+        return lod_material
+    end
+    local preserved = P.encode_set(D, lod_entries, forced_options)
+    local preserved_records, preserved_unit = record_map(preserved)
+    local preserved_layout = L.parse(preserved_unit.main)
+    local lod_section = u(preserved_unit.main, 704)
+    local lod_fork = preserved_records[B.MATERIAL .. ':' .. preserved_layout.section_by_id[lod_section].material]
+    local lod_texture = hex_at(lod_fork.main, 144)
+    assert(
+        fallback_reads == 1
+            and lod_texture ~= old_texture
+            and preserved_records[B.TEXTURE .. ':' .. lod_texture].gpu == options.original_patch(lod_entries[1]).gpu
+            and preserved_records[B.TEXTURE .. ':' .. old_texture].gpu == P.encode(D, a, lod_entries[1].original).gpu
+            and u(preserved_unit.main, 320) == 101
+            and preserved_unit.gpu == lod_unit.gpu
+            and preserved_unit.stream == lod_unit.stream,
+        'Unselected serialized LOD inherited the forced kit palette or changed geometry'
+    )
+    local expected_main = lod_main
+    for _, at in ipairs({ 96, 112, 320, 512, 704 }) do
+        expected_main = replace(expected_main, at, word(u(preserved_unit.main, at)))
+    end
+    assert(
+        preserved_unit.main:sub(1, #lod_main) == expected_main,
+        'Fallback preservation changed original Unit bytes beyond exact slot/table pointers'
+    )
+    local selected = entry('armor', 'p:0:2:2:0', a, 103)
+    selected.binding_source.unit, selected.binding_source.material = lod_unit, lod_material
+    local overridden = P.encode_set(D, { lod_entries[1], lod_entries[2], selected }, forced_options)
+    local overridden_records, overridden_unit = record_map(overridden)
+    local overridden_layout = L.parse(overridden_unit.main)
+    local selected_material =
+        overridden_records[B.MATERIAL .. ':' .. overridden_layout.section_by_id[u(overridden_unit.main, 704)].material]
+    assert(
+        hex_at(selected_material.main, 144) == old_texture,
+        'Explicit non-kit selection equal to kit palette lost its assignment to fallback'
+    )
+    forced_options.material_source = nil
+    local ok, reason = pcall(P.encode_set, D, lod_entries, forced_options)
+    assert(
+        not ok and tostring(reason):find('fallback material source unavailable', 1, true),
+        'Missing unselected LOD material source was silently skipped'
+    )
+    forced_options.material_source = function()
+        return material
+    end
+    assert(
+        not pcall(P.encode_set, D, lod_entries, forced_options),
+        'Fallback source accepted a different material resource'
+    )
+    forced_options.material_source = function()
+        return source(lod_material.resource, B.MATERIAL, material_main, material.gpu, material.stream)
+    end
+    local repeated_fallback = P.encode_set(D, { lod_entries[2], lod_entries[1] }, forced_options)
+    assert(
+        repeated_fallback.main == preserved.main and repeated_fallback.gpu == preserved.gpu,
+        'Fallback forks depend on entry order'
+    )
+end
 -- Several LOD meshes can share one global SectionID. Only changed selections
 -- receive local forks; a selected baseline and unselected mesh keep originals.
 local shared_main = unit_bytes({ 101, 101, 101 })
@@ -456,9 +621,9 @@ local zero = { width = 3, height = 1, data = ffi.new('float[12]') }
 local shared_entries = {
     entry('armor', 'p:0:2:0:0', a, 101),
     entry('armor', 'p:0:2:1:0', b, 101),
-    { kind = 'armor', key = 'p:0:2:2:0', document = zero, original = original(zero, old_texture) },
+    entry('armor', 'p:0:2:2:0', zero, 101),
 }
-for index = 1, 2 do
+for index = 1, 3 do
     local proof = shared_entries[index].binding_source
     proof.unit, proof.mesh_id, proof.material_slot_offset = shared_unit, mesh_ids[index], mesh_offsets[index] + 128
 end
@@ -467,8 +632,7 @@ local shared_records, shared_changed = record_map(shared_patch)
 local shared_layout = L.parse(shared_changed.main)
 local shared_first, shared_second = u(shared_changed.main, 320), u(shared_changed.main, 512)
 assert(
-    shared_entries[3].binding_source == nil
-        and shared_patch.count == 6
+    shared_patch.count == 6
         and shared_first ~= shared_second
         and shared_first ~= 101
         and shared_second ~= 101
@@ -633,13 +797,15 @@ before_source.unit, second_source.unit = unit, unit
 -- material fork and one local SectionID, preserving the other texture slots.
 local combined = {
     entry('armor', 'p:0:2:0:0', a, 101),
-    { kind = 'armor', key = 'p:0:2:1:0', document = zero, original = original(zero, old_texture) },
+    entry('armor', 'p:0:2:1:0', zero, 102),
     entry('armor', '0:2:0:0', cape, 101),
-    { kind = 'armor', key = '0:2:1:0', document = doc(23, 8, 0), original = original(cape, untouched) },
+    entry('armor', '0:2:1:0', doc(23, 8, 0), 102),
 }
 combined[3].binding_source.texture_slot, combined[3].binding_source.original_texture = 0x7e662968, untouched
 combined[3].original = original(cape, untouched)
 combined[4].document.data = ffi.new('float[?]', 23 * 8 * 4)
+combined[4].binding_source.texture_slot, combined[4].binding_source.original_texture = 0x7e662968, untouched
+combined[4].original = original(cape, untouched)
 local combined_patch = P.encode_set(D, combined, options)
 local combined_records, combined_unit = record_map(combined_patch)
 local combined_layout = L.parse(combined_unit.main)

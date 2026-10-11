@@ -112,6 +112,36 @@ assert(
     not pcall(E.bundle, { dds = D }, { entries = { proof_entry } }),
     'v3 metadata silently exported without its validator'
 )
+local ordinary_refs = proof_entry.binding_provenance
+for _, has_override in ipairs({ true, false }) do
+    local fixed_refs = {}
+    for k, v in pairs(ordinary_refs) do
+        fixed_refs[k] = v
+    end
+    fixed_refs.version, fixed_refs.fixed_texture, fixed_refs.kit_override = 3, true, has_override
+    fixed_refs.material_texture = '1111111111111111'
+    fixed_refs.kit = {
+        id = 21,
+        body = 0,
+        archive = '0123456789abcdef',
+        matches = has_override and 1 or 0,
+        override_texture = has_override and fixed_refs.original_texture or nil,
+        piece_body = has_override and 0 or nil,
+    }
+    proof_entry.binding_provenance = fixed_refs
+    for _, file in ipairs(E.bundle({ dds = D, binding_provenance = Binding }, { entries = { proof_entry } })) do
+        assert(not file[2]:find('FAKE_PRIVATE_GAME_BYTES', 1, true), 'Fixed assignment exported hydrated source bytes')
+        F.write('tests/tmp/presets/' .. file[1], file[2])
+    end
+    local imported = O.read(
+        { dds = D, file_io = F, binding_provenance = Binding },
+        'tests/tmp/presets/preset.tsv',
+        'Fixed Gear Import'
+    ).entries[1].binding_provenance
+    assert(Binding.matches(fixed_refs, imported) and imported.fixed_texture and imported.kit_override == has_override)
+    assert(not imported.verified and not imported.unit.main, 'Fixed assignment import trusted source bytes')
+end
+proof_entry.binding_provenance = ordinary_refs
 assert(not pcall(E.bundle, { dds = D, binding_provenance = Binding }, {
     entries = {
         {

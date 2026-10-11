@@ -133,8 +133,16 @@ assert(not partial.mesh_verified and not partial.material_slot)
 E.Unit.has_mesh = old_has_mesh
 mesh_names[88] = nil
 partial = resolve(nil, layout)
-assert(not partial.mesh_verified and partial.mesh_error:find('literal mesh name', 1, true))
+assert(partial.mesh_verified and partial.mesh_id == 99, 'Unrelated unnamed mesh blocked exact selected proof')
 mesh_names[88] = 'mesh_gibs'
+mesh_names[99] = nil
+partial = resolve(nil, layout)
+assert(not partial.mesh_verified and partial.mesh_error:find('literal mesh name', 1, true))
+mesh_names[99] = 'mesh_body'
+section_names[22] = nil
+partial = resolve(nil, layout)
+assert(partial.mesh_verified and partial.section == 11, 'Unrelated unnamed section blocked exact selected proof')
+section_names[22] = 'm_gibs'
 
 binding.mesh_index = nil
 refuse(resolve, 'runtime mesh index unavailable')
@@ -154,10 +162,8 @@ assert(#calls == 0)
 alive = true
 section_names[11] = nil
 refuse(resolve, 'literal material slot name unavailable')
-assert(#calls == 0)
 section_names[11] = '#ID[0000000b]'
 refuse(resolve, 'literal material slot name unavailable')
-assert(#calls == 0)
 section_names[11] = 'm_body'
 refuse(function()
     resolve({ candidates[1], candidates[1] })
@@ -235,6 +241,73 @@ refuse(function()
     Materials.new(E, deps)
 end, 'identity APIs unavailable')
 E.Mesh.material = old_material
+-- An unnamed section on a uniquely named mesh is identifiable without any
+-- ordering assumption only when both serialized and runtime sets are singletons.
+local sole_id, sole_resource = 44, '0000000000000044'
+local sole_candidates = { { section = sole_id, material = sole_resource } }
+local sole_layout = {
+    {
+        id = 99,
+        material_slots = { { section = sole_id, material = sole_resource, index = 0, offset = 800, mapped = true } },
+    },
+}
+local sole_count, sole_pointer, sole_calls, change_sole = 1, 200000, 0, false
+deps.single_material = function(value)
+    assert(value == binding and value.mesh == 100000)
+    sole_calls = sole_calls + 1
+    if change_sole and sole_calls > 1 then
+        return false
+    end
+    return sole_count == 1 and sole_pointer == value.material
+end
+proof = resolve(sole_candidates, sole_layout)
+assert(proof.singleton and proof.mesh_verified and proof.section == sole_id and proof.material == sole_resource)
+assert(proof.mesh_id == 99 and proof.material_slot == 0 and proof.material_slot_offset == 800 and sole_calls == 2)
+sole_count = 2
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'No verified material slot')
+sole_count, sole_pointer = 1, 210000
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'No verified material slot')
+sole_pointer, sole_calls, change_sole = 200000, 0, true
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'Runtime sole Material count/handle changed')
+change_sole, sole_calls = false, 0
+sole_layout[1].material_slots[1].mapped = false
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'No verified material slot')
+assert(sole_calls == 0, 'Unmapped serialized slot reached the singleton native check')
+sole_layout[1].material_slots[1].mapped = true
+sole_layout[1].material_slots[2] =
+    { section = 11, material = 'abcdef0123456789', index = 1, offset = 804, mapped = true }
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'No verified material slot')
+assert(sole_calls == 0, 'Multi-slot serialized mesh accepted singleton correspondence')
+sole_layout[1].material_slots[2] = nil
+mesh_names[99] = nil
+refuse(function()
+    resolve(sole_candidates, sole_layout)
+end, 'No verified material slot')
+assert(sole_calls == 0, 'Unnamed mesh reached the singleton native check')
+mesh_names[99] = 'mesh_body'
+sole_layout[1].material_slots[1].section, sole_layout[1].material_slots[1].material = 11, 'abcdef0123456789'
+material_handles.m_body = other_material
+refuse(function()
+    resolve({ candidates[1] }, sole_layout)
+end, 'No verified material slot')
+assert(sole_calls == 0, 'Singleton fallback bypassed a failed known named material proof')
+material_handles.m_body = material
+sole_layout[1].material_slots[1].section, sole_layout[1].material_slots[1].material = sole_id, sole_resource
+refuse(function()
+    resolve(sole_candidates)
+end, 'No verified material slot')
+assert(sole_calls == 0, 'Unavailable/composite mesh layout reached the singleton native check')
+deps.single_material = nil
 print(
     'PASS named material identity: genuine local Unit/Mesh/Material handles, has-before-get, exact named SectionID proof, optional named SDK mesh/slot proof without ordinal guesses, bounded/stale/ambiguous refusal; no ResourceManager calls'
 )

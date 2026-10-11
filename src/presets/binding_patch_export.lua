@@ -218,7 +218,7 @@ function B.encode(archive, documents, patches, options)
         local variant = group.variants[signature]
         variant.indices[#variant.indices + 1] = index
     end
-    local sources, units, materials = {}, {}, {}
+    local sources, units, materials, fixed_sources = {}, {}, {}, {}
     for _, group in pairs(by_texture) do
         local count = 0
         for _ in pairs(group.variants) do
@@ -226,8 +226,74 @@ function B.encode(archive, documents, patches, options)
         end
         group.conflict = count > 1
         if group.conflict then
-            assert(type(options.original_patch) == 'function', 'Original baseline texture snapshot unavailable')
+            local captured, fixed = {}, nil
+            for _, variant in pairs(group.variants) do
+                for _, index in ipairs(variant.indices) do
+                    local entry = documents[index]
+                    local source = options.provenance and options.provenance(entry) or entry.binding_source
+                    local pattern = entry.document.width == 3 and entry.document.height == 1
+                    assert(
+                        (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
+                            and type(entry.key) == 'string'
+                            and #entry.key <= 96
+                            and (pattern and entry.key:match('^p:%d+:%d+:%d+:%d+$') or not pattern and entry.key:match(
+                                '^%d+:%d+:%d+:%d+$'
+                            ))
+                            and type(source) == 'table'
+                            and source.version == 1
+                            and source.verified == true
+                            and source.kind == entry.kind
+                            and source.key == entry.key
+                            and type(source.kit_override) == 'boolean'
+                            and source.texture_slot == (pattern and 0x81d4c49d or 0x7e662968)
+                            and id(source.original_texture) == patches[index].resource,
+                        'Binding assignment provenance unavailable; no destinations guessed'
+                    )
+                    captured[index] = source
+                    if source.kit_override or source.fixed_texture == true then
+                        fixed_sources[index] = source
+                        assert(
+                            source.kit
+                                and (
+                                    source.kit_override
+                                        and id(source.kit.override_texture) == source.original_texture
+                                    or source.kit_override == false
+                                        and source.fixed_texture == true
+                                        and source.kit.matches == 0
+                                ),
+                            'Fixed binding texture proof differs from its effective original'
+                        )
+                        local material, unit = record(source.material, B.MATERIAL), record(source.unit, B.UNIT)
+                        assert(source.material.toc and source.unit.toc, 'Certified fixed material/unit TOC unavailable')
+                        local section =
+                            assert(unit_sections(unit)[source.section], 'Certified fixed Unit SectionID unavailable')
+                        for _, at in ipairs(section) do
+                            assert(
+                                hex_at(unit.main, at) == material.resource,
+                                'Fixed Unit material assignment differs from certified source'
+                            )
+                        end
+                        for _, item in ipairs({ material, unit }) do
+                            local cache = item.type == B.MATERIAL and materials or units
+                            assert(
+                                not cache[item.resource] or same_record(cache[item.resource], item),
+                                'Conflicting original binding resource bytes'
+                            )
+                            cache[item.resource] = cache[item.resource] or item
+                            used[item.type .. ':' .. item.resource] = true
+                        end
+                        local signature = variant.patch.main:sub(185) .. variant.patch.gpu
+                        assert(
+                            not fixed or fixed == signature,
+                            'Shared texture has different kit-fixed palettes; existing kit assignments require one original texture payload'
+                        )
+                        fixed = signature
+                    end
+                end
+            end
+            group.baseline, group.fixed, group.anchors = fixed, fixed ~= nil, {}
             local baseline
+            assert(type(options.original_patch) == 'function', 'Original baseline texture snapshot unavailable')
             for _, variant in pairs(group.variants) do
                 for _, index in ipairs(variant.indices) do
                     local original = options.original_patch(documents[index])
@@ -243,130 +309,140 @@ function B.encode(archive, documents, patches, options)
                         'Invalid original baseline texture patch'
                     )
                     local signature = original.main:sub(185) .. original.gpu
-                    assert(not baseline or group.baseline == signature, 'Conflicting original texture baselines')
-                    baseline, group.baseline = original, signature
+                    assert(
+                        not baseline or group.original_baseline == signature,
+                        'Conflicting original texture baselines'
+                    )
+                    baseline, group.original_baseline = original, signature
                 end
             end
-            group.variants[group.baseline] = group.variants[group.baseline] or { patch = baseline, indices = {} }
+            group.baseline = group.baseline or group.original_baseline
+            group.variants[group.original_baseline] = group.variants[group.original_baseline]
+                or { patch = baseline, indices = {} }
             for signature, variant in pairs(group.variants) do
-                if signature ~= group.baseline then
+                if signature ~= group.baseline or group.fixed then
                     for _, index in ipairs(variant.indices) do
-                        local entry = documents[index]
-                        local pattern = entry.document.width == 3 and entry.document.height == 1
-                        assert(
-                            (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
-                                and type(entry.key) == 'string'
-                                and #entry.key <= 96
-                                and (
-                                    pattern and entry.key:match('^p:%d+:%d+:%d+:%d+$')
-                                    or not pattern and entry.key:match('^%d+:%d+:%d+:%d+$')
-                                ),
-                            'Binding export requires an exact saved gear/destination key'
-                        )
-                        local source = options.provenance and options.provenance(entry) or entry.binding_source
-                        assert(
-                            type(source) == 'table'
-                                and source.version == 1
-                                and source.verified == true
-                                and source.kind == entry.kind
-                                and source.key == entry.key
-                                and source.kit_override == false,
-                            'Binding assignment provenance unavailable or kit override unsupported; no destinations guessed'
-                        )
-                        assert(
-                            type(source.section) == 'number'
-                                and source.section >= 0
-                                and source.section < 4294967296
-                                and source.section % 1 == 0,
-                            'Invalid certified native SectionID'
-                        )
-                        -- Cape material palettes use MaterialLut too. The separate
-                        -- cape-tint slot is identification data and stays untouched.
-                        local expected_slot = pattern and 0x81d4c49d or 0x7e662968
-                        assert(
-                            source.texture_slot == expected_slot
-                                and id(source.original_texture) == patches[index].resource,
-                            'Binding source texture family/identity differs from the saved destination'
-                        )
-                        assert(
-                            source.material and source.material.toc and source.unit and source.unit.toc,
-                            'Certified material/unit TOC provenance unavailable'
-                        )
-                        local material, unit = record(source.material, B.MATERIAL), record(source.unit, B.UNIT)
-                        local slots, sections = material_slots(material), unit_sections(unit)
-                        assert(
-                            hex_at(unit.main, 16) == '0000000000000000',
-                            'Composite mesh material splitting is unsupported'
-                        )
-                        local slot = assert(slots[source.texture_slot], 'Certified material texture slot unavailable')
-                        assert(
-                            hex_at(material.main, slot) == patches[index].resource,
-                            'Material original texture ID changed'
-                        )
-                        local section = assert(sections[source.section], 'Certified unit SectionID unavailable')
-                        for _, at in ipairs(section) do
+                        if not fixed_sources[index] then
+                            local entry = documents[index]
+                            local pattern = entry.document.width == 3 and entry.document.height == 1
                             assert(
-                                hex_at(unit.main, at) == material.resource,
-                                'Unit material assignment differs from certified source'
+                                (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
+                                    and type(entry.key) == 'string'
+                                    and #entry.key <= 96
+                                    and (
+                                        pattern and entry.key:match('^p:%d+:%d+:%d+:%d+$')
+                                        or not pattern and entry.key:match('^%d+:%d+:%d+:%d+$')
+                                    ),
+                                'Binding export requires an exact saved gear/destination key'
                             )
-                        end
-                        local precise = source.mesh_id ~= nil
-                            or source.material_slot ~= nil
-                            or source.material_slot_offset ~= nil
-                        local layout
-                        if precise then
+                            local source = captured[index]
                             assert(
-                                source.mesh_verified == true
-                                    and type(options.unit_layout) == 'table'
-                                    and type(options.unit_layout.parse) == 'function',
-                                'Verified named mesh layout proof unavailable'
+                                type(source) == 'table'
+                                    and source.version == 1
+                                    and source.verified == true
+                                    and source.kind == entry.kind
+                                    and source.key == entry.key
+                                    and source.kit_override == false
+                                    and source.fixed_texture ~= true,
+                                'Binding assignment provenance unavailable or kit override unsupported; no destinations guessed'
                             )
-                            for _, field in ipairs({ 'mesh_id', 'material_slot', 'material_slot_offset' }) do
-                                local value = source[field]
+                            assert(
+                                type(source.section) == 'number'
+                                    and source.section >= 0
+                                    and source.section < 4294967296
+                                    and source.section % 1 == 0,
+                                'Invalid certified native SectionID'
+                            )
+                            -- Cape material palettes use MaterialLut too. The separate
+                            -- cape-tint slot is identification data and stays untouched.
+                            local expected_slot = pattern and 0x81d4c49d or 0x7e662968
+                            assert(
+                                source.texture_slot == expected_slot
+                                    and id(source.original_texture) == patches[index].resource,
+                                'Binding source texture family/identity differs from the saved destination'
+                            )
+                            assert(
+                                source.material and source.material.toc and source.unit and source.unit.toc,
+                                'Certified material/unit TOC provenance unavailable'
+                            )
+                            local material, unit = record(source.material, B.MATERIAL), record(source.unit, B.UNIT)
+                            local slots, sections = material_slots(material), unit_sections(unit)
+                            assert(
+                                hex_at(unit.main, 16) == '0000000000000000',
+                                'Composite mesh material splitting is unsupported'
+                            )
+                            local slot =
+                                assert(slots[source.texture_slot], 'Certified material texture slot unavailable')
+                            assert(
+                                hex_at(material.main, slot) == patches[index].resource,
+                                'Material original texture ID changed'
+                            )
+                            local section = assert(sections[source.section], 'Certified unit SectionID unavailable')
+                            for _, at in ipairs(section) do
                                 assert(
-                                    type(value) == 'number' and value >= 0 and value < 4294967296 and value % 1 == 0,
-                                    'Invalid certified mesh material slot locator'
+                                    hex_at(unit.main, at) == material.resource,
+                                    'Unit material assignment differs from certified source'
                                 )
                             end
-                            layout = options.unit_layout.parse(unit.main)
-                            assert(layout.supported == true, 'Composite mesh material splitting is unsupported')
-                            local found
-                            for _, mesh in ipairs(layout.meshes) do
-                                if mesh.id == source.mesh_id then
-                                    local slot = mesh.material_slots[source.material_slot + 1]
+                            local precise = source.mesh_id ~= nil
+                                or source.material_slot ~= nil
+                                or source.material_slot_offset ~= nil
+                            local layout
+                            if precise then
+                                assert(
+                                    source.mesh_verified == true
+                                        and type(options.unit_layout) == 'table'
+                                        and type(options.unit_layout.parse) == 'function',
+                                    'Verified named mesh layout proof unavailable'
+                                )
+                                for _, field in ipairs({ 'mesh_id', 'material_slot', 'material_slot_offset' }) do
+                                    local value = source[field]
                                     assert(
-                                        slot
-                                            and slot.index == source.material_slot
-                                            and slot.offset == source.material_slot_offset
-                                            and slot.section == source.section
-                                            and slot.material == material.resource,
-                                        'Certified mesh material slot differs from pristine Unit layout'
+                                        type(value) == 'number' and value >= 0 and value < 4294967296 and value % 1 == 0,
+                                        'Invalid certified mesh material slot locator'
                                     )
-                                    found = true
                                 end
+                                layout = options.unit_layout.parse(unit.main)
+                                assert(layout.supported == true, 'Composite mesh material splitting is unsupported')
+                                local found
+                                for _, mesh in ipairs(layout.meshes) do
+                                    if mesh.id == source.mesh_id then
+                                        local slot = mesh.material_slots[source.material_slot + 1]
+                                        assert(
+                                            slot
+                                                and slot.index == source.material_slot
+                                                and slot.offset == source.material_slot_offset
+                                                and slot.section == source.section
+                                                and slot.material == material.resource,
+                                            'Certified mesh material slot differs from pristine Unit layout'
+                                        )
+                                        found = true
+                                    end
+                                end
+                                assert(found, 'Certified MeshID unavailable in pristine Unit layout')
+                            else
+                                assert(source.section_owned == true, 'Whole Unit SectionID ownership proof unavailable')
                             end
-                            assert(found, 'Certified MeshID unavailable in pristine Unit layout')
-                        else
-                            assert(source.section_owned == true, 'Whole Unit SectionID ownership proof unavailable')
+                            for _, item in ipairs({ material, unit }) do
+                                local cache = item.type == B.MATERIAL and materials or units
+                                assert(
+                                    not cache[item.resource] or same_record(cache[item.resource], item),
+                                    'Conflicting original binding resource bytes'
+                                )
+                                cache[item.resource] = cache[item.resource] or item
+                                used[item.type .. ':' .. item.resource] = true
+                            end
+                            sources[index] = {
+                                source = source,
+                                material = material,
+                                unit = unit,
+                                slot = slot,
+                                section_offsets = section,
+                                precise = precise,
+                                layout = layout,
+                            }
+                            group.anchors[unit.resource] = sources[index]
                         end
-                        for _, item in ipairs({ material, unit }) do
-                            local cache = item.type == B.MATERIAL and materials or units
-                            assert(
-                                not cache[item.resource] or same_record(cache[item.resource], item),
-                                'Conflicting original binding resource bytes'
-                            )
-                            cache[item.resource] = cache[item.resource] or item
-                            used[item.type .. ':' .. item.resource] = true
-                        end
-                        sources[index] = {
-                            source = source,
-                            material = material,
-                            unit = unit,
-                            slot = slot,
-                            section_offsets = section,
-                            precise = precise,
-                            layout = layout,
-                        }
                     end
                 end
             end
@@ -385,6 +461,33 @@ function B.encode(archive, documents, patches, options)
         error('Unable to allocate a collision-free deterministic binding resource ID', 0)
     end
     local records, destinations, section_modes = {}, {}, {}
+    local function destination(proof, target, selected)
+        local section_key = proof.unit.resource .. ':' .. proof.source.section
+        local mode = proof.precise and 'mesh' or 'whole'
+        assert(
+            not section_modes[section_key] or section_modes[section_key] == mode,
+            'Whole SectionID and mesh-local proofs cannot be combined'
+        )
+        section_modes[section_key] = mode
+        local key = section_key .. (proof.precise and (':mesh:' .. proof.source.material_slot_offset) or ':whole')
+        local value = destinations[key] or { proof = proof, changes = {}, selected = {} }
+        assert(
+            value.proof.material.resource == proof.material.resource,
+            'Conflicting material identities at one unit SectionID'
+        )
+        local previous
+        if selected then
+            previous = value.selected[proof.slot]
+        else
+            previous = value.changes[proof.slot]
+        end
+        assert(not previous or previous == target, 'One serialized unit SectionID has conflicting saved assignments')
+        if selected then
+            value.selected[proof.slot] = target
+        end
+        value.changes[proof.slot] = target
+        destinations[key] = value
+    end
     local texture_ids = {}
     for resource in pairs(by_texture) do
         texture_ids[#texture_ids + 1] = resource
@@ -392,6 +495,7 @@ function B.encode(archive, documents, patches, options)
     table.sort(texture_ids)
     for _, resource in ipairs(texture_ids) do
         local group, signatures = by_texture[resource], {}
+        group.targets = {}
         for signature in pairs(group.variants) do
             signatures[#signatures + 1] = signature
         end
@@ -400,6 +504,7 @@ function B.encode(archive, documents, patches, options)
             local variant = group.variants[signature]
             local changed = group.conflict and signature ~= group.baseline
             local target = changed and allocate(B.TEXTURE, resource, signature) or resource
+            group.targets[signature] = target
             records[#records + 1] = {
                 resource = target,
                 type = B.TEXTURE,
@@ -407,30 +512,100 @@ function B.encode(archive, documents, patches, options)
                 gpu = variant.patch.gpu,
                 stream = '',
             }
-            if changed then
+        end
+    end
+    -- A forced original-ID replacement must not recolor unselected meshes/LODs
+    -- in affected non-kit Units. Their exact serialized slots retain the
+    -- authentic original payload, before selected assignments overlay them.
+    for _, resource in ipairs(texture_ids) do
+        local group = by_texture[resource]
+        if group.fixed and group.original_baseline ~= group.baseline then
+            for _, anchor in pairs(group.anchors) do
+                assert(
+                    anchor.precise and anchor.layout and anchor.layout.supported,
+                    'Verified mesh layout required to preserve original kit-conflict fallbacks'
+                )
+                local unit, layout, fixed_slots = anchor.unit, anchor.layout, {}
+                for _, fixed in pairs(fixed_sources) do
+                    if
+                        fixed.unit.resource == unit.resource
+                        and fixed.texture_slot == anchor.source.texture_slot
+                        and fixed.original_texture == resource
+                    then
+                        assert(
+                            fixed.mesh_verified == true and fixed.material_slot_offset ~= nil,
+                            'Verified fixed mesh slot required to preserve original fallbacks'
+                        )
+                        local found
+                        for _, mesh in ipairs(layout.meshes) do
+                            if mesh.id == fixed.mesh_id then
+                                local slot = mesh.material_slots[fixed.material_slot + 1]
+                                assert(
+                                    slot
+                                        and slot.offset == fixed.material_slot_offset
+                                        and slot.section == fixed.section
+                                        and slot.material == fixed.material.resource,
+                                    'Fixed mesh slot differs from pristine fallback layout'
+                                )
+                                fixed_slots[slot.offset], found = true, true
+                            end
+                        end
+                        assert(found, 'Fixed mesh unavailable in pristine fallback layout')
+                    end
+                end
+                for _, section in ipairs(layout.sections) do
+                    local material = materials[section.material]
+                    if not material then
+                        local raw = options.material_source and options.material_source(section.material)
+                        assert(raw and raw.toc, 'Original fallback material source unavailable')
+                        material = record(raw, B.MATERIAL)
+                        assert(material.resource == section.material, 'Original fallback material resource differs')
+                        materials[section.material] = material
+                        used[B.MATERIAL .. ':' .. material.resource] = true
+                    end
+                    material_slots(material)
+                end
+                local sections = unit_sections(unit)
+                for _, mesh in ipairs(layout.meshes) do
+                    for _, slot in ipairs(mesh.material_slots) do
+                        assert(
+                            slot.mapped and materials[slot.material],
+                            'Unmapped original fallback mesh material slot'
+                        )
+                        local material = materials[slot.material]
+                        local at = material_slots(material)[anchor.source.texture_slot]
+                        if at and hex_at(material.main, at) == resource and not fixed_slots[slot.offset] then
+                            destination({
+                                source = {
+                                    section = slot.section,
+                                    mesh_id = mesh.id,
+                                    material_slot = slot.index,
+                                    material_slot_offset = slot.offset,
+                                },
+                                unit = unit,
+                                material = material,
+                                slot = at,
+                                section_offsets = sections[slot.section],
+                                precise = true,
+                                layout = layout,
+                            }, group.targets[group.original_baseline], false)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for _, resource in ipairs(texture_ids) do
+        local group = by_texture[resource]
+        for signature, variant in pairs(group.variants) do
+            if
+                group.conflict
+                and (signature ~= group.baseline or group.fixed and group.original_baseline ~= group.baseline)
+            then
                 for _, index in ipairs(variant.indices) do
-                    local proof = sources[index]
-                    local section_key = proof.unit.resource .. ':' .. proof.source.section
-                    local mode = proof.precise and 'mesh' or 'whole'
-                    assert(
-                        not section_modes[section_key] or section_modes[section_key] == mode,
-                        'Whole SectionID and mesh-local proofs cannot be combined'
-                    )
-                    section_modes[section_key] = mode
-                    local key = section_key
-                        .. (proof.precise and (':mesh:' .. proof.source.material_slot_offset) or ':whole')
-                    local destination = destinations[key] or { proof = proof, changes = {} }
-                    assert(
-                        destination.proof.material.resource == proof.material.resource,
-                        'Conflicting material identities at one unit SectionID'
-                    )
-                    local previous = destination.changes[proof.slot]
-                    assert(
-                        not previous or previous == target,
-                        'One serialized unit SectionID has conflicting saved assignments'
-                    )
-                    destination.changes[proof.slot] = target
-                    destinations[key] = destination
+                    if sources[index] then
+                        destination(sources[index], group.targets[signature], true)
+                    end
                 end
             end
         end

@@ -124,7 +124,9 @@ local function ref(record)
 end
 function P.validate(value, kind, key, original)
     assert(
-        type(value) == 'table' and (value.version == 1 or value.version == 2) and value.kit_override == false,
+        type(value) == 'table'
+            and (value.version == 1 or value.version == 2 or value.version == 3)
+            and (value.version == 3 or value.kit_override == false),
         'Unsupported binding provenance'
     )
     kind, key = kind or value.kind, key or value.key
@@ -140,7 +142,7 @@ function P.validate(value, kind, key, original)
         texture_slot = value.texture_slot,
         original_texture = texture,
         section = integer(value.section, 'SectionID'),
-        kit_override = false,
+        kit_override = value.kit_override == true,
         index_stamp = hex(value.index_stamp, 64, 'resource index digest'),
         unit = ref(value.unit),
         material = ref(value.material),
@@ -150,12 +152,31 @@ function P.validate(value, kind, key, original)
             archive = hex(kit.archive, 16, 'kit archive'),
         },
     }
-    if value.version == 2 then
+    if value.version == 2 or value.version == 3 and value.mesh_id ~= nil then
         result.mesh_id = integer(value.mesh_id, 'MeshName ID')
         result.material_slot = integer(value.material_slot, 'mesh material slot')
         assert(result.material_slot < 64, 'Mesh material slot exceeds its limit')
     else
         assert(value.mesh_id == nil and value.material_slot == nil, 'Mesh assignment requires provenance version2')
+    end
+    if value.version == 3 then
+        assert(value.fixed_texture == true, 'Fixed binding provenance required')
+        assert(type(value.kit_override) == 'boolean', 'Invalid fixed kit override flag')
+        result.fixed_texture = true
+        result.material_texture = hex(value.material_texture, 16, 'stock material texture')
+        result.kit.matches = integer(kit.matches, 'kit piece matches')
+        assert(result.kit.matches <= 1, 'Ambiguous fixed kit piece')
+        if result.kit_override then
+            assert(result.kit.matches == 1, 'Fixed kit override has no exact piece')
+            result.kit.override_texture = hex(kit.override_texture, 16, 'kit override texture')
+            assert(result.kit.override_texture == texture, 'Kit override differs from effective original texture')
+            result.kit.piece_body = integer(kit.piece_body, 'kit piece body')
+        else
+            assert(
+                result.kit.matches == 0 and kit.override_texture == nil and kit.piece_body == nil,
+                'Unknown kit assignment must retain its original texture ID'
+            )
+        end
     end
     return result
 end
@@ -180,6 +201,15 @@ function P.encode(value, kind, key, original)
     end
     if v.version == 2 then
         out[#out + 1], out[#out + 2] = tostring(v.mesh_id), tostring(v.material_slot)
+    elseif v.version == 3 then
+        out[#out + 1] = v.mesh_id and tostring(v.mesh_id) or '-'
+        out[#out + 1] = v.material_slot and tostring(v.material_slot) or '-'
+        out[#out + 1] = v.kit_override and '1' or '0'
+        out[#out + 1] = '1'
+        out[#out + 1] = tostring(v.kit.matches)
+        out[#out + 1] = v.kit.override_texture or '-'
+        out[#out + 1] = v.material_texture
+        out[#out + 1] = v.kit.piece_body and tostring(v.kit.piece_body) or '-'
     end
     local text = table.concat(out, '\n')
     assert(#text <= P.MAX_BYTES, 'Binding provenance exceeds its limit')
@@ -194,8 +224,16 @@ function P.decode(text, kind, key, original)
     for line in (text .. '\n'):gmatch('(.-)\n') do
         rows[#rows + 1] = line
     end
-    local version = rows[1] == 'EPIC-BINDING\t1' and 1 or rows[1] == 'EPIC-BINDING\t2' and 2
-    assert(version and #rows == (version == 1 and 20 or 22), 'Invalid binding provenance schema')
+    local version = rows[1] == 'EPIC-BINDING\t1' and 1
+        or rows[1] == 'EPIC-BINDING\t2' and 2
+        or rows[1] == 'EPIC-BINDING\t3' and 3
+    assert(version and #rows == (version == 1 and 20 or version == 2 and 22 or 28), 'Invalid binding provenance schema')
+    if version == 3 then
+        assert((rows[23] == '0' or rows[23] == '1') and rows[24] == '1', 'Invalid fixed binding flags')
+        for _, at in ipairs({ 21, 22, 28 }) do
+            assert(rows[at] == '-' or rows[at]:match('^%d+$'), 'Invalid fixed binding locator')
+        end
+    end
     local function record(at)
         return {
             resource = rows[at],
@@ -213,12 +251,21 @@ function P.decode(text, kind, key, original)
         original_texture = rows[5],
         section = tonumber(rows[6]),
         index_stamp = rows[7],
-        kit_override = false,
-        kit = { id = tonumber(rows[8]), body = tonumber(rows[9]), archive = rows[10] },
+        kit_override = version == 3 and rows[23] == '1' or false,
+        fixed_texture = version == 3 and true or nil,
+        material_texture = version == 3 and rows[27] or nil,
+        kit = {
+            id = tonumber(rows[8]),
+            body = tonumber(rows[9]),
+            archive = rows[10],
+            matches = version == 3 and tonumber(rows[25]) or nil,
+            override_texture = version == 3 and rows[26] ~= '-' and rows[26] or nil,
+            piece_body = version == 3 and rows[28] ~= '-' and tonumber(rows[28]) or nil,
+        },
         unit = record(11),
         material = record(16),
-        mesh_id = version == 2 and tonumber(rows[21]) or nil,
-        material_slot = version == 2 and tonumber(rows[22]) or nil,
+        mesh_id = version ~= 1 and tonumber(rows[21]) or nil,
+        material_slot = version ~= 1 and tonumber(rows[22]) or nil,
     }, kind, key, original)
 end
 function P.matches(saved, current)
@@ -303,7 +350,7 @@ function P.kit_override(read, game, identity, binding, unit_hash, texture_slot)
     local body_count = uint(kit, 56)
     assert(body_count >= 1 and body_count <= 8, 'Kit body count exceeds its bounds')
     local bodies = pointer(kit, 48)
-    local matches, override = 0, nil
+    local matches, override, piece_body = 0, nil, nil
     for i = 0, body_count - 1 do
         local body = bytes(bodies + i * 24, 24)
         local body_type, n = uint(body, 0), uint(body, 16)
@@ -315,13 +362,22 @@ function P.kit_override(read, game, identity, binding, unit_hash, texture_slot)
                 if id_at(piece, 0) == unit_hash and uint(piece, 8) == garment_slot and uint(piece, 12) == unit_type then
                     matches = matches + 1
                     override = id_at(piece, texture_slot == P.PATTERN and 32 or 24)
+                    piece_body = body_type
                 end
             end
         end
     end
-    assert(matches == 1, 'Current unit has no unique kit piece proof')
-    return override ~= '0000000000000000',
-        { id = kit_id, body = integer(identity.body, 'body type'), archive = id_at(kit, 32) }
+    assert(matches <= 1, 'Current unit has no unique kit piece proof')
+    local active = matches == 1 and override ~= '0000000000000000'
+    return active,
+        {
+            id = kit_id,
+            body = integer(identity.body, 'body type'),
+            archive = id_at(kit, 32),
+            matches = matches,
+            override_texture = active and override or nil,
+            piece_body = matches == 1 and piece_body or nil,
+        }
 end
 function P.new(deps)
     assert(
@@ -352,7 +408,17 @@ function P.new(deps)
         local unit_hash = hex(deps.unit_resource(binding.unit, identity), 16, 'live unit resource')
         local unit = source(deps.unit_source(unit_hash), unit_hash, P.UNIT)
         local kit_override, kit = deps.kit_override(binding, unit_hash, slot)
-        assert(kit_override == false, 'Active kit texture override requires kit-aware export')
+        -- A gear override (or an unlisted fallback piece) retains its exact
+        -- texture ID. The writer chooses that palette as the shared baseline
+        -- and only forks independently certified material-bound assignments.
+        local fixed = kit_override == true or kit.matches == 0
+        assert(kit_override == false or kit_override == true, 'Kit override classification unavailable')
+        if kit_override then
+            assert(
+                kit.matches == 1 and kit.override_texture == original.resource:lower(),
+                'Kit override differs from effective original texture'
+            )
+        end
         local layout = deps.layout(unit.main)
         local _, _, mesh_index = fields(binding.save_key)
         assert(
@@ -382,8 +448,10 @@ function P.new(deps)
             'Named material identity differs from pristine Unit table'
         )
         match.material = source(deps.material_source(proof.material), proof.material, P.MATERIAL)
+        local material_texture =
+            assert(texture(match.material, slot), 'Pristine named material texture slot unavailable')
         assert(
-            texture(match.material, slot) == original.resource:lower(),
+            fixed or material_texture == original.resource:lower(),
             'Pristine named material texture differs from live original'
         )
         assert(
@@ -394,10 +462,13 @@ function P.new(deps)
         )
         local check, kit_after = deps.kit_override(binding, unit_hash, slot)
         assert(
-            check == false
+            check == kit_override
                 and kit_after.id == kit.id
                 and kit_after.body == kit.body
-                and kit_after.archive == kit.archive,
+                and kit_after.archive == kit.archive
+                and kit_after.matches == kit.matches
+                and kit_after.override_texture == kit.override_texture
+                and kit_after.piece_body == kit.piece_body,
             'Worn kit changed during provenance capture'
         )
         local hydrated = {
@@ -410,7 +481,10 @@ function P.new(deps)
             section = match.section,
             unit = unit,
             material = match.material,
-            kit_override = false,
+            kit_override = kit_override,
+            fixed_texture = fixed or nil,
+            material_texture = material_texture,
+            kit = kit,
             mesh_verified = proof.mesh_verified == true,
         }
         if proof.mesh_verified then
@@ -418,7 +492,7 @@ function P.new(deps)
             hydrated.material_slot_offset = proof.material_slot_offset
         end
         local refs = P.validate({
-            version = proof.mesh_verified and 2 or 1,
+            version = fixed and 3 or proof.mesh_verified and 2 or 1,
             kind = kind,
             key = key,
             texture_slot = slot,
@@ -426,7 +500,9 @@ function P.new(deps)
             section = match.section,
             unit = unit,
             material = match.material,
-            kit_override = false,
+            kit_override = kit_override,
+            fixed_texture = fixed or nil,
+            material_texture = material_texture,
             index_stamp = unit.index_stamp,
             kit = kit,
             mesh_id = hydrated.mesh_id,

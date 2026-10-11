@@ -2798,7 +2798,10 @@ do
                     return false
                 end,
                 unit = function() end,
-                material = function() end,
+                material = function(resource)
+                    assert(resource == 'fixture-material')
+                    return 'exact cached material source'
+                end,
                 id_available = function()
                     return true
                 end,
@@ -2967,6 +2970,11 @@ do
     assert(h.set('armory_export_format', 3))
     activate('armory_export')
     assert(exported and exported.verified and exported.key == legacy.entries[1].key)
+    assert(
+        type(options.material_source) == 'function'
+            and options.material_source('fixture-material') == 'exact cached material source',
+        'Export lost its exact fallback material source after controller cleanup/re-enable'
+    )
     cache.state, ready = 'loading', false
     export_refused(pending_status)
     activate('save_setup')

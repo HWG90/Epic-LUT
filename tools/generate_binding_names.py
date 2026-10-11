@@ -8,6 +8,12 @@ REVISION = '5a886256e54db52b5d228335eae20ce796f87fc0'
 INPUT_SHA = 'd20d66fcb747ebb0bf597a7c0cd4a8caf07e8667d4ea8424fa7f7c100c447e9a'
 INPUT = ROOT / 'dist/sdk-reference' / REVISION / 'hashlists/shadervariables.txt'
 OUTPUT = ROOT / 'src/gear/binding_names.lua'
+# Existing clothing-family literals recovered against pristine current Unit
+# SectionIDs. Generation verifies each exact engine hash, not an ordinal.
+SUPPLEMENTAL_NAMES = {
+    0x2cf8d519: 'm_hips_undergarment',
+    0xdfe66f6c: 'm_hips_armor',
+}
 
 
 def hash32(value):
@@ -39,7 +45,9 @@ def candidates(alias):
 def rows(data):
     found = {}
     for line in data.decode('utf-8-sig').splitlines():
-        match = re.fullmatch(r'([^\s]+)\s+0x([0-9a-fA-F]{8})', line.strip())
+        # The SDK writes ordinary hex, omitting leading zeroes. These still
+        # identify uint32 hashes; never accept wider values or unverified names.
+        match = re.fullmatch(r'([^\s]+)\s+0x([0-9a-fA-F]{1,8})', line.strip())
         if not match:
             continue
         alias, key = match.groups()
@@ -55,6 +63,10 @@ def generate():
     data = INPUT.read_bytes()
     assert hashlib.sha256(data).hexdigest() == INPUT_SHA, 'Pinned binding-name input changed'
     names = rows(data)
+    for key, literal in SUPPLEMENTAL_NAMES.items():
+        assert hash32(literal) == key, 'Supplemental slot literal hash differs'
+        assert names.get(key, literal) == literal, 'Supplemental slot literal is ambiguous'
+        names[key] = literal
     assert names.get(0xe02f71fe) == 'm_helmet'
     assert names.get(0xa838f8a6) == 'm_jacket'
     assert names.get(0x7682a507) == 'g_helmet_LOD1'
@@ -63,6 +75,7 @@ def generate():
     text = [
         '-- Generated factual engine names; every literal hashes to its exact uint32 ID.',
         '-- SDK revision ' + REVISION + '; shadervariables SHA256 ' + INPUT_SHA,
+        '-- Supplemental clothing slot literals have independently verified uint32 hashes.',
         'local N = {}',
     ]
     for kind, entries in [('sections', sections), ('meshes', meshes)]:

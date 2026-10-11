@@ -361,7 +361,54 @@ deps.kit_override = function()
 end
 refused(function()
     resolver.capture(binding, context)
-end, 'Active kit texture override')
+end, 'Kit override differs')
+local fixed_kit =
+    { id = kit.id, body = kit.body, archive = kit.archive, matches = 1, override_texture = tex, piece_body = 0 }
+deps.kit_override = function()
+    return true, fixed_kit
+end
+-- A fixed kit ID stays valid even when the stock material uses another ID;
+-- it cannot authorize changing the serialized mesh/material assignment.
+mat = record(mat_id, P.MATERIAL, replace(mat_main, 136 + 2 * 4 + 8, hash('1111111111111111')))
+local fixed_source, fixed_refs = resolver.capture(binding, context)
+assert(fixed_source.kit_override and fixed_source.fixed_texture and fixed_source.kit.override_texture == tex)
+assert(fixed_refs.version == 3 and fixed_refs.material_texture == '1111111111111111')
+local fixed_encoded = P.encode(fixed_refs)
+assert(P.matches(fixed_refs, P.decode(fixed_encoded)))
+refused(function()
+    P.decode((fixed_encoded:gsub('\n1\n1\n1\n' .. tex, '\n0\n1\n1\n' .. tex)))
+end, 'must retain')
+refused(function()
+    P.decode((fixed_encoded:gsub('\n99\n0\n1\n', '\ninvalid\n0\n1\n')))
+end, 'locator')
+fixed_kit.override_texture = '2222222222222222'
+refused(function()
+    resolver.capture(binding, context)
+end, 'Kit override differs')
+fixed_kit.override_texture = tex
+deps.kit_override = function()
+    return false, { id = kit.id, body = kit.body, archive = kit.archive, matches = 0 }
+end
+local unknown_source, unknown_refs = resolver.capture(binding, context)
+assert(unknown_source.kit_override == false and unknown_source.fixed_texture == true)
+assert(unknown_refs.kit.matches == 0 and P.matches(unknown_refs, P.decode(P.encode(unknown_refs))))
+local changing = 0
+deps.kit_override = function()
+    changing = changing + 1
+    return true,
+        {
+            id = kit.id,
+            body = kit.body,
+            archive = kit.archive,
+            matches = 1,
+            override_texture = changing == 1 and tex or '3333333333333333',
+            piece_body = 0,
+        }
+end
+refused(function()
+    resolver.capture(binding, context)
+end, 'kit changed')
+mat = record(mat_id, P.MATERIAL, mat_main)
 deps.kit_override = guard
 mutate_binding = true
 refused(function()
@@ -425,9 +472,8 @@ refused(function()
 end, 'unique kit piece')
 addresses[bodies] = body
 addresses[pieces] = replace(piece, 0, hash('0000000000000999'))
-refused(function()
-    P.kit_override(read, game, identity, binding, unit_id, P.PATTERN)
-end, 'unique kit piece')
+local absent, fallback = P.kit_override(read, game, identity, binding, unit_id, P.PATTERN)
+assert(absent == false and fallback.matches == 0 and fallback.override_texture == nil)
 addresses[pieces] = piece
 addresses[manager] = ptr(list) .. word(4097) .. word(0)
 refused(function()

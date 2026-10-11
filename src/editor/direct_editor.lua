@@ -2416,6 +2416,11 @@ function operations.ensure_binding_provenance()
             unit_identity = units,
             section_name = m.binding_names.section,
             mesh_name = m.binding_names.mesh,
+            single_material = function(b)
+                return native.materials(b.mesh) == 1
+                    and tonumber(native.material(b.mesh, 0)) == b.material
+                    and native.materials(b.mesh) == 1
+            end,
         })
         return units, materials
     end)
@@ -2494,7 +2499,7 @@ function operations.probe_binding_sources()
     end
     operations.provenance_probe_requested = nil
     local counts = { targets = 0, matched = 0, unmatched = 0, ambiguous = 0, kit_override = 0, unready = 0 }
-    local reasons = {}
+    local reasons, seen_reasons = {}, {}
     -- Explicit-request completion is read-only: do not refresh/discover, stop
     -- flashes, mutate documents or bind anything while collecting evidence.
     for _, pool in ipairs({
@@ -2519,7 +2524,9 @@ function operations.probe_binding_sources()
                         or why:find('pointer proof', 1, true) and 'ambiguous'
                         or 'unready'
                     counts[category] = counts[category] + 1
-                    if #reasons < 3 then
+                    local distinct = category .. ':' .. why:gsub('^.-:%d+: ', '')
+                    if #reasons < 8 and not seen_reasons[distinct] then
+                        seen_reasons[distinct] = true
                         reasons[#reasons + 1] = why:sub(1, 256)
                     end
                 end
@@ -2643,6 +2650,9 @@ function operations.binding_export_provider(preset)
         end
         return hydrated[entry]
     end
+end
+function operations.export_material_source(resource)
+    return assert(operations.provenance_cache, 'Exact material source cache unavailable').material(resource)
 end
 local function keep_outfit(name, save_kind)
     assert(outfits, 'Outfit storage unavailable')
@@ -4152,6 +4162,7 @@ local function register(current)
                     include_patterns = operations.include_patterns_in_exports,
                     binding_provenance = operations.binding_export_provider(preset),
                     original_patch = operations.export_original_patch,
+                    material_source = operations.export_material_source,
                     unit_layout = m.binding_unit_layout,
                     resource_id_available = function(kind, id)
                         return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
@@ -5077,6 +5088,7 @@ local function reset_transient_state()
         selected_export_bindings = operations.selected_export_bindings,
         export_pattern_entries = operations.export_pattern_entries,
         export_original_patch = operations.export_original_patch,
+        export_material_source = operations.export_material_source,
         apply_basic_camo = operations.apply_basic_camo,
         basic_camo_picker_guard = operations.basic_camo_picker_guard,
         set_basic_camo_row = operations.set_basic_camo_row,
@@ -5690,6 +5702,7 @@ return {
                                 binding_writer = m.binding_patch_export,
                                 provenance = operations.binding_export_provider({ entries = documents }),
                                 original_patch = operations.export_original_patch,
+                                material_source = operations.export_material_source,
                                 unit_layout = m.binding_unit_layout,
                                 id_available = function(kind, id)
                                     return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
@@ -5746,6 +5759,7 @@ return {
                                 binding_writer = m.binding_patch_export,
                                 provenance = operations.binding_export_provider({ entries = documents }),
                                 original_patch = operations.export_original_patch,
+                                material_source = operations.export_material_source,
                                 unit_layout = m.binding_unit_layout,
                                 id_available = function(kind, id)
                                     return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(

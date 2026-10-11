@@ -125,6 +125,7 @@ function E.new(m, paths, options)
         provenance = options.binding_provenance,
         id_available = options.resource_id_available,
         original_patch = options.original_patch,
+        material_source = options.material_source,
         unit_layout = options.unit_layout or m.binding_unit_layout,
     })
     function self.save(name, preset, format, index, naming)
