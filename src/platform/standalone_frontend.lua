@@ -61,7 +61,7 @@ function F.new(m,ctx,deps)
     function self.open_basic()
         if not self.basic_mode then self.full_size={self.menu.window_width,self.menu.window_height}end
         self.basic_mode=true;self.menu.basic_only=true;self.menu.visible=true;self.opened_once=true
-        self.menu.window_width=1100;self.menu.window_height=780
+        self.menu.window_width=1100;self.menu.window_height=m.basic_view and m.basic_view.minimum_height or 1000
         self.api.focus_page(self.default_mod_id,'basic')
         self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1
         return true
@@ -121,7 +121,7 @@ function F.new(m,ctx,deps)
             if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit and not self.menu.capture then
                 if self.basic_mode and self.menu.visible then self.menu.visible=false
                 elseif self.default_mod_id and self.api.focus_page(self.default_mod_id,'basic')then
-                    if not self.basic_mode then self.full_size={self.menu.window_width,self.menu.window_height}end;self.menu.window_width=1100;self.menu.window_height=780
+                    if not self.basic_mode then self.full_size={self.menu.window_width,self.menu.window_height}end;self.menu.window_width=1100;self.menu.window_height=m.basic_view and m.basic_view.minimum_height or 1000
                     self.menu.visible=true;self.basic_mode=true;self.menu.basic_only=true;self.opened_once=true
                 end
             end

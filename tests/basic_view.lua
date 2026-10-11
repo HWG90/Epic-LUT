@@ -30,7 +30,8 @@ local selected, selected_kind
 local selected_calls, identify_calls = 0, 0
 local camo_toggles = {}
 local export_hits = 0
-local view = dofile('src/editor/basic_view.lua').new(
+local Basic = dofile('src/editor/basic_view.lua')
+local view = Basic.new(
     function()
         return state
     end,
@@ -199,7 +200,7 @@ api.register({
             id = 'basic',
             name = 'Basic',
             min_width = 1100,
-            min_height = 780,
+            min_height = Basic.minimum_height,
             require_confirmation = false,
             controls = controls,
             render_layout = view.draw,
@@ -209,33 +210,33 @@ api.register({
 api.mods.basic_test.tabs_top = true
 api.mods.basic_test.pages[1].render_layout = view.draw
 api.mods.basic_test.pages[1].minimum_width = 1100
-api.mods.basic_test.pages[1].minimum_height = 780
+api.mods.basic_test.pages[1].minimum_height = Basic.minimum_height
 local menu = dofile('vendor/menu/menu.lua').new(api, function(t, size)
     return #t * size * 0.5
 end)
 menu.epic_typography = true
 menu.visible = true
 menu.window_width = 1100
-menu.window_height = 780
+menu.window_height = Basic.minimum_height
 local function region_point(commands, label)
     local window = menu.window_bounds
     local bounds
     for _, b in pairs(view.region_bounds) do
         local lower, upper = window.x + b.x * window.scale, window.x + (b.x + b.w) * window.scale
         if label.x >= lower and label.x < upper then
-            bounds = { x = lower, right = upper }
+            bounds = { x = lower, right = upper, color_x = window.x + b.color_x * window.scale }
         end
     end
     assert(bounds, 'Region color hit lacks a gear-column owner')
     for _, c in ipairs(commands) do
         if
             c.type == 'rect'
-            and c.x > label.x
+            and math.abs(c.x - bounds.color_x) < 0.01
             and c.x >= bounds.x
             and c.x + c.w <= bounds.right + 0.01
             and c.y <= label.y
             and c.y + c.h > label.y
-            and c.w > c.h * 2
+            and c.w > 0
         then
             return { x = c.x + c.w / 2 - 2, y = c.y + c.h / 2 - 2 }
         end
@@ -279,9 +280,9 @@ assert(
         and imported_labels['Apply Imported Texture'],
     'Loaded import controls missing'
 )
-assert(regions >= 2, 'Basic did not show both region palettes: ' .. regions)
--- Whole-LUT camo controls stay readable instead of shrinking the region rows.
--- Compact Basic can scroll either gear column to expose the final region.
+assert(regions == 16 and row8, 'Basic did not show all eight regions in both gear columns: ' .. regions)
+-- Ordinary eight-row LUTs fit together. Wheels and stale saved offsets must
+-- not turn a standard gear table into a scroll-only list.
 for _, kind in ipairs({ 'armor', 'helmet' }) do
     local bounds = view.region_bounds[kind]
     view.wheel(bounds.x + 5, bounds.y + 5, -12000)
@@ -292,7 +293,10 @@ for _, kind in ipairs({ 'armor', 'helmet' }) do
             row8 = c
         end
     end
-    assert(last, 'Compact Basic final region is not scrollable')
+    assert(
+        last and view.region_maximum[kind] == 0 and view.region_scroll[kind] == 0,
+        'Standard eight-row Basic table requires region scrolling'
+    )
 end
 state.palette_count = 2
 state.raw.matching = { matched = 1, unmatched = 1, unidentified = 0, ambiguous = 0 }
@@ -304,7 +308,6 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
 end
 assert(matching, 'Basic matching-import action missing')
 -- Compact Basic keeps the actions above the footer and scrolls independently of regions.
-assert(view.action_maximum > 0, 'Loaded Basic actions need a scroll range at 780px window height')
 local armor_scroll, helmet_scroll = view.region_scroll.armor, view.region_scroll.helmet
 assert(view.wheel(view.action_bounds.x + 10, view.action_bounds.y + 10, -1200), 'Basic action pane ignored wheel input')
 assert(
@@ -634,6 +637,7 @@ state.dirty = true
 state.status =
     'Applied Jungle colorway to all 64 regions in this Armor LUT. Exact colors are preserved when exported; save this appearance before switching to another preset.'
 local dirty_notice = 'Modified - save or export to keep your colors.'
+local dirty_scroll_exercised = false
 for _, loaded in ipairs({ false, true }) do
     state.loaded = loaded and saved_editor or nil
     for _, font in ipairs({ 12, 20 }) do
@@ -643,7 +647,7 @@ for _, loaded in ipairs({ false, true }) do
             local maximum = view.action_maximum
             state.dirty = false
             menu.compose(unpack(resolution))
-            assert(maximum > view.action_maximum, 'Dirty notice did not reserve its own scroll space')
+            assert(maximum >= view.action_maximum, 'Dirty notice reduced the action content extent')
             state.dirty = true
             menu.compose(unpack(resolution))
             view.action_scroll = view.action_maximum
@@ -660,7 +664,7 @@ for _, loaded in ipairs({ false, true }) do
                     scrollbar = c
                 end
             end
-            assert(folder and #dirty_lines > 0 and scrollbar, 'Scrolled Basic dirty/footer content unreachable')
+            assert(folder and #dirty_lines > 0, 'Basic dirty/footer content unreachable')
             local window, bounds = menu.window_bounds, view.action_bounds
             local lower = window.y + bounds.y * window.scale
             for _, c in ipairs(dirty_lines) do
@@ -668,45 +672,54 @@ for _, loaded in ipairs({ false, true }) do
                 assert(c.y - 0.2 * c.size >= lower, 'Dirty notice escaped the action viewport into footer')
                 assert(c.viewport, 'Dirty guidance lacks action viewport clipping')
             end
-            local before_scroll = view.action_scroll
-            local sx, sy = scrollbar.x + 2, scrollbar.y + scrollbar.h / 2
-            menu.tick({
-                down = function(key)
-                    return key == 1
-                end,
-                mouse = function()
-                    return sx, sy
-                end,
-                wheel = function()
-                    return 0
-                end,
-            })
-            menu.tick({
-                down = function(key)
-                    return key == 1
-                end,
-                mouse = function()
-                    return sx, sy + 16
-                end,
-                wheel = function()
-                    return 0
-                end,
-            })
-            menu.tick({
-                down = function()
-                    return false
-                end,
-                mouse = function()
-                    return sx, sy + 16
-                end,
-                wheel = function()
-                    return 0
-                end,
-            })
-            assert(view.action_scroll < before_scroll, 'Basic action scrollbar did not drag')
+            if scrollbar then
+                dirty_scroll_exercised = true
+                local before_scroll = view.action_scroll
+                local sx, sy = scrollbar.x + 2, scrollbar.y + scrollbar.h / 2
+                menu.tick({
+                    down = function(key)
+                        return key == 1
+                    end,
+                    mouse = function()
+                        return sx, sy
+                    end,
+                    wheel = function()
+                        return 0
+                    end,
+                })
+                menu.tick({
+                    down = function(key)
+                        return key == 1
+                    end,
+                    mouse = function()
+                        return sx, sy + 16
+                    end,
+                    wheel = function()
+                        return 0
+                    end,
+                })
+                menu.tick({
+                    down = function()
+                        return false
+                    end,
+                    mouse = function()
+                        return sx, sy + 16
+                    end,
+                    wheel = function()
+                        return 0
+                    end,
+                })
+                assert(view.action_scroll < before_scroll, 'Basic action scrollbar did not drag')
+            else
+                assert(
+                    view.action_maximum == 0 and view.action_scroll == 0,
+                    'Fully visible Basic action content retained a hidden scroll offset'
+                )
+            end
         end
     end
 end
+assert(dirty_scroll_exercised, 'Oversized Basic action content did not exercise scroll dragging')
 state.dirty, state.status = false, 'Ready'
 -- Render the actual viewport masks and footer chrome through the retained
 -- native GUI mock. Checking only text baselines missed the previous bug: the
@@ -787,6 +800,116 @@ local function native_pixel(x, y)
     end
     return assert(winner, 'Missing Basic footer native pixel')
 end
+-- All ordinary gear regions fit at once, and their swatches use the available
+-- viewport height. No saved offset or wheel input can hide one of eight rows.
+local eight_previous = {
+    armor = state.raw.basic.armor.document,
+    helmet = state.raw.basic.helmet.document,
+    loaded = state.loaded,
+}
+state.raw.basic.armor.document, state.raw.basic.helmet.document = saved_editor, saved_editor
+for _, loaded in ipairs({ false, true }) do
+    state.loaded = loaded and saved_editor or nil
+    for _, font in ipairs({ 12, 20 }) do
+        for _, resolution in ipairs({ { 1280, 720 }, { 1920, 1080 } }) do
+            for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+                menu.font_size, menu.ui_scale = font, scale
+                view.region_scroll.armor, view.region_scroll.helmet = 500, 900
+                local commands = menu.compose(unpack(resolution))
+                native.draw(commands)
+                local region_count = 0
+                for _, c in ipairs(commands) do
+                    if c.full_text and c.full_text:match('^Region %d+$') then
+                        region_count = region_count + 1
+                    end
+                    assert(
+                        c.scrollbar ~= 'basic_armor_regions' and c.scrollbar ~= 'basic_helmet_regions',
+                        'An ordinary eight-row Basic table renders a region scrollbar'
+                    )
+                end
+                assert(region_count == 16, 'Basic eight-region matrix hides a gear row')
+                for _, kind in ipairs({ 'armor', 'helmet' }) do
+                    local b, window = view.region_bounds[kind], menu.window_bounds
+                    assert(
+                        view.region_maximum[kind] == 0 and view.region_scroll[kind] == 0,
+                        'Eight-row Basic layout retained stale scroll or rounding overflow'
+                    )
+                    assert(
+                        b.row_height >= 29 and math.abs(b.row_height * 8 - b.h) < 0.01,
+                        'Eight-row Basic swatches do not fill their available viewport'
+                    )
+                    local previous, square_count = nil, 0
+                    local center = window.x + (b.camo_x + b.camo_width / 2) * window.scale
+                    for _, c in ipairs(commands) do
+                        if
+                            c.type == 'rect'
+                            and c.ui_role == 'control_fill'
+                            and math.abs(c.x + c.w / 2 - center) < 0.01
+                            and math.abs(c.w - c.h) < 0.01
+                            and c.y >= window.y + b.y * window.scale
+                            and c.y + c.h <= window.y + (b.y + b.h) * window.scale
+                        then
+                            square_count = square_count + 1
+                        end
+                    end
+                    assert(square_count == 8, 'Basic eight-row checkbox squares are not visible together')
+                    for row = 1, 8 do
+                        local label = assert(column_label(commands, kind, 'Region ' .. row))
+                        assert(label.text == label.full_text, 'Basic region label was clipped at a large font')
+                        assert(
+                            label.y - 0.2 * label.size >= window.y + b.y * window.scale
+                                and label.y + 0.85 * label.size <= window.y + (b.y + b.h) * window.scale,
+                            'Eight-row Basic native glyph ink leaves its color viewport'
+                        )
+                        if previous then
+                            assert(
+                                previous.y - 0.2 * previous.size > label.y + 0.85 * label.size,
+                                'Eight-row Basic labels overlap after stretching'
+                            )
+                        end
+                        assert(
+                            native_pixel(label.x + label.size * 0.1, label.y + label.size * 0.3).text == label.text,
+                            'Native Basic row is obscured despite being in the eight-row command list'
+                        )
+                        local point = region_point(commands, label)
+                        local pixel = native_pixel(point.x + 2, point.y + 2)
+                        assert(
+                            not pixel.text and pixel.color.r == 128 and pixel.color.g == 128 and pixel.color.b == 128,
+                            'Eight-row Basic color swatch was masked by neighboring controls'
+                        )
+                        previous = label
+                    end
+                    local first = assert(column_label(commands, kind, 'Region 1'))
+                    local last = assert(column_label(commands, kind, 'Region 8'))
+                    if loaded then
+                        local imported = assert(column_label(commands, kind, 'Apply DDS'))
+                        assert(
+                            imported.y - 0.2 * imported.size > first.y + 0.85 * first.size,
+                            'Basic imported source overlaps the first of eight regions'
+                        )
+                    end
+                    local camo = assert(column_label(commands, kind, 'Camo'))
+                    assert(
+                        last.y - 0.2 * last.size > camo.y + 0.85 * camo.size,
+                        'Basic Camo footer overlaps the eighth region'
+                    )
+                    tap(region_point(commands, last))
+                    assert(
+                        selected == 8 and selected_kind == kind and menu.color_picker,
+                        'Eighth Basic region is not clickable without scrolling'
+                    )
+                    menu.close_color(false)
+                    assert(
+                        view.wheel(b.x + 5, b.y + b.h / 2, -1200) and view.region_scroll[kind] == 0,
+                        'Wheel input hid a fully visible ordinary Basic row'
+                    )
+                end
+            end
+        end
+    end
+end
+state.raw.basic.armor.document, state.raw.basic.helmet.document = eight_previous.armor, eight_previous.helmet
+state.loaded = eight_previous.loaded
 local original_portrait = package.loaded['epic.player_preview.v1']
 local preview_clicks, stop_clicks = 0, 0
 package.loaded['epic.player_preview.v1'] = {
@@ -1176,7 +1299,11 @@ end
 -- selection only; primary editing, highlighting and imported-source applying
 -- must not run as a side effect of changing that scope.
 local function empty_scope(kind, missing)
-    state.raw.basic[kind].camo_rows = missing and nil or {}
+    if missing then
+        state.raw.basic[kind].camo_rows = nil
+    else
+        state.raw.basic[kind].camo_rows = {}
+    end
     local registry = api.mods.basic_test.controls
     for _, suffix in ipairs({
         '_camo',
@@ -1190,12 +1317,89 @@ local function empty_scope(kind, missing)
     end
 end
 local function checkbox_point(commands, kind, row)
-    local label = assert(column_label(commands, kind, 'Region ' .. row), 'Camo checkbox row is not visible')
+    assert(column_label(commands, kind, 'Region ' .. row), 'Camo checkbox row is not visible')
     local b, window = view.region_bounds[kind], menu.window_bounds
     return {
         x = window.x + (b.camo_x + b.camo_width / 2) * window.scale - 2,
-        y = label.y + 5 * window.scale - 2,
+        y = window.y + (b.y + b.h + view.region_scroll[kind] - (row - 0.5) * b.row_height) * window.scale - 2,
     }
+end
+local checkbox_theme = dofile('vendor/menu/menu.lua').epic_palette
+local function checkbox_visual(commands, kind, row, checked, enabled)
+    local label = assert(column_label(commands, kind, 'Region ' .. row))
+    local b, window = view.region_bounds[kind], menu.window_bounds
+    local center = window.x + (b.camo_x + b.camo_width / 2) * window.scale
+    local frame
+    for _, c in ipairs(commands) do
+        assert(c.full_text ~= '[x]' and c.full_text ~= '[ ]', 'Basic Camo still uses bracket text as its checkbox')
+        if
+            c.type == 'rect'
+            and c.ui_role == 'control_fill'
+            and math.abs(c.x + c.w / 2 - center) < 0.01
+            and math.abs(c.w - c.h) < 0.01
+            and c.y <= label.y
+            and c.y + c.h > label.y
+        then
+            frame = c
+        end
+    end
+    assert(frame and math.abs(frame.w / window.scale - 22) < 0.01, 'Basic Camo checkbox is not a centered square')
+    local borders, ticks = {}, {}
+    for _, c in ipairs(commands) do
+        if
+            c.type == 'rect'
+            and c.x >= frame.x - 0.01
+            and c.y >= frame.y - 0.01
+            and c.x + c.w <= frame.x + frame.w + 0.01
+            and c.y + c.h <= frame.y + frame.h + 0.01
+        then
+            if c.ui_role == 'control_border' then
+                borders[#borders + 1] = c
+            elseif c.ui_role == 'control_icon' then
+                assert(
+                    c.x > frame.x and c.y > frame.y and c.x + c.w < frame.x + frame.w and c.y + c.h < frame.y + frame.h,
+                    'Basic Camo check mark escaped its square frame'
+                )
+                ticks[#ticks + 1] = c
+            end
+        end
+    end
+    assert(#borders == 4, 'Basic Camo square frame lost a border')
+    assert((#ticks > 0) == checked, 'Basic Camo tick does not match the row selection')
+    native.draw(commands)
+    if checked then
+        local color = enabled and checkbox_theme.focus or checkbox_theme.disabled
+        local turn, left_arm, right_arm
+        for _, tick in ipairs(ticks) do
+            assert(
+                tick.c[1] == color[1] and tick.c[2] == color[2] and tick.c[3] == color[3],
+                'Basic Camo check mark has the wrong enabled/disabled contrast'
+            )
+            local pixel = native_pixel(tick.x + tick.w / 2, tick.y + tick.h / 2)
+            assert(
+                not pixel.text and pixel.color.r == color[1] and pixel.color.g == color[2] and pixel.color.b == color[3],
+                'Native Basic Camo check mark is obscured by its frame or another primitive'
+            )
+            if not turn or tick.y < turn.y then
+                turn = tick
+            end
+        end
+        for _, tick in ipairs(ticks) do
+            left_arm = left_arm or tick.x < turn.x - frame.w * 0.1 and tick.y > turn.y + frame.h * 0.1
+            right_arm = right_arm or tick.x > turn.x + frame.w * 0.2 and tick.y > turn.y + frame.h * 0.2
+        end
+        assert(left_arm and right_arm, 'Basic Camo tick does not form descending and ascending check-mark arms')
+    else
+        local pixel = native_pixel(frame.x + frame.w / 2, frame.y + frame.h / 2)
+        assert(
+            not pixel.text
+                and pixel.color.r == frame.c[1]
+                and pixel.color.g == frame.c[2]
+                and pixel.color.b == frame.c[3],
+            'Native unchecked Basic Camo square is not empty'
+        )
+    end
+    return frame
 end
 local unchanged_pixels = ffi.string(camo_data, 23 * 64 * 16)
 for _, font in ipairs({ 12, 20 }) do
@@ -1209,19 +1413,7 @@ for _, font in ipairs({ 12, 20 }) do
         local commands = menu.compose(1280, 720)
         for _, kind in ipairs({ 'armor', 'helmet' }) do
             assert(column_label(commands, kind, 'Check regions above'), 'Unchecked Basic Camo scope is not explained')
-            local b, window = view.region_bounds[kind], menu.window_bounds
-            local check_count = 0
-            for _, c in ipairs(commands) do
-                if
-                    (c.full_text == '[ ]' or c.full_text == '[x]')
-                    and c.x >= window.x + b.x * window.scale
-                    and c.x < window.x + (b.x + b.w) * window.scale
-                then
-                    check_count = check_count + 1
-                    assert(c.full_text == '[ ]', 'Basic Camo implicitly checked an Armor or Helmet region')
-                end
-            end
-            assert(check_count > 0, 'Basic Camo checkbox column is missing')
+            checkbox_visual(commands, kind, 1, false, true)
             local prior_toggles, prior_selection, prior_identify, prior_import =
                 #camo_toggles, selected_calls, identify_calls, #import_actions
             tap(checkbox_point(commands, kind, 1))
@@ -1245,11 +1437,24 @@ for _, font in ipairs({ 12, 20 }) do
             assert(not state.raw.basic[other].camo_rows[1], 'Basic Camo checkbox toggled the other gear column')
             commands = menu.compose(1280, 720)
             assert(column_label(commands, kind, '1 checked regions'), 'Checked Basic Camo row count is stale')
+            checkbox_visual(commands, kind, 1, true, true)
+            local busy_toggles = #camo_toggles
+            state.busy = true
+            commands = menu.compose(1280, 720)
+            checkbox_visual(commands, kind, 1, true, false)
+            tap(checkbox_point(commands, kind, 1))
+            assert(
+                #camo_toggles == busy_toggles and state.raw.basic[kind].camo_rows[1] == true,
+                'Disabled Basic Camo square still toggles during an import'
+            )
+            state.busy = false
+            commands = menu.compose(1280, 720)
             tap(checkbox_point(commands, kind, 1))
             assert(
                 state.raw.basic[kind].camo_rows[1] == false and camo_toggles[#camo_toggles].checked == false,
                 'Basic Camo checkbox could not be unchecked'
             )
+            checkbox_visual(menu.compose(1280, 720), kind, 1, false, true)
             view.region_scroll[kind] = math.min(view.region_maximum[kind], 7 * 29)
             commands = menu.compose(1280, 720)
             tap(checkbox_point(commands, kind, 8))
@@ -1257,6 +1462,7 @@ for _, font in ipairs({ 12, 20 }) do
                 state.raw.basic[kind].camo_rows[8] == true and camo_toggles[#camo_toggles].row == 8,
                 'Basic Camo row8 could not be explicitly opted in'
             )
+            checkbox_visual(menu.compose(1280, 720), kind, 8, true, true)
             tap(checkbox_point(menu.compose(1280, 720), kind, 8))
             assert(state.raw.basic[kind].camo_rows[8] == false, 'Basic Camo row8 could not be explicitly opted out')
             view.region_scroll[kind] = view.region_maximum[kind]
@@ -1266,6 +1472,7 @@ for _, font in ipairs({ 12, 20 }) do
                 state.raw.basic[kind].camo_rows[64] == true and camo_toggles[#camo_toggles].row == 64,
                 'Scrolled final Basic Camo checkbox toggled the wrong region'
             )
+            checkbox_visual(menu.compose(1280, 720), kind, 64, true, true)
             assert(
                 selected_calls == prior_selection
                     and identify_calls == prior_identify
@@ -1279,8 +1486,9 @@ for _, font in ipairs({ 12, 20 }) do
         empty_scope('armor', true)
         empty_scope('helmet', true)
         commands = menu.compose(1280, 720)
-        for _, c in ipairs(commands) do
-            assert(c.full_text ~= '[x]', 'Missing Basic row flags were treated as implicitly checked')
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            assert(state.raw.basic[kind].camo_rows == nil, 'Missing-map fixture did not remove its row selection')
+            checkbox_visual(commands, kind, 1, false, true)
         end
         for _, kind in ipairs({ 'armor', 'helmet' }) do
             empty_scope(kind)
@@ -1291,10 +1499,13 @@ assert(ffi.string(camo_data, 23 * 64 * 16) == unchanged_pixels, 'Basic Camo chec
 package.loaded['epic.player_preview.v1'] = original_portrait
 native.release()
 print(
+    'PASS Basic eight-region layout: all16labels/squares/swatches visible together, stretched fill, no stale or rounded scroll, native ink and eighth-row hits across imports/fonts/screens/scales;64-row scrolling retained'
+)
+print(
     'PASS Basic import placement: destination/source/region ink separation, stationary source and camo/copy chrome, first/final independent region clicks and native containment across windows/fonts/scales'
 )
 print(
-    'PASS Basic Camo row scope: opt-in Armor/Helmet defaults, per-row and row8 toggle hits, scrolled final row, missing-map guard and no color/flash/import/pixel side effects'
+    'PASS Basic Camo check marks: empty native squares, contained two-arm ticks, enabled/disabled contrast and hit guards, opt-in row8/final-row scope and no color/flash/import/pixel side effects'
 )
 print(
     'PASS Basic split import: independent apply/arrow hits, shared source and filename synchronization, stable/native popup anchors, busy mouse/keyboard/cancellation and unavailable targets'

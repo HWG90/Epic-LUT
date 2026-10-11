@@ -3710,7 +3710,7 @@ local function register(current)
         end, m.control_help, operations.set_basic_camo_row)
         local page = api.mods[handle.id].pages[1]
         page.minimum_width = 1100
-        page.minimum_height = 780
+        page.minimum_height = m.basic_view.minimum_height or 1000
         page.render_layout = basic.draw
         page.on_wheel = basic.wheel
     end

@@ -1,5 +1,38 @@
--- Primary RGB and whole-LUT camo. No shader, alpha or raw-column controls.
+-- Primary RGB and checked-region camo. No shader, alpha or raw-column controls.
 local B = {}
+B.minimum_height = 1000
+local function camo_checkbox(ui, x, y, width, height, checked, enabled, callback)
+    local size = math.min(22, width, height - 4)
+    local left, bottom = x + (width - size) / 2, y + (height - size) / 2
+    local theme = ui.theme
+    local hovered = enabled and ui.hovering and ui.hovering(x, y, width, height)
+    local border = not enabled and theme.line
+        or checked and theme.focus
+        or hovered and (theme.border_hover or theme.focus)
+        or theme.muted
+    local stroke = math.min(2 * (ui.pixel_width or 1), size / 4)
+    ui.rect(left, bottom, size, size, checked and theme.selected or theme.panel, nil, 'control_fill')
+    ui.rect(left, bottom, size, stroke, border, nil, 'control_border')
+    ui.rect(left, bottom + size - stroke, size, stroke, border, nil, 'control_border')
+    ui.rect(left, bottom + stroke, stroke, size - stroke * 2, border, nil, 'control_border')
+    ui.rect(left + size - stroke, bottom + stroke, stroke, size - stroke * 2, border, nil, 'control_border')
+    if checked then
+        -- Draw the tick with native rectangle strokes so it does not depend on
+        -- the HUD/debug font containing a check-mark glyph.
+        local unit, ink = size / 20, enabled and theme.focus or theme.disabled
+        for step = 0, 3 do
+            ui.rect(left + (4 + step) * unit, bottom + (10 - step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
+        end
+        for step = 0, 8 do
+            ui.rect(left + (7 + step) * unit, bottom + (7 + step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
+        end
+    end
+    ui.hit(x, y, width, height, function()
+        if enabled then
+            callback()
+        end
+    end, nil, nil, 'Include this region when applying a camo pattern, colorway or color.')
+end
 function B.new(info, select_row, help, select_camo_row)
     help = help or {}
     local self = { action_scroll = 0, region_scroll = {}, region_maximum = {}, region_bounds = {} }
@@ -38,9 +71,6 @@ function B.new(info, select_row, help, select_camo_row)
         local divider = theme.line
         ui.rect(ui.x + left / 2, ui.y + 48, 1, math.max(0, ui.h - 148), divider)
         ui.rect(right - 9, ui.y, 1, ui.h, divider)
-        local function text(x, y, t, role, color)
-            ui.bounded(x, y, t, 14, color or white, ui.w - (x - ui.x) - 10, role)
-        end
         local guidance = help.basic or {}
         local function button(x, y, w, label, id, enabled, drawing, height)
             local ui = drawing or ui
@@ -58,17 +88,6 @@ function B.new(info, select_row, help, select_camo_row)
         end
         local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
         local hint_size = ui.text_size and ui.text_size(14, 'hint') or 14
-        local heading_y = top - math.max(20, heading_size + 6)
-        text(ui.x + 10, heading_y, 'Basic - primary colors only', 'heading')
-        text(
-            ui.x + 10,
-            heading_y - math.max(24, hint_size + 8),
-            'Click a color region to edit. Importing a file is optional.',
-            'hint',
-            muted
-        )
-        local panels = state.raw and state.raw.basic
-        button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
         local gap = ui.spacing and ui.spacing(4) or 4
         local control_height = ui.control_height and ui.control_height(14, 4, 28) or 28
         local color_label_height = ui.control_height and ui.control_height(12, 1, 14) or 14
@@ -77,7 +96,11 @@ function B.new(info, select_row, help, select_camo_row)
         local camo_y = colorway_y + 26 + gap
         local color_y = camo_y + 26 + gap
         local camo_heading_y = color_y + color_height + color_label_height + gap * 2
-        local lut_y = top - 142
+        local load_y = top - control_height - gap
+        button(ui.x + 10, load_y, left - 20, 'Load Current Armor & Helmet', 'populate_worn', nil, nil, control_height)
+        local gear_heading_height = ui.control_height and ui.control_height(14, 1, 20, 'heading') or heading_size + gap
+        local gear_heading_y = load_y - gear_heading_height - gap
+        local lut_y = gear_heading_y - 26 - gap
         local import_heading_height = ui.control_height and ui.control_height(12, 2, 20, 'heading')
             or heading_size + gap
         local import_heading_y = lut_y - import_heading_height - gap
@@ -101,10 +124,13 @@ function B.new(info, select_row, help, select_camo_row)
                     first_checked = first_checked or row
                 end
             end
+            local region_label_width =
+                math.max(80, (ui.text_width and ui.text_width('Region ' .. math.max(8, rows), 12) or 75) + gap * 2)
             local checkbox_width = math.max(28, (ui.text_width and ui.text_width('Camo', 12, 'hint') or 28) + gap * 2)
-            local checkbox_x = x + 80
-            local color_offset = 80 + checkbox_width + gap
-            local maximum = math.max(0, math.ceil(rows * 29 - region_height))
+            local checkbox_x = x + region_label_width
+            local color_offset = region_label_width + checkbox_width + gap
+            local row_height = rows == 8 and math.max(29, region_height / 8) or 29
+            local maximum = math.max(0, math.ceil(rows * row_height - region_height - 0.01))
             local scroll = math.min(self.region_scroll[kind] or 0, maximum)
             self.region_maximum[kind], self.region_scroll[kind] = maximum, scroll
             self.region_bounds[kind] = {
@@ -115,18 +141,30 @@ function B.new(info, select_row, help, select_camo_row)
                 camo_x = checkbox_x,
                 camo_width = checkbox_width,
                 color_x = x + color_offset,
+                row_height = row_height,
             }
+            local gear_name = kind == 'armor' and 'Armor' or 'Helmet'
             ui.bounded(
                 x,
-                top - 110,
-                kind == 'armor' and 'Armor' or 'Helmet',
+                ui.text_y and ui.text_y(gear_heading_y, gear_heading_height, 14, gear_name, 'heading') or gear_heading_y,
+                gear_name,
                 14,
                 state.palette_ready == false and muted or white,
                 half,
                 'heading'
             )
             if panel and panel.resource then
-                ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65, 'hint')
+                local label = 'ID: ' .. panel.resource
+                local id_offset = (ui.text_width and ui.text_width(gear_name, 14, 'heading') or 65) + gap * 2
+                ui.bounded(
+                    x + id_offset,
+                    ui.text_y and ui.text_y(gear_heading_y, gear_heading_height, 12, label, 'hint') or gear_heading_y,
+                    label,
+                    12,
+                    muted,
+                    math.max(0, half - id_offset),
+                    'hint'
+                )
             end
             ui.choice('basic_' .. kind .. '_lut', x, lut_y, half)
             if state.loaded then
@@ -171,11 +209,10 @@ function B.new(info, select_row, help, select_camo_row)
                 checkbox_width,
                 'hint'
             )
-            local cursor = cliptop + scroll
             if document then
                 for row = 1, document.height do
-                    cursor = cursor - 29
-                    if cursor >= clipbottom and cursor + 28 <= cliptop then
+                    local cursor = cliptop + scroll - row * row_height
+                    if cursor >= clipbottom - 0.01 and cursor + row_height - 1 <= cliptop + 0.01 then
                         local at = (row - 1) * document.width * 4
                         local rgb = {}
                         for ch = 0, 2 do
@@ -184,38 +221,40 @@ function B.new(info, select_row, help, select_camo_row)
                         local pulse = 0.5 + 0.5 * math.sin((state.time or 0) * 3)
                         ui.bounded(
                             x + 3,
-                            cursor + 9,
+                            ui.text_y and ui.text_y(cursor, row_height - 1, 12, 'Region ' .. row)
+                                or cursor + (row_height - 12) / 2,
                             'Region ' .. row,
                             12,
                             { math.floor(175 + 69 * pulse), math.floor(180 + 22 * pulse), math.floor(140 - 87 * pulse) },
-                            75
+                            region_label_width - 6
                         )
-                        ui.rect(x + color_offset, cursor + 2, math.max(0, half - color_offset - 3), 26, rgb)
+                        ui.rect(x + color_offset, cursor + 2, math.max(0, half - color_offset - 3), row_height - 3, rgb)
                         local selected = row
                         local target = kind
                         local checked = checked_rows and checked_rows[row] == true
-                        ui.button(checkbox_x, cursor + 1, checkbox_width, 26, checked and '[x]' or '[ ]', function()
-                            if select_camo_row then
-                                select_camo_row(selected, target, not checked, checked_rows)
-                            end
-                        end, {
-                            enabled = document.width == 23
+                        camo_checkbox(
+                            ui,
+                            checkbox_x,
+                            cursor + 1,
+                            checkbox_width,
+                            row_height - 2,
+                            checked,
+                            document.width == 23
                                 and checked_rows ~= nil
                                 and select_camo_row ~= nil
                                 and not state.busy
                                 and not document.stale
                                 and not document.read_only,
-                            selected = checked,
-                            padding = gap,
-                            size = 12,
-                            help = 'Include this region when applying a camo pattern, colorway or color.',
-                        })
-                        ui.hit(x, cursor, 78, 28, function()
+                            function()
+                                select_camo_row(selected, target, not checked, checked_rows)
+                            end
+                        )
+                        ui.hit(x, cursor, region_label_width - 2, row_height - 1, function()
                             if select_row(selected, target) ~= false then
                                 ui.activate('identify_region')
                             end
                         end, nil, nil, 'Flash this region on your character to find which part it colors.')
-                        ui.hit(x + color_offset, cursor, math.max(0, half - color_offset), 28, function()
+                        ui.hit(x + color_offset, cursor, math.max(0, half - color_offset), row_height - 1, function()
                             if select_row(selected, target) ~= false then
                                 ui.activate('cell_color', nil, 1)
                             end
@@ -293,7 +332,7 @@ function B.new(info, select_row, help, select_camo_row)
                     x + half - 3,
                     clipbottom,
                     region_height,
-                    rows * 29,
+                    rows * row_height,
                     region_height,
                     scroll,
                     function(value)
@@ -395,6 +434,7 @@ function B.new(info, select_row, help, select_camo_row)
                 drawing.rect(right, y, width, 1, divider)
             end, gap * 2)
         end
+        paragraph('Click a region color to edit; its label flashes the region.', 'hint', muted)
         paragraph('Import a palette (optional)', 'heading')
         buttons({ { 'Import DDS / ZIP / RAR...', 'browse' } })
         local plan = state.raw and state.raw.matching

@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Add a Camo checkbox column beside Basic's regions, with every box initially unchecked. Patterns, colorways and camo tints affect only checked rows; keep unchecked bytes intact, retain selections through Undo/Redo and use the first checked row for color swatches.
+- Give Basic mode enough minimum window height to show all eight regions together, expanding those rows to fill the available space. Remove its repeated title/help above the LUTs and measure the compact Load, gear and import headers. Retain scrolling for larger tables.
+- Add a Camo checkbox column beside Basic's regions, with square boxes and drawn check marks, every box initially unchecked. Patterns, colorways and camo tints affect only checked rows; keep unchecked bytes intact, retain selections through Undo/Redo and use the first checked row for color swatches.
 - Place Basic's Apply Imported Texture controls directly below each destination LUT selector, with source selection on the dropdown arrow and Apply [filename] on the main button. Keep both source labels synchronized and move camo swatches above the pattern/colorway selectors.
 - Initialize dormant Basic camo using the complete recipe copied by Match Your Colors: color alpha, fade, mask sharpness/bias/UV scale and roughness blending. Generated colorways now activate camo; keep authored working patterns and independent tint edits.
 - Reserve a measured Basic action footer so scrolling content and clip masks cannot cover Player Preview or Stop Highlight.
