@@ -88,7 +88,7 @@ end
 local function material_slots(source)
     assert(#source.main >= 136, 'Truncated native material record')
     local count, slots = uint(source.main, 64), {}
-    assert(count >= 1 and count <= 64 and 136 + 12 * count <= #source.main, 'Invalid native material texture table')
+    assert(count <= 64 and 136 + 12 * count <= #source.main, 'Invalid native material texture table')
     for i = 0, count - 1 do
         local slot = uint(source.main, 136 + i * 4)
         assert(not slots[slot], 'Ambiguous duplicate native material texture slot')
@@ -568,27 +568,28 @@ function B.encode(archive, documents, patches, options)
                 local sections = unit_sections(unit)
                 for _, mesh in ipairs(layout.meshes) do
                     for _, slot in ipairs(mesh.material_slots) do
-                        assert(
-                            slot.mapped and materials[slot.material],
-                            'Unmapped original fallback mesh material slot'
-                        )
-                        local material = materials[slot.material]
-                        local at = material_slots(material)[anchor.source.texture_slot]
-                        if at and hex_at(material.main, at) == resource and not fixed_slots[slot.offset] then
-                            destination({
-                                source = {
-                                    section = slot.section,
-                                    mesh_id = mesh.id,
-                                    material_slot = slot.index,
-                                    material_slot_offset = slot.offset,
-                                },
-                                unit = unit,
-                                material = material,
-                                slot = at,
-                                section_offsets = sections[slot.section],
-                                precise = true,
-                                layout = layout,
-                            }, group.targets[group.original_baseline], false)
+                        -- Opaque unmapped slots have no serialized Material
+                        -- texture link. Keep their exact slot bytes untouched.
+                        if slot.mapped then
+                            assert(materials[slot.material], 'Original fallback mesh material source unavailable')
+                            local material = materials[slot.material]
+                            local at = material_slots(material)[anchor.source.texture_slot]
+                            if at and hex_at(material.main, at) == resource and not fixed_slots[slot.offset] then
+                                destination({
+                                    source = {
+                                        section = slot.section,
+                                        mesh_id = mesh.id,
+                                        material_slot = slot.index,
+                                        material_slot_offset = slot.offset,
+                                    },
+                                    unit = unit,
+                                    material = material,
+                                    slot = at,
+                                    section_offsets = sections[slot.section],
+                                    precise = true,
+                                    layout = layout,
+                                }, group.targets[group.original_baseline], false)
+                            end
                         end
                     end
                 end

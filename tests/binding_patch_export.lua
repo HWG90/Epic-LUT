@@ -612,6 +612,56 @@ do
         repeated_fallback.main == preserved.main and repeated_fallback.gpu == preserved.gpu,
         'Fallback forks depend on entry order'
     )
+    local shadow =
+        source('0102030405060708', B.MATERIAL, replace(material_main, 64, word(0)), material.gpu, material.stream)
+    local shadow_main = replace(kit_main, 832, hash(shadow.resource))
+    local shadow_unit = source(unit_id, B.UNIT, shadow_main, unit.gpu, unit.stream)
+    for _, value in ipairs(lod_entries) do
+        value.binding_source.unit = shadow_unit
+    end
+    forced_options.material_source = function(resource)
+        assert(resource == shadow.resource)
+        return shadow
+    end
+    local shadow_patch = P.encode_set(D, lod_entries, forced_options)
+    local shadow_records, shadow_changed = record_map(shadow_patch)
+    local shadow_layout = L.parse(shadow_changed.main)
+    assert(
+        u(shadow_changed.main, 704) == 103
+            and shadow_layout.section_by_id[103].material == shadow.resource
+            and not shadow_records[B.MATERIAL .. ':' .. shadow.resource],
+        'Zero-texture unselected shadow material changed'
+    )
+    local opaque_id = 0x11223344
+    local opaque_main = replace(shadow_main, 704, word(opaque_id))
+    local opaque_unit = source(unit_id, B.UNIT, opaque_main, unit.gpu, unit.stream)
+    for _, value in ipairs(lod_entries) do
+        value.binding_source.unit = opaque_unit
+    end
+    local opaque_patch = P.encode_set(D, lod_entries, forced_options)
+    local _, opaque_changed = record_map(opaque_patch)
+    local opaque_layout = L.parse(opaque_changed.main)
+    assert(
+        u(opaque_changed.main, 704) == opaque_id and not opaque_layout.meshes[3].material_slots[1].mapped,
+        'Opaque unselected unmapped slot was rewritten or adopted by an appended SectionID'
+    )
+    local selected_opaque = entry('armor', 'p:0:2:2:0', b, 103)
+    selected_opaque.binding_source.unit, selected_opaque.binding_source.section = opaque_unit, opaque_id
+    local opaque_ok, opaque_error = pcall(P.encode_set, D, { lod_entries[1], selected_opaque }, forced_options)
+    assert(
+        not opaque_ok and tostring(opaque_error):find('Certified unit SectionID unavailable', 1, true),
+        'Selected unmapped slot bypassed its required global SectionID proof'
+    )
+    for _, value in ipairs(lod_entries) do
+        value.binding_source.unit = shadow_unit
+    end
+    local selected_shadow = entry('armor', 'p:0:2:2:0', b, 103)
+    selected_shadow.binding_source.unit, selected_shadow.binding_source.material = shadow_unit, shadow
+    local selected_ok, selected_error = pcall(P.encode_set, D, { lod_entries[1], selected_shadow }, forced_options)
+    assert(
+        not selected_ok and tostring(selected_error):find('Certified material texture slot unavailable', 1, true),
+        'Selected zero-texture material bypassed its required texture-slot proof'
+    )
 end
 -- Several LOD meshes can share one global SectionID. Only changed selections
 -- receive local forks; a selected baseline and unselected mesh keep originals.
