@@ -1,6 +1,6 @@
 -- Primary RGB and whole-LUT camo. No shader, alpha or raw-column controls.
 local B = {}
-function B.new(info, select_row, help)
+function B.new(info, select_row, help, select_camo_row)
     help = help or {}
     local self = { action_scroll = 0, region_scroll = {}, region_maximum = {}, region_bounds = {} }
     function self.wheel(x, y, delta)
@@ -73,11 +73,19 @@ function B.new(info, select_row, help)
         local control_height = ui.control_height and ui.control_height(14, 4, 28) or 28
         local color_label_height = ui.control_height and ui.control_height(12, 1, 14) or 14
         local color_height = math.max(22, control_height - gap)
-        local colorway_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
-        local camo_y = colorway_y + control_height + gap
-        local color_y = camo_y + control_height + gap
-        local camo_heading_y = color_y + color_height + color_label_height + gap * 3
-        local cliptop, clipbottom = top - 142, camo_heading_y + math.max(heading_size, hint_size) + gap
+        local colorway_y = ui.y + 38 + gap
+        local camo_y = colorway_y + 26 + gap
+        local color_y = camo_y + 26 + gap
+        local camo_heading_y = color_y + color_height + color_label_height + gap * 2
+        local lut_y = top - 142
+        local import_heading_height = ui.control_height and ui.control_height(12, 2, 20, 'heading')
+            or heading_size + gap
+        local import_heading_y = lut_y - import_heading_height - gap
+        local import_y = import_heading_y - control_height - gap
+        local region_heading_height = ui.control_height and ui.control_height(12, 1, 20, 'hint') or 20
+        local region_top = state.loaded and import_y - gap * 2 or lut_y
+        local cliptop = region_top - region_heading_height - gap
+        local clipbottom = camo_heading_y + math.max(heading_size, hint_size) + gap
         local region_height = math.max(0, cliptop - clipbottom)
         local half = (left - 26) / 2
         for n, kind in ipairs({ 'armor', 'helmet' }) do
@@ -85,10 +93,29 @@ function B.new(info, select_row, help)
             local panel = state.raw and state.raw.basic and state.raw.basic[kind]
             local document = state.palette_ready ~= false and panel and panel.document
             local rows = document and document.height or 0
-            local maximum = math.max(0, math.ceil(rows * 29 + 11 - region_height))
+            local checked_rows = panel and panel.camo_rows
+            local checked_count, first_checked = 0, nil
+            for row = 1, rows do
+                if checked_rows and checked_rows[row] then
+                    checked_count = checked_count + 1
+                    first_checked = first_checked or row
+                end
+            end
+            local checkbox_width = math.max(28, (ui.text_width and ui.text_width('Camo', 12, 'hint') or 28) + gap * 2)
+            local checkbox_x = x + 80
+            local color_offset = 80 + checkbox_width + gap
+            local maximum = math.max(0, math.ceil(rows * 29 - region_height))
             local scroll = math.min(self.region_scroll[kind] or 0, maximum)
             self.region_maximum[kind], self.region_scroll[kind] = maximum, scroll
-            self.region_bounds[kind] = { x = x, y = clipbottom, w = half, h = region_height }
+            self.region_bounds[kind] = {
+                x = x,
+                y = clipbottom,
+                w = half,
+                h = region_height,
+                camo_x = checkbox_x,
+                camo_width = checkbox_width,
+                color_x = x + color_offset,
+            }
             ui.bounded(
                 x,
                 top - 110,
@@ -101,8 +128,50 @@ function B.new(info, select_row, help)
             if panel and panel.resource then
                 ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65, 'hint')
             end
-            ui.choice('basic_' .. kind .. '_lut', x, top - 142, half)
-            local cursor = top - 153 + scroll
+            ui.choice('basic_' .. kind .. '_lut', x, lut_y, half)
+            if state.loaded then
+                local title = 'Apply Imported Texture'
+                ui.bounded(
+                    x,
+                    ui.text_y and ui.text_y(import_heading_y, import_heading_height, 12, title, 'heading')
+                        or import_heading_y + gap,
+                    title,
+                    12,
+                    white,
+                    half,
+                    'heading'
+                )
+                local filename = (state.loaded.source or ''):gsub('\\', '/'):match('[^/]+$') or 'DDS'
+                local arrow_width = math.min(half / 3, math.max(control_height, ui.spacing and ui.spacing(44) or 44))
+                button(
+                    x,
+                    import_y,
+                    half - arrow_width,
+                    'Apply ' .. filename,
+                    'apply_import_' .. kind,
+                    panel ~= nil and panel.group ~= nil and not state.busy,
+                    nil,
+                    control_height
+                )
+                ui.choice('palette', x + half - arrow_width, import_y, arrow_width, nil, {
+                    button = true,
+                    height = control_height,
+                    enabled = not state.busy,
+                    anchor_x = x,
+                    anchor_width = half,
+                    help = 'Choose the imported texture. Press Apply to replace the LUT selected above.',
+                })
+            end
+            ui.bounded(
+                checkbox_x,
+                ui.text_y and ui.text_y(cliptop + gap, region_heading_height, 12, 'Camo', 'hint') or cliptop + gap,
+                'Camo',
+                12,
+                muted,
+                checkbox_width,
+                'hint'
+            )
+            local cursor = cliptop + scroll
             if document then
                 for row = 1, document.height do
                     cursor = cursor - 29
@@ -121,15 +190,32 @@ function B.new(info, select_row, help)
                             { math.floor(175 + 69 * pulse), math.floor(180 + 22 * pulse), math.floor(140 - 87 * pulse) },
                             75
                         )
-                        ui.rect(x + 80, cursor + 2, half - 83, 26, rgb)
+                        ui.rect(x + color_offset, cursor + 2, math.max(0, half - color_offset - 3), 26, rgb)
                         local selected = row
                         local target = kind
+                        local checked = checked_rows and checked_rows[row] == true
+                        ui.button(checkbox_x, cursor + 1, checkbox_width, 26, checked and '[x]' or '[ ]', function()
+                            if select_camo_row then
+                                select_camo_row(selected, target, not checked, checked_rows)
+                            end
+                        end, {
+                            enabled = document.width == 23
+                                and checked_rows ~= nil
+                                and select_camo_row ~= nil
+                                and not state.busy
+                                and not document.stale
+                                and not document.read_only,
+                            selected = checked,
+                            padding = gap,
+                            size = 12,
+                            help = 'Include this region when applying a camo pattern, colorway or color.',
+                        })
                         ui.hit(x, cursor, 78, 28, function()
                             if select_row(selected, target) ~= false then
                                 ui.activate('identify_region')
                             end
                         end, nil, nil, 'Flash this region on your character to find which part it colors.')
-                        ui.hit(x + 80, cursor, half - 80, 28, function()
+                        ui.hit(x + color_offset, cursor, math.max(0, half - color_offset), 28, function()
                             if select_row(selected, target) ~= false then
                                 ui.activate('cell_color', nil, 1)
                             end
@@ -139,7 +225,7 @@ function B.new(info, select_row, help)
             else
                 ui.bounded(
                     x,
-                    top - 181,
+                    cliptop - 39,
                     state.palette_ready == false and 'Load current gear or import a LUT.'
                         or (panel and panel.unavailable and 'Original LUT unavailable.' or 'Reading colors...'),
                     12,
@@ -147,29 +233,48 @@ function B.new(info, select_row, help)
                     half,
                     'hint'
                 )
-                ui.bounded(x, top - 201, 'Try another LUT # or Load Current Colors.', 12, muted, half, 'hint')
+                ui.bounded(x, cliptop - 59, 'Try another LUT # or Load Current Colors.', 12, muted, half, 'hint')
             end
             ui.bounded(x, camo_heading_y, 'Camo', 12, white, half, 'heading')
             local label_width = ui.text_width and ui.text_width('Camo', 12, 'heading') or heading_size * 2.5
             ui.bounded(
                 x + label_width + gap * 2,
                 camo_heading_y,
-                (panel and panel.kind or kind) == 'helmet' and 'All except region 8' or 'All regions in this LUT',
+                checked_count > 0 and (checked_count .. ' checked regions') or 'Check regions above',
                 12,
                 muted,
                 math.max(0, half - label_width - gap * 2),
                 'hint'
             )
-            ui.choice('basic_' .. kind .. '_camo', x, camo_y, half)
-            ui.choice('basic_' .. kind .. '_camo_colorway', x, colorway_y, half)
-            local camo_editable = document and document.width >= 23 and document.height > 0 and not state.busy
+            ui.choice(
+                'basic_' .. kind .. '_camo',
+                x,
+                camo_y,
+                half,
+                nil,
+                { enabled = checked_count > 0 and not state.busy }
+            )
+            ui.choice(
+                'basic_' .. kind .. '_camo_colorway',
+                x,
+                colorway_y,
+                half,
+                nil,
+                { enabled = checked_count > 0 and not state.busy }
+            )
+            local camo_editable = document
+                and document.width == 23
+                and checked_count > 0
+                and not state.busy
+                and not document.stale
+                and not document.read_only
             local color_width = (half - gap * 3) / 4
             for color = 1, 4 do
                 local cx = x + (color - 1) * (color_width + gap)
                 local rgb = { 65, 68, 67 }
                 if camo_editable then
                     for channel = 0, 2 do
-                        local value = document.data[(15 + color) * 4 + channel]
+                        local value = document.data[((first_checked - 1) * document.width + 15 + color) * 4 + channel]
                         rgb[channel + 1] = math.floor(math.max(0, math.min(1, value)) * 255 + 0.5)
                     end
                 end
@@ -179,7 +284,7 @@ function B.new(info, select_row, help)
                     local control = 'basic_' .. kind .. '_camo_color_' .. color
                     ui.hit(cx, color_y, color_width, color_height, function()
                         ui.activate(control, nil, 1)
-                    end, nil, nil, 'Edit Camo color ' .. color .. ' for all regions in this LUT.')
+                    end, nil, nil, 'Edit Camo color ' .. color .. ' for checked regions in this LUT.')
                 end
             end
             if ui.scrollbar and maximum > 0 and region_height > 0 then
@@ -188,42 +293,13 @@ function B.new(info, select_row, help)
                     x + half - 3,
                     clipbottom,
                     region_height,
-                    rows * 29 + 11,
+                    rows * 29,
                     region_height,
                     scroll,
                     function(value)
                         self.region_scroll[kind] = value
                     end
                 )
-            end
-            if state.loaded then
-                ui.bounded(x, ui.y + 80, 'Single LUT Import', 12, white, half, 'heading')
-                local filename = state.loaded and (state.loaded.source or ''):gsub('\\', '/'):match('[^/]+$') or 'DDS'
-                local number = panel and panel.label and panel.label:match('LUT (%d+)')
-                -- The per-target selection is exposed separately from the imported source.
-                number = number or (kind == 'armor' and state.armor_lut or state.helmet_lut) or 1
-                local arrow_width = math.min(half / 3, math.max(control_height, ui.spacing and ui.spacing(44) or 44))
-                button(
-                    x,
-                    ui.y + 48,
-                    half - arrow_width,
-                    'Import '
-                        .. filename
-                        .. ' into '
-                        .. (panel and panel.kind == 'cape' and panel.label or 'LUT ' .. number)
-                        .. ' '
-                        .. (panel and panel.resource or '[unavailable]'),
-                    'apply_import_' .. kind,
-                    state.loaded ~= nil and panel ~= nil and panel.group ~= nil and not state.busy
-                )
-                ui.choice('palette', x + half - arrow_width, ui.y + 48, arrow_width, nil, {
-                    button = true,
-                    height = 28,
-                    enabled = not state.busy,
-                    anchor_x = x,
-                    anchor_width = half,
-                    help = 'Choose the imported texture. Press the main button to apply it to this LUT.',
-                })
             end
             if kind == 'armor' then
                 button(x, ui.y + 10, (half - 6) * 0.43, 'Copy Helmet', 'basic_copy_helmet')

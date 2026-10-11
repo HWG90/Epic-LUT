@@ -20,13 +20,45 @@ local state = {
     helmet_checked = false,
 }
 state.raw = { basic = { armor = { document = state.editor }, helmet = { document = state.editor } } }
+for _, kind in ipairs({ 'armor', 'helmet' }) do
+    state.raw.basic[kind].camo_rows = {}
+    for row = 1, 64 do
+        state.raw.basic[kind].camo_rows[row] = true
+    end
+end
 local selected, selected_kind
+local selected_calls, identify_calls = 0, 0
+local camo_toggles = {}
 local export_hits = 0
-local view = dofile('src/editor/basic_view.lua').new(function()
-    return state
-end, function(row, kind)
-    selected, selected_kind = row, kind
-end)
+local view = dofile('src/editor/basic_view.lua').new(
+    function()
+        return state
+    end,
+    function(row, kind)
+        selected_calls = selected_calls + 1
+        selected, selected_kind = row, kind
+    end,
+    nil,
+    function(row, kind, checked, expected_rows)
+        local panel = state.raw.basic[kind]
+        if expected_rows and panel.camo_rows ~= expected_rows then
+            return false
+        end
+        camo_toggles[#camo_toggles + 1] = { row = row, kind = kind, checked = checked, expected_rows = expected_rows }
+        panel.camo_rows = panel.camo_rows or {}
+        panel.camo_rows[row] = checked
+        local any = false
+        for index = 1, panel.document.height do
+            any = any or panel.camo_rows[index] == true
+        end
+        local registry = api.mods.basic_test.controls
+        registry['basic_' .. kind .. '_camo'].disabled = not any
+        registry['basic_' .. kind .. '_camo_colorway'].disabled = not any
+        for color = 1, 4 do
+            registry['basic_' .. kind .. '_camo_color_' .. color].disabled = not any
+        end
+    end
+)
 local controls = {
     { id = 'palette', type = 'choice', label = 'Imported LUT', choices = { 'Import first', 'LUT 2' }, default = 1 },
     {
@@ -120,6 +152,8 @@ for _, id in ipairs({
         on_activate = function()
             if id == 'export_selected' then
                 export_hits = export_hits + 1
+            elseif id == 'identify_region' then
+                identify_calls = identify_calls + 1
             end
             return true
         end,
@@ -183,6 +217,31 @@ menu.epic_typography = true
 menu.visible = true
 menu.window_width = 1100
 menu.window_height = 780
+local function region_point(commands, label)
+    local window = menu.window_bounds
+    local bounds
+    for _, b in pairs(view.region_bounds) do
+        local lower, upper = window.x + b.x * window.scale, window.x + (b.x + b.w) * window.scale
+        if label.x >= lower and label.x < upper then
+            bounds = { x = lower, right = upper }
+        end
+    end
+    assert(bounds, 'Region color hit lacks a gear-column owner')
+    for _, c in ipairs(commands) do
+        if
+            c.type == 'rect'
+            and c.x > label.x
+            and c.x >= bounds.x
+            and c.x + c.w <= bounds.right + 0.01
+            and c.y <= label.y
+            and c.y + c.h > label.y
+            and c.w > c.h * 2
+        then
+            return { x = c.x + c.w / 2 - 2, y = c.y + c.h / 2 - 2 }
+        end
+    end
+    error('Region color swatch is not present beside its label')
+end
 local commands = menu.compose(1920, 1080)
 local regions = 0
 local row8
@@ -204,7 +263,7 @@ end
 assert(
     not apply_labels['Apply LUT 1 to All Armor']
         and not apply_labels['Restore Imported']
-        and not apply_labels['Single LUT Import'],
+        and not apply_labels['Apply Imported Texture'],
     'Unused import controls should be hidden'
 )
 state.loaded = state.editor
@@ -217,7 +276,7 @@ end
 assert(
     imported_labels['Apply LUT 1 to All Armor']
         and imported_labels['Apply LUT 1 to All Helmet']
-        and imported_labels['Single LUT Import'],
+        and imported_labels['Apply Imported Texture'],
     'Loaded import controls missing'
 )
 assert(regions >= 2, 'Basic did not show both region palettes: ' .. regions)
@@ -312,7 +371,8 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
         row8 = c
     end
 end
-local x, y = row8.x + 85, row8.y + 2
+local row8_point = region_point(menu.compose(1920, 1080), row8)
+local x, y = row8_point.x + 2, row8_point.y + 2
 menu.tick({
     down = function(k)
         return k == 1
@@ -423,11 +483,15 @@ end
 local function column_label(commands, kind, label)
     local b, window = view.region_bounds[kind], menu.window_bounds
     local left, right = window.x + b.x * window.scale, window.x + (b.x + b.w) * window.scale
+    local found
     for _, c in ipairs(commands) do
         if (c.full_text or c.text) == label and c.x >= left and c.x < right then
-            return c
+            if not found or c.y < found.y then
+                found = c
+            end
         end
     end
+    return found
 end
 local function tap(command)
     for _, pressed in ipairs({ true, false }) do
@@ -456,12 +520,9 @@ for _, loaded in ipairs({ false, true }) do
             for _, kind in ipairs({ 'armor', 'helmet' }) do
                 local b = view.region_bounds[kind]
                 local heading = assert(column_label(before, kind, 'Camo'))
-                assert(
-                    column_label(before, kind, kind == 'helmet' and 'All except region 8' or 'All regions in this LUT')
-                )
+                assert(column_label(before, kind, '64 checked regions'))
                 local field = assert(column_label(before, kind, 'Off'))
-                local footer_label = loaded and 'Single LUT Import'
-                    or (kind == 'armor' and 'Copy Helmet' or 'Copy Armor')
+                local footer_label = kind == 'armor' and 'Copy Helmet' or 'Copy Armor'
                 local footer = assert(column_label(before, kind, footer_label))
                 assert(
                     heading.y - 0.2 * heading.size > field.y + 0.85 * field.size,
@@ -489,7 +550,7 @@ for _, loaded in ipairs({ false, true }) do
                     'Region scrolling moved the lower actions'
                 )
                 -- Click the last color swatch through its current scroll position.
-                tap({ x = window.x + (b.x + 82) * window.scale, y = last.y })
+                tap(region_point(after, last))
                 assert(
                     selected == 64 and selected_kind == kind and menu.color_picker,
                     'Scrolled final region hit the wrong gear'
@@ -872,7 +933,7 @@ local function split_label(commands, kind, filename)
     for _, c in ipairs(commands) do
         if
             c.full_text
-            and c.full_text:sub(1, 7) == 'Import '
+            and c.full_text:sub(1, 6) == 'Apply '
             and c.full_text:find(filename, 1, true)
             and c.x >= lower
             and c.x < upper
@@ -885,6 +946,123 @@ local function split_arrow(commands, kind, filename)
     local c = assert(split_label(commands, kind, filename), 'Single LUT Import filename not shown for ' .. kind)
     local b, window = view.region_bounds[kind], menu.window_bounds
     return { x = window.x + (b.x + b.w - 8) * window.scale - 2, y = c.y + c.size * 0.3 - 2 }
+end
+-- Destination -> imported source -> region colors. The imported source row
+-- stays with its destination selector while each color column scrolls below;
+-- loading an import must not reserve an empty area beside the Camo footer.
+for _, font in ipairs({ 12, 20 }) do
+    for _, resolution in ipairs({ { 1280, 720 }, { 1920, 1080 } }) do
+        for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+            menu.font_size, menu.ui_scale = font, scale
+            state.busy, state.loaded = false, nil
+            view.region_scroll.armor, view.region_scroll.helmet = 0, 0
+            local before = menu.compose(unpack(resolution))
+            local fixed = {}
+            for _, kind in ipairs({ 'armor', 'helmet' }) do
+                assert(
+                    not column_label(before, kind, 'Apply Imported Texture'),
+                    'Basic source apply row is visible without an imported texture'
+                )
+                local copy = kind == 'armor' and 'Copy Helmet' or 'Copy Armor'
+                fixed[kind] = {
+                    camo = assert(column_label(before, kind, 'Camo')).y,
+                    colorway = assert(column_label(before, kind, 'Current / custom')).y,
+                    copy = assert(column_label(before, kind, copy)).y,
+                }
+                local first = assert(
+                    column_label(before, kind, 'Region 1'),
+                    'Basic first region is missing without an imported texture'
+                )
+                local window, b = menu.window_bounds, view.region_bounds[kind]
+                assert(
+                    first.y - 0.2 * first.size >= window.y + b.y * window.scale
+                        and first.y + 0.85 * first.size <= window.y + (b.y + b.h) * window.scale,
+                    'Basic first region ink escaped its no-import viewport'
+                )
+            end
+            state.loaded = sources[1]
+            local commands = menu.compose(unpack(resolution))
+            for _, kind in ipairs({ 'armor', 'helmet' }) do
+                local target = assert(column_label(commands, kind, 'LUT 1'))
+                local heading = assert(column_label(commands, kind, 'Apply Imported Texture'))
+                local main = assert(split_label(commands, kind, 'Alpha.dds'))
+                local first = assert(column_label(commands, kind, 'Region 1'))
+                assert(
+                    main.full_text == 'Apply Alpha.dds',
+                    'Basic apply source label repeats destination hashes or LUT ordinals'
+                )
+                assert(
+                    target.y - 0.2 * target.size > heading.y + 0.85 * heading.size,
+                    'Basic imported-texture heading overlaps its destination selector'
+                )
+                assert(
+                    heading.y - 0.2 * heading.size > main.y + 0.85 * main.size,
+                    'Basic imported-texture heading overlaps its split apply button'
+                )
+                local window, b = menu.window_bounds, view.region_bounds[kind]
+                local top = window.y + (b.y + b.h) * window.scale
+                assert(
+                    main.y - 0.2 * main.size > top,
+                    'Basic imported-texture apply button intrudes into scrolling region colors'
+                )
+                assert(
+                    first.y + 0.85 * first.size < main.y - 0.2 * main.size,
+                    'Basic first region overlaps the imported-texture apply button'
+                )
+                local copy = kind == 'armor' and 'Copy Helmet' or 'Copy Armor'
+                assert(
+                    column_label(commands, kind, 'Camo').y == fixed[kind].camo
+                        and column_label(commands, kind, 'Current / custom').y == fixed[kind].colorway
+                        and column_label(commands, kind, copy).y == fixed[kind].copy,
+                    'Import loading left an unused reserve beside Basic Camo/copy controls'
+                )
+                local other = kind == 'armor' and 'helmet' or 'armor'
+                local other_scroll = view.region_scroll[other]
+                assert(view.wheel(b.x + 5, b.y + b.h / 2, -12000))
+                commands = menu.compose(unpack(resolution))
+                assert(
+                    view.region_scroll[kind] == view.region_maximum[kind] and view.region_scroll[other] == other_scroll,
+                    'Moved import row coupled Armor and Helmet region scrolling'
+                )
+                local last = assert(
+                    column_label(commands, kind, 'Region 64'),
+                    'Moved import row made the final Basic region unreachable'
+                )
+                assert(
+                    last.y - 0.2 * last.size >= window.y + b.y * window.scale and last.y + 0.85 * last.size <= top,
+                    'Final Basic region glyphs escaped the viewport below the imported source row'
+                )
+                assert(
+                    column_label(commands, kind, 'Apply Imported Texture').y == heading.y
+                        and split_label(commands, kind, 'Alpha.dds').y == main.y
+                        and column_label(commands, kind, copy).y == fixed[kind].copy,
+                    'Region scrolling moved Basic imported-source or copy controls'
+                )
+                native.draw(commands)
+                for _, label in ipairs({ main, last }) do
+                    assert(
+                        native_pixel(label.x + label.size * 0.1, label.y + label.size * 0.3).text == label.text,
+                        'Basic native source/region text was hidden after moving the import row'
+                    )
+                end
+                tap(region_point(commands, last))
+                assert(
+                    selected == 64 and selected_kind == kind and menu.color_picker,
+                    'Moved source row intercepted the final Basic region color click'
+                )
+                menu.close_color(false)
+                view.region_scroll[kind] = 0
+                commands = menu.compose(unpack(resolution))
+                local reset = assert(column_label(commands, kind, 'Region 1'))
+                tap(region_point(commands, reset))
+                assert(
+                    selected == 1 and selected_kind == kind and menu.color_picker,
+                    'Moved source row intercepted the first Basic region color click'
+                )
+                menu.close_color(false)
+            end
+        end
+    end
 end
 for _, font in ipairs({ 12, 20 }) do
     for _, scale in ipairs({ 0.7, 1, 1.15 }) do
@@ -994,8 +1172,130 @@ for _, font in ipairs({ 12, 20 }) do
         end
     end
 end
+-- Camo scope is opt-in for every Armor and Helmet row. The checkbox controls
+-- selection only; primary editing, highlighting and imported-source applying
+-- must not run as a side effect of changing that scope.
+local function empty_scope(kind, missing)
+    state.raw.basic[kind].camo_rows = missing and nil or {}
+    local registry = api.mods.basic_test.controls
+    for _, suffix in ipairs({
+        '_camo',
+        '_camo_colorway',
+        '_camo_color_1',
+        '_camo_color_2',
+        '_camo_color_3',
+        '_camo_color_4',
+    }) do
+        registry['basic_' .. kind .. suffix].disabled = true
+    end
+end
+local function checkbox_point(commands, kind, row)
+    local label = assert(column_label(commands, kind, 'Region ' .. row), 'Camo checkbox row is not visible')
+    local b, window = view.region_bounds[kind], menu.window_bounds
+    return {
+        x = window.x + (b.camo_x + b.camo_width / 2) * window.scale - 2,
+        y = label.y + 5 * window.scale - 2,
+    }
+end
+local unchanged_pixels = ffi.string(camo_data, 23 * 64 * 16)
+for _, font in ipairs({ 12, 20 }) do
+    for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+        menu.font_size, menu.ui_scale = font, scale
+        state.loaded, state.busy = sources[1], false
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            empty_scope(kind)
+            view.region_scroll[kind] = 0
+        end
+        local commands = menu.compose(1280, 720)
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            assert(column_label(commands, kind, 'Check regions above'), 'Unchecked Basic Camo scope is not explained')
+            local b, window = view.region_bounds[kind], menu.window_bounds
+            local check_count = 0
+            for _, c in ipairs(commands) do
+                if
+                    (c.full_text == '[ ]' or c.full_text == '[x]')
+                    and c.x >= window.x + b.x * window.scale
+                    and c.x < window.x + (b.x + b.w) * window.scale
+                then
+                    check_count = check_count + 1
+                    assert(c.full_text == '[ ]', 'Basic Camo implicitly checked an Armor or Helmet region')
+                end
+            end
+            assert(check_count > 0, 'Basic Camo checkbox column is missing')
+            local prior_toggles, prior_selection, prior_identify, prior_import =
+                #camo_toggles, selected_calls, identify_calls, #import_actions
+            tap(checkbox_point(commands, kind, 1))
+            assert(
+                #camo_toggles == prior_toggles + 1
+                    and camo_toggles[#camo_toggles].row == 1
+                    and camo_toggles[#camo_toggles].kind == kind
+                    and camo_toggles[#camo_toggles].checked == true
+                    and state.raw.basic[kind].camo_rows[1] == true,
+                'Basic Camo checkbox did not toggle only its own gear row'
+            )
+            assert(
+                selected_calls == prior_selection
+                    and identify_calls == prior_identify
+                    and #import_actions == prior_import
+                    and not menu.color_picker
+                    and not menu.dropdown,
+                'Basic Camo checkbox also selected, flashed, applied or edited colors'
+            )
+            local other = kind == 'armor' and 'helmet' or 'armor'
+            assert(not state.raw.basic[other].camo_rows[1], 'Basic Camo checkbox toggled the other gear column')
+            commands = menu.compose(1280, 720)
+            assert(column_label(commands, kind, '1 checked regions'), 'Checked Basic Camo row count is stale')
+            tap(checkbox_point(commands, kind, 1))
+            assert(
+                state.raw.basic[kind].camo_rows[1] == false and camo_toggles[#camo_toggles].checked == false,
+                'Basic Camo checkbox could not be unchecked'
+            )
+            view.region_scroll[kind] = math.min(view.region_maximum[kind], 7 * 29)
+            commands = menu.compose(1280, 720)
+            tap(checkbox_point(commands, kind, 8))
+            assert(
+                state.raw.basic[kind].camo_rows[8] == true and camo_toggles[#camo_toggles].row == 8,
+                'Basic Camo row8 could not be explicitly opted in'
+            )
+            tap(checkbox_point(menu.compose(1280, 720), kind, 8))
+            assert(state.raw.basic[kind].camo_rows[8] == false, 'Basic Camo row8 could not be explicitly opted out')
+            view.region_scroll[kind] = view.region_maximum[kind]
+            commands = menu.compose(1280, 720)
+            tap(checkbox_point(commands, kind, 64))
+            assert(
+                state.raw.basic[kind].camo_rows[64] == true and camo_toggles[#camo_toggles].row == 64,
+                'Scrolled final Basic Camo checkbox toggled the wrong region'
+            )
+            assert(
+                selected_calls == prior_selection
+                    and identify_calls == prior_identify
+                    and #import_actions == prior_import,
+                'Scrolled Basic Camo checkbox leaked into color/flash/import controls'
+            )
+            empty_scope(kind)
+            view.region_scroll[kind] = 0
+            commands = menu.compose(1280, 720)
+        end
+        empty_scope('armor', true)
+        empty_scope('helmet', true)
+        commands = menu.compose(1280, 720)
+        for _, c in ipairs(commands) do
+            assert(c.full_text ~= '[x]', 'Missing Basic row flags were treated as implicitly checked')
+        end
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            empty_scope(kind)
+        end
+    end
+end
+assert(ffi.string(camo_data, 23 * 64 * 16) == unchanged_pixels, 'Basic Camo checkbox selection changed LUT pixel data')
 package.loaded['epic.player_preview.v1'] = original_portrait
 native.release()
+print(
+    'PASS Basic import placement: destination/source/region ink separation, stationary source and camo/copy chrome, first/final independent region clicks and native containment across windows/fonts/scales'
+)
+print(
+    'PASS Basic Camo row scope: opt-in Armor/Helmet defaults, per-row and row8 toggle hits, scrolled final row, missing-map guard and no color/flash/import/pixel side effects'
+)
 print(
     'PASS Basic split import: independent apply/arrow hits, shared source and filename synchronization, stable/native popup anchors, busy mouse/keyboard/cancellation and unavailable targets'
 )

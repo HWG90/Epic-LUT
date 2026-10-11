@@ -15,7 +15,7 @@ local api = Core.new(store)
 local kits = { body = 7, armor = 11, helmet = 12, cape = 13 }
 local units, materials, bound, originals, live = {}, {}, {}, {}, {}
 local created, frontend, saved_outfit, bulk_entries, mirror_entries, shared_entries = 0
-local include_capes, gear_ready, proof_ready, basic_select = true, true, true
+local include_capes, gear_ready, proof_ready, basic_select, basic_camo_row = true, true, true
 local basic_info, action_history
 local after_write
 local stock = { width = 23, height = 8, data = ffi.new('float[736]'), resource = '1111111111111111' }
@@ -190,9 +190,10 @@ local m = {
         end,
     },
     basic_view = {
-        new = function(info, select)
+        new = function(info, select, _, camo_row)
             basic_info = info
             basic_select = select
+            basic_camo_row = camo_row
             return { draw = function() end, wheel = function() end }
         end,
     },
@@ -947,8 +948,8 @@ do
     bound[cape][2] = 5004
     runtime.on_disable(ctx)
 end
--- Basic camo is a whole-table edit on the chosen resource/kind. It does not
--- depend on a selected row and keeps both live writes and the local draft safe.
+-- Basic camo edits only the explicitly checked regions of one resource/kind.
+-- Its transient row scope stays independent of document history.
 do
     actor(6)
     armor, cape, helmet = current()
@@ -967,7 +968,7 @@ do
     local other_doc = m.basic_state.clone(stock)
     other_doc.resource = '2222222222222222'
     originals[6003] = other_doc
-    local uploads, fail_next = {}, false
+    local uploads, fail_next, fail_material = {}, false, armor
     m.engine.create_texture = function(_, width, height, data)
         assert(width == 23 or width == 3 and height == 1)
         created = created + 1
@@ -976,7 +977,7 @@ do
         return texture
     end
     m.engine.bind = function(_, material, slot, object)
-        if fail_next and material == armor then
+        if fail_next and material == fail_material then
             fail_next = false
             error('simulated camo bind failure', 0)
         end
@@ -1012,20 +1013,41 @@ do
     api.focus_page(h.id, 'basic')
     assert(h.set('basic_armor_lut', 1) and h.set('edit_row', 7))
     local initial = basic_info().raw.basic.armor.document
-    local before = ffi.string(initial.data, initial.width * initial.height * 16)
-    local function recipe_bytes(source, index, mask, helmet_kind, pattern)
+    local before, initial_revision = ffi.string(initial.data, initial.width * initial.height * 16), initial.revision
+    local armor_rows, helmet_rows = { [1] = true, [3] = true }, {}
+    for row = 1, 7 do
+        helmet_rows[row] = true
+    end
+    local function choose_rows(kind, rows)
+        local panel = basic_info().raw.basic[kind]
+        for row = 1, panel.document.height do
+            assert(basic_camo_row(row, kind, rows[row] == true, panel.camo_rows))
+        end
+        return basic_info().raw.basic[kind]
+    end
+    local function assert_scope(panel, expected)
+        local count = 0
+        for row = 1, panel.document.height do
+            assert(panel.camo_rows[row] == (expected[row] == true), 'Camo scope contains an unexpected region')
+            count = count + (expected[row] and 1 or 0)
+        end
+        assert(panel.camo_count == count, 'Camo checked-region count is stale')
+    end
+    local function recipe_bytes(source, index, mask, rows, keep_colors)
         local palette = m.basic_camo.COLORWAYS[index]
         local values = ffi.new('float[736]')
         ffi.copy(values, source, #source)
         for row = 1, 8 do
             local offset = (row - 1) * 23 * 4
-            if not helmet_kind or row ~= 8 then
+            if rows[row] then
                 for color, hex in ipairs(palette.colors) do
-                    for channel = 0, 2 do
-                        values[offset + (15 + color) * 4 + channel] = tonumber(
-                            hex:sub(channel * 2 + 1, channel * 2 + 2),
-                            16
-                        ) / 255
+                    if not keep_colors then
+                        for channel = 0, 2 do
+                            values[offset + (15 + color) * 4 + channel] = tonumber(
+                                hex:sub(channel * 2 + 1, channel * 2 + 2),
+                                16
+                            ) / 255
+                        end
                     end
                     values[offset + (15 + color) * 4 + 3] = ({ 0.52978515625, 2, -1, 4 })[color]
                 end
@@ -1035,23 +1057,67 @@ do
                 end
                 values[offset + 21 * 4 + 3] = mask
                 values[offset + 22 * 4 + 3] = palette.blend
-            elseif pattern then
-                values[offset + 21 * 4 + 3] = -1
             end
         end
         return ffi.string(values, #source)
     end
+    do
+        local raw = basic_info().raw.basic
+        local history_count, redo_count, texture_count = #action_history.undo, #action_history.redo, created
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            assert_scope(raw[kind], {})
+            local prefix = 'basic_' .. kind .. '_camo'
+            local controls = api.mods[h.id].controls
+            assert(controls[prefix].disabled and controls[prefix .. '_colorway'].disabled)
+            for color = 1, 4 do
+                local field = controls[prefix .. '_color_' .. color]
+                assert(field.disabled and field.can_open_picker() == false)
+            end
+            assert(not pcall(h.set, prefix, 7), 'Unchecked Camo pattern control remains enabled')
+            local refusal = controls[prefix].on_change(7)
+            assert(refusal:find('Select at least one Camo region', 1, true))
+            refusal = controls[prefix .. '_colorway'].on_change(3)
+            assert(refusal:find('Select at least one Camo region', 1, true))
+            assert(controls[prefix .. '_color_1'].picker_commit('#123456') == false)
+        end
+        assert(
+            created == texture_count
+                and #action_history.undo == history_count
+                and #action_history.redo == redo_count
+                and basic_info().raw.basic.armor.document == initial
+                and ffi.string(initial.data, #before) == before
+                and bound[armor][1] == 6001
+                and bound[same][1] == 6001
+                and bound[helmet][1] == 6002,
+            'Unchecked Camo actions changed a document, history or native texture'
+        )
+        assert(not basic_camo_row(0, 'armor', true) and not basic_camo_row(9, 'armor', true))
+        assert(not basic_camo_row(1.5, 'armor', true) and not basic_camo_row(1, 'armor', 1))
+        assert(not basic_camo_row(1, 'invalid', true))
+        local panel = choose_rows('armor', armor_rows)
+        assert_scope(panel, armor_rows)
+        assert(
+            created == texture_count
+                and #action_history.undo == history_count
+                and #action_history.redo == redo_count
+                and panel.document == initial
+                and panel.document.revision == initial_revision
+                and ffi.string(initial.data, #before) == before
+                and not api.mods[h.id].controls.basic_armor_camo.disabled,
+            'Camo checkbox toggles allocated textures, edited pixels or entered history'
+        )
+    end
     local count = #action_history.undo
     assert(h.set('basic_armor_camo', 7))
     local applied = basic_info().raw.basic.armor.document
-    local bytes = recipe_bytes(before, 1, 4)
+    local bytes = recipe_bytes(before, 1, 4, armor_rows)
     local armor_camo = bound[armor][1]
     assert(
         applied ~= initial
             and ffi.string(initial.data, #before) == before
             and ffi.string(applied.data, #before) == bytes
             and uploads[armor_camo] == bytes,
-        'Basic camo did not activate zeroed controls with one complete upload or changed the old draft'
+        'Basic camo changed unchecked rows, missed its complete upload or changed the old draft'
     )
     assert(
         bound[same][1] == armor_camo
@@ -1061,7 +1127,7 @@ do
             and bound[helmet][1] == 6002,
         'Selected Armor camo escaped its exact resource/kind bindings'
     )
-    assert(#action_history.undo == count + 1, 'Whole-table camo was not one history action')
+    assert(#action_history.undo == count + 1, 'Checked-region camo was not one history action')
     activate('global_undo')
     assert(
         bound[armor][1] == 6001
@@ -1069,6 +1135,7 @@ do
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == before,
         'Basic camo Undo lost the original live/local table'
     )
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
     activate('global_redo')
     assert(
         bound[armor][1] == armor_camo
@@ -1076,10 +1143,12 @@ do
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == bytes,
         'Basic camo Redo lost the full table'
     )
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
     local helmet_before = ffi.string(basic_info().raw.basic.helmet.document.data, #before)
+    choose_rows('helmet', helmet_rows)
     assert(h.set('basic_helmet_camo', 4))
     local helmet_doc = basic_info().raw.basic.helmet.document
-    local helmet_pattern_bytes = recipe_bytes(helmet_before, 1, 1, true, true)
+    local helmet_pattern_bytes = recipe_bytes(helmet_before, 1, 1, helmet_rows)
     local helmet_pattern_object = bound[helmet][1]
     assert(uploads[helmet_pattern_object] == helmet_pattern_bytes, 'Helmet pattern did not isolate visor Region 8')
     assert(
@@ -1093,12 +1162,12 @@ do
     )
     activate('global_redo')
     assert(bound[helmet][1] == helmet_pattern_object and uploads[bound[helmet][1]] == helmet_pattern_bytes)
-    local function tinted(source, palette, helmet_kind)
+    local function tinted(source, palette, rows)
         local values = ffi.new('float[736]')
         ffi.copy(values, source, #source)
         for color, hex in pairs(palette) do
             for row = 1, 8 do
-                if not helmet_kind or row ~= 8 then
+                if rows[row] then
                     for channel = 0, 2 do
                         values[((row - 1) * 23 + 15 + color) * 4 + channel] = tonumber(
                             hex:sub(channel * 2 + 1, channel * 2 + 2),
@@ -1113,7 +1182,7 @@ do
     do
         local color_count = #action_history.undo
         assert(h.set('basic_helmet_camo_colorway', 4))
-        local colorway_bytes = recipe_bytes(helmet_pattern_bytes, 3, 1, true)
+        local colorway_bytes = recipe_bytes(helmet_pattern_bytes, 3, 1, helmet_rows)
         local colorway_object = bound[helmet][1]
         basic_info()
         assert(
@@ -1129,16 +1198,45 @@ do
         assert(bound[helmet][1] == colorway_object)
         assert(h.set('basic_helmet_camo_color_2', '#40A020'))
         assert(
-            uploads[bound[helmet][1]] == tinted(colorway_bytes, { [2] = '40A020' }, true)
+            uploads[bound[helmet][1]] == tinted(colorway_bytes, { [2] = '40A020' }, helmet_rows)
                 and bound[armor][1] == armor_camo
                 and bound[cape][1] == 6001,
             'Helmet tint changed Region 8 visor bytes or another gear kind'
         )
     end
+    do
+        local old = basic_info().raw.basic.helmet.document
+        local old_bytes, old_object = ffi.string(old.data, #before), bound[helmet][1]
+        local history_count, texture_count = #action_history.undo, created
+        local visor_rows = { [8] = true }
+        assert_scope(choose_rows('helmet', visor_rows), visor_rows)
+        assert(created == texture_count and #action_history.undo == history_count)
+        assert(h.set('basic_helmet_camo', 5), 'Helmet Region 8 cannot explicitly opt into Camo')
+        local visor_bytes = recipe_bytes(old_bytes, 1, 2, visor_rows, true)
+        local visor_object = bound[helmet][1]
+        assert(
+            uploads[visor_object] == visor_bytes
+                and #action_history.undo == history_count + 1
+                and bound[armor][1] == armor_camo
+                and bound[cape][1] == 6001,
+            'Explicit Helmet Region 8 Camo changed an unchecked row or another gear kind'
+        )
+        activate('global_undo')
+        assert(
+            bound[helmet][1] == old_object
+                and ffi.string(basic_info().raw.basic.helmet.document.data, #before) == old_bytes
+        )
+        assert_scope(basic_info().raw.basic.helmet, visor_rows)
+        activate('global_redo')
+        assert(bound[helmet][1] == visor_object and uploads[visor_object] == visor_bytes)
+        assert_scope(basic_info().raw.basic.helmet, visor_rows)
+        activate('global_undo')
+        choose_rows('helmet', helmet_rows)
+    end
     local helmet_object, color_history = bound[helmet][1], #action_history.undo
     assert(h.set('basic_armor_camo_colorway', 3))
     local colorway_object = bound[armor][1]
-    local colorway_bytes = recipe_bytes(bytes, 2, 4)
+    local colorway_bytes = recipe_bytes(bytes, 2, 4, armor_rows)
     assert(
         uploads[colorway_object] == colorway_bytes
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == colorway_bytes
@@ -1149,7 +1247,7 @@ do
             and bound[helmet][1] == helmet_object,
         'Basic colorway escaped its selected resource/kind or missed its complete camo recipe'
     )
-    assert(#action_history.undo == color_history + 1, 'Whole-table colorway split its history action')
+    assert(#action_history.undo == color_history + 1, 'Checked-region colorway split its history action')
     activate('global_undo')
     assert(
         bound[armor][1] == armor_camo
@@ -1159,20 +1257,27 @@ do
     )
     activate('global_redo')
     assert(bound[armor][1] == colorway_object and uploads[bound[same][1]] == colorway_bytes)
+    color_history = #action_history.undo
     assert(h.set('basic_armor_camo_color_1', '#0A80FF'))
-    local c1_bytes = tinted(colorway_bytes, { [1] = '0A80FF' })
+    local c1_bytes = tinted(colorway_bytes, { [1] = '0A80FF' }, armor_rows)
+    local c1_object = bound[armor][1]
     assert(
         uploads[bound[armor][1]] == c1_bytes
             and bound[same][1] == bound[armor][1]
             and bound[other][1] == 6003
             and bound[cape][1] == 6001
-            and bound[helmet][1] == helmet_object,
-        'C1 edit changed another tint, alpha, pattern or gear resource'
+            and bound[helmet][1] == helmet_object
+            and #action_history.undo == color_history + 1,
+        'C1 edit changed unchecked bytes or another gear resource, or split its history action'
     )
+    activate('global_undo')
+    assert(bound[armor][1] == colorway_object and uploads[bound[same][1]] == colorway_bytes)
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
+    activate('global_redo')
+    assert(bound[armor][1] == c1_object and uploads[bound[same][1]] == c1_bytes)
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
     local mixed = basic_info().raw.basic.armor.document
-    for row = 2, mixed.height do
-        mixed.data[((row - 1) * 23 + 16) * 4] = 0.25
-    end
+    mixed.data[((3 - 1) * 23 + 16) * 4] = 0.25
     mixed.revision = mixed.revision + 1
     basic_info()
     assert(h.get('basic_armor_camo_color_1') == '#0A80FF')
@@ -1186,13 +1291,14 @@ do
             and uploads[bound[armor][1]] == c1_bytes
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == c1_bytes
             and #action_history.undo == color_history + 1,
-        'Unchanged first-row picker value did not unify mixed lower rows in one action'
+        'Unchanged first-row picker value did not unify checked lower rows in one action'
     )
     local old_color = basic_info().raw.basic.armor.document
     local old_color_object = bound[armor][1]
     color_history = #action_history.undo
-    fail_next = true
+    fail_next, fail_material = true, same
     assert(c1.picker_commit('#010203') == false)
+    fail_material = armor
     assert(
         basic_info().raw.basic.armor.document == old_color
             and ffi.string(old_color.data, #before) == c1_bytes
@@ -1201,6 +1307,7 @@ do
             and #action_history.undo == color_history,
         'Failed camo color write published a new draft/history or lost its live table'
     )
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
     local other_choice
     for index, target in ipairs(api.mods[h.id].controls.basic_armor_lut.choice_targets) do
         if target.binding.original == 6003 then
@@ -1209,6 +1316,10 @@ do
     end
     local count_before_switch = created
     assert(h.set('basic_armor_lut', assert(other_choice)))
+    local other_scope = basic_info().raw.basic.armor.camo_rows
+    assert_scope(basic_info().raw.basic.armor, {})
+    assert(basic_camo_row(2, 'armor', true, other_scope))
+    assert_scope(basic_info().raw.basic.armor, { [2] = true })
     local allowed, reason = c1.can_open_picker()
     assert(
         not allowed and reason:find('selected LUT changed', 1, true) and created == count_before_switch,
@@ -1216,6 +1327,25 @@ do
     )
     frontend.menu.color_picker = nil
     assert(h.set('basic_armor_lut', 1))
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
+    assert(not basic_camo_row(2, 'armor', true, other_scope), 'A stale LUT checkbox changed the current row scope')
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
+    local shared_cape_choice
+    for index, target in ipairs(api.mods[h.id].controls.basic_armor_lut.choice_targets) do
+        if target.kind == 'cape' and target.binding.original == 6001 then
+            shared_cape_choice = index
+        end
+    end
+    assert(h.set('basic_armor_lut', assert(shared_cape_choice)))
+    assert_scope(basic_info().raw.basic.armor, {})
+    choose_rows('armor', { [4] = true })
+    assert(h.set('basic_armor_lut', 1))
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
+    assert(h.set('basic_armor_lut', shared_cape_choice))
+    assert_scope(basic_info().raw.basic.armor, { [4] = true })
+    assert(h.set('basic_armor_lut', other_choice))
+    assert_scope(basic_info().raw.basic.armor, { [2] = true })
+    assert(h.set('basic_armor_lut', 1) and created == count_before_switch)
     assert(basic_select(1, 'helmet'))
     helmet_doc = basic_info().raw.basic.helmet.document
     local interacting, was_interacting = true, frontend.menu.is_interacting
@@ -1255,6 +1385,21 @@ do
             and #action_history.undo == old_history,
         'Failed complete colorway recipe committed a changed local draft/history/live table'
     )
+    assert_scope(basic_info().raw.basic.armor, armor_rows)
+    do
+        local old_scope = basic_info().raw.basic.armor.camo_rows
+        local history_count, texture_count = #action_history.undo, created
+        kits.armor = 99
+        local changed = basic_info().raw.basic.armor
+        assert_scope(changed, {})
+        assert(changed.camo_rows ~= old_scope and not basic_camo_row(1, 'armor', true, old_scope))
+        kits.armor = 11
+        assert_scope(basic_info().raw.basic.armor, {})
+        assert(
+            created == texture_count and #action_history.undo == history_count and bound[armor][1] == old_object,
+            'New-kit Camo scope reset changed data, history or native bindings'
+        )
+    end
     runtime.on_disable(ctx)
     actor(7)
     armor, cape, helmet = current()
@@ -1268,7 +1413,8 @@ do
     frontend.basic_mode = true
     api.focus_page(h.id, 'basic')
     assert(h.set('basic_armor_lut', 1))
-    basic_info()
+    assert_scope(basic_info().raw.basic.armor, {})
+    choose_rows('armor', { [1] = true })
     after_write = function(material)
         if material == armor then
             kits.armor = 99
@@ -1366,6 +1512,8 @@ do
     api.focus_page(h.id, 'basic')
     assert(h.set('basic_armor_lut', 1))
     basic_info().raw.basic.armor.document.data[0] = 1.23456
+    assert(basic_camo_row(1, 'armor', true))
+    basic_info()
     assert(h.set('basic_armor_camo', 8) and lut_handle)
     assert(#retire.records == previous_records + 1)
     local preview_closed = false

@@ -214,6 +214,106 @@ for _, height in ipairs({ 8, 64 }) do
         assert(C.selection(helmet, 'helmet') == 1, 'Helmet selector ignored a non-visor mixed region')
     end
 end
+-- Explicit checkbox maps supersede kind defaults and leave every unchecked
+-- row byte-exact, including the visor. The first checked row owns the swatch.
+do
+    local mapped = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4), revision = 1 }
+    ffi.copy(mapped.data, original, #before)
+    local rows = { [1] = true, [3] = true, [9] = true, [8] = false, [64] = false }
+    local function checked_bytes(source, full, selected)
+        local chunks, row_size = {}, 23 * 16
+        for row = 1, #source / row_size do
+            chunks[row] = (selected[row] == true and full or source):sub((row - 1) * row_size + 1, row * row_size)
+        end
+        return table.concat(chunks)
+    end
+    local pattern = ffi.new('float[?]', 23 * 64 * 4)
+    ffi.copy(pattern, before, #before)
+    for row = 1, 64 do
+        pattern[((row - 1) * 23 + 21) * 4 + 3] = 5
+    end
+    assert(C.apply(mapped, 8, nil, nil, 'helmet', rows) == 3)
+    local pattern_bytes = checked_bytes(before, ffi.string(pattern, #before), rows)
+    assert(ffi.string(mapped.data, #before) == pattern_bytes, 'Sparse pattern changed unchecked HDR/visor rows')
+    assert(C.selection(mapped, 'helmet', rows) == 8)
+    assert(C.apply(mapped, 2, 'colorway', nil, 'helmet', rows) == 3)
+    local palette_bytes = checked_bytes(pattern_bytes, expected_recipe(pattern_bytes, 1, false, 5, true), rows)
+    assert(ffi.string(mapped.data, #before) == palette_bytes, 'Sparse colorway changed unchecked recipe fields')
+    assert(C.colorway_selection(mapped, 'helmet', rows) == 2)
+    local first = { [1] = false, [3] = true, [9] = true }
+    mapped.data[16 * 4], mapped.data[21 * 4 + 3] = 0, 99
+    assert(C.color(mapped, 1, first) == '#' .. C.COLORWAYS[1].colors[1])
+    assert(C.selection(mapped, 'helmet', first) == 8 and C.colorway_selection(mapped, 'helmet', first) == 2)
+    local source = ffi.string(mapped.data, #before)
+    assert(C.apply(mapped, { 0, 150, 200 }, 'color', 2, 'helmet', first) == 2)
+    local tint_bytes = checked_bytes(source, expected_colors(source, { [2] = '0096C8' }), first)
+    assert(ffi.string(mapped.data, #before) == tint_bytes and C.color(mapped, 2, first) == '#0096C8')
+    ffi.copy(pattern, tint_bytes, #before)
+    for row = 1, 64 do
+        pattern[((row - 1) * 23 + 21) * 4 + 3] = -1
+    end
+    assert(C.apply(mapped, 2, nil, nil, 'helmet', first) == 2)
+    local off_bytes = checked_bytes(tint_bytes, ffi.string(pattern, #before), first)
+    assert(ffi.string(mapped.data, #before) == off_bytes and C.selection(mapped, 'helmet', first) == 2)
+    assert(C.apply(mapped, 3, 'colorway', nil, 'helmet', first) == 2)
+    assert(
+        ffi.string(mapped.data, #before)
+            == checked_bytes(off_bytes, expected_recipe(off_bytes, 2, false, nil, true), first),
+        'Checked Off rows did not receive the same profile activation recipe'
+    )
+    local visor = { [8] = true }
+    source = ffi.string(mapped.data, #before)
+    ffi.copy(pattern, source, #before)
+    pattern[(7 * 23 + 21) * 4 + 3] = 5
+    assert(C.apply(mapped, 8, nil, nil, 'helmet', visor) == 1)
+    local visor_pattern = checked_bytes(source, ffi.string(pattern, #before), visor)
+    assert(ffi.string(mapped.data, #before) == visor_pattern and C.selection(mapped, 'helmet', visor) == 8)
+    assert(C.apply(mapped, 3, 'colorway', nil, 'helmet', visor) == 1)
+    assert(
+        ffi.string(mapped.data, #before)
+                == checked_bytes(visor_pattern, expected_recipe(visor_pattern, 2, false, 5, true), visor)
+            and C.colorway_selection(mapped, 'helmet', visor) == 3,
+        'Explicit visor opt-in was ignored or affected another row'
+    )
+    local unchanged, revision = ffi.string(mapped.data, #before), mapped.revision
+    for _, empty in ipairs({ {}, { [1] = false, [8] = false, [64] = false } }) do
+        assert(C.available(mapped) and C.selection(mapped, 'helmet', empty) == 1)
+        assert(C.colorway_selection(mapped, 'helmet', empty) == 1 and C.color(mapped, 1, empty) == '#000000')
+        for _, mode in ipairs({ 'pattern', 'colorway', 'color' }) do
+            local ok, why = pcall(
+                C.apply,
+                mapped,
+                mode == 'color' and '#AABBCC' or 3,
+                mode ~= 'pattern' and mode or nil,
+                1,
+                'helmet',
+                empty
+            )
+            assert(not ok and tostring(why):find('Select at least one Camo region', 1, true))
+            assert(ffi.string(mapped.data, #before) == unchanged and mapped.revision == revision)
+        end
+    end
+    for _, invalid in ipairs({
+        false,
+        'all',
+        { [1] = true, [0] = false },
+        { [1] = true, [65] = false },
+        { [1] = true, [1.5] = true },
+        { [1] = true, ['9'] = true },
+        { [1] = true, [math.huge] = false },
+        { [1] = true, [9] = 1 },
+        { [1] = true, [3] = 'true' },
+    }) do
+        assert(not pcall(C.apply, mapped, 3, 'colorway', nil, 'helmet', invalid))
+        assert(not pcall(C.selection, mapped, 'helmet', invalid))
+        assert(not pcall(C.colorway_selection, mapped, 'helmet', invalid))
+        assert(not pcall(C.color, mapped, 1, invalid))
+        assert(
+            ffi.string(mapped.data, #before) == unchanged and mapped.revision == revision,
+            'Invalid region map partially edited a LUT'
+        )
+    end
+end
 local revision = colors.revision
 snapshot = ffi.string(colors.data, #before)
 for _, args in ipairs({
@@ -284,5 +384,5 @@ assert(not thumbnails[1] and not thumbnails[2] and thumbnails[8])
 assert(not C.thumbnails({ width = 16, height = 16, layers = { 'bad' } }))
 assert(thumbnails[3].colors[1][1] ~= thumbnails[4].colors[1][1], 'Mask regions disappeared in neutral thumbnails')
 print(
-    'PASS Basic camo: all64 rows, complete camo recipes/dormant activation, authored RGB/scalar preservation, exact single-tint/visor edits, mixed/invalid/unsupported selections, commit callbacks and neutral actual-mask thumbnails'
+    'PASS Basic camo: exact sparse/empty/invalid checkbox scopes, visor opt-in/legacy policy, all64-row recipes/dormant activation, authored RGB/scalar preservation, first-checked swatches and neutral actual-mask thumbnails'
 )

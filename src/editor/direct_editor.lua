@@ -1191,19 +1191,26 @@ import_state = function()
                 resource = group and resource_id(group.object) or 'unavailable',
                 unavailable = not doc and original_luts and original_luts.loaded and key ~= nil,
             }
+            local proof = operations.appearance_proof()
+            local camo_rows, camo_count =
+                basic_state.camo_rows(key, doc, raw.basic[container].kind, proof and proof[raw.basic[container].kind])
+            raw.basic[container].camo_rows, raw.basic[container].camo_count = camo_rows, camo_count
             if m.basic_camo then
                 local prefix = 'basic_' .. container .. '_camo'
-                local values = { [prefix] = m.basic_camo.selection(doc, container) }
+                local values = { [prefix] = m.basic_camo.selection(doc, container, camo_rows) }
                 if m.basic_camo.colorway_selection then
-                    values[prefix .. '_colorway'] = m.basic_camo.colorway_selection(doc, container)
+                    values[prefix .. '_colorway'] = m.basic_camo.colorway_selection(doc, container, camo_rows)
                     for color = 1, 4 do
-                        values[prefix .. '_color_' .. color] = m.basic_camo.color(doc, color)
+                        values[prefix .. '_color_' .. color] = m.basic_camo.color(doc, color, camo_rows)
                     end
                 end
                 for id, value in pairs(values) do
                     local camo = api.mods[handle.id].controls[id]
                     if camo then
-                        local disabled = pending ~= nil or not m.basic_camo.available(doc) or not group
+                        local disabled = pending ~= nil
+                            or not m.basic_camo.available(doc)
+                            or not group
+                            or camo_count == 0
                         camo.disabled = false
                         if id == prefix then
                             camo.choice_pattern_previews = operations.camo_thumbnails
@@ -1325,6 +1332,29 @@ import_state = function()
         preserve_emissives = handle.get('preserve_emissives'),
     }
 end
+function operations.set_basic_camo_row(row, container, checked, expected_rows)
+    local panel = import_state().raw.basic[container]
+    if
+        not panel
+        or not m.basic_camo.available(panel.document)
+        or pending
+        or index_job
+        or type(row) ~= 'number'
+        or row % 1 ~= 0
+        or row < 1
+        or row > panel.document.height
+        or type(checked) ~= 'boolean'
+        or not panel.camo_rows
+        or (expected_rows and panel.camo_rows ~= expected_rows)
+    then
+        return false
+    end
+    panel.camo_rows[row] = checked
+    if frontend.menu then
+        frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
+    end
+    return true
+end
 checked_editor_target = function(target)
     assert(target, 'Load current gear again')
     if target.binding_keys then
@@ -1400,6 +1430,7 @@ local function apply_basic_camo(container, choice, mode, color)
     refresh(true)
     local panel = import_state().raw.basic[container]
     assert(panel and m.basic_camo.available(panel.document), 'Load a current Armor or Helmet material LUT first')
+    assert(panel.camo_count > 0, 'Select at least one Camo region')
     local target = import_target(panel.kind, panel.group)
     local index = checked_editor_target(target)
     local targets = {}
@@ -1410,7 +1441,7 @@ local function apply_basic_camo(container, choice, mode, color)
     end
     assert(#targets > 0, 'Selected LUT has no current material bindings')
     local document = m.basic_state.copier().copy(panel.document)
-    local rows, label = m.basic_camo.apply(document, choice, mode, color, panel.kind)
+    local rows, label = m.basic_camo.apply(document, choice, mode, color, panel.kind, panel.camo_rows)
     local previous = operations.camo_write_target
     operations.camo_write_target = target
     local ok, count = pcall(apply_bindings, document, targets)
@@ -1436,12 +1467,11 @@ local function apply_basic_camo(container, choice, mode, color)
             .. (label or m.basic_camo.CHOICES[choice])
             .. ' to '
             .. rows
-            .. ' regions in this '
+            .. ' checked regions in this '
             .. m.gear_catalog.label(panel.kind)
             .. ' LUT ('
             .. count
             .. ' bindings).'
-            .. (panel.kind == 'helmet' and document.height >= 8 and ' Region 8 excluded.' or '')
     )
 end
 operations.apply_basic_camo = apply_basic_camo
@@ -1450,6 +1480,9 @@ function operations.basic_camo_picker_guard(control, container)
         local panel = import_state().raw.basic[container]
         if not panel or not m.basic_camo.available(panel.document) then
             return false, 'Load a current material LUT first.'
+        end
+        if panel.camo_count == 0 then
+            return false, 'Select at least one Camo region.'
         end
         local picker = frontend.menu and frontend.menu.color_picker
         if picker and picker.control == control then
@@ -2259,7 +2292,7 @@ local function restore_action(snapshot, expected)
     index_job = nil
     editor_pending = nil
     populate_request = nil
-    basic_state.clear()
+    basic_state.clear(true)
     for key, d in pairs(snapshot.basic) do
         basic_documents[key] = d
     end
@@ -3674,7 +3707,7 @@ local function register(current)
                 palette_editor.focus_cell(row, 1)
                 return true
             end
-        end, m.control_help)
+        end, m.control_help, operations.set_basic_camo_row)
         local page = api.mods[handle.id].pages[1]
         page.minimum_width = 1100
         page.minimum_height = 780
@@ -3846,6 +3879,7 @@ local function reset_transient_state()
         export_pattern_entries = operations.export_pattern_entries,
         apply_basic_camo = operations.apply_basic_camo,
         basic_camo_picker_guard = operations.basic_camo_picker_guard,
+        set_basic_camo_row = operations.set_basic_camo_row,
         update_camo_previews = operations.update_camo_previews,
         outfit_documents = operations.outfit_documents,
         outfit_document = operations.outfit_document,

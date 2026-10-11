@@ -1,4 +1,4 @@
--- Basic's whole-table camo recipes. Native ownership stays in the controller.
+-- Basic's checked-region camo recipes. Native ownership stays in the controller.
 local C = {}
 C.CHOICES = { 'Current / mixed', 'Off', 'Pattern 0', 'Pattern 1', 'Pattern 2', 'Pattern 3', 'Pattern 4', 'Pattern 5' }
 -- Generated RGB palettes with camo controls verified against weapon schemes.
@@ -61,6 +61,26 @@ end
 local function camo_row(kind, row)
     return kind ~= 'helmet' or row ~= 8
 end
+local function selected_rows(d, kind, rows)
+    if rows ~= nil then
+        assert(type(rows) == 'table', 'Choose a Camo region map')
+        for row, checked in next, rows do
+            assert(
+                type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= d.height,
+                'Camo region must be an integer within this LUT'
+            )
+            assert(type(checked) == 'boolean', 'Camo region choices must be true or false')
+        end
+    end
+    local selected = {}
+    for row = 1, d.height do
+        -- Explicit checkboxes override the legacy Helmet Region 8 default.
+        if (rows ~= nil and rawget(rows, row) == true) or (rows == nil and camo_row(kind, row)) then
+            selected[#selected + 1] = row
+        end
+    end
+    return selected
+end
 local function recipe(data, offset, palette, include_colors)
     for color = 1, 4 do
         local at = offset + (15 + color) * 4
@@ -111,56 +131,65 @@ end
 function C.available(d)
     return editable(d) == true
 end
-function C.selection(d, kind)
+function C.selection(d, kind, rows)
     if not editable(d) then
         return 1
     end
-    local value = d.data[21 * 4 + 3]
+    local selected = selected_rows(d, kind, rows)
+    if #selected == 0 then
+        return 1
+    end
+    local value = d.data[((selected[1] - 1) * 23 + 21) * 4 + 3]
     if value ~= value or value < -1 or value > 5 or value % 1 ~= 0 then
         return 1
     end
-    for row = 1, d.height do
-        if camo_row(kind, row) then
-            local offset = (row - 1) * 23 * 4
-            if
-                d.data[offset + 21 * 4 + 3] ~= value
-                or (value >= 0 and (not ready(d.data, offset) or black_colors(d.data, offset)))
-            then
-                return 1
-            end
+    for _, row in ipairs(selected) do
+        local offset = (row - 1) * 23 * 4
+        if
+            d.data[offset + 21 * 4 + 3] ~= value
+            or (value >= 0 and (not ready(d.data, offset) or black_colors(d.data, offset)))
+        then
+            return 1
         end
     end
     return value + 3
 end
-function C.color(d, index)
+function C.color(d, index, rows)
     assert(type(index) == 'number' and index % 1 == 0 and index >= 1 and index <= 4, 'Choose Camo color 1-4')
     if not editable(d) then
         return '#000000'
     end
+    local selected = selected_rows(d, nil, rows)
+    if #selected == 0 then
+        return '#000000'
+    end
+    local offset = (selected[1] - 1) * 23 * 4
     local values = {}
     for channel = 0, 2 do
-        local value = tonumber(d.data[(15 + index) * 4 + channel])
+        local value = tonumber(d.data[offset + (15 + index) * 4 + channel])
         value = value == value and math.max(0, math.min(1, value)) or 0
         values[#values + 1] = math.floor(value * 255 + 0.5)
     end
     return string.format('#%02X%02X%02X', values[1], values[2], values[3])
 end
-function C.colorway_selection(d, kind)
+function C.colorway_selection(d, kind, rows)
     if editable(d) then
+        local selected = selected_rows(d, kind, rows)
+        if #selected == 0 then
+            return 1
+        end
         for index, palette in ipairs(C.COLORWAYS) do
             local matches = true
             for color, hex in ipairs(palette.colors) do
                 local expected = rgb(hex)
-                for row = 1, d.height do
-                    if camo_row(kind, row) then
-                        if not recipe_matches(d.data, (row - 1) * 23 * 4, palette) then
+                for _, row in ipairs(selected) do
+                    if not recipe_matches(d.data, (row - 1) * 23 * 4, palette) then
+                        matches = false
+                    end
+                    for channel = 0, 2 do
+                        local value = tonumber(d.data[((row - 1) * 23 + 15 + color) * 4 + channel])
+                        if value ~= value or math.abs(value - expected[channel + 1]) > 0.0000001 then
                             matches = false
-                        end
-                        for channel = 0, 2 do
-                            local value = tonumber(d.data[((row - 1) * 23 + 15 + color) * 4 + channel])
-                            if value ~= value or math.abs(value - expected[channel + 1]) > 0.0000001 then
-                                matches = false
-                            end
                         end
                     end
                 end
@@ -172,8 +201,10 @@ function C.colorway_selection(d, kind)
     end
     return 1
 end
-function C.apply(d, choice, mode, index, kind)
+function C.apply(d, choice, mode, index, kind, rows)
     assert(editable(d), 'Load a current 23-column material LUT first')
+    local selected = selected_rows(d, kind, rows)
+    assert(#selected > 0, 'Select at least one Camo region')
     local colors, label, palette
     if mode == 'colorway' then
         assert(type(choice) == 'number' and choice % 1 == 0 and C.COLORWAYS[choice - 1], 'Choose a camo colorway')
@@ -192,47 +223,46 @@ function C.apply(d, choice, mode, index, kind)
         )
         local value = choice - 3
         label = C.CHOICES[choice]
-        for row = 1, d.height do
+        for _, row in ipairs(selected) do
             local offset = (row - 1) * 23 * 4
-            if camo_row(kind, row) and value >= 0 then
+            if value >= 0 then
                 local black = black_colors(d.data, offset)
                 if not ready(d.data, offset) or black then
                     recipe(d.data, offset, C.COLORWAYS[1], black)
                 end
             end
-            d.data[offset + 21 * 4 + 3] = camo_row(kind, row) and value or -1
+            d.data[offset + 21 * 4 + 3] = value
+        end
+        if rows == nil and kind == 'helmet' and d.height >= 8 then
+            d.data[(7 * 23 + 21) * 4 + 3] = -1
         end
     end
     if colors then
         if palette then
-            for row = 1, d.height do
-                if camo_row(kind, row) then
-                    local offset = (row - 1) * 23 * 4
-                    local mask = active(d.data, offset) and d.data[offset + 21 * 4 + 3] or palette.mask[4]
-                    recipe(d.data, offset, palette, false)
-                    d.data[offset + 21 * 4 + 3] = mask
-                end
+            for _, row in ipairs(selected) do
+                local offset = (row - 1) * 23 * 4
+                local mask = active(d.data, offset) and d.data[offset + 21 * 4 + 3] or palette.mask[4]
+                recipe(d.data, offset, palette, false)
+                d.data[offset + 21 * 4 + 3] = mask
             end
         end
         for color, values in pairs(colors) do
-            for row = 1, d.height do
-                if camo_row(kind, row) then
-                    local at = ((row - 1) * 23 + 15 + color) * 4
-                    for channel = 0, 2 do
-                        d.data[at + channel] = values[channel + 1]
-                    end
+            for _, row in ipairs(selected) do
+                local at = ((row - 1) * 23 + 15 + color) * 4
+                for channel = 0, 2 do
+                    d.data[at + channel] = values[channel + 1]
                 end
             end
         end
     end
     d.revision = (d.revision or 0) + 1
-    return d.height - (kind == 'helmet' and d.height >= 8 and 1 or 0), label
+    return #selected, label
 end
 function C.controls(apply)
     local out = {}
     for _, kind in ipairs({ 'armor', 'helmet' }) do
         local target = kind
-        local scope = kind == 'helmet' and 'all regions except Region 8' or 'every region'
+        local scope = 'checked Camo regions'
         local choices = {}
         for i, label in ipairs(C.CHOICES) do
             choices[i] = label
@@ -247,8 +277,7 @@ function C.controls(apply)
             description = 'Changes the pattern on '
                 .. scope
                 .. ' in this LUT.'
-                .. (kind == 'helmet' and ' Region 8 stays Off.' or '')
-                .. ' Initializes dormant camo so the pattern can show. Existing working camo settings are kept. Previews show the pattern mask in neutral colors.',
+                .. ' Check at least one Camo region first. Initializes dormant camo so the pattern can show. Existing working camo settings are kept. Previews show the pattern mask in neutral colors.',
             on_change = function(value)
                 if value > 1 then
                     return apply(target, value)
@@ -258,7 +287,7 @@ function C.controls(apply)
     end
     for _, kind in ipairs({ 'armor', 'helmet' }) do
         local target = kind
-        local scope = kind == 'helmet' and 'all regions except Region 8' or 'every region'
+        local scope = 'checked Camo regions'
         local choices = { 'Current / custom' }
         for _, palette in ipairs(C.COLORWAYS) do
             choices[#choices + 1] = palette.name
@@ -272,7 +301,7 @@ function C.controls(apply)
             default = 1,
             description = 'Generated Jungle, Desert, Urban and Arctic palettes with weapon camo settings. Applies colors and a complete camo setup to '
                 .. scope
-                .. ' in this LUT; keeps an existing active pattern.',
+                .. ' in this LUT; keeps an existing active pattern. Check at least one Camo region first.',
             on_change = function(value)
                 if value > 1 then
                     return apply(target, value, 'colorway')
@@ -289,7 +318,7 @@ function C.controls(apply)
                 picker_mode = 1,
                 description = 'Apply this camo color to '
                     .. scope
-                    .. ' in the selected LUT. The swatch starts from the first row; alpha, pattern and scale are preserved.',
+                    .. ' in the selected LUT. Check at least one Camo region first. The swatch starts from the first checked region; alpha, pattern and scale are preserved.',
                 on_change = function(value)
                     return apply(target, value, 'color', selected)
                 end,

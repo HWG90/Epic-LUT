@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Choose imported textures from a dropdown attached to each Basic Single LUT Import button; press its main segment to apply. Keep both source labels synchronized and move camo swatches above the pattern/colorway selectors.
+- Add a Camo checkbox column beside Basic's regions, with every box initially unchecked. Patterns, colorways and camo tints affect only checked rows; keep unchecked bytes intact, retain selections through Undo/Redo and use the first checked row for color swatches.
+- Place Basic's Apply Imported Texture controls directly below each destination LUT selector, with source selection on the dropdown arrow and Apply [filename] on the main button. Keep both source labels synchronized and move camo swatches above the pattern/colorway selectors.
 - Initialize dormant Basic camo using the complete recipe copied by Match Your Colors: color alpha, fade, mask sharpness/bias/UV scale and roughness blending. Generated colorways now activate camo; keep authored working patterns and independent tint edits.
-- Exclude Helmet Region 8 from Basic camo color changes and keep its pattern Off when changing masks.
 - Reserve a measured Basic action footer so scrolling content and clip masks cannot cover Player Preview or Stop Highlight.
 - Keep Armor and Cape preset application separate. Adapt unmatched LOD meshes only when the saved piece/material family has identical palettes and an exact live match proves the current resource and dimensions; log successful preset binds after readback.
 - Finish texture retirement before closing the frontend's render-readiness service, preventing a cleanup deadlock that blocked LLL reloads.

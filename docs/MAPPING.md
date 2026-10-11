@@ -6,7 +6,9 @@ Material field numbering follows research on 23-column LUTs. Base Color is colum
 
 ## Basic camo masks
 
-Basic's selectors change column 22 A (-1 off, 0–5 pattern) across the selected 23-column LUT. Armor affects every row; Helmet excludes Region 8, forcing that row's pattern Off when selecting a mask and retaining its bytes during color edits. Off retains all other fields. A mask with finite, nonzero column 22 R/B and nonblack camo colors keeps its authored settings. Otherwise the pattern action seeds a complete Jungle camo recipe, keeping nonblack colors and supplying the generated Jungle palette only when all twelve camo RGB channels are zero. Dormant controls or all-black colors display Current / mixed so reselecting a mask can initialize them.
+Basic's Camo checkbox column chooses which regions receive camo edits. Every checkbox starts unchecked. Pattern, colorway and individual tint actions affect only checked rows in the selected 23-column LUT; unchecked rows remain byte-exact. No checked rows disables the camo controls and rejects application. Helmet Region 8 is included only if explicitly checked. Checkbox changes never apply textures or create data history; selections stay with their LUT during switching and data Undo/Redo, and reset for changed dimensions or gear identity.
+
+Pattern selection changes column 22 A (-1 off, 0–5 pattern) on checked rows. Off retains all other fields. A mask with finite, nonzero column 22 R/B and nonblack camo colors keeps its authored settings. Otherwise the pattern action seeds a complete Jungle camo recipe, keeping nonblack colors and supplying the generated Jungle palette only when all twelve camo RGB channels are zero. Dormant controls or all-black colors display Current / mixed so reselecting a mask can initialize them.
 
 The current game's ArmorTemplate binds `CustomizationCamoTilerArray` (slot `0f5ff78d`) to texture `eecf271273d7090c`, a 256×256 RGBA8 array with six slices and nine mips. The preview worker reads mip 4: 16×16, 1,024 bytes per slice, at offset 348,160 within each 349,524-byte slice. The six neutral mask thumbnails are not a full shader render; the source RGB channels contain packed masks and its alpha is zero. Slice 5 duplicates slice 0 in this atlas.
 
@@ -23,7 +25,7 @@ Column 22 R controls mask sharpness, G its bias, B camo UV scale, and A its arra
 | Urban | 216.625 | -1 | 1.19921875 | 1 | 0.82958984375 |
 | Arctic | 216.625 | -0.98974609375 | 5 | 3 | 0.82958984375 |
 
-All profiles use camo color alpha values `0.52978515625, 2, -1, 4` and column 21 A `0.8896484375`. Individual swatches change only one camo RGB column across the eligible rows; a mixed table displays the first row's color until it is applied. Picker changes commit once when Apply is pressed, rather than uploading a texture for every drag frame.
+All profiles use camo color alpha values `0.52978515625, 2, -1, 4` and column 21 A `0.8896484375`. Individual swatches change only one camo RGB column across checked rows; a mixed selection displays the first checked row's color until it is applied. Picker changes commit once when Apply is pressed, rather than uploading a texture for every drag frame.
 
 ## Emission
 

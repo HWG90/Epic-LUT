@@ -3413,7 +3413,10 @@ function M.new(api, measure, Text)
                                     help = display.help or control.description,
                                 })
                             else
-                                M.choice(primitives, control, value, x, y, width, function(direction)
+                                local visual_control = display.enabled == false
+                                        and setmetatable({ disabled = true }, { __index = control })
+                                    or control
+                                M.choice(primitives, visual_control, value, x, y, width, function(direction)
                                     if prepare then
                                         prepare()
                                     end
