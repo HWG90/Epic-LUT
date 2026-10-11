@@ -52,14 +52,32 @@ function I.new(E, deps)
         local ok, address = pcall(function()
             return tonumber(ffi.cast('uintptr_t', unit))
         end)
-        if not ok or not address or address % 4 ~= 0 or not reference(address / 4) then
+        if not ok or not address then
             return nil
         end
-        return address / 4
+        -- Match the established preview adapter: the genuine handle can carry
+        -- two low tag bits. Decode its reference, retain the handle unchanged.
+        local ref = math.floor(address / 4)
+        return reference(ref) and ref or nil
     end
     local function worlds()
-        local out = A.worlds()
-        assert(type(out) == 'table' and #out <= I.MAX_WORLDS, 'World list bounds changed')
+        local listed = A.worlds()
+        assert(type(listed) == 'table' and #listed <= I.MAX_WORLDS, 'World list bounds changed')
+        local out, seen = {}, {}
+        local function append(world)
+            if world ~= nil and not seen[world] then
+                assert(#out < I.MAX_WORLDS, 'World list bounds changed')
+                out[#out + 1], seen[world] = world, true
+            end
+        end
+        -- The existing preview captures main_world first; worlds() is not
+        -- assumed to contain it. Never create or release either world here.
+        if type(A.main_world) == 'function' then
+            append(A.main_world())
+        end
+        for _, world in ipairs(listed) do
+            append(world)
+        end
         return out
     end
     local function scan(ref, expected)
@@ -117,9 +135,25 @@ function I.new(E, deps)
     end
     function self.resource(ref, expected)
         local handle, receipt = self.handle(ref, expected)
-        local value = tostring(U.resource_name(handle))
-        local hash = value:match('^#ID%[(%x+)%]$')
-        assert(hash and #hash == 16, 'Stable Lua Unit resource ID unavailable')
+        local returned = U.resource_name(handle)
+        local printed, value = pcall(tostring, returned)
+        local kind, hash = type(returned)
+        if printed and kind == 'string' then
+            hash = value:match('^#ID%[(%x+)%]$')
+        elseif printed and kind == 'userdata' then
+            -- Observed live IdString64 rendering includes the same exact ID
+            -- twice. Require agreement; do not reinterpret its userdata bytes.
+            local named, raw = value:match('^%[IdString64 "#ID%[(%x+)%]" 0x(%x+)%]$')
+            if named and raw and #named == 16 and #raw == 16 and named:lower() == raw:lower() then
+                hash = named
+            end
+        end
+        if not hash or #hash ~= 16 then
+            -- Unknown representations remain bounded diagnostics; no guessed
+            -- conversion or numeric64-bit precision loss is permitted.
+            local detail = printed and string.format('%q', value:sub(1, 128)) or '<tostring failed>'
+            error('Stable Lua Unit resource ID unavailable (type=' .. type(returned) .. ', value=' .. detail .. ')', 0)
+        end
         self.validate(receipt)
         return hash:lower(), receipt
     end

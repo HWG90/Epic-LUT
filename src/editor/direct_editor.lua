@@ -5058,6 +5058,7 @@ local function reset_transient_state()
         include_patterns_in_exports = operations.include_patterns_in_exports,
         selected_export_bindings = operations.selected_export_bindings,
         export_pattern_entries = operations.export_pattern_entries,
+        export_original_patch = operations.export_original_patch,
         apply_basic_camo = operations.apply_basic_camo,
         basic_camo_picker_guard = operations.basic_camo_picker_guard,
         set_basic_camo_row = operations.set_basic_camo_row,

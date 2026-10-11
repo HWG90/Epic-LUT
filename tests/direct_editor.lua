@@ -227,7 +227,7 @@ m.basic_view = {
 m.outfit_presets = dofile('src/presets/outfit_presets.lua')
 m.original_luts = {
     new = function()
-        return {
+        local self = {
             loaded = true,
             status = 'Ready',
             start = function() end,
@@ -245,17 +245,24 @@ m.original_luts = {
                 }
             end,
         }
+        self.get_resource = function(resource)
+            local original = self.get()
+            assert(resource == original.resource)
+            return original
+        end
+        return self
     end,
 }
 local stock_editor = assert(loadstring('local m=...\n' .. source))(m)
 local patch_saved
 m.patch_export = {
     zip_entries = dofile('src/presets/patch_export.lua').zip_entries,
+    encode = dofile('src/presets/patch_export.lua').encode,
     new = function(folder, deps)
         assert(folder == test_root .. '/tests/tmp/files' and deps.dds == m.dds)
         return {
             save = function(name, document, original)
-                patch_saved = { name = name, document = document, original = original }
+                patch_saved = { name = name, document = document, original = original, deps = deps }
                 if not original then
                     return folder .. '/' .. name, #document
                 end
@@ -372,6 +379,13 @@ assert(
         and patch_saved.document == preset.entries[1].document
         and patch_saved.original.resource == preset.entries[1].original.resource,
     'Armory patch exported editor/worn bytes instead of selected stored preset'
+)
+assert(type(patch_saved.deps.original_patch) == 'function', 'Editor activation discarded the Armory baseline callback')
+local armory_baseline = patch_saved.deps.original_patch(preset.entries[1])
+assert(
+    armory_baseline.resource == preset.entries[1].original.resource
+        and armory_baseline.gpu == ffi.string(stock, 23 * 8 * 16),
+    'Armory export did not forward its game-original baseline snapshot after activation'
 )
 local original_key, original_value = bad_entry.key, bad_entry.document.data[0]
 bad_entry.key = '2:9:63:63'
