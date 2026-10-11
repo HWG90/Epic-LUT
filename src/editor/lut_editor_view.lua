@@ -23,7 +23,13 @@ function V.new(deps)
     local function layout(ui)
         local d = document()
         local h = self.handle
-        if selection_drag and (not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
+        local pattern = self.pattern_editor
+        local pattern_host = not self.embedded and pattern and pattern.workspace and pattern.quick
+        if pattern_host and pattern.set_workspace_host then
+            pattern.set_workspace_host(true)
+        end
+        local pattern_full = pattern_host and pattern.is_open and pattern.is_open()
+        if selection_drag and (pattern_full or not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
             selection_drag.cancel()
         end
         if
@@ -33,11 +39,13 @@ function V.new(deps)
                 or self.tools ~= splitter_drag.tools
                 or not self.tools.is_open()
                 or not self.tools.is_docked()
+                or splitter_drag.pattern_full ~= pattern_full
             )
         then
             splitter_drag.stop('Tools layout changed')
         end
         self.tools_splitter = nil
+        self.pattern_quick_bounds, self.pattern_workspace_bounds = nil, nil
         local mod = self.api.mods[h.id]
         local theme = ui.theme
         local dark, blue, white, muted = theme.panel, theme.header, theme.white, theme.muted
@@ -153,12 +161,12 @@ function V.new(deps)
             gridbottom,
             left,
             ui.h - content_bottom,
-            (self.is_dirty() and 'Pixel Grid - unsaved edits' or 'Pixel Grid')
+            (pattern_full and 'Pattern LUT' or self.is_dirty() and 'Pixel Grid - unsaved edits' or 'Pixel Grid')
                 .. (
-                    d
-                        and (' / ' .. d.height .. ' x ' .. d.width .. ' / ' .. (d.source or 'Current LUT')
-                            :gsub('\\', '/')
-                            :match('[^/]+$'))
+                    pattern_full and ' / 1 x 3'
+                    or d and (' / ' .. d.height .. ' x ' .. d.width .. ' / ' .. (d.source or 'Current LUT')
+                        :gsub('\\', '/')
+                        :match('[^/]+$'))
                     or ''
                 )
         )
@@ -339,13 +347,21 @@ function V.new(deps)
                         elseif target == 'pattern' then
                             ui.activate('pattern_open')
                         else
+                            if pattern_full and pattern.dismiss then
+                                if pattern.dismiss() == false then
+                                    return
+                                end
+                                if self.gear == target then
+                                    return
+                                end
+                            end
                             self.gear = target
                             ui.activate('editor_load_' .. target)
                         end
                     end,
                     {
                         enabled = ready,
-                        selected = self.gear == target,
+                        selected = target == 'pattern' and pattern_full or not pattern_full and self.gear == target,
                         accent = featured
                             and (
                                 target == 'load' and ui.load_color(self.load_seen and self.load_seen())
@@ -360,37 +376,40 @@ function V.new(deps)
             local selector_x = ui.x + 28
             local selector_y = top - 32 - header_shift - header_height - header_rows * (header_height + header_gap)
             header_bottom = selector_y
-            local selector_width = math.min(220, left * 0.32)
-            ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
-            ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
-            local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
-            local resource = control.choice_details and control.choice_details[h.get('basic_' .. self.gear .. '_lut')]
-            local hash = control.choice_hashes and control.choice_hashes[h.get('basic_' .. self.gear .. '_lut')]
-            local resource_width = ui.x + left - selector_x - selector_width - 30
-            if resource and resource_width > 40 then
-                if hash and mod.controls.rename_lut then
-                    ui.hit(
+            if not pattern_full then
+                local selector_width = math.min(220, left * 0.32)
+                ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
+                ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
+                local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
+                local resource = control.choice_details
+                    and control.choice_details[h.get('basic_' .. self.gear .. '_lut')]
+                local hash = control.choice_hashes and control.choice_hashes[h.get('basic_' .. self.gear .. '_lut')]
+                local resource_width = ui.x + left - selector_x - selector_width - 30
+                if resource and resource_width > 40 then
+                    if hash and mod.controls.rename_lut then
+                        ui.hit(
+                            selector_x + 12 + selector_width,
+                            selector_y,
+                            resource_width,
+                            26,
+                            function()
+                                ui.activate('rename_lut')
+                            end,
+                            nil,
+                            nil,
+                            '[0x' .. hash .. ']\nClick to name this LUT. Clear its name to show the texture ID again.'
+                        )
+                    end
+                    ui.bounded(
                         selector_x + 12 + selector_width,
-                        selector_y,
+                        ui.text_y and ui.text_y(selector_y, 26, 12, resource, 'hint') or selector_y + 8,
+                        resource,
+                        12,
+                        muted,
                         resource_width,
-                        26,
-                        function()
-                            ui.activate('rename_lut')
-                        end,
-                        nil,
-                        nil,
-                        '[0x' .. hash .. ']\nClick to name this LUT. Clear its name to show the texture ID again.'
+                        'hint'
                     )
                 end
-                ui.bounded(
-                    selector_x + 12 + selector_width,
-                    ui.text_y and ui.text_y(selector_y, 26, 12, resource, 'hint') or selector_y + 8,
-                    resource,
-                    12,
-                    muted,
-                    resource_width,
-                    'hint'
-                )
             end
         elseif d and mod.controls.lut and ui.choice then
             ui.choice('lut', ui.x + 10, top - 58 - header_shift, math.min(360, left - 24))
@@ -427,7 +446,7 @@ function V.new(deps)
                 h = available,
             }
         end
-        if not d then
+        if not d and not pattern_full then
             -- Empty documents share the responsive header with loaded ones.
             -- Flow each block from its predecessor instead of retaining the
             -- pre-header offsets, and reserve the measured font ink height.
@@ -513,54 +532,75 @@ function V.new(deps)
         local function tool_x(offset)
             return ui.x + 10 + offset * toolbar_scale
         end
-        if ui.choice then
-            ui.choice('grid_tool', tool_x(0), top - 92 - extra_header, 130 * toolbar_scale)
-            ui.choice('grid_channel', tool_x(136), top - 92 - extra_header, 118 * toolbar_scale)
+        if not pattern_full then
+            if ui.choice then
+                ui.choice('grid_tool', tool_x(0), top - 92 - extra_header, 130 * toolbar_scale)
+                ui.choice('grid_channel', tool_x(136), top - 92 - extra_header, 118 * toolbar_scale)
+            end
+            button(tool_x(260), top - 92 - extra_header, 56 * toolbar_scale, 'Copy', 'copy_selection')
+            button(tool_x(322), top - 92 - extra_header, 56 * toolbar_scale, 'Paste', 'paste_selection')
+            button(tool_x(384), top - 92 - extra_header, 56 * toolbar_scale, 'Undo', 'undo')
+            button(tool_x(446), top - 92 - extra_header, 56 * toolbar_scale, 'Redo', 'redo')
+            if toolbar_pattern then
+                ui.button(
+                    tool_x(508),
+                    top - 92 - extra_header,
+                    142 * toolbar_scale,
+                    26,
+                    'Pattern LUT Editor',
+                    function()
+                        ui.activate('pattern_open')
+                    end,
+                    {
+                        help = 'Edit separate 3x1 Pattern LUTs.',
+                    }
+                )
+            end
+            button(
+                tool_x(toolbar_pattern and 656 or 508),
+                top - 92 - extra_header,
+                142 * toolbar_scale,
+                '[ ' .. (h.get('show_alpha') and 'x' or ' ') .. ' ] Show Alpha',
+                'show_alpha'
+            )
         end
-        button(tool_x(260), top - 92 - extra_header, 56 * toolbar_scale, 'Copy', 'copy_selection')
-        button(tool_x(322), top - 92 - extra_header, 56 * toolbar_scale, 'Paste', 'paste_selection')
-        button(tool_x(384), top - 92 - extra_header, 56 * toolbar_scale, 'Undo', 'undo')
-        button(tool_x(446), top - 92 - extra_header, 56 * toolbar_scale, 'Redo', 'redo')
-        if toolbar_pattern then
-            ui.button(tool_x(508), top - 92 - extra_header, 142 * toolbar_scale, 26, 'Pattern LUT Editor', function()
-                ui.activate('pattern_open')
-            end, {
-                help = 'Edit separate 3x1 Pattern LUTs.',
-            })
-        end
-        button(
-            tool_x(toolbar_pattern and 656 or 508),
-            top - 92 - extra_header,
-            142 * toolbar_scale,
-            '[ ' .. (h.get('show_alpha') and 'x' or ' ') .. ' ] Show Alpha',
-            'show_alpha'
-        )
-        local grid_top = top - 129 - extra_header
-        local grid_floor = gridbottom + 30
+        local quick_height = pattern_host and not pattern_full and pattern.quick_height and pattern.quick_height(ui)
+            or 0
+        local grid_top = pattern_full and (header_bottom + (gear_controls and 26 or 0) - 8 * font_scale)
+            or top - 129 - extra_header
+        local grid_floor = gridbottom + 30 + quick_height
         if grid_top <= grid_floor then
             self.grid_bounds = nil
             overlays()
             return
         end
-        local width_cell = (left - 98) / d.width
+        local grid_width, grid_height = d and d.width or 23, d and d.height or 8
+        local width_cell = (left - 98) / grid_width
         if portrait_width then
-            width_cell = math.min(width_cell, (left - portrait_width - 112) / d.width)
+            width_cell = math.min(width_cell, (left - portrait_width - 112) / grid_width)
         end
         local space = math.max(18, grid_top - grid_floor)
-        local cell = math.max(4, math.min(d.height > 8 and 40 or 64, width_cell, space / math.min(d.height, 8)))
+        local rows_to_fit = math.min(grid_height, 8)
+        local preferred_cell = math.max(4, math.min(self.embedded and grid_height <= 8 and 64 or 40, width_cell))
+        local minimum_cell =
+            math.min(preferred_cell, math.max(18, ui.control_height and ui.control_height(12, 2, 18) or 18))
+        local cell = math.max(minimum_cell, math.min(preferred_cell, space / rows_to_fit))
         if docking then
             local minimum = self.tools.minimum_height and self.tools.minimum_height(ui) or 140
-            local rows = math.min(d.height, 8)
-            rows =
-                math.min(rows, math.max(math.min(2, d.height), math.floor((space - minimum - 24 * font_scale) / cell)))
-            -- Keep the grid's cell size and at least two rows; the row viewport
-            -- scrolls rather than drawing swatches through the docked Tools.
-            -- Tools fills everything below those rows, down to the footer.
-            dock_tools(grid_top - cell * rows - 30 - 8 * font_scale)
+            local bottom = gridbottom + 8 * font_scale
+            local total = math.max(0, grid_top - bottom - 30 - 8 * font_scale - quick_height)
+            local minimum_grid = pattern_full and math.max(120, 120 * font_scale)
+                or minimum_cell * math.min(2, grid_height)
+            local maximum = math.max(0, total - minimum_grid - 8 * font_scale)
+            minimum = math.min(minimum, maximum)
+            local available = math.max(4, total - minimum)
+            cell = math.max(minimum_cell, math.min(preferred_cell, available / rows_to_fit))
+            local rows = math.min(rows_to_fit, math.max(1, math.floor((available + 0.01) / cell)))
+            -- Reserve readable rows before giving the remaining height to Tools.
+            -- Wider cells must not evict rows when Values or Preview are hidden.
+            local wanted = pattern_full and minimum or math.max(minimum, total - cell * rows - 8 * font_scale)
+            dock_tools(gridbottom + 16 * font_scale + wanted)
             if tools_bounds then
-                local total = grid_top - tools_bounds.y - 30 - 8 * font_scale
-                local maximum = math.max(0, total - cell * math.min(2, d.height) - 8 * font_scale)
-                minimum = math.min(minimum, maximum)
                 local ratio = self.tools.split_ratio
                 if type(ratio) == 'number' and ratio == ratio and math.abs(ratio) ~= math.huge then
                     tools_bounds.h = math.max(minimum, math.min(maximum, ratio * total))
@@ -580,316 +620,340 @@ function V.new(deps)
                     total = total,
                     minimum = minimum,
                     maximum = maximum,
-                    cell = cell,
+                    minimum_cell = minimum_cell,
                 }
-                grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30
+                grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30 + quick_height
                 space = math.max(4, grid_top - grid_floor)
             end
         end
-        local visible_rows = math.max(1, math.min(d.height, math.floor(space / cell)))
-        self.grid_max = math.max(0, d.height - visible_rows)
-        self.grid_first = math.max(1, math.min(self.grid_max + 1, self.grid_first or 1))
-        local selected_grid_row = h.get('edit_row')
-        if self.grid_selected ~= selected_grid_row then
-            if selected_grid_row < self.grid_first then
-                self.grid_first = selected_grid_row
-            end
-            if selected_grid_row >= self.grid_first + visible_rows then
-                self.grid_first = selected_grid_row - visible_rows + 1
-            end
-            self.grid_selected = selected_grid_row
+        -- The final viewport includes the user-selected Tools split. Clamp cell
+        -- growth against that height, keeping text readable when scrolling is needed.
+        cell = math.max(minimum_cell, math.min(preferred_cell, space / rows_to_fit))
+        if self.tools_splitter then
+            self.tools_splitter.cell = cell
         end
-        local first_row, last_row = self.grid_first, self.grid_first + visible_rows - 1
-        self.grid_bounds = { x = ui.x, y = grid_floor, w = left - (portrait_width or 0) - 8, h = space }
-        if self.grid_max > 0 then
-            ui.bounded(
-                ui.x + 10,
-                grid_floor - 19,
-                'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
-                12,
-                muted,
-                left - 150,
-                'hint'
-            )
-            local function navigate(x, label, direction)
-                ui.button(x, grid_floor - 27, 54, 24, label, function()
-                    self.grid_first =
-                        math.max(1, math.min(self.grid_max + 1, self.grid_first + direction * visible_rows))
-                end)
-            end
-            navigate(ui.x + left - 124, '< Rows', -1)
-            navigate(ui.x + left - 64, 'Rows >', 1)
-        end
-        for c = 1, d.width do
-            ui.bounded(
-                ui.x + 82 + (c - 1) * cell,
-                top - 119 - extra_header,
-                d.width == 23 and semantics.short_columns[c] or tostring(c),
-                12,
-                muted,
-                cell - 2,
-                'hint'
-            )
-        end
-        local row = h.get('edit_row')
-        local column = h.get('edit_column')
-        local function select_cell(selected_row, selected_col)
-            self.open_row = selected_row
-            if h.get('edit_row') ~= selected_row then
-                assert(h.set('edit_row', selected_row))
-            end
-            if h.get('edit_column') ~= selected_col then
-                assert(h.set('edit_column', selected_col))
-            end
-            self.focus_column = selected_col
-            for i, col in ipairs(color_columns) do
-                if col == selected_col then
-                    if h.get('color_field') ~= i then
-                        assert(h.set('color_field', i))
-                    end
-                    break
-                end
-            end
-            self.sync()
-        end
-        local function begin_selection_drag(selected_row, selected_col, rows_only)
-            if not ui.begin_drag or not self.selection then
-                return
-            end
-            local state = {
-                document = d,
-                data = d.data,
-                width = d.width,
-                height = d.height,
-                source = d.source,
-                gear = self.gear,
-                row = selected_row,
-                column = selected_col,
-                anchor_row = self.selection.anchor_row or self.selection.r1,
-                anchor_col = self.selection.anchor_col or self.selection.c1,
-                selection = self.selection,
-                rows_only = rows_only,
-            }
-            selection_drag = state
-            local function cancel()
-                if not same_source(state) and self.selection == state.selection then
-                    self.selection = nil
-                end
-                if selection_drag == state then
-                    selection_drag = nil
-                end
-            end
-            local function move(x, y)
-                if selection_drag ~= state then
-                    return
-                end
-                if not same_source(state) or h.get('grid_tool') ~= 1 then
-                    if state.cancel then
-                        state.cancel()
-                    else
-                        cancel()
-                    end
-                    return
-                end
-                if not x or not y then
-                    return
-                end
-                local selected_col = rows_only and 1
-                    or math.max(1, math.min(d.width, math.floor((x - ui.x - 82) / cell) + 1))
-                local selected_row =
-                    math.max(first_row, math.min(last_row, first_row + math.floor((grid_top - y) / cell)))
-                if selected_row == state.row and selected_col == state.column then
-                    return
-                end
-                state.row, state.column = selected_row, selected_col
-                if rows_only then
-                    self.select_rows(state.anchor_row, selected_row)
-                else
-                    self.selection = {
-                        anchor_row = state.anchor_row,
-                        anchor_col = state.anchor_col,
-                        r1 = math.min(state.anchor_row, selected_row),
-                        r2 = math.max(state.anchor_row, selected_row),
-                        c1 = math.min(state.anchor_col, selected_col),
-                        c2 = math.max(state.anchor_col, selected_col),
-                    }
-                end
-                state.selection = self.selection
-                select_cell(selected_row, selected_col)
-                if self.set_paste_anchor then
-                    self.set_paste_anchor(self.selection.r1, self.selection.c1)
-                end
-            end
-            state.cancel = ui.begin_drag(move, function(x, y)
-                move(x, y)
-                cancel()
-            end, cancel)
-        end
+        local row, column = h.get('edit_row'), h.get('edit_column')
         local can_identify = mod.controls.identify_region
-        local fill_ui = setmetatable({
-            rect = function(x, y, width, height, color, alpha)
-                ui.rect(x, y, width, height, color, alpha, 'swatch_fill')
-            end,
-        }, { __index = ui })
-        for r = first_row, last_row do
-            local y = grid_top - (r - first_row + 1) * cell
-            local selected_row = r
-            ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, r == row and theme.brass or muted, 68)
-            ui.hit(
-                ui.x + 8,
-                y,
-                70,
-                cell,
-                function()
-                    local ok, why = pcall(function()
-                        if h.get('grid_tool') ~= 1 then
-                            assert(h.set('grid_tool', 1))
-                        end
-                        local anchor = ui.shift
-                                and ui.shift()
-                                and self.selection
-                                and (self.selection.anchor_row or self.selection.r1)
-                            or selected_row
-                        self.select_rows(anchor, selected_row)
-                        select_cell(selected_row, 1)
-                        self.set_paste_anchor(self.selection.r1, 1)
-                        begin_selection_drag(selected_row, 1, true)
+        if not pattern_full then
+            local visible_rows = math.max(1, math.min(d.height, math.floor((space + 0.01) / cell)))
+            self.grid_max = math.max(0, d.height - visible_rows)
+            self.grid_first = math.max(1, math.min(self.grid_max + 1, self.grid_first or 1))
+            local selected_grid_row = h.get('edit_row')
+            if self.grid_selected ~= selected_grid_row then
+                if selected_grid_row < self.grid_first then
+                    self.grid_first = selected_grid_row
+                end
+                if selected_grid_row >= self.grid_first + visible_rows then
+                    self.grid_first = selected_grid_row - visible_rows + 1
+                end
+                self.grid_selected = selected_grid_row
+            end
+            local first_row, last_row = self.grid_first, self.grid_first + visible_rows - 1
+            self.grid_bounds = { x = ui.x, y = grid_floor, w = left - (portrait_width or 0) - 8, h = space }
+            if self.grid_max > 0 then
+                ui.bounded(
+                    ui.x + 10,
+                    grid_floor - 19,
+                    'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
+                    12,
+                    muted,
+                    left - 150,
+                    'hint'
+                )
+                local function navigate(x, label, direction)
+                    ui.button(x, grid_floor - 27, 54, 24, label, function()
+                        self.grid_first =
+                            math.max(1, math.min(self.grid_max + 1, self.grid_first + direction * visible_rows))
                     end)
-                    if not ok then
-                        note(tostring(why))
-                    end
-                end,
-                can_identify
-                        and function()
-                            assert(h.set('edit_row', selected_row))
-                            self.sync()
-                            ui.activate('identify_region')
-                        end
-                    or nil,
-                nil,
-                'Click or drag to select whole rows. Shift-click extends the row range.'
-                    .. (can_identify and ' Right-click to flash this region.' or '')
-            )
-        end
-        for r = first_row, last_row do
+                end
+                navigate(ui.x + left - 124, '< Rows', -1)
+                navigate(ui.x + left - 64, 'Rows >', 1)
+            end
             for c = 1, d.width do
-                local selected_row, selected_col = r, c
-                local index = semantics.index(r, c, 1, d.width, d.height)
-                local x = ui.x + 82 + (c - 1) * cell
+                ui.bounded(
+                    ui.x + 82 + (c - 1) * cell,
+                    top - 119 - extra_header,
+                    d.width == 23 and semantics.short_columns[c] or tostring(c),
+                    12,
+                    muted,
+                    cell - 2,
+                    'hint'
+                )
+            end
+            local function select_cell(selected_row, selected_col)
+                self.open_row = selected_row
+                if h.get('edit_row') ~= selected_row then
+                    assert(h.set('edit_row', selected_row))
+                end
+                if h.get('edit_column') ~= selected_col then
+                    assert(h.set('edit_column', selected_col))
+                end
+                self.focus_column = selected_col
+                for i, col in ipairs(color_columns) do
+                    if col == selected_col then
+                        if h.get('color_field') ~= i then
+                            assert(h.set('color_field', i))
+                        end
+                        break
+                    end
+                end
+                self.sync()
+            end
+            local function begin_selection_drag(selected_row, selected_col, rows_only)
+                if not ui.begin_drag or not self.selection then
+                    return
+                end
+                local state = {
+                    document = d,
+                    data = d.data,
+                    width = d.width,
+                    height = d.height,
+                    source = d.source,
+                    gear = self.gear,
+                    row = selected_row,
+                    column = selected_col,
+                    anchor_row = self.selection.anchor_row or self.selection.r1,
+                    anchor_col = self.selection.anchor_col or self.selection.c1,
+                    selection = self.selection,
+                    rows_only = rows_only,
+                }
+                selection_drag = state
+                local function cancel()
+                    if not same_source(state) and self.selection == state.selection then
+                        self.selection = nil
+                    end
+                    if selection_drag == state then
+                        selection_drag = nil
+                    end
+                end
+                local function move(x, y)
+                    if selection_drag ~= state then
+                        return
+                    end
+                    if not same_source(state) or h.get('grid_tool') ~= 1 then
+                        if state.cancel then
+                            state.cancel()
+                        else
+                            cancel()
+                        end
+                        return
+                    end
+                    if not x or not y then
+                        return
+                    end
+                    local selected_col = rows_only and 1
+                        or math.max(1, math.min(d.width, math.floor((x - ui.x - 82) / cell) + 1))
+                    local selected_row =
+                        math.max(first_row, math.min(last_row, first_row + math.floor((grid_top - y) / cell)))
+                    if selected_row == state.row and selected_col == state.column then
+                        return
+                    end
+                    state.row, state.column = selected_row, selected_col
+                    if rows_only then
+                        self.select_rows(state.anchor_row, selected_row)
+                    else
+                        self.selection = {
+                            anchor_row = state.anchor_row,
+                            anchor_col = state.anchor_col,
+                            r1 = math.min(state.anchor_row, selected_row),
+                            r2 = math.max(state.anchor_row, selected_row),
+                            c1 = math.min(state.anchor_col, selected_col),
+                            c2 = math.max(state.anchor_col, selected_col),
+                        }
+                    end
+                    state.selection = self.selection
+                    select_cell(selected_row, selected_col)
+                    if self.set_paste_anchor then
+                        self.set_paste_anchor(self.selection.r1, self.selection.c1)
+                    end
+                end
+                state.cancel = ui.begin_drag(move, function(x, y)
+                    move(x, y)
+                    cancel()
+                end, cancel)
+            end
+            local fill_ui = setmetatable({
+                rect = function(x, y, width, height, color, alpha)
+                    ui.rect(x, y, width, height, color, alpha, 'swatch_fill')
+                end,
+            }, { __index = ui })
+            for r = first_row, last_row do
                 local y = grid_top - (r - first_row + 1) * cell
-                local color = rgb(d.data, index)
-                local channel = h.get('grid_channel')
-                if channel >= 3 then
-                    local value = math.floor(math.max(0, math.min(1, d.data[index + channel - 3])) * 255 + 0.5)
-                    color = { value, value, value }
-                end
-                ui.rect(x, y, cell, cell, { 75, 78, 82 }, nil, 'swatch_border')
-                if deps.swatch then
-                    deps.swatch(
-                        fill_ui,
-                        x + 1,
-                        y + 1,
-                        cell - 2,
-                        cell - 2,
-                        color,
-                        d.data[index + 3],
-                        h.get('show_alpha') and channel < 3
-                    )
-                else
-                    fill_ui.rect(x + 1, y + 1, cell - 2, cell - 2, color)
-                end
+                local selected_row = r
+                ui.bounded(ui.x + 10, y + cell * 0.35, 'Row ' .. r, 12, r == row and theme.brass or muted, 68)
                 ui.hit(
-                    x,
+                    ui.x + 8,
                     y,
-                    cell,
+                    70,
                     cell,
                     function()
                         local ok, why = pcall(function()
-                            if self.clear_value_focus then
-                                self.clear_value_focus()
+                            if h.get('grid_tool') ~= 1 then
+                                assert(h.set('grid_tool', 1))
                             end
-                            local tool = h.get('grid_tool')
-                            if tool == 3 then
-                                self.move_selection(selected_row, selected_col)
-                            elseif tool == 2 then
-                                paint(selected_row, selected_col)
-                            elseif self.selection and ui.shift and ui.shift() then
-                                local anchor_row, anchor_col =
-                                    self.selection.anchor_row or self.selection.r1,
-                                    self.selection.anchor_col or self.selection.c1
-                                self.selection = {
-                                    anchor_row = anchor_row,
-                                    anchor_col = anchor_col,
-                                    r1 = math.min(anchor_row, selected_row),
-                                    r2 = math.max(anchor_row, selected_row),
-                                    c1 = math.min(anchor_col, selected_col),
-                                    c2 = math.max(anchor_col, selected_col),
-                                }
-                            else
-                                self.selection = {
-                                    anchor_row = selected_row,
-                                    anchor_col = selected_col,
-                                    r1 = selected_row,
-                                    r2 = selected_row,
-                                    c1 = selected_col,
-                                    c2 = selected_col,
-                                }
-                            end
-                            select_cell(selected_row, selected_col)
-                            if self.selection and self.set_paste_anchor then
-                                self.set_paste_anchor(self.selection.r1, self.selection.c1)
-                            end
-                            if tool == 1 then
-                                begin_selection_drag(selected_row, selected_col)
-                            end
+                            local anchor = ui.shift
+                                    and ui.shift()
+                                    and self.selection
+                                    and (self.selection.anchor_row or self.selection.r1)
+                                or selected_row
+                            self.select_rows(anchor, selected_row)
+                            select_cell(selected_row, 1)
+                            self.set_paste_anchor(self.selection.r1, 1)
+                            begin_selection_drag(selected_row, 1, true)
                         end)
                         if not ok then
                             note(tostring(why))
                         end
                     end,
+                    can_identify
+                            and function()
+                                assert(h.set('edit_row', selected_row))
+                                self.sync()
+                                ui.activate('identify_region')
+                            end
+                        or nil,
                     nil,
-                    function()
-                        local at = semantics.index(selected_row, selected_col, 1, d.width, d.height)
-                        local data = ffi.new('float[4]')
-                        ffi.copy(data, d.data + at, 16)
-                        self.clip = { data = data, width = 1, height = 1 }
-                        local color = rgb(d.data, at)
-                        self.scratch = { color[1], color[2], color[3] }
-                        assert(h.set('scratch_color', string.format('#%02X%02X%02X', color[1], color[2], color[3])))
-                        assert(h.set('scratch_alpha', math.max(0, math.min(1, tonumber(d.data[at + 3])))))
-                        note('Swatch copied to scratch and pixel clipboard.')
-                    end,
-                    function()
-                        local values = deps.swatch_tooltip and deps.swatch_tooltip(d, selected_row, selected_col)
-                        return values and (values .. '\nDouble-click edits. Middle-click copies.') or nil
-                    end,
-                    function()
-                        self.focus_cell(selected_row, selected_col)
-                        ui.activate('cell_color')
-                    end
+                    'Click or drag to select whole rows. Shift-click extends the row range.'
+                        .. (can_identify and ' Right-click to flash this region.' or '')
                 )
             end
-        end
-        -- Stroke every selected cell boundary without painting a filled gold
-        -- surface. Shared edges are drawn once; RGB/checkers keep their bounds.
-        local selected = self.selection or { r1 = row, r2 = row, c1 = column, c2 = column }
-        local selected_first, selected_last = math.max(first_row, selected.r1), math.min(last_row, selected.r2)
-        if selected_first <= selected_last then
-            local x = ui.x + 82 + (selected.c1 - 1) * cell
-            local y = grid_top - (selected_last - first_row + 1) * cell
-            local width = (selected.c2 - selected.c1 + 1) * cell
-            local height = (selected_last - selected_first + 1) * cell
-            local gold, border = { 244, 202, 53 }, 2
-            for c = selected.c1, selected.c2 + 1 do
-                local edge = ui.x + 82 + (c - 1) * cell
-                ui.rect(edge - border / 2, y, border, height, gold, nil, 'selection_outline')
+            for r = first_row, last_row do
+                for c = 1, d.width do
+                    local selected_row, selected_col = r, c
+                    local index = semantics.index(r, c, 1, d.width, d.height)
+                    local x = ui.x + 82 + (c - 1) * cell
+                    local y = grid_top - (r - first_row + 1) * cell
+                    local color = rgb(d.data, index)
+                    local channel = h.get('grid_channel')
+                    if channel >= 3 then
+                        local value = math.floor(math.max(0, math.min(1, d.data[index + channel - 3])) * 255 + 0.5)
+                        color = { value, value, value }
+                    end
+                    ui.rect(x, y, cell, cell, { 75, 78, 82 }, nil, 'swatch_border')
+                    if deps.swatch then
+                        deps.swatch(
+                            fill_ui,
+                            x + 1,
+                            y + 1,
+                            cell - 2,
+                            cell - 2,
+                            color,
+                            d.data[index + 3],
+                            h.get('show_alpha') and channel < 3
+                        )
+                    else
+                        fill_ui.rect(x + 1, y + 1, cell - 2, cell - 2, color)
+                    end
+                    ui.hit(
+                        x,
+                        y,
+                        cell,
+                        cell,
+                        function()
+                            local ok, why = pcall(function()
+                                if self.clear_value_focus then
+                                    self.clear_value_focus()
+                                end
+                                local tool = h.get('grid_tool')
+                                if tool == 3 then
+                                    self.move_selection(selected_row, selected_col)
+                                elseif tool == 2 then
+                                    paint(selected_row, selected_col)
+                                elseif self.selection and ui.shift and ui.shift() then
+                                    local anchor_row, anchor_col =
+                                        self.selection.anchor_row or self.selection.r1,
+                                        self.selection.anchor_col or self.selection.c1
+                                    self.selection = {
+                                        anchor_row = anchor_row,
+                                        anchor_col = anchor_col,
+                                        r1 = math.min(anchor_row, selected_row),
+                                        r2 = math.max(anchor_row, selected_row),
+                                        c1 = math.min(anchor_col, selected_col),
+                                        c2 = math.max(anchor_col, selected_col),
+                                    }
+                                else
+                                    self.selection = {
+                                        anchor_row = selected_row,
+                                        anchor_col = selected_col,
+                                        r1 = selected_row,
+                                        r2 = selected_row,
+                                        c1 = selected_col,
+                                        c2 = selected_col,
+                                    }
+                                end
+                                select_cell(selected_row, selected_col)
+                                if self.selection and self.set_paste_anchor then
+                                    self.set_paste_anchor(self.selection.r1, self.selection.c1)
+                                end
+                                if tool == 1 then
+                                    begin_selection_drag(selected_row, selected_col)
+                                end
+                            end)
+                            if not ok then
+                                note(tostring(why))
+                            end
+                        end,
+                        nil,
+                        function()
+                            local at = semantics.index(selected_row, selected_col, 1, d.width, d.height)
+                            local data = ffi.new('float[4]')
+                            ffi.copy(data, d.data + at, 16)
+                            self.clip = { data = data, width = 1, height = 1 }
+                            local color = rgb(d.data, at)
+                            self.scratch = { color[1], color[2], color[3] }
+                            assert(h.set('scratch_color', string.format('#%02X%02X%02X', color[1], color[2], color[3])))
+                            assert(h.set('scratch_alpha', math.max(0, math.min(1, tonumber(d.data[at + 3])))))
+                            note('Swatch copied to scratch and pixel clipboard.')
+                        end,
+                        function()
+                            local values = deps.swatch_tooltip and deps.swatch_tooltip(d, selected_row, selected_col)
+                            return values and (values .. '\nDouble-click edits. Middle-click copies.') or nil
+                        end,
+                        function()
+                            self.focus_cell(selected_row, selected_col)
+                            ui.activate('cell_color')
+                        end
+                    )
+                end
             end
-            for r = selected_first, selected_last + 1 do
-                local edge = grid_top - (r - first_row) * cell
-                ui.rect(x - border / 2, edge - border / 2, width + border, border, gold, nil, 'selection_outline')
+            -- Stroke every selected cell boundary without painting a filled gold
+            -- surface. Shared edges are drawn once; RGB/checkers keep their bounds.
+            local selected = self.selection or { r1 = row, r2 = row, c1 = column, c2 = column }
+            local selected_first, selected_last = math.max(first_row, selected.r1), math.min(last_row, selected.r2)
+            if selected_first <= selected_last then
+                local x = ui.x + 82 + (selected.c1 - 1) * cell
+                local y = grid_top - (selected_last - first_row + 1) * cell
+                local width = (selected.c2 - selected.c1 + 1) * cell
+                local height = (selected_last - selected_first + 1) * cell
+                local gold, border = { 244, 202, 53 }, 2
+                for c = selected.c1, selected.c2 + 1 do
+                    local edge = ui.x + 82 + (c - 1) * cell
+                    ui.rect(edge - border / 2, y, border, height, gold, nil, 'selection_outline')
+                end
+                for r = selected_first, selected_last + 1 do
+                    local edge = grid_top - (r - first_row) * cell
+                    ui.rect(x - border / 2, edge - border / 2, width + border, border, gold, nil, 'selection_outline')
+                end
+            end
+        end -- Material table; Pattern workspace owns its replacement rectangle.
+        if pattern_host then
+            local bounds = {
+                x = ui.x + 8 * font_scale,
+                y = grid_floor - quick_height - 30,
+                w = left - (portrait_width or 0) - 16 * font_scale,
+                h = pattern_full and grid_top - grid_floor + 30 or quick_height,
+            }
+            if pattern_full then
+                self.pattern_workspace_bounds = bounds
+                pattern.workspace(ui, bounds)
+            else
+                self.pattern_quick_bounds = bounds
+                local control = mod.controls['basic_' .. (self.gear or 'armor') .. '_lut']
+                local chosen = control and control.choices[h.get(control.id)]
+                pattern.quick(ui, bounds, chosen and chosen:match('^Cape') and 'cape' or self.gear)
             end
         end
-        if show_values then
+        if show_values and d then
             local finish_options = ui.surface and ui.surface(130)
             local inspector_button_width = (rightw - 21) / 2
             local inspector_gap = 6 * font_scale
@@ -1257,6 +1321,7 @@ function V.new(deps)
                         source = d.source,
                         gear = self.gear,
                         tools = self.tools,
+                        pattern_full = pattern_full,
                     }
                     local function clear()
                         state.tools.splitter_dragging = false

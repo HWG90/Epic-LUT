@@ -57,9 +57,10 @@ local handle = api.register({ id = 'splitter_test', name = 'Epic LUT', pages = p
 editor.attach(api, handle)
 api.mods[handle.id].tabs_top = true
 local prior_preview, preview = package.loaded['epic.player_preview.v1']
+local portrait_docked = true
 package.loaded['epic.player_preview.v1'] = {
     is_docked = function()
-        return true
+        return portrait_docked
     end,
     dock = function(bounds)
         preview = bounds
@@ -281,7 +282,184 @@ assert(not editor.tools_splitter and not editor.tools.splitter_dragging, 'Closin
 input(-50, -50, false)
 assert(not menu.is_interacting(), 'Closed Tools retained mouse drag ownership')
 unchanged()
+-- Width changes cannot grow square cells past the available row viewport.
+-- Compare the actual grid after hiding Values, with and without a portrait,
+-- across automatic/chosen Tools allocations and font/window resize cases.
+local tall_doc = doc
+doc = { width = 23, height = 8, data = ffi.new('float[?]', 23 * 8 * 4) }
+for index = 0, doc.width * doc.height * 4 - 1 do
+    doc.data[index] = (index % 17) / 16
+end
+local grid_pixels, grid_revision, grid_undo, grid_writes =
+    ffi.string(doc.data, doc.width * doc.height * 16), doc.revision, #editor.undo, writes
+editor.tools.open('rows')
+editor.tools.set_docked(true)
+assert(handle.set('grid_tool', 1))
+local function grid_cells(commands)
+    local out, b, window = {}, assert(editor.grid_bounds), menu.window_bounds
+    local lower, upper = window.y + b.y * window.scale, window.y + (b.y + b.h) * window.scale
+    for _, c in ipairs(commands) do
+        if
+            c.type == 'rect'
+            and c.ui_role == 'swatch_border'
+            and c.x >= window.x + b.x * window.scale
+            and c.x + c.w <= window.x + (b.x + b.w) * window.scale + 0.01
+            and c.y >= lower - 0.01
+            and c.y + c.h <= upper + 0.01
+        then
+            out[#out + 1] = c
+        end
+    end
+    table.sort(out, function(a, b)
+        return math.abs(a.y - b.y) > 0.01 and a.y > b.y or math.abs(a.y - b.y) <= 0.01 and a.x < b.x
+    end)
+    assert(#out > 0 and #out % doc.width == 0, 'Advanced grid cells escaped their row viewport')
+    return out
+end
+local function cell_input(cell, down)
+    input(cell.x + cell.w / 2, cell.y + cell.h / 2, down)
+end
+local full_views, constrained_views = 0, 0
+local width_growth_clamped = false
+for _, scenario in ipairs({
+    { 12, 0.65, 1200, 1200 },
+    { 20, 0.85, 1100, 1400 },
+    { 20, 1.15, 1000, 1800 },
+    { 12, 1, 900, 1200 },
+}) do
+    menu.font_size, menu.ui_scale, menu.window_height = scenario[1], scenario[2], scenario[3]
+    menu.window_width = scenario[4]
+    for _, has_portrait in ipairs({ true, false }) do
+        portrait_docked = has_portrait
+        for _, allocation in ipairs({ false, 0.35, 0.6, 0.9 }) do
+            editor.tools.split_ratio = allocation or nil
+            local shown
+            for _, values in ipairs({ true, false }) do
+                assert(handle.set('value_editor_visible', values))
+                editor.grid_first, editor.grid_selected = 1, nil
+                assert(handle.set('edit_row', 1))
+                assert(handle.set('edit_column', 1))
+                local commands = compose()
+                local g, split, window = assert(editor.grid_bounds), assert(editor.tools_splitter), menu.window_bounds
+                local cells = grid_cells(commands)
+                local visible = #cells / doc.width
+                assert(
+                    visible == doc.height - editor.grid_max,
+                    'Rendered Advanced grid rows differ from scroll metadata after width change'
+                )
+                assert(
+                    math.abs(cells[1].w / window.scale - split.cell) < 0.01,
+                    'Tools splitter cached a cell size different from the grid/hit geometry'
+                )
+                local fits_eight = g.h + 0.01 >= split.minimum_cell * 8
+                if fits_eight then
+                    full_views = full_views + 1
+                    assert(
+                        visible == 8 and editor.grid_first == 1 and editor.grid_max == 0,
+                        'Advanced width growth hides an ordinary row despite room for eight readable cells'
+                    )
+                else
+                    constrained_views = constrained_views + 1
+                    assert(
+                        visible >= 2 and split.cell >= split.minimum_cell - 0.01,
+                        'Explicit Tools expansion sacrificed readable cells or the minimum usable row count'
+                    )
+                end
+                if values then
+                    shown = { visible = visible, fits = fits_eight, height = g.h, width = g.w, cell = split.cell }
+                elseif shown.fits and fits_eight then
+                    assert(
+                        visible == shown.visible,
+                        'Hiding Values reduced the visible row count at the same usable allocation'
+                    )
+                    if g.w > shown.width and split.cell > shown.cell + 0.1 and math.abs(split.cell * 8 - g.h) < 0.1 then
+                        width_growth_clamped = true
+                    end
+                end
+                cell_input(cells[1], true)
+                cell_input(cells[1], false)
+                assert(
+                    handle.get('edit_row') == 1 and handle.get('edit_column') == 1,
+                    'First Advanced grid cell hit was shifted after width/Tools resize'
+                )
+                if not fits_eight then
+                    editor.grid_first = editor.grid_max + 1
+                    commands = compose()
+                    cells = grid_cells(commands)
+                end
+                cell_input(cells[#cells], true)
+                cell_input(cells[#cells], false)
+                assert(
+                    handle.get('edit_row') == 8 and handle.get('edit_column') == 23,
+                    'Last Advanced grid cell hit used an outdated square size'
+                )
+                if fits_eight then
+                    commands = compose()
+                    cells = grid_cells(commands)
+                    cell_input(cells[1], true)
+                    assert(menu.is_interacting(), 'Advanced selection drag did not acquire ownership')
+                    cell_input(cells[#cells], true)
+                    cell_input(cells[#cells], false)
+                    local selected = assert(editor.selection)
+                    assert(
+                        selected.r1 == 1 and selected.r2 == 8 and selected.c1 == 1 and selected.c2 == 23,
+                        'Advanced resized-grid drag selection mapped to the wrong rows or columns'
+                    )
+                    assert(not menu.is_interacting(), 'Advanced resized-grid drag retained pointer ownership')
+                end
+                assert(
+                    ffi.string(doc.data, doc.width * doc.height * 16) == grid_pixels
+                        and doc.revision == grid_revision
+                        and #editor.undo == grid_undo
+                        and writes == grid_writes,
+                    'Advanced layout/selection regression wrote LUT data, history or a native binding'
+                )
+            end
+        end
+    end
+end
+assert(full_views > 0 and constrained_views > 0, 'Advanced grid matrix missed full and constrained Tools allocations')
+assert(width_growth_clamped, 'Advanced grid matrix never exercised width-grown squares clamped by eight-row height')
+-- Tall documents retain real scrolling and final-row hit mapping in every
+-- Values/portrait combination after the ordinary-table height clamp.
+doc = tall_doc
+editor.tools.split_ratio = 0.6
+menu.font_size, menu.ui_scale, menu.window_height = 20, 0.85, 1100
+for _, has_portrait in ipairs({ true, false }) do
+    portrait_docked = has_portrait
+    for _, values in ipairs({ true, false }) do
+        assert(handle.set('value_editor_visible', values))
+        assert(handle.set('edit_row', 1))
+        editor.grid_first, editor.grid_selected = 1, nil
+        compose()
+        assert(editor.grid_max > 0, 'A64-row Advanced table lost its scroll range')
+        local tools_offset = editor.tools.scroll
+        local g, b = editor.grid_bounds, menu.window_bounds
+        for _ = 1, 35 do
+            menu.wheel(-120, b.x + (g.x + g.w / 2) * b.scale, b.y + (g.y + g.h / 2) * b.scale)
+            compose()
+        end
+        assert(
+            editor.grid_first == editor.grid_max + 1 and editor.tools.scroll == tools_offset,
+            'Advanced tall-grid wheel changed Tools or failed to reach the final row'
+        )
+        local cells = grid_cells(compose())
+        cell_input(cells[#cells], true)
+        cell_input(cells[#cells], false)
+        assert(
+            handle.get('edit_row') == 64 and handle.get('edit_column') == 23,
+            'Advanced tall-grid final cell hit lost its original row identity'
+        )
+        assert(
+            ffi.string(doc.data, doc.width * doc.height * 16) == pixels and writes == grid_writes,
+            'Advanced tall-grid sizing/selection changed texture bytes or bindings'
+        )
+    end
+end
 package.loaded['epic.player_preview.v1'] = prior_preview
 print(
     'PASS Tools splitter: actual bidirectional drag, usable clamps, ratio across font/scale/resize/redock, independent scroll, all rows, Escape/focus/outside-release cleanup and unchanged LUT/selection/bindings'
+)
+print(
+    'PASS Advanced grid sizing: Values/portrait/width/font/Tools matrices, eight readable rows when space permits, matching cell metadata/hits/drag selection and independent64-row final-row scrolling without LUT writes'
 )

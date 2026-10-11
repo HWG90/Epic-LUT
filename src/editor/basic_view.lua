@@ -1,38 +1,6 @@
 -- Primary RGB and checked-region camo. No shader, alpha or raw-column controls.
 local B = {}
 B.minimum_height = 1000
-local function camo_checkbox(ui, x, y, width, height, checked, enabled, callback)
-    local size = math.min(22, width, height - 4)
-    local left, bottom = x + (width - size) / 2, y + (height - size) / 2
-    local theme = ui.theme
-    local hovered = enabled and ui.hovering and ui.hovering(x, y, width, height)
-    local border = not enabled and theme.line
-        or checked and theme.focus
-        or hovered and (theme.border_hover or theme.focus)
-        or theme.muted
-    local stroke = math.min(2 * (ui.pixel_width or 1), size / 4)
-    ui.rect(left, bottom, size, size, checked and theme.selected or theme.panel, nil, 'control_fill')
-    ui.rect(left, bottom, size, stroke, border, nil, 'control_border')
-    ui.rect(left, bottom + size - stroke, size, stroke, border, nil, 'control_border')
-    ui.rect(left, bottom + stroke, stroke, size - stroke * 2, border, nil, 'control_border')
-    ui.rect(left + size - stroke, bottom + stroke, stroke, size - stroke * 2, border, nil, 'control_border')
-    if checked then
-        -- Draw the tick with native rectangle strokes so it does not depend on
-        -- the HUD/debug font containing a check-mark glyph.
-        local unit, ink = size / 20, enabled and theme.focus or theme.disabled
-        for step = 0, 3 do
-            ui.rect(left + (4 + step) * unit, bottom + (10 - step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
-        end
-        for step = 0, 8 do
-            ui.rect(left + (7 + step) * unit, bottom + (7 + step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
-        end
-    end
-    ui.hit(x, y, width, height, function()
-        if enabled then
-            callback()
-        end
-    end, nil, nil, 'Include this region when applying a camo pattern, colorway or color.')
-end
 function B.new(info, select_row, help, select_camo_row)
     help = help or {}
     local self = { action_scroll = 0, region_scroll = {}, region_maximum = {}, region_bounds = {} }
@@ -97,7 +65,7 @@ function B.new(info, select_row, help, select_camo_row)
         local color_y = camo_y + 26 + gap
         local camo_heading_y = color_y + color_height + color_label_height + gap * 2
         local load_y = top - control_height - gap
-        button(ui.x + 10, load_y, left - 20, 'Load Current Armor & Helmet', 'populate_worn', nil, nil, control_height)
+        button(ui.x + 10, load_y, left - 20, 'Load Current Gear', 'populate_worn', nil, nil, control_height)
         local gear_heading_height = ui.control_height and ui.control_height(14, 1, 20, 'heading') or heading_size + gap
         local gear_heading_y = load_y - gear_heading_height - gap
         local lut_y = gear_heading_y - 26 - gap
@@ -232,8 +200,7 @@ function B.new(info, select_row, help, select_camo_row)
                         local selected = row
                         local target = kind
                         local checked = checked_rows and checked_rows[row] == true
-                        camo_checkbox(
-                            ui,
+                        ui.checkbox(
                             checkbox_x,
                             cursor + 1,
                             checkbox_width,
@@ -245,9 +212,10 @@ function B.new(info, select_row, help, select_camo_row)
                                 and not state.busy
                                 and not document.stale
                                 and not document.read_only,
-                            function()
-                                select_camo_row(selected, target, not checked, checked_rows)
-                            end
+                            function(value)
+                                select_camo_row(selected, target, value, checked_rows)
+                            end,
+                            'Include this region when applying a camo pattern, colorway or color.'
                         )
                         ui.hit(x, cursor, region_label_width - 2, row_height - 1, function()
                             if select_row(selected, target) ~= false then
@@ -486,14 +454,12 @@ function B.new(info, select_row, help, select_camo_row)
         choice('outfit_preset')
         buttons({
             {
-                'Apply Preset Armor',
-                'outfit_apply_armor',
-                state.raw and state.raw.outfit and #state.raw.outfit.armor > 0,
-            },
-            {
-                'Apply Preset Helmet',
-                'outfit_apply_helmet',
-                state.raw and state.raw.outfit and #state.raw.outfit.helmet > 0,
+                'Apply Preset...',
+                'outfit_choose_luts',
+                not state.busy
+                    and state.raw
+                    and state.raw.outfit
+                    and (#state.raw.outfit.armor + #state.raw.outfit.helmet + #(state.raw.outfit.cape or {})) > 0,
             },
         })
         buttons({ { 'Save to Armory', 'save_setup' } })

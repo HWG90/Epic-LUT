@@ -1,10 +1,13 @@
 -- Named preset collection and UI selection. No native writes or gear discovery.
 local A = {}
 local function type_label(preset)
-    if #preset.armor > 0 or #(preset.cape or {}) > 0 then
-        return #preset.helmet > 0 and 'Armor + Helmet' or 'Armor Only'
+    local labels = {}
+    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+        if #(preset[kind] or {}) > 0 then
+            labels[#labels + 1] = kind:sub(1, 1):upper() .. kind:sub(2)
+        end
     end
-    return 'Helmet Only'
+    return #labels == 1 and (labels[1] .. ' Only') or (#labels > 0 and table.concat(labels, ' + ') or 'No LUTs')
 end
 local function first_strip(documents)
     local document = documents[1]
@@ -111,7 +114,8 @@ function A.new(storage, control, handle)
         return true, 'Removed ' .. name .. ' from The Armory.'
     end
     function self.save(name, entries)
-        storage.save(name, entries)
+        local saved, why = storage.save(name, entries)
+        assert(saved ~= false, why or 'Could not save the Armory preset')
         self.selected = storage.load(name)
         self.query = ''
         self.refresh()

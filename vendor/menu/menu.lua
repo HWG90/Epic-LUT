@@ -61,6 +61,36 @@ function M.control_border(ui, x, y, w, h, color)
     ui.rect(x, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
     ui.rect(x + w - stroke, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
 end
+-- Native checkbox ink is shared by custom workspaces and modal selectors.
+-- It stays visible with either the HUD font or the debug-font fallback.
+function M.checkbox(ui, x, y, width, height, checked, enabled, callback, help)
+    local size = math.min(22, width, height - 4)
+    local left, bottom = x + (width - size) / 2, y + (height - size) / 2
+    local theme = ui.theme
+    local hovered = enabled and ui.hovering and ui.hovering(x, y, width, height)
+    local border = not enabled and theme.line
+        or checked and theme.focus
+        or hovered and (theme.border_hover or theme.focus)
+        or theme.muted
+    ui.rect(left, bottom, size, size, checked and theme.selected or theme.panel, nil, 'control_fill')
+    M.control_border(ui, left, bottom, size, size, border)
+    if checked then
+        local unit, ink = size / 20, enabled and theme.focus or theme.disabled
+        for step = 0, 3 do
+            ui.rect(left + (4 + step) * unit, bottom + (10 - step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
+        end
+        for step = 0, 8 do
+            ui.rect(left + (7 + step) * unit, bottom + (7 + step) * unit, 2 * unit, 2 * unit, ink, nil, 'control_icon')
+        end
+    end
+    if callback then
+        ui.hit(x, y, width, height, function()
+            if enabled then
+                callback(not checked)
+            end
+        end, nil, nil, help)
+    end
+end
 -- Small decoded pattern masks share the regular popup plane. Merge adjacent
 -- pixels so previews remain cheap to retain and never need another GUI.
 function M.pattern_thumbnail(preview, emit, x, y, size)
@@ -109,6 +139,9 @@ end
 function M.custom_ui(ui)
     ui.theme = ui.epic_style and M.epic_palette or M.palette
     ui.decorate = M.custom_ui
+    function ui.checkbox(...)
+        return M.checkbox(ui, ...)
+    end
     function ui.surface_color(x, y, w, h, options)
         local o, T = options or {}, ui.theme
         local hovered = o.enabled ~= false and ui.hovering and ui.hovering(x, y, w, h)
@@ -896,6 +929,20 @@ function M.new(api, measure, Text)
             end
             return
         end
+        if self.visible and self.lut_apply_dialog then
+            if code == 27 or code == (self.toggle_key or 121) then
+                self.lut_apply_dialog = nil
+                scroll_drag = nil
+                if code == 27 then
+                    return
+                end
+            else
+                if code == 13 and self.lut_apply_dialog.apply then
+                    self.lut_apply_dialog.apply()
+                end
+                return
+            end
+        end
         if
             code == 13
             and self.outfit_dialog
@@ -1453,6 +1500,35 @@ function M.new(api, measure, Text)
     end
 
     function self.wheel(delta, x, y)
+        if not self.visible or not x or not y or not delta then
+            return
+        end
+        if self.lut_apply_dialog then
+            local b = self.window_bounds
+            if b then
+                local px, py = (x - b.x) / b.scale, (y - b.y) / b.scale
+                for _, column in ipairs(self.lut_apply_dialog.columns or {}) do
+                    local bounds = column.scroll_bounds
+                    if
+                        bounds
+                        and px >= bounds.x
+                        and px <= bounds.x + bounds.w
+                        and py >= bounds.y
+                        and py <= bounds.y + bounds.h
+                    then
+                        column.scroll = math.max(
+                            0,
+                            math.min(
+                                column.maximum or 0,
+                                (column.scroll or 0) - delta / 120 * (column.row_height or 32)
+                            )
+                        )
+                        break
+                    end
+                end
+            end
+            return
+        end
         if
             not self.visible
             or self.capture
@@ -1671,15 +1747,22 @@ function M.new(api, measure, Text)
                     text_repeat = nil
                     self.mouse_held = true
                 else
-                    local valid = self.finish_color_field()
+                    local naming_outfit = self.outfit_dialog
+                        and self.outfit_dialog.phase == 'name'
+                        and self.text_edit
+                        and self.text_edit.control == self.outfit_dialog.control
+                    local valid = naming_outfit or self.finish_color_field()
 
-                    if self.text_edit and self.text_edit.control and self.text_edit.control.type == 'input' then
+                    if self.text_edit and self.text_edit.control and not naming_outfit then
+                        -- Numeric fields use the same validation and owner
+                        -- callback as Enter, before the clicked control can
+                        -- change the row/column. Failed drafts keep focus.
                         self.key(13)
 
                         valid = self.text_edit == nil
                     end
 
-                    if valid then
+                    if valid and not naming_outfit then
                         self.text_edit = nil
                     end
 
@@ -1934,7 +2017,7 @@ function M.new(api, measure, Text)
         then
             return true
         end
-        if self.color_picker or self.outfit_dialog or self.dropdown then
+        if self.color_picker or self.outfit_dialog or self.lut_apply_dialog or self.dropdown then
             return true
         end
         return self.floating_at(x, y) ~= nil
@@ -4751,17 +4834,35 @@ function M.new(api, measure, Text)
                 end)
             elseif dialog.phase == 'scope' then
                 bounded(px + 14, py + 116, 'What do you want to save?', 14, white, 412)
-                for i, option in ipairs({ { 'armor', 'Armor Only' }, { 'both', 'Both' }, { 'helmet', 'Helmet Only' } }) do
+                if type(dialog.save_kind) ~= 'table' then
+                    local kind = dialog.save_kind
+                    dialog.save_kind = { armor = kind ~= 'helmet', helmet = kind ~= 'armor', cape = kind ~= 'helmet' }
+                end
+                local check_ui = M.custom_ui({
+                    rect = rect,
+                    bounded = bounded,
+                    hit = hit,
+                    hovering = hovering,
+                    text_y = text_y,
+                    epic_style = self.epic_typography,
+                    pixel_width = 1 / s,
+                })
+                local any = false
+                for i, option in ipairs({ { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }) do
                     local bx = px + 14 + (i - 1) * 140
                     local kind, label = option[1], option[2]
-                    rect(bx, py + 70, 132, 32, T.field, nil, 'control_fill')
-                    bounded(bx + 6, py + 80, label, 14, white, 120)
+                    local checked = dialog.save_kind[kind] == true
+                    any = any or checked
+                    check_ui.checkbox(bx, py + 70, 28, 32, checked, true)
+                    bounded(bx + 34, text_y(py + 70, 32, 14, label), label, 14, white, 98)
                     hit(bx, py + 70, 132, 32, function()
-                        dialog.save_kind = kind
-                        dialog.phase = 'name'
-                        self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
+                        dialog.save_kind[kind] = not checked
                     end)
                 end
+                check_ui.button(px + 14, py + 22, 198, 30, 'Save', function()
+                    dialog.phase = 'name'
+                    self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
+                end, { enabled = any, accent = any and accent, ink = T.background })
             elseif dialog.phase == 'confirm' then
                 bounded(px + 14, py + 116, 'Save the current gear as a named preset.', 14, white, 412)
                 rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
@@ -4773,19 +4874,18 @@ function M.new(api, measure, Text)
                 end)
             else
                 if not dialog.title then
-                    bounded(
-                        px + 14,
-                        py + 130,
-                        'Saving: '
-                            .. (
-                                dialog.save_kind == 'armor' and 'Armor Only'
-                                or dialog.save_kind == 'helmet' and 'Helmet Only'
-                                or 'Armor + Helmet'
-                            ),
-                        14,
-                        accent,
-                        412
-                    )
+                    local scopes = {}
+                    local selected = dialog.save_kind
+                    if type(selected) ~= 'table' then
+                        selected =
+                            { armor = selected ~= 'helmet', helmet = selected ~= 'armor', cape = selected ~= 'helmet' }
+                    end
+                    for _, option in ipairs({ { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }) do
+                        if selected[option[1]] then
+                            scopes[#scopes + 1] = option[2]
+                        end
+                    end
+                    bounded(px + 14, py + 130, 'Saving: ' .. table.concat(scopes, ' + '), 14, accent, 412)
                 elseif dialog.description then
                     bounded(px + 14, py + 130, dialog.description, 12, muted, 412)
                 end
@@ -4800,8 +4900,14 @@ function M.new(api, measure, Text)
                     396
                 )
                 hit(px + 14, py + 89, 412, 30, function()
-                    self.text_edit =
-                        { mod = dialog.mod, control = dialog.control, text = dialog.initial_text or '', replace = true }
+                    if not editing then
+                        self.text_edit = {
+                            mod = dialog.mod,
+                            control = dialog.control,
+                            text = dialog.initial_text or '',
+                            replace = true,
+                        }
+                    end
                 end)
                 rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Save Preset', 14, white, 180)
@@ -4818,6 +4924,178 @@ function M.new(api, measure, Text)
             paint_surface(first, popup_planes.dialog, 20)
             for i = first, #commands do
                 commands[i].popup = true
+            end
+        end
+        if self.lut_apply_dialog then
+            local dialog = self.lut_apply_dialog
+            local pad = 14
+            local dw, dh = math.min(800, ww - 48), math.min(580, wh - 64)
+            local px, py = (ww - dw) / 2, (wh - dh) / 2
+            local bh = math.max(30, text_metrics(14).height + 10)
+            local hint_height = text_metrics(12, nil, 'hint').height + 6
+            local row_height = math.max(32, bh + 4)
+            local header_height = math.max(36, text_metrics(18, nil, 'heading').height + 12)
+            local first = #commands + 1
+            hits = {}
+            local drawing = M.custom_ui({
+                rect = rect,
+                bounded = bounded,
+                hit = hit,
+                hovering = hovering,
+                text_y = text_y,
+                epic_style = self.epic_typography,
+                pixel_width = 1 / s,
+            })
+            local function cancel()
+                self.lut_apply_dialog = nil
+                scroll_drag = nil
+            end
+            local function selected_ids()
+                local selected, any = {}, false
+                for _, column in ipairs(dialog.columns or {}) do
+                    for _, item in ipairs(column.items or {}) do
+                        if item.enabled ~= false and item.checked == true then
+                            selected[item.id], any = true, true
+                        end
+                    end
+                end
+                return selected, any
+            end
+            local function apply()
+                local selected, any = selected_ids()
+                if not any or self.lut_apply_dialog ~= dialog then
+                    return
+                end
+                local called, ok, status = pcall(dialog.on_apply, selected)
+                if called and ok ~= false then
+                    self.notice = tostring(status or 'Selected LUTs applied')
+                    cancel()
+                else
+                    dialog.error = tostring(called and status or ok)
+                    self.notice = dialog.error
+                end
+            end
+            dialog.apply = apply
+            rect(px, py, dw, dh, T.panel, 0.99)
+            rect(px, py + dh - header_height, dw, header_height, T.header)
+            bounded(
+                px + pad,
+                text_y(py + dh - header_height, header_height, 18, dialog.title or 'Apply Preset LUTs', 'heading'),
+                dialog.title or 'Apply Preset LUTs',
+                18,
+                accent,
+                dw - pad * 2 - 30,
+                'heading'
+            )
+            drawing.button(px + dw - pad - 26, py + dh - header_height + 4, 26, header_height - 8, 'X', cancel)
+            local toolbar_y = py + dh - header_height - bh - 8
+            local function select_all(value)
+                for _, column in ipairs(dialog.columns or {}) do
+                    for _, item in ipairs(column.items or {}) do
+                        item.checked = value and item.enabled ~= false
+                    end
+                end
+            end
+            drawing.button(px + pad, toolbar_y, 140, bh, 'Select All', function()
+                select_all(true)
+            end)
+            drawing.button(px + pad + 148, toolbar_y, 140, bh, 'Clear All', function()
+                select_all(false)
+            end)
+            local caption_y = toolbar_y - hint_height - 4
+            bounded(px + pad, caption_y, 'Matching Pattern LUTs are always included.', 12, muted, dw - pad * 2, 'hint')
+            local column_top = caption_y - hint_height - 4
+            local body_top = column_top - bh
+            local body_bottom = py + bh + hint_height + pad * 2
+            local viewport = math.max(1, body_top - body_bottom)
+            local gap = 16
+            local column_width = (dw - pad * 2 - gap) / 2
+            for ci, column in ipairs(dialog.columns or {}) do
+                local cx = px + pad + (ci - 1) * (column_width + gap)
+                bounded(
+                    cx,
+                    text_y(column_top - bh, bh, 14, column.title or '', 'heading'),
+                    column.title or '',
+                    14,
+                    white,
+                    column_width,
+                    'heading'
+                )
+                column.maximum = math.max(0, #(column.items or {}) * row_height - viewport)
+                column.scroll = math.max(0, math.min(column.scroll or 0, column.maximum))
+                column.row_height = row_height
+                column.scroll_bounds = { x = cx, y = body_bottom, w = column_width, h = viewport }
+                for index, item in ipairs(column.items or {}) do
+                    local y = body_top + column.scroll - index * row_height
+                    if y >= body_bottom - 0.01 and y + bh <= body_top + 0.01 then
+                        local enabled = item.enabled ~= false
+                        drawing.checkbox(cx, y, 28, bh, enabled and item.checked == true, enabled)
+                        local detail_width = item.detail
+                                and math.min(
+                                    column_width * 0.4,
+                                    text_metrics(12, item.detail, 'hint').width or #item.detail * 6
+                                )
+                            or 0
+                        bounded(
+                            cx + 34,
+                            text_y(y, bh, 14, item.label or item.id),
+                            item.label or item.id,
+                            14,
+                            enabled and white or muted,
+                            column_width - 46 - detail_width
+                        )
+                        if item.detail then
+                            bounded(
+                                cx + column_width - detail_width - 10,
+                                text_y(y, bh, 12, item.detail, 'hint'),
+                                item.detail,
+                                12,
+                                muted,
+                                detail_width,
+                                'hint'
+                            )
+                        end
+                        hit(cx, y, column_width - 10, bh, function()
+                            if enabled then
+                                item.checked = item.checked ~= true
+                            end
+                        end, nil, nil, item.detail)
+                    end
+                end
+                if column.maximum > 0 then
+                    scrollbar(
+                        'lut_apply_column_' .. ci,
+                        cx + column_width - 6,
+                        body_bottom,
+                        viewport,
+                        #(column.items or {}) * row_height,
+                        viewport,
+                        column.scroll,
+                        function(value)
+                            column.scroll = value <= 1 and 0 or value >= column.maximum - 1 and column.maximum or value
+                        end
+                    )
+                end
+            end
+            if dialog.error then
+                bounded(px + pad, py + bh + pad + 4, dialog.error, 12, muted, dw - pad * 2, 'hint')
+            end
+            local _, any = selected_ids()
+            drawing.button(
+                px + pad,
+                py + pad,
+                (dw - pad * 2 - 8) / 2,
+                bh,
+                'Apply',
+                apply,
+                { enabled = any, accent = any and accent, ink = T.background }
+            )
+            drawing.button(px + dw / 2 + 4, py + pad, (dw - pad * 2 - 8) / 2, bh, 'Cancel', cancel)
+            dialog.bounds = { x = px, y = py, w = dw, h = dh }
+            frame('lut_apply_dialog', px, py, dw, dh)
+            paint_surface(first, popup_planes.dialog, 20)
+            for index = first, #commands do
+                commands[index].popup = true
             end
         end
         if

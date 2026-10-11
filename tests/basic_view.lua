@@ -141,6 +141,7 @@ for _, id in ipairs({
     'outfit_apply_armor',
     'outfit_apply_helmet',
     'save_setup',
+    'outfit_choose_luts',
     'save_patch_all',
     'save_dds',
     'export_selected',

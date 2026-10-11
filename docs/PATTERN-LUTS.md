@@ -1,6 +1,8 @@
 # Pattern LUTs
 
-Open **LUT Editor > Pattern LUT Editor**, then **Load Current Patterns**. Armor and Helmet stay gray until current or imported pattern data is available. Choose either gear and a table. The popup refreshes loaded values when equipment changes; use the gold Load button to retry a missing snapshot. The optional automatic-population setting also enables loading on first open.
+Open **LUT Editor > Pattern LUT Editor** to replace the material table with the full Pattern workspace, then use **Load Current Patterns** if values are not ready. Armor and Helmet stay gray until current or imported pattern data is available. Choose either gear and a table. The workspace refreshes loaded values when equipment changes; use the gold Load button to retry a missing snapshot. The optional automatic-population setting also enables loading on first open.
+
+Below the ordinary material table, **Quick Editor: Pattern LUT** provides three swatches. An explicit **Load Current Gear** also loads their current Pattern values without opening the workspace or resetting its edited values and history. Click a quick swatch to edit it; the full editor retains the advanced gates for unknown channels. Selecting Armor or Helmet closes the full Pattern workspace without restoring its edited bindings. Quick editing is disabled while a Cape material LUT is selected.
 
 Pattern LUTs contain **3 columns and 1 row**, bound through a separate pattern texture slot. They do not replace the 23-column material table. A garment can bind a pattern table without visibly using it; **Flash Pattern** identifies where the selected accent appears. **Stop Flash** restores its previous binding.
 
@@ -16,7 +18,7 @@ Click a swatch to select its controls. Double-click to open the color picker. Co
 
 To import a pattern, choose **Import** and select a 3x1 DDS. Preview its three swatches, choose a loaded destination, then **Apply Imported DDS to Selected Pattern LUT**. Importing a file alone does not change the model. An unavailable destination must finish loading before an import can be applied.
 
-For paired material and Pattern DDS imports, **Import / Apply > Apply Matching LUTs** includes Patterns whose exact resource IDs match the worn gear. Material and Pattern targets are checked before applying either. Files without matching resource IDs still use the explicit destination action in the Pattern window.
+For paired material and Pattern DDS imports, **Import / Apply > Apply Matching LUTs** includes Patterns whose exact resource IDs match the worn gear. Material and Pattern targets are checked before applying either. Files without matching resource IDs still use the explicit destination action in the Pattern workspace.
 
 Name the export, then choose **Export DDS** for the selected table or **Export Patch ZIP** for its game texture replacement. **Export Entire Palette** in the main editor also includes edited pattern tables. Exports append a timestamp in `files/exports`; **Open Export Location** opens that folder. All twelve floats, including unknown values, remain intact.
 

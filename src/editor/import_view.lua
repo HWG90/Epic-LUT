@@ -138,11 +138,11 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         local load_width = available - scratch_width - 8
         local header_bottom = top - header_height - 19 - row_height
         local scratch_y = header_bottom
-        if load_width < text_width('Load Current Armor & Helmet') + 18 then
+        if load_width < text_width('Load Current Gear') + 18 then
             load_width = available
             scratch_y = header_bottom - row_height - 8
         end
-        button(ui.x + 12, header_bottom, load_width, 'Load Current Armor & Helmet', 'populate_worn', nil, row_height)
+        button(ui.x + 12, header_bottom, load_width, 'Load Current Gear', 'populate_worn', nil, row_height)
         local scratch_x = ui.x + lw - 12 - scratch_width
         ui.button(scratch_x, scratch_y, scratch_width, row_height, 'Quick Scratch', function()
             self.scratch_open = not self.scratch_open

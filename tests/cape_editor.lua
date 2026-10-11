@@ -16,7 +16,9 @@ local kits = { body = 7, armor = 11, helmet = 12, cape = 13 }
 local units, materials, bound, originals, live = {}, {}, {}, {}, {}
 local created, frontend, saved_outfit, bulk_entries, mirror_entries, shared_entries = 0
 local include_capes, gear_ready, proof_ready, basic_select, basic_camo_row = true, true, true
+local include_patterns = true
 local basic_info, action_history
+local outfit_save_calls, fail_outfit_save = 0, false
 local after_write
 local stock = { width = 23, height = 8, data = ffi.new('float[736]'), resource = '1111111111111111' }
 stock.data[0] = 0.125
@@ -181,6 +183,9 @@ local m = {
                 include_capes_in_armor_exports = function()
                     return include_capes
                 end,
+                include_patterns_in_exports = function()
+                    return include_patterns
+                end,
             }
         end,
     },
@@ -243,6 +248,10 @@ local m = {
                     return saved_outfit
                 end,
                 save = function(_, entries)
+                    outfit_save_calls = outfit_save_calls + 1
+                    if fail_outfit_save then
+                        return false, 'Simulated Armory manifest lock'
+                    end
                     saved_outfit = { name = 'Cape fixture', entries = entries, armor = {}, helmet = {}, cape = {} }
                     for _, entry in ipairs(entries) do
                         saved_outfit[entry.kind][#saved_outfit[entry.kind] + 1] = entry.document
@@ -319,6 +328,10 @@ local ctx = { log = function() end, on_cleanup = function() end }
 runtime.on_enable(ctx)
 runtime.on_update(ctx, 0)
 local h = api.mods.epic_direct_lut.handle
+assert(
+    h.get('outfit_target_armor') and h.get('outfit_target_helmet') and h.get('outfit_target_cape'),
+    'Armory apply targets did not default to all three gear families'
+)
 local function activate(id)
     local ok, value = h.activate(id)
     assert(ok, id .. ': ' .. tostring(value))
@@ -387,6 +400,8 @@ assert(exported_cape, 'Outgoing include flag discarded Cape')
 local function save(scope)
     activate('save_setup')
     assert(frontend.menu.outfit_dialog)
+    local defaults = frontend.menu.outfit_dialog.save_kind
+    assert(defaults.armor and defaults.helmet and defaults.cape, 'Save popup did not default to the complete outfit')
     frontend.menu.outfit_dialog.on_save('Cape fixture', scope)
     return saved_outfit
 end
@@ -403,6 +418,59 @@ assert(
 )
 local both = save('both')
 assert(#both.armor > 0 and #both.cape > 0 and #both.helmet > 0, 'Both save omitted a gear kind')
+do
+    local native_before = { bound[armor][1], bound[cape][1], bound[helmet][1], bound[cape][3] }
+    local texture_count, history_count = created, #action_history.undo
+    for flags = 1, 7 do
+        local scope = { armor = flags % 2 == 1, helmet = math.floor(flags / 2) % 2 == 1, cape = flags >= 4 }
+        local subset = save(scope)
+        for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            assert(#subset[kind] == (scope[kind] and #both[kind] or 0), 'Save mask included an unchecked gear family')
+            for index, doc in ipairs(subset[kind]) do
+                local original = both[kind][index]
+                assert(
+                    ffi.string(doc.data, doc.width * doc.height * 16)
+                        == ffi.string(original.data, original.width * original.height * 16),
+                    'Save mask altered a selected material LUT'
+                )
+            end
+        end
+        for _, entry in ipairs(subset.entries) do
+            assert(scope[entry.kind] and entry.key:sub(1, 2) ~= 'p:', 'Material-only save invented Pattern data')
+        end
+    end
+    assert(
+        created == texture_count
+            and #action_history.undo == history_count
+            and bound[armor][1] == native_before[1]
+            and bound[cape][1] == native_before[2]
+            and bound[helmet][1] == native_before[3]
+            and bound[cape][3] == native_before[4],
+        'Saving independent gear subsets changed native bindings, textures or history'
+    )
+    for _, scope in ipairs({ {}, { armor = false, helmet = false, cape = false }, { armor = 1 }, { torso = true } }) do
+        local previous, save_count = saved_outfit, outfit_save_calls
+        activate('save_setup')
+        assert(not pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', scope))
+        assert(saved_outfit == previous and outfit_save_calls == save_count and created == texture_count)
+    end
+    local previous, saved_pixels = saved_outfit, both.cape[1].saved_pixels
+    activate('save_setup')
+    local dialog = frontend.menu.outfit_dialog
+    fail_outfit_save = true
+    local accepted, reason = pcall(dialog.on_save, 'Cape fixture', { cape = true })
+    fail_outfit_save = false
+    assert(
+        not accepted
+            and reason:find('Simulated Armory manifest lock', 1, true)
+            and saved_outfit == previous
+            and both.cape[1].saved_pixels == saved_pixels
+            and frontend.menu.outfit_dialog == dialog
+            and created == texture_count
+            and #action_history.undo == history_count,
+        'Failed subset save committed a new preset, closed its dialog or changed native state'
+    )
+end
 activate('restore')
 activate('outfit_apply_cape')
 assert(
@@ -436,6 +504,23 @@ assert(
     not saved and why:find('Armor/Cape LUTs', 1, true) and saved_outfit == before,
     'Loading Armor silently saved a partial Both preset'
 )
+do
+    local saved_before, save_count, texture_count = saved_outfit, outfit_save_calls, created
+    for _, scope in ipairs({ { armor = true }, { cape = true }, { helmet = true, cape = true } }) do
+        activate('save_setup')
+        local accepted, reason = pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', scope)
+        assert(
+            not accepted
+                and reason:find('material LUTs are unavailable', 1, true)
+                and saved_outfit == saved_before
+                and outfit_save_calls == save_count
+                and created == texture_count,
+            'Missing checked material family silently saved a partial preset'
+        )
+    end
+    local helmet_only = save({ helmet = true })
+    assert(#helmet_only.helmet > 0 and #helmet_only.armor == 0 and #helmet_only.cape == 0)
+end
 gear_ready = true
 -- Alias writes retain raw texture IDs and the modal refocus seed.
 activate('populate_worn')
@@ -777,6 +862,19 @@ do
     end
     m.engine.PATTERN_SLOT = 2
     m.pattern_luts = dofile('src/editor/pattern_luts.lua')
+    local make_pattern, primed, pattern_model, prime_error = m.pattern_luts.new, {}, nil, false
+    m.pattern_luts.new = function(...)
+        pattern_model = make_pattern(...)
+        local prime = pattern_model.prime
+        pattern_model.prime = function(kind)
+            primed[#primed + 1] = kind
+            if prime_error then
+                error('Simulated optional Pattern prime failure', 0)
+            end
+            return prime(kind)
+        end
+        return pattern_model
+    end
     m.engine.create_texture = function(_, width, height, data)
         assert(width == 23 or width == 3 and height == 1, 'Wrong Cape DDS entered texture upload')
         created = created + 1
@@ -802,7 +900,104 @@ do
     runtime.on_enable(ctx)
     runtime.on_update(ctx, 0)
     h = api.mods.epic_direct_lut.handle
+    assert(#primed == 0, 'Startup populated Pattern values without an explicit Load Current Gear request')
     activate('populate_worn')
+    assert(#primed == 1 and primed[1] == 'armor' and not pattern_model.is_open())
+    do
+        local time, now = os.time, os.time() + 10
+        os.time = function()
+            return now
+        end
+        for _ = 1, 3 do
+            runtime.on_update(ctx, 0)
+            basic_info()
+        end
+        assert(#primed == 1, 'Idle/render repeated a completed manual Pattern prime')
+        assert(h.set('auto_populate_worn', true))
+        runtime.on_update(ctx, 0)
+        runtime.on_update(ctx, 1.1)
+        assert(#primed == 1, 'Automatic populate/toggle primed the Pattern workspace')
+        assert(h.set('auto_populate_worn', false))
+        local helmet_source = originals[5002]
+        originals[5002] = nil
+        activate('populate_worn')
+        assert(#primed == 1)
+        now = now + 2
+        runtime.on_update(ctx, 0)
+        assert(#primed == 1, 'Pending manual material read primed Pattern too early')
+        originals[5002] = helmet_source
+        now = now + 2
+        runtime.on_update(ctx, 0)
+        assert(#primed == 2 and primed[2] == 'armor', 'Async manual material completion did not prime Pattern once')
+        now = now + 2
+        runtime.on_update(ctx, 0)
+        assert(#primed == 2)
+        originals[5002] = nil
+        activate('populate_worn')
+        now = now + 131
+        runtime.on_update(ctx, 0)
+        originals[5002] = helmet_source
+        assert(h.set('auto_populate_worn', true))
+        runtime.on_update(ctx, 0)
+        assert(#primed == 2, 'Expired manual request primed a later automatic populate')
+        assert(h.set('auto_populate_worn', false))
+        prime_error = true
+        activate('populate_worn')
+        prime_error = false
+        assert(#primed == 3 and basic_info().raw.basic.armor.document and not pattern_model.is_open())
+        os.time = time
+    end
+    do
+        local texture_count, history_count = created, #action_history.undo
+        local native_before = {
+            armor = { bound[armor][1], bound[armor][2] },
+            helmet = { bound[helmet][1], bound[helmet][2] },
+            cape = { bound[cape][1], bound[cape][2], bound[cape][3] },
+        }
+        for flags = 1, 7 do
+            local scope = { armor = flags % 2 == 1, helmet = math.floor(flags / 2) % 2 == 1, cape = flags >= 4 }
+            local subset = save(scope)
+            local counts = { armor = { 0, 0 }, helmet = { 0, 0 }, cape = { 0, 0 } }
+            for _, entry in ipairs(subset.entries) do
+                assert(scope[entry.kind], 'Subset save leaked another gear family Pattern')
+                local pattern = entry.key:sub(1, 2) == 'p:'
+                assert(entry.document.width == (pattern and 3 or 23))
+                counts[entry.kind][pattern and 2 or 1] = counts[entry.kind][pattern and 2 or 1] + 1
+                assert(
+                    ffi.string(entry.document.data, entry.document.width * entry.document.height * 16)
+                        == ffi.string(entry.original.data, entry.original.width * entry.original.height * 16),
+                    'Subset save altered original material/Pattern pixels'
+                )
+            end
+            for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                local count = scope[kind] and 1 or 0
+                assert(counts[kind][1] == count and counts[kind][2] == count)
+            end
+        end
+        local original_pattern = originals[5005]
+        originals[5005] = nil
+        local helmet_only = save({ helmet = true })
+        originals[5005] = original_pattern
+        assert(
+            #helmet_only.entries == 1
+                and helmet_only.entries[1].kind == 'helmet'
+                and helmet_only.entries[1].document.width == 23,
+            'Unavailable optional Pattern prevented saving its checked material LUT'
+        )
+        assert(
+            created == texture_count
+                and #action_history.undo == history_count
+                and bound[armor][1] == native_before.armor[1]
+                and bound[armor][2] == native_before.armor[2]
+                and bound[helmet][1] == native_before.helmet[1]
+                and bound[helmet][2] == native_before.helmet[2]
+                and bound[cape][1] == native_before.cape[1]
+                and bound[cape][2] == native_before.cape[2]
+                and bound[cape][3] == native_before.cape[3],
+            'Subset material/Pattern saves changed native binding ownership or history'
+        )
+    end
+    assert(h.set('outfit_preset', 1))
     local material = { width = 23, height = 8, data = ffi.new('float[736]') }
     local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
     material.data[0], pattern.data[0], pattern.data[3] = 0.6875, 0.9375, 1.875
@@ -946,6 +1141,368 @@ do
         'Cape Pattern application adopted a foreign binding'
     )
     bound[cape][2] = 5004
+    do
+        local documents, destinations = {}, { armor = '0:2:0:0', helmet = '0:0:0:0', cape = '0:1:0:0' }
+        local physical = { armor = armor, helmet = helmet, cape = cape }
+        local pattern_objects = { armor = 5003, helmet = 5005, cape = 5004 }
+        local entries = {}
+        for index, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            local material = m.basic_state.clone(stock)
+            local pattern = m.basic_state.clone(originals[pattern_objects[kind]])
+            material.data[0], material.data[3], pattern.data[0], pattern.data[3] = index / 8, 1.875, index / 5, -0.75
+            documents[kind] = { material, pattern }
+            entries[#entries + 1] = { kind = kind, key = destinations[kind], document = material }
+            entries[#entries + 1] = { kind = kind, key = 'p:' .. destinations[kind], document = pattern }
+        end
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = {
+            name = 'Cape fixture',
+            armor = documents.armor,
+            helmet = documents.helmet,
+            cape = documents.cape,
+            entries = entries,
+        }
+        assert(h.set('outfit_preset', 2))
+        local function select_targets(flags)
+            local scope = { armor = flags % 2 == 1, helmet = math.floor(flags / 2) % 2 == 1, cape = flags >= 4 }
+            local texture_count, history_count = created, #action_history.undo
+            for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                assert(h.set('outfit_target_' .. kind, scope[kind]))
+            end
+            local raw = basic_info().armory_targets
+            assert(raw.armor == scope.armor and raw.helmet == scope.helmet and raw.cape == scope.cape)
+            assert(
+                created == texture_count and #action_history.undo == history_count,
+                'Armory targets edited live gear or history'
+            )
+            return scope
+        end
+        local function native_snapshot()
+            local result = {}
+            for kind, material in pairs(physical) do
+                result[kind] = { bound[material][1], bound[material][2], bound[material][3] }
+            end
+            return result
+        end
+        local function same_native(expected)
+            for kind, material in pairs(physical) do
+                for slot = 1, 3 do
+                    assert(
+                        bound[material][slot] == expected[kind][slot],
+                        'Grouped preset escaped its prior native state'
+                    )
+                end
+            end
+        end
+        local function applied(scope, old)
+            for kind, material in pairs(physical) do
+                if scope[kind] then
+                    for slot = 1, 2 do
+                        local d = documents[kind][slot]
+                        assert(
+                            uploads[bound[material][slot]] == ffi.string(d.data, d.width * d.height * 16),
+                            'Grouped preset missed a checked material/Pattern family or changed its F32 bytes'
+                        )
+                    end
+                else
+                    assert(bound[material][1] == old[kind][1] and bound[material][2] == old[kind][2])
+                end
+                assert(bound[material][3] == old[kind][3], 'Grouped preset changed the Cape tint/emblem slot')
+            end
+        end
+        for flags = 1, 7 do
+            activate('restore')
+            local scope = select_targets(flags)
+            local before, history_count = native_snapshot(), #action_history.undo
+            activate('outfit_apply_selected')
+            applied(scope, before)
+            assert(#action_history.undo == history_count + 1, 'Grouped preset created more than one Undo action')
+            local after = native_snapshot()
+            activate('global_undo')
+            same_native(before)
+            activate('global_redo')
+            same_native(after)
+        end
+        -- A malformed later family is rejected before any earlier family uploads.
+        select_targets(3)
+        local before, texture_count, history_count = native_snapshot(), created, #action_history.undo
+        local bad = m.basic_state.clone(documents.helmet[1])
+        bad.width = 16
+        saved_outfit.helmet, entries[3].document = { bad, documents.helmet[2] }, bad
+        local accepted, reason = h.activate('outfit_apply_selected')
+        saved_outfit.helmet, entries[3].document = documents.helmet, documents.helmet[1]
+        assert(
+            accepted
+                and reason:find('Invalid saved LUT target or dimensions', 1, true)
+                and created == texture_count
+                and #action_history.undo == history_count,
+            'Grouped preflight wrote a partial outfit before rejecting a later saved family'
+        )
+        same_native(before)
+        -- Fail the first Pattern write after all three materials have changed.
+        select_targets(7)
+        before, history_count = native_snapshot(), #action_history.undo
+        local drafts = {}
+        for _, container in ipairs({ 'armor', 'helmet' }) do
+            local d = basic_info().raw.basic[container].document
+            drafts[container] = ffi.string(d.data, d.width * d.height * 16)
+        end
+        local replacement = { name = 'Cape fixture', armor = {}, helmet = {}, cape = {}, entries = {} }
+        for _, entry in ipairs(entries) do
+            local changed = m.basic_state.clone(entry.document)
+            changed.data[0] = changed.data[0] + 0.0375
+            replacement.entries[#replacement.entries + 1] = { kind = entry.kind, key = entry.key, document = changed }
+            replacement[entry.kind][#replacement[entry.kind] + 1] = changed
+        end
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = replacement
+        assert(h.set('outfit_preset', 2))
+        local native_bind, failed, material_writes = m.engine.bind, false, 0
+        m.engine.bind = function(_, target, slot, object)
+            if not failed and object >= 90000 then
+                if slot == 1 then
+                    material_writes = material_writes + 1
+                elseif slot == 2 then
+                    failed = true
+                    error('Simulated grouped Pattern failure', 0)
+                end
+            end
+            return native_bind(_, target, slot, object)
+        end
+        accepted, reason = h.activate('outfit_apply_selected')
+        m.engine.bind = native_bind
+        assert(
+            accepted
+                and failed
+                and material_writes == 3
+                and reason:find('Simulated grouped Pattern failure', 1, true)
+                and not reason:find('rollback failed', 1, true)
+                and #action_history.undo == history_count,
+            'Failed grouped apply did not roll prior custom material/Pattern state back atomically'
+        )
+        same_native(before)
+        for _, container in ipairs({ 'armor', 'helmet' }) do
+            local d = basic_info().raw.basic[container].document
+            assert(
+                ffi.string(d.data, d.width * d.height * 16) == drafts[container],
+                'Failed grouped apply retained a partial Basic draft'
+            )
+        end
+        runtime.on_update(ctx, 0.5)
+        same_native(before)
+        select_targets(0)
+        texture_count = created
+        accepted, reason = h.activate('outfit_apply_selected')
+        assert(
+            accepted
+                and reason:find('Check at least one available gear type', 1, true)
+                and created == texture_count
+                and #action_history.undo == history_count,
+            'Empty preset target scope issued native writes or added history'
+        )
+        same_native(before)
+        -- Default checked targets omit families absent from this saved preset.
+        local helmet_only = { name = 'Cape fixture', armor = {}, helmet = replacement.helmet, cape = {}, entries = {} }
+        for _, entry in ipairs(replacement.entries) do
+            if entry.kind == 'helmet' then
+                helmet_only.entries[#helmet_only.entries + 1] = entry
+            end
+        end
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = helmet_only
+        assert(h.set('outfit_preset', 2))
+        select_targets(7)
+        activate('outfit_apply_selected')
+        assert(
+            #action_history.undo == history_count + 1
+                and bound[armor][1] == before.armor[1]
+                and bound[armor][2] == before.armor[2]
+                and bound[cape][1] == before.cape[1]
+                and bound[cape][2] == before.cape[2],
+            'Default checked targets applied gear families absent from the saved preset'
+        )
+        for slot = 1, 2 do
+            local d = helmet_only.helmet[slot]
+            assert(uploads[bound[helmet][slot]] == ffi.string(d.data, d.width * d.height * 16))
+        end
+        activate('global_undo')
+        same_native(before)
+        -- Basic's per-LUT chooser separates two Armor resources and always
+        -- brings the Pattern at each selected physical destination with it.
+        local other = armor + 20
+        materials[units[1].unit][2] = { mesh = other + 10, material = other, mesh_index = 1, material_index = 1 }
+        bound[other] = { [1] = 5010, [2] = 5011, [3] = 0 }
+        originals[5010] = m.basic_state.clone(stock)
+        originals[5010].resource = '4444444444444444'
+        originals[5011] = m.basic_state.clone(originals[5003])
+        originals[5011].resource = '5555555555555555'
+        local extra_material, extra_pattern = m.basic_state.clone(stock), m.basic_state.clone(originals[5011])
+        extra_material.data[0], extra_material.data[3], extra_pattern.data[0] = 0.8125, 2.25, 0.9375
+        local chooser_preset = { name = 'Cape fixture', armor = {}, helmet = {}, cape = {}, entries = {} }
+        for _, entry in ipairs(entries) do
+            chooser_preset.entries[#chooser_preset.entries + 1] = entry
+            chooser_preset[entry.kind][#chooser_preset[entry.kind] + 1] = entry.document
+        end
+        chooser_preset.entries[#chooser_preset.entries + 1] =
+            { kind = 'armor', key = '0:2:1:1', document = extra_material }
+        chooser_preset.entries[#chooser_preset.entries + 1] =
+            { kind = 'armor', key = 'p:0:2:1:1', document = extra_pattern }
+        chooser_preset.armor[#chooser_preset.armor + 1] = extra_material
+        chooser_preset.armor[#chooser_preset.armor + 1] = extra_pattern
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = chooser_preset
+        assert(h.set('outfit_preset', 2))
+        activate('restore')
+        local function chooser()
+            local texture_count, history_count = created, #action_history.undo
+            activate('outfit_choose_luts')
+            local dialog = assert(frontend.menu.lut_apply_dialog)
+            assert(dialog.title == 'Apply Preset' and #dialog.columns == 2)
+            assert(dialog.columns[1].title == 'Armor / Cape' and dialog.columns[2].title == 'Helmet')
+            assert(#dialog.columns[1].items == 3 and #dialog.columns[2].items == 1)
+            assert(
+                created == texture_count and #action_history.undo == history_count,
+                'Opening LUT chooser changed native gear/history'
+            )
+            local map, all = {}, {}
+            for _, column in ipairs(dialog.columns) do
+                for _, item in ipairs(column.items) do
+                    assert(not map[item.label] and type(item.id) == 'string')
+                    map[item.label] = item
+                    all[item.id] = item.enabled == true
+                    assert(item.checked == item.enabled, 'Chooser did not initially check all enabled LUTs')
+                end
+            end
+            return dialog, map, all
+        end
+        local dialog, items = chooser()
+        local extra = assert(items['Armor LUT 2'])
+        assert(items['Armor LUT 1'] and items['Cape LUT 1'] and items['Helmet LUT 1'])
+        for _, item in pairs(items) do
+            assert(item.enabled and item.detail == 'Pattern included')
+        end
+        before, history_count = native_snapshot(), #action_history.undo
+        local extra_before = { bound[other][1], bound[other][2] }
+        include_patterns = false
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(
+            uploads[bound[other][1]] == ffi.string(extra_material.data, 23 * 8 * 16)
+                and uploads[bound[other][2]] == ffi.string(extra_pattern.data, 48)
+                and #action_history.undo == history_count + 1
+                and frontend.menu.lut_apply_dialog == nil,
+            'Selected Armor LUT failed to include its mandatory Pattern in one Undo action'
+        )
+        same_native(before)
+        local extra_after = { bound[other][1], bound[other][2] }
+        activate('global_undo')
+        assert(bound[other][1] == extra_before[1] and bound[other][2] == extra_before[2])
+        same_native(before)
+        activate('global_redo')
+        assert(bound[other][1] == extra_after[1] and bound[other][2] == extra_after[2])
+        include_patterns = true
+        activate('restore')
+        local all
+        dialog, items, all = chooser()
+        history_count = #action_history.undo
+        local previous_action = action_history.undo[history_count]
+        before, extra_before = native_snapshot(), { bound[other][1], bound[other][2] }
+        assert(dialog.on_apply(all))
+        applied({ armor = true, helmet = true, cape = true }, native_snapshot())
+        assert(uploads[bound[other][1]] == ffi.string(extra_material.data, 23 * 8 * 16))
+        assert(uploads[bound[other][2]] == ffi.string(extra_pattern.data, 48))
+        assert(
+            #action_history.undo <= history_count + 1 and action_history.undo[#action_history.undo] ~= previous_action,
+            'Select All split its material/Pattern application history'
+        )
+        activate('global_undo')
+        same_native(before)
+        assert(bound[other][1] == extra_before[1] and bound[other][2] == extra_before[2])
+        activate('restore')
+        local function refused(dialog, selected, text)
+            local texture_count, history_count = created, #action_history.undo
+            local native_before, extra_before = native_snapshot(), { bound[other][1], bound[other][2] }
+            local accepted, reason = pcall(dialog.on_apply, selected)
+            assert(not accepted and reason:find(text, 1, true), 'Chooser did not explain its rejected target')
+            assert(created == texture_count and #action_history.undo == history_count)
+            assert(
+                frontend.menu.lut_apply_dialog == dialog,
+                'Rejected chooser closed instead of retaining its selection'
+            )
+            same_native(native_before)
+            assert(bound[other][1] == extra_before[1] and bound[other][2] == extra_before[2])
+        end
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        refused(dialog, {}, 'Select at least one current LUT')
+        refused(dialog, { unknown = true }, 'Preset LUT choices changed')
+        local old = chooser_preset.entries[1].document.data[0]
+        chooser_preset.entries[1].document.data[0] = old + 0.125
+        refused(dialog, { [extra.id] = true }, 'Saved preset changed')
+        chooser_preset.entries[1].document.data[0] = old
+        kits.armor = 99
+        refused(dialog, { [extra.id] = true }, 'Worn gear changed')
+        kits.armor = 11
+        old = bound[other][1]
+        bound[other][1] = 888777
+        refused(dialog, { [extra.id] = true }, 'Current LUT target changed')
+        bound[other][1] = old
+        local pattern_original = originals[5011]
+        originals[5011] = nil
+        refused(dialog, { [extra.id] = true }, 'Current LUT resource changed')
+        local disabled
+        dialog, items = chooser()
+        disabled = items['Armor LUT 2']
+        assert(not disabled.enabled and not disabled.checked)
+        refused(dialog, { [disabled.id] = true }, 'This current LUT cannot use')
+        originals[5011] = pattern_original
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        local extra_member = armor + 30
+        materials[units[1].unit][3] =
+            { mesh = extra_member + 10, material = extra_member, mesh_index = 2, material_index = 1 }
+        bound[extra_member] = { [1] = 5010, [2] = 5011, [3] = 0 }
+        refused(dialog, { [extra.id] = true }, 'Current LUT members changed')
+        materials[units[1].unit][3] = nil
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        local old_bind, failed = m.engine.bind, false
+        m.engine.bind = function(_, material, slot, object)
+            if not failed and material == other and slot == 2 and object >= 90000 then
+                failed = true
+                error('Simulated chooser Pattern failure', 0)
+            end
+            return old_bind(_, material, slot, object)
+        end
+        before, history_count = native_snapshot(), #action_history.undo
+        extra_before = { bound[other][1], bound[other][2] }
+        local accepted, reason = pcall(dialog.on_apply, { [extra.id] = true })
+        m.engine.bind = old_bind
+        assert(
+            not accepted
+                and failed
+                and reason:find('Simulated chooser Pattern failure', 1, true)
+                and not reason:find('rollback failed', 1, true)
+                and #action_history.undo == history_count,
+            'Chooser Pattern failure left a partial material application/history'
+        )
+        same_native(before)
+        assert(bound[other][1] == extra_before[1] and bound[other][2] == extra_before[2])
+        assert(frontend.menu.lut_apply_dialog == dialog)
+        -- Legacy material-only presets have no companion to invent or opt out.
+        local saved_pattern_entry = table.remove(chooser_preset.entries)
+        local saved_pattern_document = table.remove(chooser_preset.armor)
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        assert(
+            extra.enabled and extra.checked and extra.detail == nil,
+            'Material-only chooser displayed a fake Pattern detail'
+        )
+        local previous_pattern = bound[other][2]
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(bound[other][2] == previous_pattern, 'Material-only preset changed an unsaved Pattern')
+        chooser_preset.entries[#chooser_preset.entries + 1] = saved_pattern_entry
+        chooser_preset.armor[#chooser_preset.armor + 1] = saved_pattern_document
+    end
     runtime.on_disable(ctx)
 end
 -- Basic camo edits only the explicitly checked regions of one resource/kind.

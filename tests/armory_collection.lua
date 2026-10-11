@@ -70,11 +70,62 @@ assert(not presets.Delta and not collection.selected)
 presets.Cape = { name = 'Cape', armor = {}, helmet = {}, cape = { document }, entries = {} }
 collection.refresh()
 assert(
-    selector.choice_details[4] == 'Armor Only' and #selector.choice_previews[4].armor == 1,
-    'Cape-only Armory preset lost Armor grouping or preview'
+    selector.choice_details[4] == 'Cape Only' and #selector.choice_previews[4].armor == 1,
+    'Cape-only Armory preset lost its Cape label or grouped preview'
 )
 presets.Cape = nil
 collection.refresh()
+do
+    local labels = {
+        { armor = { document }, helmet = {}, cape = {}, label = 'Armor Only' },
+        { armor = {}, helmet = { document }, cape = {}, label = 'Helmet Only' },
+        { armor = {}, helmet = {}, cape = { document }, label = 'Cape Only' },
+        { armor = { document }, helmet = { document }, cape = {}, label = 'Armor + Helmet' },
+        { armor = { document }, helmet = {}, cape = { document }, label = 'Armor + Cape' },
+        { armor = {}, helmet = { document }, cape = { document }, label = 'Helmet + Cape' },
+        { armor = { document }, helmet = { document }, cape = { document }, label = 'Armor + Helmet + Cape' },
+        { armor = {}, helmet = {}, cape = {}, label = 'No LUTs' },
+    }
+    for _, preset in ipairs(labels) do
+        preset.name = 'Combo'
+        presets.Combo = preset
+        collection.refresh()
+        local choice
+        for index, name in ipairs(selector.choices) do
+            if name == preset.name then
+                choice = index
+            end
+        end
+        assert(
+            selector.choice_details[assert(choice)] == preset.label,
+            'Armory label misrepresented a saved gear combination'
+        )
+        local previews = selector.choice_previews[choice]
+        assert(#previews.armor == ((#preset.armor > 0 or #preset.cape > 0) and 1 or 0))
+        assert(#previews.helmet == (#preset.helmet > 0 and 1 or 0))
+    end
+    presets.Combo = nil
+    collection.refresh()
+    collection.select_name('Alpha')
+    local original_save = storage.save
+    local old_preset, old_choices, old_names, old_index =
+        collection.selected, selector.choices, collection.names, selected
+    storage.save = function()
+        return false, 'Manifest is locked'
+    end
+    local accepted, reason = pcall(collection.save, 'Failed', {})
+    storage.save = original_save
+    assert(
+        not accepted
+            and reason:find('Manifest is locked', 1, true)
+            and collection.selected == old_preset
+            and selector.choices == old_choices
+            and collection.names == old_names
+            and selected == old_index
+            and not presets.Failed,
+        'Failed storage save committed a new Armory preview or selection'
+    )
+end
 print('PASS Armory collection: type previews, empty selection, save/select, rename and confirmed deletion')
 
 collection.filter('br', 1)

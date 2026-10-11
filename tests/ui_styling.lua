@@ -156,7 +156,7 @@ local function tap(rect)
 end
 
 local commands = compose()
-local load = button(commands, 'Load Current Armor & Helmet')
+local load = button(commands, 'Load Current Gear')
 local scratch = button(commands, 'Quick Scratch')
 assert(load.x + load.w <= scratch.x or scratch.y + scratch.h < load.y, 'Import toolbar collision returned')
 local before = writes

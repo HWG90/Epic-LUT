@@ -194,6 +194,7 @@ for _, font in ipairs({ 12, 20 }) do
         { 1420, 960, 1920, 1080 },
         { 1100, 720, 1280, 720 },
         { 850, 720, 1280, 720 },
+        { 650, 720, 1280, 720 },
     }) do
         for _, count in ipairs({ 0, 1, 2 }) do
             state.loaded = count > 0 and saved_document or nil
@@ -208,7 +209,7 @@ for _, font in ipairs({ 12, 20 }) do
                 assert(not (command.text and command.text:find('Editor control missing:', 1, true)), command.text)
                 assert(not (command.text and command.text:find('attempt to ', 1, true)), command.text)
             end
-            local load = button_rectangle(commands, 'Load Current Armor & Helmet')
+            local load = button_rectangle(commands, 'Load Current Gear')
             local scratch = button_rectangle(commands, 'Quick Scratch')
             assert(not overlap(load, scratch), 'Quick Scratch overlaps Load Current in import header')
             compact = compact or math.abs(load.y - scratch.y) < 0.1

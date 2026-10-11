@@ -645,8 +645,12 @@ assert(
 editor.scratch_tool.open()
 commands = compose()
 assert(
-    editor.tools.is_open() and pattern.open and editor.scratch_tool.is_open() and #menu.floating_windows == 3,
-    'Pattern, Toolbox and Scratch could not coexist'
+    editor.tools.is_open()
+        and pattern.open
+        and editor.pattern_workspace_bounds
+        and editor.scratch_tool.is_open()
+        and #menu.floating_windows == 2,
+    'Embedded Pattern workspace, Toolbox and Scratch could not coexist'
 )
 print(
     'PASS editor layout: expandable Toolbox shortcuts, independent Scratch/alpha, popup ownership, lazy palette cache, roomy grid and preserved exports'

@@ -594,6 +594,13 @@ local function initialize_editor_state()
                     'Cape kit changed; load current gear again'
                 )
             end
+            if operations.lut_apply_proofs then
+                local proof, kind = appearance_proof(), m.gear_catalog.kind(b)
+                assert(
+                    proof and proof[kind] == operations.lut_apply_proofs[kind],
+                    'Worn gear changed during preset application'
+                )
+            end
             m.engine.bind(native, b.material, m.engine.LUT_SLOT, object)
             native.commit(b.mesh)
             if b.cape and operations.armory_cape_proof then
@@ -828,6 +835,7 @@ local function load_debug_lut()
         assert(not pending and not index_job, 'Wait for the current import to finish')
         load_dds(DEBUG_SOURCE)
         resume_done, resume_job, populate_request = true, nil, nil
+        edit.populate_manual_request = nil
         basic_selected, m.quick_source, edit.quick_selection = nil, nil, nil
         basic_imported = edit.imported
         palettes = { DEBUG_SOURCE }
@@ -940,8 +948,16 @@ local function populate_worn()
         palette_editor.sync()
     end
     import_state()
+    local manual_request = populate_request ~= nil and edit.populate_manual_request == true
     populate_request = nil
+    edit.populate_manual_request = nil
     message('Loaded every current Armor, Cape and Helmet LUT slot. Select a table to edit.')
+    if manual_request and pattern_editor and pattern_editor.prime then
+        local ok, ready, why = pcall(pattern_editor.prime, container)
+        if (not ok or ready == false) and ctx.log then
+            ctx.log('Material LUTs loaded; Pattern quick editor not ready: ' .. tostring(ok and why or ready))
+        end
+    end
     return true
 end
 local function mark_current_load()
@@ -1313,6 +1329,11 @@ import_state = function()
         helmet = previews.helmet,
         cape_available = #m.gear_catalog.targets(groups, 5, nil, 'cape') > 0,
         armory_cape_available = operations.armory_cape_available(armory_collection and armory_collection.selected),
+        armory_targets = {
+            armor = handle.get('outfit_target_armor'),
+            helmet = handle.get('outfit_target_helmet'),
+            cape = handle.get('outfit_target_cape'),
+        },
         loaded = edit.imported,
         import_description = m.import_description,
         import_detail = picker.detail,
@@ -2292,6 +2313,7 @@ local function restore_action(snapshot, expected)
     index_job = nil
     editor_pending = nil
     populate_request = nil
+    edit.populate_manual_request = nil
     basic_state.clear(true)
     for key, d in pairs(snapshot.basic) do
         basic_documents[key] = d
@@ -2338,38 +2360,59 @@ local function refresh_outfits()
 end
 local function keep_outfit(name, save_kind)
     assert(outfits, 'Outfit storage unavailable')
+    local explicit = type(save_kind) == 'table'
+    local scope = {}
+    if explicit then
+        for kind, checked in pairs(save_kind) do
+            assert(kind == 'armor' or kind == 'helmet' or kind == 'cape', 'Unknown Armory save target')
+            assert(type(checked) == 'boolean', 'Armory save targets must be checked or unchecked')
+        end
+        for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            scope[kind] = save_kind[kind] == true
+        end
+    else
+        assert(
+            save_kind == nil or save_kind == 'armor' or save_kind == 'helmet' or save_kind == 'both',
+            'Choose Armor, Helmet or Cape to save'
+        )
+        -- Historical programmatic Armor saves include capes. The explicit UI
+        -- mask selects all three families independently.
+        scope.armor = save_kind ~= 'helmet'
+        scope.helmet = save_kind ~= 'armor'
+        scope.cape = save_kind ~= 'helmet'
+    end
+    assert(scope.armor or scope.helmet or scope.cape, 'Check at least one gear type to save')
+    local labels = {}
+    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+        if scope[kind] then
+            labels[#labels + 1] = m.gear_catalog.label(kind)
+        end
+    end
+    local scope_label = table.concat(labels, ' + ')
     assert(stop_identification(), 'Highlight restoration pending')
     if pattern_editor then
         assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
     end
     refresh(true)
-    assert(
-        save_kind == nil or save_kind == 'armor' or save_kind == 'helmet' or save_kind == 'both',
-        'Choose Armor Only, Helmet Only or Both'
-    )
     local entries, seen = {}, {}
     local counts = { armor = 0, helmet = 0, cape = 0 }
+    local material_counts = { armor = 0, helmet = 0, cape = 0 }
     local function collect(targets, pattern)
         for _, group in ipairs(targets) do
             for _, b in ipairs(group.bindings) do
                 local kind = m.gear_catalog.kind(b)
                 local saved_key = (pattern and 'p:' or '') .. b.save_key
                 local key = kind .. ':' .. saved_key
-                if
-                    not seen[key]
-                    and (
-                        not save_kind
-                        or save_kind == 'both'
-                        or save_kind == kind
-                        or (save_kind == 'armor' and kind == 'cape')
-                    )
-                then
+                if not seen[key] and scope[kind] then
                     local original = original_luts and original_luts.get(b.original)
                     local source = applied_document(b) or original
                     if not pattern or (source and source.width == 3 and source.height == 1) then
                         assert(source, 'Current ' .. kind .. ' LUT unavailable; load current gear before saving')
                         entries[#entries + 1] = { kind = kind, key = saved_key, document = source, original = original }
                         counts[kind] = counts[kind] + 1
+                        if not pattern then
+                            material_counts[kind] = material_counts[kind] + 1
+                        end
                         seen[key] = true
                     end
                 end
@@ -2381,20 +2424,29 @@ local function keep_outfit(name, save_kind)
         pattern_editor.scan()
         collect(pattern_editor.all_groups or {}, true)
     end
-    local wants_armor = save_kind == nil or save_kind == 'both' or save_kind == 'armor'
-    local wants_helmet = save_kind == nil or save_kind == 'both' or save_kind == 'helmet'
-    assert(
-        not wants_armor or counts.armor + counts.cape > 0,
-        'Current Armor/Cape LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
-    )
-    assert(
-        not wants_helmet or counts.helmet > 0,
-        'Current Helmet LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
-    )
+    if explicit then
+        for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            assert(
+                not scope[kind] or material_counts[kind] > 0,
+                'Current '
+                    .. m.gear_catalog.label(kind)
+                    .. ' material LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
+            )
+        end
+    else
+        assert(
+            not scope.armor or counts.armor + counts.cape > 0,
+            'Current Armor/Cape LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
+        )
+        assert(
+            not scope.helmet or counts.helmet > 0,
+            'Current Helmet LUTs are unavailable or still loading. Load Current Gear, then try saving again.'
+        )
+    end
     if ctx.log then
         ctx.log(
             'ARMORY_SAVE scope='
-                .. tostring(save_kind or 'both')
+                .. scope_label
                 .. ' armor='
                 .. counts.armor
                 .. ' cape='
@@ -2405,10 +2457,10 @@ local function keep_outfit(name, save_kind)
                 .. #entries
         )
     end
+    armory_collection.save(name, entries)
     if api.mods[handle.id].controls.armory_search then
         assert(handle.set('armory_search', ''))
     end
-    armory_collection.save(name, entries)
     for _, entry in ipairs(entries) do
         local d = entry.document
         d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
@@ -2417,13 +2469,7 @@ local function keep_outfit(name, save_kind)
         frontend.menu.outfit_dialog = nil
         frontend.menu.text_edit = nil
     end
-    return message(
-        'Saved '
-            .. name
-            .. ' with '
-            .. (save_kind == 'armor' and 'Armor only' or save_kind == 'helmet' and 'Helmet only' or 'Armor and Helmet')
-            .. ' LUTs in The Armory.'
-    )
+    return message('Saved ' .. name .. ' with ' .. scope_label .. ' LUTs in The Armory.')
 end
 function operations.outfit_documents(preset)
     if m.outfit_targets then
@@ -2494,13 +2540,29 @@ function operations.sync_armory_cape()
             not operations.armory_cape_available(armory_collection and armory_collection.selected)
     end
 end
-local function apply_outfit(kind)
+local function apply_outfit(kind, selection)
     local selected_outfit = assert(armory_collection and armory_collection.selected, 'Choose an outfit preset first')
+    local combined = type(kind) == 'table'
+    local scope, names = {}, {}
+    for _, family in ipairs({ 'armor', 'helmet', 'cape' }) do
+        local wanted = combined and kind[family] == true or not combined and kind == family
+        if wanted then
+            local available = not combined
+                or family == 'cape' and operations.armory_cape_available(selected_outfit)
+                or family ~= 'cape' and #(selected_outfit[family] or {}) > 0
+            if available then
+                scope[family] = true
+                names[#names + 1] = m.gear_catalog.label(family)
+            end
+        end
+    end
+    assert(next(scope), 'Check at least one available gear type to apply')
+    local scope_label = table.concat(names, ' + ')
     assert(stop_identification(), 'Highlight restoration pending')
     if pattern_editor then
         assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
     end
-    if kind == 'cape' then
+    if scope.cape then
         for _, session in ipairs({ bindings, operations.pattern_session or {} }) do
             for _, b in ipairs(session.owned or {}) do
                 assert(
@@ -2514,18 +2576,29 @@ local function apply_outfit(kind)
     if pattern_editor then
         pattern_editor.scan()
     end
+    if selection then
+        selection.validate(true)
+    end
     local exact = operations.outfit_documents(selected_outfit)
-    local has_saved = false
+    local has_saved = {}
     for _, entry in ipairs(selected_outfit.entries) do
-        if entry.kind == kind or (kind == 'cape' and entry.kind == 'armor') then
-            has_saved = true
+        if scope[entry.kind] then
+            has_saved[entry.kind] = true
+        end
+        if scope.cape and entry.kind == 'armor' then
+            has_saved.cape = true
         end
     end
-    assert(has_saved, 'This preset has no ' .. kind .. ' palette')
+    for family in pairs(scope) do
+        assert(has_saved[family], 'This preset has no ' .. family .. ' palette')
+    end
     local batches, skipped, matches = {}, 0, {}
+    local family_matches = {}
+    local selected_material, selected_pattern = {}, {}
     for _, group in ipairs(groups) do
         for _, b in ipairs(group.bindings) do
-            if b[kind] then
+            local family = m.gear_catalog.kind(b)
+            if scope[family] and (not selection or selection.material[family .. ':' .. material_key(b)]) then
                 assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear again')
                 local d, match = operations.outfit_document(exact, b, false)
                 if d then
@@ -2534,6 +2607,8 @@ local function apply_outfit(kind)
                     batches[d] = batches[d] or {}
                     table.insert(batches[d], b)
                     matches[b] = match or 'exact'
+                    family_matches[family] = true
+                    selected_material[family .. ':' .. material_key(b)] = true
                 else
                     skipped = skipped + 1
                     if ctx.log then
@@ -2541,7 +2616,7 @@ local function apply_outfit(kind)
                             'ARMORY_SKIP preset='
                                 .. selected_outfit.name
                                 .. ' kind='
-                                .. kind
+                                .. family
                                 .. ' unmatched_slot='
                                 .. b.save_key
                         )
@@ -2555,7 +2630,8 @@ local function apply_outfit(kind)
         for _, group in ipairs(pattern_editor.all_groups or {}) do
             for _, b in ipairs(group.bindings) do
                 local d, match
-                if b[kind] then
+                local family = m.gear_catalog.kind(b)
+                if scope[family] and (not selection or selection.pattern[family .. ':' .. material_key(b)]) then
                     d, match = operations.outfit_document(exact, b, true)
                 end
                 if d then
@@ -2565,6 +2641,8 @@ local function apply_outfit(kind)
                     patterns[d] = patterns[d] or {}
                     patterns[d][#patterns[d] + 1] = b
                     matches[b] = match or 'exact'
+                    family_matches[family] = true
+                    selected_pattern[family .. ':' .. material_key(b)] = true
                 end
             end
         end
@@ -2573,6 +2651,22 @@ local function apply_outfit(kind)
         next(batches) or next(patterns),
         'No saved LUT bindings match this gear; select a table and apply it manually to adapt the preset'
     )
+    if selection then
+        for key in pairs(selection.material) do
+            assert(selected_material[key], 'Selected material LUT changed; reopen Apply Preset')
+        end
+        for key in pairs(selection.pattern) do
+            assert(selected_pattern[key], 'Associated Pattern LUT changed; reopen Apply Preset')
+        end
+    end
+    if combined then
+        for family in pairs(scope) do
+            assert(
+                family_matches[family],
+                'No saved ' .. family .. ' LUT bindings match this gear; apply a table manually to adapt the preset'
+            )
+        end
+    end
     local cape_proof
     for _, plans in ipairs({ batches, patterns }) do
         for _, targets in pairs(plans) do
@@ -2587,7 +2681,9 @@ local function apply_outfit(kind)
     end
     local function apply_batch(session, document, targets, pattern)
         local previous = operations.armory_cape_proof
+        local previous_lut_proofs = operations.lut_apply_proofs
         operations.armory_cape_proof = cape_proof
+        operations.lut_apply_proofs = selection and selection.proofs or nil
         local ok, count = pcall(function()
             if cape_proof then
                 local proof = appearance_proof()
@@ -2601,13 +2697,10 @@ local function apply_outfit(kind)
             return apply_bindings(document, targets)
         end)
         operations.armory_cape_proof = previous
+        operations.lut_apply_proofs = previous_lut_proofs
         assert(ok, count)
         return count
     end
-    set_default(kind, nil) -- A multi-LUT preset never becomes a blanket override for unmatched pieces.
-    resume_done = true
-    resume_job = nil
-    local count = 0
     local function log_applied(targets, pattern)
         if not ctx.log then
             return
@@ -2617,7 +2710,7 @@ local function apply_outfit(kind)
                 'ARMORY_APPLY preset='
                     .. selected_outfit.name
                     .. ' kind='
-                    .. kind
+                    .. m.gear_catalog.kind(b)
                     .. ' slot='
                     .. (pattern and 'p:' or '')
                     .. b.save_key
@@ -2629,32 +2722,321 @@ local function apply_outfit(kind)
             )
         end
     end
-    for d, targets in pairs(batches) do
-        count = count + apply_batch(bindings, d, targets, false)
-        log_applied(targets, false)
-        for _, b in ipairs(targets) do
-            basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
+    local before = combined and capture_action()
+    local ok, count = pcall(function()
+        -- Multi-LUT presets never become blanket overrides for unmatched pieces.
+        for family in pairs(scope) do
+            set_default(family, nil)
         end
+        resume_done = true
+        resume_job = nil
+        local applied = 0
+        for d, targets in pairs(batches) do
+            applied = applied + apply_batch(bindings, d, targets, false)
+            log_applied(targets, false)
+            for _, b in ipairs(targets) do
+                basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] =
+                    m.basic_state.clone(d, d.source)
+            end
+        end
+        for d, targets in pairs(patterns) do
+            applied = applied
+                + apply_batch(assert(operations.pattern_session, 'Pattern application unavailable'), d, targets, true)
+            log_applied(targets, true)
+        end
+        assert(applied > 0, 'No worn gear bindings available for this preset')
+        edit.remember_application = true
+        save_setup()
+        return applied
+    end)
+    if not ok then
+        if before then
+            local restored, reason = pcall(restore_action, before, capture_action())
+            assert(restored and reason ~= false, tostring(count) .. '; preset rollback failed: ' .. tostring(reason))
+        end
+        error(count, 0)
     end
-    for d, targets in pairs(patterns) do
-        count = count
-            + apply_batch(assert(operations.pattern_session, 'Pattern application unavailable'), d, targets, true)
-        log_applied(targets, true)
-    end
-    assert(count > 0, 'No worn gear bindings available for this preset')
-    edit.remember_application = true
-    save_setup()
     return message(
         'Applied '
             .. selected_outfit.name
             .. ' '
-            .. kind
+            .. scope_label
             .. ' palettes to '
             .. count
             .. ' matched bindings; '
             .. skipped
             .. ' unmatched left unchanged.'
     )
+end
+function operations.choose_outfit_luts()
+    local preset = assert(armory_collection and armory_collection.selected, 'Choose an outfit preset first')
+    assert(frontend.menu, 'Preset chooser requires the editor menu')
+    assert(stop_identification(), 'Highlight restoration pending')
+    if pattern_editor then
+        assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+    end
+    refresh(true)
+    if pattern_editor then
+        pattern_editor.scan()
+    end
+    local proof = assert(appearance_proof(), 'Current gear identity unavailable; load current gear again')
+    local exact = operations.outfit_documents(preset)
+    local columns = { { title = 'Armor / Cape', items = {} }, { title = 'Helmet', items = {} } }
+    local records, saved, saved_pixels = {}, {}, {}
+    local function bytes(d)
+        return ffi.string(d.data, d.width * d.height * 16)
+    end
+    local function metadata(original)
+        return original
+                and table.concat({
+                    tostring(original.resource),
+                    tostring(original.width),
+                    tostring(original.height),
+                    tostring(original.patch_source),
+                }, '|')
+            or ''
+    end
+    for _, entry in ipairs(preset.entries) do
+        saved_pixels[entry.document] = saved_pixels[entry.document] or bytes(entry.document)
+        saved[#saved + 1] = {
+            entry = entry,
+            kind = entry.kind,
+            key = entry.key,
+            document = entry.document,
+            width = entry.document.width,
+            height = entry.document.height,
+            bytes = saved_pixels[entry.document],
+            original = entry.original,
+            metadata = metadata(entry.original),
+        }
+    end
+    local pattern_bindings = {}
+    for _, group in ipairs(pattern_editor and pattern_editor.all_groups or {}) do
+        for _, b in ipairs(group.bindings) do
+            pattern_bindings[m.gear_catalog.kind(b) .. ':' .. material_key(b)] = b
+        end
+    end
+    local function receipt(b, pattern)
+        local original = original_luts and original_luts.get(b.original)
+        return {
+            binding = b,
+            kind = m.gear_catalog.kind(b),
+            unit = b.unit,
+            mesh = b.mesh,
+            material = b.material,
+            slot = b.slot or (pattern and m.engine.PATTERN_SLOT or m.engine.LUT_SLOT),
+            original = b.original,
+            current = b.current,
+            save_key = b.save_key,
+            resource = original and original.resource,
+            width = original and original.width,
+            height = original and original.height,
+            pattern = pattern,
+        }
+    end
+    local function companion(material, match)
+        local kind = m.gear_catalog.kind(material)
+        local key = kind .. ':' .. material_key(material)
+        local b = pattern_bindings[key]
+        local candidate = b
+            or {
+                unit = material.unit,
+                mesh = material.mesh,
+                material = material.material,
+                save_key = material.save_key,
+                cape = material.cape,
+                helmet = material.helmet,
+                armor = material.armor,
+            }
+        local d
+        if b then
+            d = operations.outfit_document(exact, b, true)
+        elseif exact.resolve then
+            d = exact.resolve(kind, candidate, true, nil)
+        else
+            d = exact[kind .. ':p:' .. material.save_key] or material.cape and exact['armor:p:' .. material.save_key]
+        end
+        local required = d ~= nil
+        if not required and match == 'mesh-family' then
+            local own_prefix, own_index = material.save_key:match('^(%d+:%d+):%d+:(%d+)$')
+            for _, entry in ipairs(preset.entries) do
+                local prefix, index = entry.key:match('^p:(%d+:%d+):%d+:(%d+)$')
+                if own_prefix and entry.kind == kind and prefix == own_prefix and index == own_index then
+                    required = true
+                end
+            end
+        end
+        if not required then
+            return
+        end
+        local original = b and original_luts and original_luts.get(b.original)
+        assert(
+            b
+                and d
+                and d.width == 3
+                and d.height == 1
+                and original
+                and original.width == 3
+                and original.height == 1
+                and b.slot == m.engine.PATTERN_SLOT
+                and present(b)
+                and binding(b) == b.current,
+            'Associated Pattern LUT is unavailable or changed; load current Pattern LUTs again'
+        )
+        return receipt(b, true)
+    end
+    for column, container in ipairs({ 'armor', 'helmet' }) do
+        for _, choice in ipairs(current_choices(container)) do
+            local group = groups[choice.group]
+            local record =
+                { target = import_target(choice.kind, choice.group), material = {}, patterns = {}, members = {} }
+            local allowed, reason = pcall(function()
+                assert(proof[choice.kind], 'Current gear identity unavailable')
+                for _, b in ipairs(group.bindings) do
+                    if m.gear_catalog.kind(b) == choice.kind then
+                        record.members[#record.members + 1] = receipt(b, false)
+                        assert(present(b) and binding(b) == b.current, 'Current LUT binding changed')
+                        local d, match = operations.outfit_document(exact, b, false)
+                        if d then
+                            assert(d.width == 23, 'Saved material LUT must have 23 columns')
+                            record.material[#record.material + 1] = receipt(b, false)
+                            local paired = companion(b, match)
+                            if paired then
+                                record.patterns[#record.patterns + 1] = paired
+                            end
+                        end
+                    end
+                end
+                assert(#record.material > 0, 'No saved material LUT matches this current LUT')
+            end)
+            record.enabled = allowed
+            records[choice.key] = record
+            local detail = #record.patterns > 0 and 'Pattern included' or nil
+            if not allowed then
+                detail = tostring(reason):gsub('^.-%.lua:%d+:%s*', '')
+            end
+            columns[column].items[#columns[column].items + 1] = {
+                id = choice.key,
+                label = (choice.kind == 'cape' and 'Cape' or m.gear_catalog.label(choice.kind))
+                    .. ' LUT '
+                    .. choice.ordinal,
+                kind = choice.kind,
+                enabled = allowed,
+                checked = allowed,
+                detail = detail,
+            }
+        end
+    end
+    local dialog = { title = 'Apply Preset', columns = columns }
+    local function validate_record(r)
+        local b = r.binding
+        assert(
+            b.unit == r.unit
+                and b.mesh == r.mesh
+                and b.material == r.material
+                and b.original == r.original
+                and b.save_key == r.save_key
+                and (b.slot or m.engine.LUT_SLOT) == r.slot
+                and present(b)
+                and binding(b) == r.current,
+            'Current LUT target changed; reopen Apply Preset'
+        )
+        local original = original_luts and original_luts.get(r.original)
+        assert(
+            original and original.resource == r.resource and original.width == r.width and original.height == r.height,
+            'Current LUT resource changed; reopen Apply Preset'
+        )
+        if r.pattern then
+            assert(original.width == 3 and original.height == 1, 'Associated Pattern LUT is unavailable or changed')
+        end
+    end
+    dialog.on_apply = function(selected)
+        assert(frontend.menu.lut_apply_dialog == dialog, 'Preset chooser changed; reopen Apply Preset')
+        assert(type(selected) == 'table', 'Choose current LUTs to apply')
+        local chosen, scope = {}, {}
+        for id, checked in pairs(selected) do
+            assert(records[id] and type(checked) == 'boolean', 'Preset LUT choices changed; reopen Apply Preset')
+            if checked then
+                assert(records[id].enabled, 'This current LUT cannot use the selected preset')
+                chosen[#chosen + 1] = records[id]
+                scope[records[id].target.kind] = true
+            end
+        end
+        assert(#chosen > 0, 'Select at least one current LUT')
+        local selection = { material = {}, pattern = {}, proofs = proof }
+        selection.validate = function(refreshed)
+            assert(
+                armory_collection.selected == preset and #preset.entries == #saved,
+                'Saved preset changed; reopen Apply Preset'
+            )
+            local checked_documents = {}
+            for index, entry in ipairs(saved) do
+                local current = preset.entries[index]
+                assert(
+                    current == entry.entry
+                        and current.kind == entry.kind
+                        and current.key == entry.key
+                        and current.document == entry.document
+                        and current.original == entry.original
+                        and metadata(current.original) == entry.metadata
+                        and current.document.width == entry.width
+                        and current.document.height == entry.height,
+                    'Saved preset changed; reopen Apply Preset'
+                )
+                if not checked_documents[current.document] then
+                    assert(bytes(current.document) == entry.bytes, 'Saved preset changed; reopen Apply Preset')
+                    checked_documents[current.document] = true
+                end
+            end
+            local current = appearance_proof()
+            for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                assert(current and current[kind] == proof[kind], 'Worn gear changed; reopen Apply Preset')
+            end
+            for _, record in ipairs(chosen) do
+                for _, r in ipairs(record.members) do
+                    validate_record(r)
+                end
+                for _, r in ipairs(record.patterns) do
+                    validate_record(r)
+                end
+                if refreshed then
+                    local actual, count = {}, 0
+                    for _, group in ipairs(groups) do
+                        if group.object == record.target.object then
+                            for _, b in ipairs(group.bindings) do
+                                if m.gear_catalog.kind(b) == record.target.kind then
+                                    actual[material_key(b) .. ':' .. tostring(b.slot or m.engine.LUT_SLOT)] = b.save_key
+                                    count = count + 1
+                                end
+                            end
+                        end
+                    end
+                    assert(count == #record.members, 'Current LUT members changed; reopen Apply Preset')
+                    for key, value in pairs(record.target.binding_keys) do
+                        assert(actual[key] == value, 'Current LUT members changed; reopen Apply Preset')
+                    end
+                end
+            end
+        end
+        selection.validate() -- Reject stale state before refresh/flash cleanup or any native write.
+        for _, record in ipairs(chosen) do
+            for _, r in ipairs(record.material) do
+                selection.material[r.kind .. ':' .. material_key(r.binding)] = true
+            end
+            for _, r in ipairs(record.patterns) do
+                selection.pattern[r.kind .. ':' .. material_key(r.binding)] = true
+            end
+        end
+        local before = history and history.capture()
+        local result = apply_outfit(scope, selection)
+        if before then
+            history.record(before, history.capture())
+        end
+        frontend.menu.lut_apply_dialog = nil
+        return true, result
+    end
+    frontend.menu.lut_apply_dialog = dialog
+    return message('Choose current LUTs to apply. Associated Pattern LUTs are always included.')
 end
 local function sync_armory_export()
     if not handle then
@@ -3023,6 +3405,20 @@ local function register(current)
                 return apply_outfit('cape')
             end)
         end,
+        outfit_apply_selected_activate = function()
+            return action(function()
+                return apply_outfit({
+                    armor = handle.get('outfit_target_armor'),
+                    helmet = handle.get('outfit_target_helmet'),
+                    cape = handle.get('outfit_target_cape')
+                        and operations.armory_cape_available(armory_collection.selected),
+                })
+            end)
+        end,
+        outfit_choose_luts_activate = function()
+            local ok, value = pcall(operations.choose_outfit_luts)
+            return ok and value or message(tostring(value))
+        end,
         global_undo_activate = function()
             assert(history, 'Action history unavailable')
             history.undo_action()
@@ -3127,6 +3523,7 @@ local function register(current)
                     original_luts.retry()
                 end
                 populate_request = os.time()
+                edit.populate_manual_request = true
                 if not populate_worn() then
                     return message('Reading worn gear colors; editor will populate when ready.')
                 end
@@ -3345,11 +3742,12 @@ local function register(current)
             assert(stop_identification(), 'Highlight restoration pending')
             frontend.menu.outfit_dialog = {
                 phase = 'scope',
+                save_kind = { armor = true, helmet = true, cape = true },
                 mod = api.mods[handle.id],
                 control = api.mods[handle.id].controls.outfit_name,
                 on_save = keep_outfit,
             }
-            return message('Keep this Armor and Helmet setup as a named preset?')
+            return message('Choose Armor, Helmet and Cape LUTs to keep as a named preset.')
         end,
         restore_activate = function()
             return action(function()
@@ -3456,6 +3854,7 @@ local function register(current)
             auto_populate_changed = function(enabled)
                 edit.auto_signature = nil
                 if enabled then
+                    edit.populate_manual_request = nil
                     populate_request = os.time()
                     populate_next = 0
                 end
@@ -3884,6 +4283,7 @@ local function reset_transient_state()
         outfit_documents = operations.outfit_documents,
         outfit_document = operations.outfit_document,
         armory_cape_available = operations.armory_cape_available,
+        choose_outfit_luts = operations.choose_outfit_luts,
         sync_armory_cape = operations.sync_armory_cape,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
@@ -4225,6 +4625,13 @@ return {
                     return m.engine.create_texture(native, w, h, data, read, small)
                 end,
                 bind = function(b, object)
+                    if operations.lut_apply_proofs then
+                        local proof, kind = appearance_proof(), m.gear_catalog.kind(b)
+                        assert(
+                            proof and proof[kind] == operations.lut_apply_proofs[kind],
+                            'Worn gear changed during preset application'
+                        )
+                    end
                     if b.cape and operations.armory_cape_proof then
                         local proof = appearance_proof()
                         assert(
@@ -4641,6 +5048,7 @@ return {
                 local ok, why = pcall(populate_worn)
                 if not ok or (populate_request and os.time() - populate_request > 130) then
                     populate_request = nil
+                    edit.populate_manual_request = nil
                     message(
                         'Could not load worn colors. Retry Load Current Colors. '
                             .. tostring(why or 'Snapshot timed out')

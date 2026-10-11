@@ -215,7 +215,7 @@ function T.new(deps)
             if controls.populate_worn then
                 action(
                     top - step * 6.5,
-                    'Load Current Armor & Helmet',
+                    'Load Current Gear',
                     'populate_worn',
                     true,
                     'Read every worn LUT slot without changing its colors.'

@@ -24,7 +24,7 @@ No Python or MCM installation required. Windows PowerShell/.NET handles file pic
 
 **Shared Lobby LUT is in testing.** Share Armor, Helmet and Pattern LUTs with compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
 
-**LUT Editor** now opens a separate movable **Pattern LUT Editor** popup for 3x1 pattern tables: color, metallic RGB, opacity, raw unknown values, undo/redo, DDS export and Pattern Patch ZIP export. Import a 3x1 DDS through the normal chooser, then apply it explicitly to the selected Pattern LUT. **Show Alpha** is shared between the main grid and popup. [Pattern controls](docs/PATTERN-LUTS.md).
+**LUT Editor** includes a three-swatch **Quick Editor: Pattern LUT** beneath the material grid. **Load Current Gear** prepares its current values; click a swatch to edit it. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
 
 ## Roomier LUT Editor
 
@@ -52,7 +52,7 @@ Tables above eight rows retain their added rows when Preserve Original Emissives
 
 ## Start with Basic
 
-Press **F9**, then **Load Current Armor & Helmet**. Choose the LUT above either column, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact. Gear selectors stay gray until current or imported LUTs are ready. Gold Load buttons pulse until their first use.
+Press **F9**, then **Load Current Gear**. Choose the LUT above either column, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact. Gear selectors stay gray until current or imported LUTs are ready. Gold Load buttons pulse until their first use.
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
@@ -104,9 +104,9 @@ Tools initially opens docked below the swatches, then remembers your last **Dock
 
 Select multiple rows through their row labels, or select their first-column cells, then **Apply preset to selected rows** to fill every selected row with the preset as one undoable edit. Use the **X** beside a saved row, palette or Armory preset to remove it from the library. Removed files remain recoverable; the applied appearance is preserved.
 
-The Pattern LUT Editor is an independent window and can stay open alongside Tools and Scratch.
+The Pattern LUT Editor occupies the table workspace while Tools and Scratch remain available. Its controls scroll independently when space is limited.
 
-Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.
+Select a Value Editor channel, then use Copy Value/Paste Value to transfer its raw number. Clipboard paste respects the advanced editing lock. Typed numbers commit when clicking away, before another row or column becomes active; invalid values stay in the field for correction, and Escape cancels. Text fields support click/drag selection, Shift+arrow selection, Home/End, and Ctrl+A/C/X/V while typing. Held letters, Backspace/Delete and navigation keys repeat after a short delay.
 
 Typed values can exceed recommended slider ranges. Swatches clamp RGB for viewing; stored floats remain intact. Export edited DDS files to `%LOCALAPPDATA%/Epic LUT/files/exports` to share them.
 
@@ -128,11 +128,13 @@ Preview uses the game's lighter **Game Default UI pipeline**, with an independen
 
 ## The Armory
 
-**Save to Armory / Save Current Gear Preset** asks for **Armor Only, Helmet Only, or Both**, then a name.
+**Save to Armory / Save Current Gear Preset** provides independent **Armor**, **Helmet** and **Cape** checkboxes, initially all checked. Choose the parts to include, press **Save**, then name the preset.
 
-Select a preset to preview it. Name-selector swatches give a quick glance; the full preview shows every saved LUT. Apply either half separately to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
+Select a preset to preview it. Name-selector swatches give a quick glance; the full preview shows every saved LUT. Choose which parts to apply to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
 
-Development builds provide separate **Apply Preset Armor LUTs**, **Apply Preset Helmet LUTs** and **Apply Preset Cape LUTs** actions. Each affects only that gear kind. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
+**The Armory** provides independent **Armor**, **Helmet** and **Cape** checkboxes above one **Apply Preset** button. Parts available in the selected preset start checked; unavailable parts are disabled. Apply changes only the checked parts as one undoable action. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
+
+Basic mode uses one **Apply Preset...** button to open a two-column LUT chooser. Select individual Armor, Cape and Helmet LUTs or use **Select All**. Matching Pattern LUTs are included with the selected material LUTs.
 
 If the current piece has an extra LOD mesh, an unmatched destination can use the saved piece/material palette only when every saved mesh in that family has identical palette bytes and an exact live match confirms the current texture resource and dimensions. Conflicting palettes and unproved destinations stay unchanged. Application logs distinguish exact and adapted mesh matches after binding readback succeeds.
 

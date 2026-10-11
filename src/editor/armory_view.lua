@@ -78,9 +78,50 @@ function A.new(info, preview)
         local outfit = state.raw and state.raw.outfit
         local armor_count = outfit and #outfit.armor or 0
         local cape_count = outfit and #(outfit.cape or {}) or 0
-        button('Apply Preset Armor LUTs', 'outfit_apply_armor', armor_count > 0)
-        button('Apply Preset Helmet LUTs', 'outfit_apply_helmet', outfit ~= nil and #outfit.helmet > 0)
-        button('Apply Preset Cape LUTs', 'outfit_apply_cape', outfit ~= nil and state.armory_cape_available == true)
+        local targets = state.armory_targets or {}
+        local available = {
+            armor = armor_count > 0,
+            helmet = outfit ~= nil and #outfit.helmet > 0,
+            cape = outfit ~= nil and state.armory_cape_available == true,
+        }
+        local any = false
+        local y, visible = position()
+        local apply_width = math.max(90, (ui.text_width and ui.text_width('Apply Preset', 14) or 90) + 16)
+        local label_width = ui.text_width and ui.text_width('Helmet', 14) or 60
+        local inline_apply = left - 24 >= (label_width + 38) * 3 + apply_width + 8
+        local target_width = (left - 24 - (inline_apply and apply_width + 8 or 0)) / 3
+        for i, option in ipairs({ { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }) do
+            local kind, label = option[1], option[2]
+            local enabled = available[kind]
+            local checked = enabled and targets[kind] ~= false
+            any = any or checked
+            if visible then
+                local x = ui.x + 12 + (i - 1) * target_width
+                ui.checkbox(x, y, 28, bh, checked, enabled)
+                ui.bounded(
+                    x + 34,
+                    ui.text_y and ui.text_y(y, bh, 14, label) or y + 8,
+                    label,
+                    14,
+                    enabled and white or muted,
+                    math.max(0, target_width - 38)
+                )
+                ui.hit(x, y, target_width, bh, function()
+                    if enabled then
+                        ui.activate('outfit_target_' .. kind)
+                    end
+                end, nil, nil, 'Include ' .. label .. ' when applying this preset.')
+            end
+        end
+        if inline_apply then
+            if visible then
+                ui.button(ui.x + 12 + target_width * 3 + 8, y, apply_width, bh, 'Apply Preset', function()
+                    ui.activate('outfit_apply_selected')
+                end, { enabled = any })
+            end
+        else
+            button('Apply Preset', 'outfit_apply_selected', any)
+        end
         separator()
         button('Rename Preset', 'outfit_rename', outfit ~= nil)
         button('Delete Preset', 'outfit_delete', outfit ~= nil)

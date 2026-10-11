@@ -84,7 +84,7 @@ menu.visible, menu.epic_typography, menu.compact_fonts = true, true, true
 menu.window_width, menu.window_height = 1800, 1000
 local actions = {
     import = {
-        { 'Load Current Armor & Helmet', 'populate_worn' },
+        { 'Load Current Gear', 'populate_worn' },
         { 'Import DDS / ZIP / RAR...', 'browse' },
         { 'Send to LUT Editor', 'save_palette' },
         { 'Apply to Armor LUT 1', 'editor_apply_armor' },

@@ -11,9 +11,9 @@ local basic = {
     basic_copy_helmet = 'Copy the selected Helmet table into the selected Armor or Cape table. Colors apply live.',
     basic_copy_helmet_all = 'Copy the selected Helmet table into every worn Armor table. Colors apply live.',
     basic_copy_armor = 'Copy the selected Armor or Cape table into the selected Helmet table. Colors apply live.',
-    outfit_apply_armor = 'Apply the saved Armor and Cape LUTs from the selected Armory preset.',
+    outfit_apply_armor = 'Apply only the Armor LUTs from the selected Armory preset.',
     outfit_apply_helmet = 'Apply only the Helmet half of the selected Armory preset.',
-    save_setup = 'Save your current gear colors to The Armory. Choose Armor Only, Helmet Only, or Both, then name it. Armor presets also retain Cape LUTs.',
+    save_setup = 'Save your current gear colors to The Armory. Check Armor, Helmet and Cape independently, then name the preset.',
     restore = 'Restore Arrowhead original LUT bindings and refresh the displayed gear colors.',
     restore_imported = 'Reset editor values to the imported file. The imported file remains available.',
     stop_identify = 'Stop the flashing region highlight and restore the colors shown before highlighting.',
@@ -31,7 +31,7 @@ local imported = {
     restore_imported = 'Reset editor values to the imported file.',
     global_undo = 'Undo the last action, including imports and gear applications.',
     global_redo = 'Redo the last undone action.',
-    save_setup = 'Choose Armor, Helmet, or Both and save a named Armory preset. Armor presets also retain Cape LUTs.',
+    save_setup = 'Check the Armor, Helmet and Cape parts to include, then save a named Armory preset.',
     preserve_emissives = 'Keep original game emissive values and shader modes when applying imported colors.',
 }
 return { basic = basic, imported = imported }

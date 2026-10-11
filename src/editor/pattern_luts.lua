@@ -2,7 +2,7 @@
 local P = {}
 function P.new(deps)
     local ffi = require('ffi')
-    local self = { groups = {}, undo = {}, redo = {}, busy = false, documents = {}, selections = {} }
+    local self = { groups = {}, undo = {}, redo = {}, busy = false, documents = {}, selections = {}, scroll = 0 }
     local handle, controls
     local function note(text)
         self.status = text
@@ -629,6 +629,31 @@ function P.new(deps)
             end
         end
     end
+    function self.prime(kind)
+        kind = kind or self.gear or 'armor'
+        if kind == 'cape' then
+            return false
+        end
+        assert(kind == 'armor' or kind == 'helmet', 'Unsupported Pattern gear kind')
+        self.gear, self.load_seen, self.requested = kind, true, true
+        self.gear_elapsed = 0
+        if deps.mark_load_seen then
+            deps.mark_load_seen()
+        end
+        local ok, why = pcall(function()
+            self.gear_signature = deps.gear_signature and deps.gear_signature() or nil
+            assert(self.scan() > 0, 'No bound Pattern LUTs for this gear')
+            -- Manual material loading primes the Quick strip without opening
+            -- its workspace or discarding an edited Pattern's cached history.
+            self.load()
+        end)
+        if not ok then
+            self.document, self.waiting = nil, nil
+            sync()
+            note(tostring(why))
+        end
+        return ok, self.status
+    end
     function self.show(kind)
         self.open = true
         self.gear = kind or self.gear or 'armor'
@@ -656,8 +681,478 @@ function P.new(deps)
         end
         return self.status or 'Pattern LUT Editor opened'
     end
+    function self.set_workspace_host(value)
+        self.workspace_host = value == true
+        self.workspace_bounds = nil
+    end
+    function self.is_open()
+        return self.open == true
+    end
+    function self.dismiss()
+        if not self.stop_flash() then
+            return false
+        end
+        self.open, self.waiting, self.workspace_bounds = false, nil, nil
+        return true
+    end
+    function self.wheel(x, y, delta)
+        local b = self.workspace_bounds
+        if self.open and b and x and y and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+            self.scroll = math.max(0, math.min(self.maximum or 0, self.scroll - delta / 120 * (self.scroll_step or 24)))
+            return true
+        end
+    end
+    local function action(ui, x, y, width, height, text, id, enabled, callback, active)
+        enabled = enabled ~= false and (not id or not controls[id] or not controls[id].disabled)
+        local featured = enabled and (id == 'pattern_export' or id == 'pattern_export_patch' or id == 'pattern_load')
+        local color = { 244, 202, 53 }
+        local seen = self.load_seen
+        if deps.load_seen then
+            seen = deps.load_seen()
+        end
+        if id == 'pattern_load' and not seen then
+            local pulse = math.floor(32 + 26 * math.sin((self.cue_time or 0) * 4))
+            color = { 244, math.min(255, 202 + pulse), 53 + pulse }
+        end
+        ui.button(x, y, width, height, text, function()
+            if callback then
+                callback()
+            else
+                ui.activate(id)
+            end
+        end, {
+            enabled = enabled,
+            selected = active,
+            accent = featured and color,
+            ink = featured and { 25, 28, 31 },
+            size = 13,
+            padding = 6,
+        })
+    end
+    local function picker(ui, column)
+        if not self.document then
+            return note('Load a Pattern LUT first')
+        end
+        self.column = column
+        local allowed, why = controls.pattern_picker.can_open_picker()
+        if not allowed then
+            return note(why)
+        end
+        local at, color = (column - 1) * 4, {}
+        for channel = 1, 3 do
+            color[channel] = math.floor(math.max(0, math.min(1, self.document.data[at + channel - 1])) * 255 + 0.5)
+        end
+        self.busy = true
+        local ok, message = handle.set('pattern_picker', string.format('#%02X%02X%02X', color[1], color[2], color[3]))
+        self.busy = false
+        assert(ok, message)
+        ui.activate('pattern_picker')
+    end
+    local function swatch(ui, x, y, width, height, column, quick)
+        local d, at = self.document, (column - 1) * 4
+        local color = { 0, 0, 0 }
+        if d then
+            for channel = 1, 3 do
+                color[channel] = math.floor(math.max(0, math.min(1, d.data[at + channel - 1])) * 255 + 0.5)
+            end
+        end
+        ui.rect(
+            x - 1,
+            y - 1,
+            width + 2,
+            height + 2,
+            self.column == column and { 244, 202, 53 } or ui.theme.muted,
+            nil,
+            'swatch_border'
+        )
+        deps.swatch(ui, x, y, width, height, color, d and d.data[at + 3] or 1, handle.get('show_alpha'))
+        ui.hit(
+            x,
+            y,
+            width,
+            height,
+            function()
+                self.column = column
+                if quick then
+                    if not self.document or column == 3 and not self.raw then
+                        self.show(self.gear)
+                    else
+                        picker(ui, column)
+                    end
+                end
+            end,
+            nil,
+            nil,
+            quick and 'Edit this Pattern LUT swatch.' or 'Double-click to edit this Pattern LUT swatch.',
+            function()
+                picker(ui, column)
+            end
+        )
+    end
+    local function metric(ui, size, text, role)
+        return ui.text_metrics and ui.text_metrics(size, text, role)
+            or { min_y = 0, height = ui.text_size and ui.text_size(size, role) or size }
+    end
+    function self.quick_height(ui)
+        local gap = ui.spacing and ui.spacing(6) or 6
+        return metric(ui, 13, 'Quick Editor: Pattern LUT', 'heading').height + gap * 2 + 28
+    end
+    function self.quick(ui, bounds, kind)
+        if not bounds or bounds.w <= 0 or bounds.h <= 0 or not handle then
+            return
+        end
+        kind = kind or (deps.current_gear and deps.current_gear()) or self.gear or 'armor'
+        if kind == 'cape' then
+            -- Cape may share the material selector, but the Pattern editor's
+            -- targets are Armor/Helmet. Do not expose an Armor picker here.
+            local gap = ui.spacing and ui.spacing(6) or 6
+            local title = 'Quick Editor: Pattern LUT - Armor / Helmet only'
+            local heading = metric(ui, 13, title, 'heading')
+            ui.bounded(
+                bounds.x,
+                bounds.y + bounds.h - heading.height - heading.min_y,
+                title,
+                13,
+                ui.theme.disabled or ui.theme.muted,
+                bounds.w,
+                'heading'
+            )
+            local width = (bounds.w - gap * 2) / 3
+            local height = math.max(1, math.min(28, bounds.h - heading.height - gap * 2))
+            for column = 1, 3 do
+                ui.rect(
+                    bounds.x + (column - 1) * (width + gap),
+                    bounds.y + gap,
+                    width,
+                    height,
+                    ui.theme.disabled or ui.theme.muted,
+                    nil,
+                    'swatch_fill'
+                )
+            end
+            return
+        end
+        kind = kind == 'helmet' and 'helmet' or 'armor'
+        -- A drawing pass must never discover gear before the user's first load.
+        local signature = self.gear_signature
+        if self.requested and deps.gear_signature then
+            local ok, value = pcall(deps.gear_signature)
+            if ok then
+                signature = value
+            end
+        end
+        if self.ready and (self.gear ~= kind or signature ~= self.gear_signature) then
+            self.switch(kind)
+        else
+            self.gear = kind
+        end
+        if self.ready and #self.groups > 0 and not self.document and not self.waiting then
+            -- Save/apply may refresh bindings with scan(), which clears only
+            -- the selected view. Reuse its matching cached owned document.
+            local ok, why = pcall(self.load)
+            if not ok then
+                note(tostring(why))
+            end
+        end
+        local gap = ui.spacing and ui.spacing(6) or 6
+        local title = 'Quick Editor: Pattern LUT'
+        local heading = metric(ui, 13, title, 'heading')
+        local top = bounds.y + bounds.h
+        local title_y = top - heading.height
+        ui.bounded(bounds.x, title_y - heading.min_y, title, 13, ui.theme.white, bounds.w, 'heading')
+        local title_height = heading.height
+        ui.hit(bounds.x, title_y, bounds.w, title_height, function()
+            self.show(kind)
+        end, nil, nil, 'Open the Pattern LUT workspace.')
+        local width = (bounds.w - gap * 2) / 3
+        local height = math.max(1, math.min(28, bounds.h - heading.height - gap * 2))
+        local bottom = bounds.y + gap
+        for column = 1, 3 do
+            local x = bounds.x + (column - 1) * (width + gap)
+            swatch(ui, x, bottom, width, height, column, true)
+        end
+    end
+    function self.workspace(ui, bounds)
+        self.workspace_bounds = nil
+        if not self.open or not bounds or bounds.w <= 0 or bounds.h <= 0 or not handle then
+            return
+        end
+        self.workspace_bounds = bounds
+        local gap = ui.spacing and ui.spacing(6) or 6
+        local pad = ui.spacing and ui.spacing(8) or 8
+        local bh = ui.control_height and ui.control_height(13, 6, 26)
+            or math.max(26, (ui.text_size and ui.text_size(13) or 13) + 12)
+        local x, width = bounds.x + pad, math.max(1, bounds.w - pad * 2 - 8)
+        local top, bottom = bounds.y + bounds.h - pad, bounds.y + pad
+        local viewport = math.max(1, top - bottom)
+        local scroll = math.max(0, math.min(self.scroll or 0, self.maximum or math.huge))
+        local cursor = top + scroll
+        local d = self.document
+        local function take(height, after)
+            cursor = cursor - height
+            local y = cursor
+            cursor = cursor - (after or gap)
+            return y
+        end
+        local function visible(y, height)
+            return ui.viewport and y + height > bottom and y < top or y >= bottom and y + height <= top
+        end
+        local function label(text, size, role, color)
+            local ink = metric(ui, size or 13, text, role)
+            local y = take(ink.height)
+            if visible(y, ink.height) then
+                ui.bounded(x, y - ink.min_y, text, size or 13, color or ui.theme.white, width, role)
+            end
+        end
+        local function button(px, y, bw, text, id, enabled, callback, active)
+            if visible(y, bh) then
+                action(ui, px, y, bw, bh, text, id, enabled, callback, active)
+            end
+        end
+        local function number(id, name)
+            local height = math.max(bh, 26)
+            local y = take(height)
+            if visible(y, height) then
+                local label_width =
+                    math.min(width * 0.34, math.max(110, ui.text_width and ui.text_width(name, 13) or 110))
+                ui.bounded(
+                    x,
+                    ui.text_y and ui.text_y(y, height, 13, name) or y + 5,
+                    name,
+                    13,
+                    ui.theme.white,
+                    label_width
+                )
+                ui.number(
+                    id,
+                    x + label_width + gap,
+                    y,
+                    width - label_width - gap,
+                    handle.get(id),
+                    function() end,
+                    d ~= nil,
+                    controls[id].drag_min or 0,
+                    controls[id].drag_max or 1
+                )
+            end
+        end
+        local function divider()
+            local y = take(1)
+            if visible(y, 1) then
+                ui.rect(x, y, width, 1, ui.theme.line)
+            end
+        end
+        local function draw()
+            local heading = metric(ui, 13, 'Pattern LUT Editor', 'heading')
+            local y = take(math.max(bh, heading.height))
+            if visible(y, bh) then
+                ui.bounded(
+                    x,
+                    ui.text_y and ui.text_y(y, bh, 13, 'Pattern LUT Editor', 'heading') or y + 5,
+                    'Pattern LUT Editor',
+                    13,
+                    ui.theme.white,
+                    width - bh - gap,
+                    'heading'
+                )
+                button(x + width - bh, y, bh, 'X', nil, true, self.dismiss)
+            end
+            y = take(bh)
+            local quarter = (width - gap * 2) / 4
+            for index, kind in ipairs({ 'armor', 'helmet' }) do
+                local gear = kind
+                button(
+                    x + (index - 1) * (quarter + gap),
+                    y,
+                    quarter,
+                    kind == 'armor' and 'Armor' or 'Helmet',
+                    nil,
+                    self.ready == true,
+                    function()
+                        self.scroll = 0
+                        self.switch(gear)
+                    end,
+                    self.gear == kind
+                )
+            end
+            button(x + (quarter + gap) * 2, y, quarter * 2, 'Load Current Patterns', 'pattern_load')
+            y = take(bh)
+            local alpha_width = math.min(
+                width * 0.33,
+                math.max(138, ui.text_width and ui.text_width('Show Alpha', 13) + gap * 4 or 138)
+            )
+            if visible(y, bh) then
+                ui.choice('pattern_lut', x, y, width - alpha_width - gap, nil, { height = bh })
+                button(
+                    x + width - alpha_width,
+                    y,
+                    alpha_width,
+                    '[ ' .. (handle.get('show_alpha') and 'x' or ' ') .. ' ] Show Alpha',
+                    'show_alpha'
+                )
+            end
+            local group = self.groups[handle.get('pattern_lut')]
+            label(
+                group and deps.resource_id(group.object) or 'No pattern resource selected',
+                12,
+                'hint',
+                ui.theme.brass
+            )
+            local sw = (width - gap * 2) / 3
+            local names = { '1: Accent color', '2: Material / opacity', '3: Unknown' }
+            local caption = metric(ui, 12, names[2], 'hint')
+            y = take(caption.height)
+            if visible(y, caption.height) then
+                for column, name in ipairs(names) do
+                    ui.bounded(x + (column - 1) * (sw + gap), y - caption.min_y, name, 12, ui.theme.white, sw, 'hint')
+                end
+            end
+            local sh = math.max(32, math.min(48, bh * 1.5))
+            y = take(sh)
+            if visible(y, sh) then
+                for column = 1, 3 do
+                    swatch(ui, x + (column - 1) * (sw + gap), y, sw, sh, column, false)
+                end
+            end
+            self.column = self.column or 1
+            if d then
+                if self.column == 1 then
+                    button(x, take(bh), width, 'Edit accent color', 'pattern_color')
+                    button(
+                        x,
+                        take(bh),
+                        width,
+                        (self.raw and 'v ' or '> ') .. 'Advanced: unknown alpha',
+                        nil,
+                        true,
+                        function()
+                            self.raw = not self.raw
+                        end
+                    )
+                    if self.raw then
+                        number('pattern_color_alpha', 'Unknown A')
+                    end
+                elseif self.column == 2 then
+                    number('pattern_metal_r', 'Metallic R')
+                    number('pattern_metal_g', 'Metallic G')
+                    number('pattern_metal_b', 'Metallic B')
+                    number('pattern_opacity', 'Opacity A')
+                else
+                    button(
+                        x,
+                        take(bh),
+                        width,
+                        (self.raw and 'v ' or '> ') .. 'Advanced: raw unknown values',
+                        nil,
+                        true,
+                        function()
+                            self.raw = not self.raw
+                        end
+                    )
+                    if self.raw then
+                        number('pattern_unknown_r', 'Unknown R')
+                        number('pattern_unknown_g', 'Unknown G')
+                        number('pattern_unknown_b', 'Unknown B')
+                        number('pattern_unknown_a', 'Unknown A')
+                    end
+                end
+            else
+                label('Load Current Patterns to edit. Snapshots may still be loading.', 12, 'hint', ui.theme.muted)
+            end
+            divider()
+            local half, third = (width - gap) / 2, (width - gap * 2) / 3
+            y = take(bh)
+            button(x, y, half, 'Flash Pattern', 'pattern_flash', d ~= nil)
+            button(x + half + gap, y, half, 'Stop Flash', 'pattern_stop_flash')
+            y = take(bh)
+            button(x, y, third, 'Undo', 'pattern_undo', d ~= nil and #self.undo > 0)
+            button(x + third + gap, y, third, 'Redo', 'pattern_redo', d ~= nil and #self.redo > 0)
+            button(x + (third + gap) * 2, y, third, 'Restore All Patterns', 'pattern_restore')
+            divider()
+            label('Pattern Import', 13, 'heading')
+            if self.imported then
+                y = take(24)
+                if visible(y, 24) then
+                    for column = 1, 3 do
+                        local color, at = {}, (column - 1) * 4
+                        for channel = 1, 3 do
+                            color[channel] =
+                                math.floor(math.max(0, math.min(1, self.imported.data[at + channel - 1])) * 255 + 0.5)
+                        end
+                        deps.swatch(
+                            ui,
+                            x + (column - 1) * (sw + gap),
+                            y,
+                            sw,
+                            24,
+                            color,
+                            self.imported.data[at + 3],
+                            handle.get('show_alpha')
+                        )
+                    end
+                end
+            end
+            y = take(bh)
+            button(x, y, third, 'Import', 'browse')
+            button(
+                x + third + gap,
+                y,
+                third * 2 + gap,
+                'Apply Imported DDS to Selected Pattern LUT',
+                'pattern_import_apply',
+                self.imported ~= nil and d ~= nil
+            )
+            divider()
+            button(
+                x,
+                take(bh),
+                width,
+                'Name: '
+                    .. (ui.input_value and ui.input_value('pattern_export_name') or handle.get('pattern_export_name')),
+                'pattern_export_name'
+            )
+            y = take(bh)
+            button(x, y, half, 'Export Pattern DDS', 'pattern_export', d ~= nil)
+            button(
+                x + half + gap,
+                y,
+                half,
+                'Export Pattern Patch ZIP',
+                'pattern_export_patch',
+                d ~= nil and deps.export_patch ~= nil
+            )
+            label(self.status or 'Pattern LUT values apply live.', 11, 'hint', ui.theme.muted)
+        end
+        if ui.viewport then
+            ui.viewport(
+                { x = x, y = bottom, w = width, h = viewport },
+                draw,
+                { top = bounds.y + bounds.h, bottom = bounds.y, color = ui.theme.panel }
+            )
+        else
+            draw()
+        end
+        local content = top + scroll - cursor
+        self.maximum = math.max(0, content - viewport)
+        self.scroll = math.min(scroll, self.maximum)
+        self.scroll_step = math.max(1, math.min(bh / 2, viewport / 4))
+        if ui.scrollbar and self.maximum > 0 then
+            ui.scrollbar(
+                'pattern_workspace',
+                bounds.x + bounds.w - 5,
+                bottom,
+                viewport,
+                content,
+                viewport,
+                self.scroll,
+                function(value)
+                    self.scroll = math.max(0, math.min(self.maximum, value))
+                end
+            )
+        end
+    end
     function self.popup(ui)
-        if not self.open or not ui.floating then
+        if self.workspace_host or not self.open or not ui.floating then
             return
         end
         local function draw(x, y, w, h)
@@ -667,31 +1162,7 @@ function P.new(deps)
                 ui.bounded(px, py, text, 13, white, width or w - 24, role)
             end
             local function button(px, py, width, text, id, enabled, callback, active)
-                local featured = enabled ~= false
-                    and (id == 'pattern_export' or id == 'pattern_export_patch' or id == 'pattern_load')
-                local featured_color = { 244, 202, 53 }
-                local seen = self.load_seen
-                if deps.load_seen then
-                    seen = deps.load_seen()
-                end
-                if id == 'pattern_load' and not seen then
-                    local pulse = math.floor(32 + 26 * math.sin((self.cue_time or 0) * 4))
-                    featured_color = { 244, math.min(255, 202 + pulse), 53 + pulse }
-                end
-                ui.button(px, py, width, 26, text, function()
-                    if callback then
-                        callback()
-                    else
-                        ui.activate(id)
-                    end
-                end, {
-                    enabled = enabled,
-                    selected = active,
-                    accent = featured and featured_color,
-                    ink = featured and { 25, 28, 31 },
-                    size = 13,
-                    padding = 6,
-                })
+                action(ui, px, py, width, 26, text, id, enabled, callback, active)
             end
             ui.rect(x, y, w, h, theme.panel)
             ui.rect(x, y + h - 40, w, 40, theme.header)
@@ -736,57 +1207,9 @@ function P.new(deps)
             local d = self.document
             local sw = (w - 36) / 3
             for col = 1, 3 do
-                local index = (col - 1) * 4
-                local color = { 0, 0, 0 }
-                if d then
-                    for ch = 1, 3 do
-                        color[ch] = math.floor(math.max(0, math.min(1, d.data[index + ch - 1])) * 255 + 0.5)
-                    end
-                end
                 local px = x + 12 + (col - 1) * (sw + 6)
                 label(px, y + h - 150, ({ '1: Accent color', '2: Material / opacity', '3: Unknown' })[col], sw, 'hint')
-                ui.rect(
-                    px - 1,
-                    y + h - 211,
-                    sw + 2,
-                    50,
-                    self.column == col and { 244, 202, 53 } or muted,
-                    nil,
-                    'swatch_border'
-                )
-                deps.swatch(ui, px, y + h - 210, sw, 48, color, d and d.data[index + 3] or 1, handle.get('show_alpha'))
-                local selected_column = col
-                ui.hit(
-                    px,
-                    y + h - 210,
-                    sw,
-                    48,
-                    function()
-                        self.column = selected_column
-                    end,
-                    nil,
-                    nil,
-                    'Double-click to edit this Pattern LUT swatch.',
-                    function()
-                        if not self.document then
-                            note('Load a Pattern LUT first')
-                            return
-                        end
-                        self.column = selected_column
-                        local at = (selected_column - 1) * 4
-                        self.busy = true
-                        local color = {}
-                        for ch = 1, 3 do
-                            color[ch] =
-                                math.floor(math.max(0, math.min(1, self.document.data[at + ch - 1])) * 255 + 0.5)
-                        end
-                        assert(
-                            handle.set('pattern_picker', string.format('#%02X%02X%02X', color[1], color[2], color[3]))
-                        )
-                        self.busy = false
-                        ui.activate('pattern_picker')
-                    end
-                )
+                swatch(ui, px, y + h - 210, sw, 48, col, false)
             end
             self.column = self.column or 1
             local cursor = y + h - 249
@@ -910,11 +1333,7 @@ function P.new(deps)
             )
             ui.bounded(x + 12, y + 12, self.status or 'Pattern LUT values apply live.', 11, muted, w - 24, 'hint')
         end
-        ui.floating('pattern_lut_editor', draw, 580, 700, function()
-            self.open = false
-            self.waiting = nil
-            self.stop_flash()
-        end, 40)
+        ui.floating('pattern_lut_editor', draw, 580, 700, self.dismiss, 40)
     end
     function self.attach(h, c)
         handle, controls = h, c
@@ -1033,7 +1452,7 @@ function P.new(deps)
         if not self.stop_flash() then
             return false
         end
-        self.open, self.waiting = false, nil
+        self.open, self.waiting, self.workspace_bounds = false, nil, nil
         local restored = deps.session.restore()
         if restored then
             self.document, self.documents, self.undo, self.redo = nil, {}, {}, {}

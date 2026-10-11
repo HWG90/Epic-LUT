@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace Basic's separate preset apply buttons with a two-column LUT checkbox chooser and Select All. Apply selected Armor, Cape and Helmet LUTs with their associated Patterns as one checked transaction.
+- Commit typed Value Editor numbers when clicking away; retain invalid edits for correction. Canceling an Armory name skips validation and never saves, including when the name is empty.
+- Add a three-swatch Pattern quick editor below the material LUT table and place the complete Pattern editor in that workspace instead of a separate window. Preserve independent scrolling, editing, import/export and non-restoring navigation back to the material table.
+- Select Armor, Helmet and Cape independently with checkboxes when saving an Armory preset. Replace The Armory's stacked apply actions with the same three targets and one Apply Preset button, with grouped preflight, rollback and Undo.
+- Clamp Advanced LUT cell growth against the final space above docked Tools. Hiding Values or Preview keeps eight readable rows visible whenever they fit; cap oversized cells and retain scrolling for larger tables or tighter divider positions.
 - Give Basic mode enough minimum window height to show all eight regions together, expanding those rows to fill the available space. Remove its repeated title/help above the LUTs and measure the compact Load, gear and import headers. Retain scrolling for larger tables.
 - Add a Camo checkbox column beside Basic's regions, with square boxes and drawn check marks, every box initially unchecked. Patterns, colorways and camo tints affect only checked rows; keep unchecked bytes intact, retain selections through Undo/Redo and use the first checked row for color swatches.
 - Place Basic's Apply Imported Texture controls directly below each destination LUT selector, with source selection on the dropdown arrow and Apply [filename] on the main button. Keep both source labels synchronized and move camo swatches above the pattern/colorway selectors.
