@@ -78,6 +78,9 @@ for _, control in ipairs({
     button('editor_load_helmet'),
     button('editor_apply_armor'),
     button('editor_all_armor'),
+    button('imported_map_armor'),
+    button('imported_map_helmet'),
+    button('imported_map_cape'),
     button('restore'),
     button('reset_custom'),
     button('save_setup'),
@@ -319,7 +322,12 @@ do
         'Import Paydex JSON...',
     }) do
         local current = assert(label(floating_rows, name, true))
-        assert(previous.y > current.y + current.size, 'Rows controls are out of order/overlap: ' .. name)
+        assert(
+            previous.y > current.y + current.size
+                or math.abs(previous.y - current.y) < 0.01
+                    and previous.x + #previous.text * previous.size * 0.5 < current.x,
+            'Rows controls are out of order/overlap: ' .. name
+        )
         previous = current
     end
 end
@@ -567,7 +575,128 @@ assert(
     'Closing Tools removed persistent footer actions'
 )
 assert(not editor.tools.bounds, 'Closed Tools retained dock wheel ownership')
+-- Wide Tools retain their frame space, but navigation and individual controls
+-- use bounded/content-sized widths. Efficient action groups share a row.
+local palette_control = mod.controls.palette
+palette_control.choices = {}
+for index = 1, 32 do
+    palette_control.choices[index] = 'Imported LUT ' .. index
+end
+local browse_hits = 0
+local mapped = {}
+mod.controls.browse.on_activate = function()
+    browse_hits = browse_hits + 1
+end
+for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+    mod.controls['imported_map_' .. kind].on_activate = function()
+        mapped[#mapped + 1] = kind
+    end
+end
+assert(handle.set('value_editor_visible', false))
+editor.tools.split_ratio = 0.75
+editor.tools.set_docked(true)
+for _, font in ipairs({ 12, 20 }) do
+    for _, canvas_width in ipairs({ 1200, 2200 }) do
+        menu.font_size, menu.window_width, menu.window_height, menu.ui_scale = font, canvas_width, 1200, 0.7
+        for _, tab in ipairs({ 'import', 'rows', 'export', 'options' }) do
+            editor.tools.open(tab)
+            editor.tools.scroll = 0
+            local commands = compose()
+            local outer, content, wb =
+                assert(editor.tools.bounds), assert(editor.tools.content_bounds), menu.window_bounds
+            local function body_label(value)
+                for _, c in ipairs(commands) do
+                    if
+                        c.full_text == value
+                        and not c.popup
+                        and c.x >= wb.x + content.x * wb.scale
+                        and c.x < wb.x + (content.x + content.w) * wb.scale
+                        and c.y >= wb.y + content.y * wb.scale
+                        and c.y <= wb.y + (content.y + content.h) * wb.scale
+                    then
+                        return c
+                    end
+                end
+            end
+            assert(
+                content.w <= 760 and content.x + content.w <= outer.x + outer.w,
+                'Tools expandable content consumes a giant full-pane width'
+            )
+            local previous
+            for _, bounds in ipairs(editor.tools.tab_bounds) do
+                assert(
+                    bounds.w <= 180 and bounds.x >= outer.x and bounds.x + bounds.w <= outer.x + outer.w,
+                    'Tools tab escaped its content-sized header width cap'
+                )
+                if previous and math.abs(previous.y - bounds.y) < 0.01 then
+                    assert(previous.x + previous.w < bounds.x, 'Content-sized Tools tabs overlap')
+                end
+                previous = bounds
+            end
+            for _, c in ipairs(commands) do
+                if
+                    c.type == 'rect'
+                    and c.ui_role == 'control_fill'
+                    and not c.popup
+                    and c.x >= wb.x + content.x * wb.scale
+                    and c.x < wb.x + (content.x + content.w) * wb.scale
+                    and c.y >= wb.y + content.y * wb.scale
+                    and c.y + c.h <= wb.y + (content.y + content.h) * wb.scale
+                then
+                    assert(c.w / wb.scale <= 760 + 0.01, 'Tools body control escaped its width cap')
+                end
+            end
+            if tab == 'import' then
+                local import = assert(body_label('Import DDS / ZIP / RAR...'))
+                local load = assert(body_label('Load Current Gear'))
+                if canvas_width == 2200 then
+                    assert(
+                        math.abs(import.y - load.y) < 0.01 and import.x + #import.text * import.size * 0.5 < load.x,
+                        'Wide Tools wasted a second row for compact import/load actions'
+                    )
+                    local source = assert(label(commands, 'Imported LUT 1', false))
+                    local preview = assert(label(commands, 'Preview Palette', false))
+                    local send = assert(label(commands, 'Send to LUT Editor', false))
+                    assert(math.abs(preview.y - send.y) < 0.01, 'Wide Tools Preview/Send actions were not packed')
+                    tap(import.x + 2, import.y + 2)
+                    assert(browse_hits > 0, 'Content-sized Tools import button lost its hit target')
+                    tap(source.x + 2, source.y + 2)
+                    assert(
+                        menu.dropdown and menu.dropdown.control.id == 'palette',
+                        'Bounded Tools source dropdown did not open'
+                    )
+                    assert(menu.dropdown.width <= 760, 'Tools source popup restored an unbounded width')
+                    menu.key(27)
+                    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                        local text = 'Map LUTs to ' .. kind:sub(1, 1):upper() .. kind:sub(2)
+                        local target = assert(body_label(text), 'Tools imported-LUT mapping target is missing')
+                        local before = #mapped
+                        tap(target.x + 2, target.y + 2)
+                        assert(
+                            #mapped == before + 1 and mapped[#mapped] == kind,
+                            'Tools mapping hit selected the wrong gear kind'
+                        )
+                    end
+                end
+            elseif tab == 'rows' and canvas_width == 2200 then
+                local save = assert(label(commands, 'Save selected row', false))
+                local apply = assert(label(commands, 'Apply preset to row', false))
+                assert(
+                    math.abs(save.y - apply.y) < 0.01 and save.x + #save.text * save.size * 0.5 < apply.x,
+                    'Wide Tools row-preset actions did not share a readable row'
+                )
+            end
+        end
+    end
+end
+assert(
+    ffi.string(document.data, document.width * document.height * 16) == initial_pixels,
+    'Tools responsive navigation/layout changed LUT pixels'
+)
 package.loaded['epic.player_preview.v1'] = prior_preview
+print(
+    'PASS Tools widths: measured capped tabs, bounded fields/actions, packed semantic pairs,32-source dropdown anchors and actual hits across wide/narrow panes and fonts'
+)
 print(
     'PASS Tools docking: persisted docked default and icon choices, no-write restoration/save failure, actual window icons/header tooltips, shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
 )

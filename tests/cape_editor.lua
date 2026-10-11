@@ -2105,6 +2105,267 @@ do
         'Certified texture cleanup freed legacy buffers or retained its own completed cohort'
     )
 end
+-- Imported mapping uses ready sources, exact current LUT groups and one atomic
+-- transaction, including only metadata-proven Pattern companions.
+do
+    m.texture_lifetime = nil
+    actor(9)
+    armor, cape, helmet = current()
+    local armor_targets = { armor }
+    for index = 1, 4 do
+        local material, object = armor + 10 + index * 10, 9000 + index * 10
+        materials[units[1].unit][index + 1] =
+            { mesh = material + 10, material = material, mesh_index = index, material_index = index }
+        bound[material] = { [1] = object, [3] = 0 }
+        originals[object] = m.basic_state.clone(stock)
+        originals[object].resource = tostring(index + 1):rep(16)
+        armor_targets[#armor_targets + 1] = material
+    end
+    local physical, pattern_objects = { armor, cape, helmet }, {}
+    for index = 2, #armor_targets do
+        physical[#physical + 1] = armor_targets[index]
+    end
+    for index, material in ipairs(physical) do
+        local object = 9200 + index
+        local d = {
+            width = 3,
+            height = 1,
+            data = ffi.new('float[12]'),
+            resource = index == 1 and '8888888888888888' or string.format('%016x', object),
+        }
+        d.data[0], d.data[3] = index / 7, -0.875
+        originals[object], bound[material][2], pattern_objects[material] = d, object, object
+    end
+    local uploads = {}
+    m.engine.create_texture = function(_, width, height, data)
+        created = created + 1
+        local texture = { object = 90000 + created, width = width, height = height, data = data }
+        uploads[texture.object] = ffi.string(data, width * height * 16)
+        return texture
+    end
+    m.engine.bind = function(_, material, slot, object)
+        assert(slot == 1 or slot == 2, 'Imported mapping wrote the tint/emblem slot')
+        bound[material][slot] = object
+    end
+    m.original_luts.preserve = dofile('src/gear/original_luts.lua').preserve
+    m.import_matches = dofile('src/imports/import_matches.lua')
+    local make_picker, accept = m.import_picker.new
+    m.import_picker.new = function(deps)
+        accept = deps.accept
+        return make_picker(deps)
+    end
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    activate('populate_worn')
+    local zero, one = m.basic_state.clone(stock), m.basic_state.clone(stock)
+    zero.data[0], one.data[0], zero.data[3], one.data[3] = 0.11875, 0.68125, 3.25, 2.75
+    for i = 52, 55 do
+        zero.data[i], one.data[i] = 1.625, 2.125
+    end
+    local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
+    pattern.data[0], pattern.data[3] = 0.64375, 1.875
+    DDS.write(fixture .. '/lut000.dds', zero.data, 23, 8)
+    DDS.write(fixture .. '/lut001.dds', one.data, 23, 8)
+    DDS.write(fixture .. '/lut002.dds', pattern.data, 3, 1)
+    local metadata = assert(io.open(fixture .. '/resources.tsv', 'wb'))
+    metadata:write('lut000.dds\t1111111111111111\nlut001.dds\t2222222222222222\nlut002.dds\t8888888888888888\n')
+    metadata:close()
+    local function imported()
+        assert(accept('ok\nlut001.dds\nlut000.dds\nlut002.dds\n', { base = fixture }))
+    end
+    imported()
+    local count_before = created
+    activate('imported_map_armor')
+    assert(not frontend.menu.lut_apply_dialog, 'Mapping opened before asynchronous imported tables were ready')
+    for _ = 1, 5 do
+        runtime.on_update(ctx, 0)
+    end
+    assert(created == count_before, 'Asynchronous mapping preparation uploaded a texture')
+    local dialog = assert(frontend.menu.lut_apply_dialog)
+    local function inspect(kind)
+        local dialog = assert(frontend.menu.lut_apply_dialog)
+        assert(dialog.mode == 'mapping' and dialog.title == 'Map LUTs to ' .. kind)
+        local sources = {}
+        for _, item in ipairs(dialog.columns[1].items) do
+            sources[item.label:match('(lut%d%d%d%.dds)$')] = item
+        end
+        assert(sources['lut000.dds'].enabled and sources['lut001.dds'].enabled and not sources['lut002.dds'].enabled)
+        return dialog, sources, dialog.columns[2].items
+    end
+    local sources, target_items
+    dialog, sources, target_items = inspect('Armor')
+    assert(#target_items == 5)
+    local function snapshot()
+        local result = {}
+        for _, material in ipairs(physical) do
+            result[material] = { bound[material][1], bound[material][2], bound[material][3] }
+        end
+        return result
+    end
+    local function same(expected)
+        for _, material in ipairs(physical) do
+            for slot = 1, 3 do
+                assert(bound[material][slot] == expected[material][slot], 'Mapping changed an unselected native group')
+            end
+        end
+    end
+    local before, history_count = snapshot(), #action_history.undo
+    dialog.source_id = sources['lut000.dds'].id
+    assert(created == count_before and #action_history.undo == history_count)
+    assert(dialog.on_map(dialog.source_id, target_items[2].id))
+    assert(uploads[bound[armor_targets[2]][1]] == ffi.string(zero.data, 23 * 8 * 16))
+    assert(
+        bound[armor_targets[2]][2] == before[armor_targets[2]][2],
+        'Arbitrary mapping guessed a Pattern relationship'
+    )
+    for _, material in ipairs(physical) do
+        if material ~= armor_targets[2] then
+            assert(bound[material][1] == before[material][1] and bound[material][2] == before[material][2])
+        end
+    end
+    assert(frontend.menu.lut_apply_dialog == dialog and target_items[2].mapped_source == sources['lut000.dds'].id)
+    local mapped = snapshot()
+    assert(dialog.on_map(sources['lut001.dds'].id, target_items[2].id))
+    assert(uploads[bound[armor_targets[2]][1]] == ffi.string(one.data, 23 * 8 * 16))
+    local remapped = snapshot()
+    activate('global_undo')
+    same(mapped)
+    activate('global_undo')
+    same(before)
+    activate('global_redo')
+    same(mapped)
+    activate('global_redo')
+    same(remapped)
+    activate('restore')
+    activate('imported_map_armor')
+    dialog, sources, target_items = inspect('Armor')
+    before, history_count = snapshot(), #action_history.undo
+    local previous_action = action_history.undo[history_count]
+    assert(dialog.on_auto_map())
+    for index, material in ipairs(armor_targets) do
+        local source = index % 2 == 1 and zero or one
+        assert(
+            uploads[bound[material][1]] == ffi.string(source.data, 23 * 8 * 16),
+            'Auto-map lost zero-based numeric order or source cycling'
+        )
+        assert(target_items[index].mapped_source == sources[index % 2 == 1 and 'lut000.dds' or 'lut001.dds'].id)
+        if index > 1 then
+            assert(bound[material][2] == before[material][2], 'Auto-map guessed an unrelated Pattern companion')
+        end
+    end
+    assert(
+        uploads[bound[armor][2]] == ffi.string(pattern.data, 48),
+        'Verified imported resource pair lost its associated Pattern'
+    )
+    assert(bound[cape][1] == before[cape][1] and bound[helmet][1] == before[helmet][1])
+    assert(#action_history.undo <= history_count + 1 and action_history.undo[#action_history.undo] ~= previous_action)
+    activate('global_undo')
+    same(before)
+    activate('restore')
+    activate('imported_map_armor')
+    dialog, sources, target_items = inspect('Armor')
+    before, history_count = snapshot(), #action_history.undo
+    local bind, forward = m.engine.bind, 0
+    m.engine.bind = function(_, material, slot, object)
+        if slot == 1 and object >= 90000 then
+            forward = forward + 1
+            if forward == 3 then
+                error('Simulated auto-map batch failure', 0)
+            end
+        end
+        return bind(_, material, slot, object)
+    end
+    local accepted, why = pcall(dialog.on_auto_map)
+    m.engine.bind = bind
+    assert(
+        not accepted
+            and forward >= 3
+            and why:find('Simulated auto-map batch failure', 1, true)
+            and not why:find('rollback failed', 1, true)
+    )
+    assert(#action_history.undo == history_count and frontend.menu.lut_apply_dialog == dialog)
+    same(before)
+    local function refused(call, text)
+        local native_before, count, history_count = snapshot(), created, #action_history.undo
+        local accepted, why = pcall(call)
+        assert(not accepted and why:find(text, 1, true), 'Mapping did not reject stale/unready data')
+        assert(created == count and #action_history.undo == history_count)
+        same(native_before)
+    end
+    kits.armor = 99
+    refused(dialog.on_auto_map, 'Worn gear changed')
+    kits.armor = 11
+    local original = originals[9020]
+    originals[9020] = nil
+    refused(dialog.on_auto_map, 'Original mapping target changed')
+    originals[9020] = original
+    original = originals[pattern_objects[armor]]
+    originals[pattern_objects[armor]] = nil
+    refused(dialog.on_auto_map, 'Original mapping target changed')
+    originals[pattern_objects[armor]] = original
+    local loaded, old_source = basic_info().raw.tables[1]
+    old_source = loaded.data[0]
+    loaded.data[0] = old_source + 0.125
+    refused(dialog.on_auto_map, 'Imported LUT data changed')
+    loaded.data[0] = old_source
+    local old = bound[armor_targets[4]][1]
+    bound[armor_targets[4]][1] = 888777
+    refused(dialog.on_auto_map, 'Current mapping target changed')
+    bound[armor_targets[4]][1] = old
+    imported()
+    for _ = 1, 5 do
+        runtime.on_update(ctx, 0)
+    end
+    refused(dialog.on_auto_map, 'Imported palette changed')
+    activate('imported_map_armor')
+    dialog, sources, target_items = inspect('Armor')
+    assert(h.set('preserve_emissives', true))
+    local expected = m.original_luts.preserve(one, originals[9001])
+    assert(dialog.on_map(sources['lut001.dds'].id, target_items[1].id))
+    assert(
+        uploads[bound[armor][1]] == ffi.string(expected.data, 23 * 8 * 16),
+        'Mapping did not preserve exact original emissive/zero values'
+    )
+    assert(h.set('preserve_emissives', false))
+    for _, kind in ipairs({ 'helmet', 'cape' }) do
+        activate('imported_map_' .. kind)
+        local name = kind == 'helmet' and 'Helmet' or 'Cape'
+        local d, source_items, targets = inspect(name)
+        local before = snapshot()
+        assert(#targets == 1 and d.on_map(source_items['lut001.dds'].id, targets[1].id))
+        local material = kind == 'helmet' and helmet or cape
+        assert(uploads[bound[material][1]] == ffi.string(one.data, 23 * 8 * 16))
+        for _, other in ipairs(physical) do
+            if other ~= material then
+                assert(bound[other][1] == before[other][1] and bound[other][2] == before[other][2])
+            end
+        end
+    end
+    original = originals[9030]
+    originals[9030] = nil
+    activate('imported_map_armor')
+    dialog = frontend.menu.lut_apply_dialog
+    assert(not dialog.columns[2].items[4].enabled)
+    refused(dialog.on_auto_map, 'current mapping target is not ready')
+    originals[9030] = original
+    metadata = assert(io.open(fixture .. '/resources.tsv', 'wb'))
+    metadata:write('lut002.dds\t8888888888888888\n')
+    metadata:close()
+    assert(accept('ok\nlut002.dds\n', { base = fixture }))
+    for _ = 1, 3 do
+        runtime.on_update(ctx, 0)
+    end
+    activate('imported_map_armor')
+    dialog = assert(frontend.menu.lut_apply_dialog)
+    assert(#dialog.columns[1].items == 1 and not dialog.columns[1].items[1].enabled)
+    refused(dialog.on_auto_map, 'No material LUTs available to auto-map')
+    runtime.on_disable(ctx)
+    m.import_picker.new = make_picker
+    for _, name in ipairs({ 'lut000.dds', 'lut001.dds', 'lut002.dds', 'resources.tsv' }) do
+        os.remove(fixture .. '/' .. name)
+    end
+end
 os.remove(fixture .. '/' .. armor_file)
 os.remove(fixture .. '/' .. filename)
 print(

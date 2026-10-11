@@ -60,9 +60,9 @@ for _, id in ipairs({
     'apply_matching',
     'global_undo',
     'global_redo',
-    'apply_file_armor',
-    'apply_file_helmet',
-    'apply_file_cape',
+    'imported_map_armor',
+    'imported_map_helmet',
+    'imported_map_cape',
     'apply_file_both',
     'apply_import_armor',
     'apply_import_helmet',
@@ -86,7 +86,7 @@ for _, id in ipairs({
         on_activate = function()
             if id == 'populate_worn' then
                 load_actions = load_actions + 1
-            elseif id == 'apply_file_cape' then
+            elseif id == 'imported_map_cape' then
                 cape_actions = cape_actions + 1
             end
             return true
@@ -136,10 +136,10 @@ assert(
     'Import layout did not complete'
 )
 assert(
-    texts['Apply LUT 1 to All Armor LUTs'] and texts['Apply LUT 1 to All Helmet LUTs'],
+    texts['Map LUTs to Armor'] and texts['Map LUTs to Helmet'],
     'Multi-LUT selected-source broadcast controls missing'
 )
-assert(texts['Apply to All Cape LUTs'], 'Imported palette Cape action missing')
+assert(texts['Map LUTs to Cape'], 'Imported palette Cape action missing')
 assert(
     texts.Armor and texts.Helmet and texts['Armor LUT 1'] and texts['Helmet LUT 2'],
     'Target color previews were not grouped'
@@ -245,9 +245,9 @@ for _, font in ipairs({ 12, 20 }) do
     menu.font_size = font
     state.cape_available = false
     local commands = menu.compose(1920, 1200)
-    local cape_button = button_rectangle(commands, 'Apply to All Cape LUTs')
-    local armor_button = button_rectangle(commands, 'Apply to All Armor LUTs')
-    local helmet_button = button_rectangle(commands, 'Apply to All Helmet LUTs')
+    local cape_button = button_rectangle(commands, 'Map LUTs to Cape')
+    local armor_button = button_rectangle(commands, 'Map LUTs to Armor')
+    local helmet_button = button_rectangle(commands, 'Map LUTs to Helmet')
     local preserve = button_rectangle(commands, '[   ] Preserve Original Emissives')
     assert(
         not overlap(cape_button, armor_button)
@@ -260,7 +260,7 @@ for _, font in ipairs({ 12, 20 }) do
     assert(cape_actions == before, 'Missing Cape accepted an Apply click')
     state.cape_available = true
     commands = menu.compose(1920, 1200)
-    cape_button = button_rectangle(commands, 'Apply to All Cape LUTs')
+    cape_button = button_rectangle(commands, 'Map LUTs to Cape')
     tap(cape_button.x + cape_button.w / 2, cape_button.y + cape_button.h / 2)
     assert(cape_actions == before + 1, 'Visible Cape action lost its callback')
 end

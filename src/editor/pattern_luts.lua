@@ -727,6 +727,7 @@ function P.new(deps)
             ink = featured and { 25, 28, 31 },
             size = 13,
             padding = 6,
+            field = id and controls[id] and controls[id].type == 'input' or nil,
         })
     end
     local function picker(ui, column)
@@ -757,15 +758,25 @@ function P.new(deps)
             end
         end
         ui.rect(
-            x - 1,
-            y - 1,
-            width + 2,
-            height + 2,
+            quick and x or x - 1,
+            quick and y or y - 1,
+            quick and width or width + 2,
+            quick and height or height + 2,
             self.column == column and { 244, 202, 53 } or ui.theme.muted,
             nil,
             'swatch_border'
         )
-        deps.swatch(ui, x, y, width, height, color, d and d.data[at + 3] or 1, handle.get('show_alpha'))
+        local inset = quick and 1 or 0
+        deps.swatch(
+            ui,
+            x + inset,
+            y + inset,
+            math.max(0, width - inset * 2),
+            math.max(0, height - inset * 2),
+            color,
+            d and d.data[at + 3] or 1,
+            handle.get('show_alpha')
+        )
         ui.hit(
             x,
             y,
@@ -793,9 +804,19 @@ function P.new(deps)
         return ui.text_metrics and ui.text_metrics(size, text, role)
             or { min_y = 0, height = ui.text_size and ui.text_size(size, role) or size }
     end
-    function self.quick_height(ui)
+    function self.quick_height(ui, cell_height)
         local gap = ui.spacing and ui.spacing(6) or 6
-        return metric(ui, 13, 'Quick Editor: Pattern LUT', 'heading').height + gap * 2 + 28
+        cell_height = math.max(0, math.min(40, tonumber(cell_height) or 28))
+        return metric(ui, 13, 'Quick Editor: Pattern LUT', 'heading').height + gap * 2 + cell_height
+    end
+    local function quick_cells(ui, bounds, heading)
+        local gap = ui.spacing and ui.spacing(6) or 6
+        local available = math.max(1, (bounds.w - gap * 2) / 3)
+        local width =
+            math.max(1, math.min(40, tonumber(bounds.cell_width) or tonumber(bounds.row_height) or 28, available))
+        local height =
+            math.max(1, math.min(40, tonumber(bounds.row_height) or width, bounds.h - heading.height - gap * 2))
+        return gap, width, height
     end
     function self.quick(ui, bounds, kind)
         if not bounds or bounds.w <= 0 or bounds.h <= 0 or not handle then
@@ -805,9 +826,9 @@ function P.new(deps)
         if kind == 'cape' then
             -- Cape may share the material selector, but the Pattern editor's
             -- targets are Armor/Helmet. Do not expose an Armor picker here.
-            local gap = ui.spacing and ui.spacing(6) or 6
             local title = 'Quick Editor: Pattern LUT - Armor / Helmet only'
             local heading = metric(ui, 13, title, 'heading')
+            local gap, width, height = quick_cells(ui, bounds, heading)
             ui.bounded(
                 bounds.x,
                 bounds.y + bounds.h - heading.height - heading.min_y,
@@ -817,8 +838,6 @@ function P.new(deps)
                 bounds.w,
                 'heading'
             )
-            local width = (bounds.w - gap * 2) / 3
-            local height = math.max(1, math.min(28, bounds.h - heading.height - gap * 2))
             for column = 1, 3 do
                 ui.rect(
                     bounds.x + (column - 1) * (width + gap),
@@ -854,9 +873,9 @@ function P.new(deps)
                 note(tostring(why))
             end
         end
-        local gap = ui.spacing and ui.spacing(6) or 6
         local title = 'Quick Editor: Pattern LUT'
         local heading = metric(ui, 13, title, 'heading')
+        local gap, width, height = quick_cells(ui, bounds, heading)
         local top = bounds.y + bounds.h
         local title_y = top - heading.height
         ui.bounded(bounds.x, title_y - heading.min_y, title, 13, ui.theme.white, bounds.w, 'heading')
@@ -864,8 +883,6 @@ function P.new(deps)
         ui.hit(bounds.x, title_y, bounds.w, title_height, function()
             self.show(kind)
         end, nil, nil, 'Open the Pattern LUT workspace.')
-        local width = (bounds.w - gap * 2) / 3
-        local height = math.max(1, math.min(28, bounds.h - heading.height - gap * 2))
         local bottom = bounds.y + gap
         for column = 1, 3 do
             local x = bounds.x + (column - 1) * (width + gap)
@@ -882,7 +899,7 @@ function P.new(deps)
         local pad = ui.spacing and ui.spacing(8) or 8
         local bh = ui.control_height and ui.control_height(13, 6, 26)
             or math.max(26, (ui.text_size and ui.text_size(13) or 13) + 12)
-        local x, width = bounds.x + pad, math.max(1, bounds.w - pad * 2 - 8)
+        local x, width = bounds.x + pad, math.max(1, math.min(760, bounds.w - pad * 2 - 8))
         local top, bottom = bounds.y + bounds.h - pad, bounds.y + pad
         local viewport = math.max(1, top - bottom)
         local scroll = math.max(0, math.min(self.scroll or 0, self.maximum or math.huge))
@@ -909,14 +926,13 @@ function P.new(deps)
                 action(ui, px, y, bw, bh, text, id, enabled, callback, active)
             end
         end
-        local function number(id, name)
+        local function number_at(id, name, px, y, span)
             local height = math.max(bh, 26)
-            local y = take(height)
             if visible(y, height) then
                 local label_width =
-                    math.min(width * 0.34, math.max(110, ui.text_width and ui.text_width(name, 13) or 110))
+                    math.min(span * 0.34, math.max(110, ui.text_width and ui.text_width(name, 13) or 110))
                 ui.bounded(
-                    x,
+                    px,
                     ui.text_y and ui.text_y(y, height, 13, name) or y + 5,
                     name,
                     13,
@@ -925,15 +941,30 @@ function P.new(deps)
                 )
                 ui.number(
                     id,
-                    x + label_width + gap,
+                    px + label_width + gap,
                     y,
-                    width - label_width - gap,
+                    span - label_width - gap,
                     handle.get(id),
                     function() end,
                     d ~= nil,
                     controls[id].drag_min or 0,
                     controls[id].drag_max or 1
                 )
+            end
+        end
+        local function number(id, name)
+            number_at(id, name, x, take(math.max(bh, 26)), width)
+        end
+        local function numbers(fields)
+            local columns = width >= 640 and 2 or 1
+            local span = (width - gap * (columns - 1)) / columns
+            local y
+            for index, field in ipairs(fields) do
+                local column = (index - 1) % columns
+                if column == 0 then
+                    y = take(math.max(bh, 26))
+                end
+                number_at(field[1], field[2], x + column * (span + gap), y, span)
             end
         end
         local function divider()
@@ -1033,10 +1064,12 @@ function P.new(deps)
                         number('pattern_color_alpha', 'Unknown A')
                     end
                 elseif self.column == 2 then
-                    number('pattern_metal_r', 'Metallic R')
-                    number('pattern_metal_g', 'Metallic G')
-                    number('pattern_metal_b', 'Metallic B')
-                    number('pattern_opacity', 'Opacity A')
+                    numbers({
+                        { 'pattern_metal_r', 'Metallic R' },
+                        { 'pattern_metal_g', 'Metallic G' },
+                        { 'pattern_metal_b', 'Metallic B' },
+                        { 'pattern_opacity', 'Opacity A' },
+                    })
                 else
                     button(
                         x,
@@ -1050,10 +1083,12 @@ function P.new(deps)
                         end
                     )
                     if self.raw then
-                        number('pattern_unknown_r', 'Unknown R')
-                        number('pattern_unknown_g', 'Unknown G')
-                        number('pattern_unknown_b', 'Unknown B')
-                        number('pattern_unknown_a', 'Unknown A')
+                        numbers({
+                            { 'pattern_unknown_r', 'Unknown R' },
+                            { 'pattern_unknown_g', 'Unknown G' },
+                            { 'pattern_unknown_b', 'Unknown B' },
+                            { 'pattern_unknown_a', 'Unknown A' },
+                        })
                     end
                 end
             else

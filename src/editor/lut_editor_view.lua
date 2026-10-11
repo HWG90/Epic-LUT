@@ -564,8 +564,9 @@ function V.new(deps)
                 'show_alpha'
             )
         end
-        local quick_height = pattern_host and not pattern_full and pattern.quick_height and pattern.quick_height(ui)
-            or 0
+        local has_quick = pattern_host and not pattern_full and pattern.quick_height ~= nil
+        local quick_overhead = has_quick and pattern.quick_height(ui, 0) or 0
+        local quick_height = quick_overhead
         local grid_top = pattern_full and (header_bottom + (gear_controls and 26 or 0) - 8 * font_scale)
             or top - 129 - extra_header
         local grid_floor = gridbottom + 30 + quick_height
@@ -581,24 +582,27 @@ function V.new(deps)
         end
         local space = math.max(18, grid_top - grid_floor)
         local rows_to_fit = math.min(grid_height, 8)
+        local cells_to_fit = rows_to_fit + (has_quick and 1 or 0)
         local preferred_cell = math.max(4, math.min(self.embedded and grid_height <= 8 and 64 or 40, width_cell))
         local minimum_cell =
             math.min(preferred_cell, math.max(18, ui.control_height and ui.control_height(12, 2, 18) or 18))
-        local cell = math.max(minimum_cell, math.min(preferred_cell, space / rows_to_fit))
+        local cell = math.max(minimum_cell, math.min(preferred_cell, space / cells_to_fit))
         if docking then
             local minimum = self.tools.minimum_height and self.tools.minimum_height(ui) or 140
             local bottom = gridbottom + 8 * font_scale
-            local total = math.max(0, grid_top - bottom - 30 - 8 * font_scale - quick_height)
+            local total = math.max(0, grid_top - bottom - 30 - 8 * font_scale - quick_overhead)
             local minimum_grid = pattern_full and math.max(120, 120 * font_scale)
-                or minimum_cell * math.min(2, grid_height)
+                or minimum_cell * (math.min(2, grid_height) + (has_quick and 1 or 0))
             local maximum = math.max(0, total - minimum_grid - 8 * font_scale)
             minimum = math.min(minimum, maximum)
             local available = math.max(4, total - minimum)
-            cell = math.max(minimum_cell, math.min(preferred_cell, available / rows_to_fit))
-            local rows = math.min(rows_to_fit, math.max(1, math.floor((available + 0.01) / cell)))
+            cell = math.max(minimum_cell, math.min(preferred_cell, available / cells_to_fit))
+            local rows =
+                math.min(rows_to_fit, math.max(1, math.floor((available - (has_quick and cell or 0) + 0.01) / cell)))
             -- Reserve readable rows before giving the remaining height to Tools.
             -- Wider cells must not evict rows when Values or Preview are hidden.
-            local wanted = pattern_full and minimum or math.max(minimum, total - cell * rows - 8 * font_scale)
+            local wanted = pattern_full and minimum
+                or math.max(minimum, total - cell * (rows + (has_quick and 1 or 0)) - 8 * font_scale)
             dock_tools(gridbottom + 16 * font_scale + wanted)
             if tools_bounds then
                 local ratio = self.tools.split_ratio
@@ -622,13 +626,17 @@ function V.new(deps)
                     maximum = maximum,
                     minimum_cell = minimum_cell,
                 }
-                grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30 + quick_height
+                grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30 + quick_overhead
                 space = math.max(4, grid_top - grid_floor)
             end
         end
         -- The final viewport includes the user-selected Tools split. Clamp cell
         -- growth against that height, keeping text readable when scrolling is needed.
-        cell = math.max(minimum_cell, math.min(preferred_cell, space / rows_to_fit))
+        cell = math.max(minimum_cell, math.min(preferred_cell, space / cells_to_fit))
+        if has_quick then
+            quick_height = quick_overhead + cell
+            grid_floor, space = grid_floor + cell, math.max(4, space - cell)
+        end
         if self.tools_splitter then
             self.tools_splitter.cell = cell
         end
@@ -940,13 +948,17 @@ function V.new(deps)
             local bounds = {
                 x = ui.x + 8 * font_scale,
                 y = grid_floor - quick_height - 30,
-                w = left - (portrait_width or 0) - 16 * font_scale,
+                w = left - (portrait_width or 0) - 16 * font_scale - (portrait_width and 8 or 0),
                 h = pattern_full and grid_top - grid_floor + 30 or quick_height,
             }
             if pattern_full then
                 self.pattern_workspace_bounds = bounds
                 pattern.workspace(ui, bounds)
             else
+                local right_edge = bounds.x + bounds.w
+                bounds.x = ui.x + 82
+                bounds.w = math.max(1, math.min(grid_width * cell, right_edge - bounds.x))
+                bounds.cell_width, bounds.row_height = cell, cell
                 self.pattern_quick_bounds = bounds
                 local control = mod.controls['basic_' .. (self.gear or 'armor') .. '_lut']
                 local chosen = control and control.choices[h.get(control.id)]

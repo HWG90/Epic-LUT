@@ -454,6 +454,82 @@ resolution = { 1920, 1080 }
 dialog = open()
 menu.key(121)
 assert(not menu.visible and not menu.lut_apply_dialog, 'F10 retained an orphan per-LUT modal after closing Basic')
+menu.visible, menu.font_size, menu.ui_scale = true, 12, 0.8
+menu.window_width, menu.window_height = 1500, 1000
+local maps, auto_maps = {}, 0
+local mapping = {
+    mode = 'mapping',
+    title = 'Map LUTs to Armor',
+    columns = {
+        {
+            title = 'Imported LUTs',
+            items = {
+                { id = 'source:0', label = 'Imported LUT000', enabled = true },
+                { id = 'source:1', label = 'Imported LUT001', enabled = true },
+                { id = 'source:pattern', label = 'Pattern source', enabled = false },
+            },
+        },
+        {
+            title = 'Current Armor LUTs',
+            items = {
+                { id = 'armor:1', label = 'Armor LUT Slot 1', enabled = true },
+                { id = 'armor:2', label = 'Armor LUT Slot 2', enabled = true },
+                { id = 'armor:gone', label = 'Unavailable target', enabled = false },
+            },
+        },
+    },
+    on_map = function(source, target)
+        maps[#maps + 1] = { source, target }
+        return true, 'Mapped selected LUT'
+    end,
+    on_auto_map = function()
+        auto_maps = auto_maps + 1
+        return true, 'Auto-mapped current slots'
+    end,
+}
+open(mapping)
+assert(
+    label('Auto-map', true) and not label('Select All', true) and not label('Apply', true),
+    'Mapping used preset-selection controls'
+)
+click(assert(label('Armor LUT Slot 1', true)))
+assert(#maps == 0 and mapping.error == 'Choose an imported LUT first.', 'Unselected source invoked a target write')
+click(assert(label('Imported LUT001', true)))
+assert(mapping.source_id == 'source:1' and #maps == 0, 'Choosing an import applied it prematurely')
+click(assert(label('Pattern source', true)))
+assert(mapping.source_id == 'source:1', 'Disabled Pattern source entered material mapping')
+click(assert(label('Armor LUT Slot 2', true)))
+assert(
+    #maps == 1 and maps[1][1] == 'source:1' and maps[1][2] == 'armor:2',
+    'One-click mapping lost source or target ID'
+)
+assert(
+    menu.lut_apply_dialog == mapping and mapping.status == 'Mapped selected LUT' and not mapping.error,
+    'Manual mapping dismissed its dialog or retained stale errors'
+)
+click(assert(label('Unavailable target', true)))
+menu.key(13)
+assert(#maps == 1 and auto_maps == 0 and menu.lut_apply_dialog == mapping, 'Disabled target or Enter applied a batch')
+click(assert(label('Auto-map', true)))
+assert(
+    auto_maps == 1 and #maps == 1 and menu.lut_apply_dialog == mapping,
+    'Auto-map did not invoke its batch callback exactly once'
+)
+mapping.on_auto_map = function()
+    error('Gear changed; reopen mapping')
+end
+click(assert(label('Auto-map', true)))
+assert(
+    mapping.error:find('Gear changed; reopen mapping', 1, true) and label(mapping.error, true),
+    'Failed Auto-map hid its error or dismissed the dialog'
+)
+click(assert(label('Background Apply', false)))
+assert(background_applies == 0 and menu.lut_apply_dialog == mapping, 'Mapping leaked input to Basic')
+click(assert(label('Close', true)))
+assert(not menu.lut_apply_dialog, 'Mapping Close retained the dialog')
+print(
+    'PASS imported mapping modal: source-only selection, one-click targets, disabled and Enter guards, explicit Auto-map, retained errors and modal ownership'
+)
 print(
     'PASS per-LUT native/scroll layout: two independent wheel/drag endpoints, last-row ID hits, enabled-only Enter masks, Pattern detail invariants and bounded frames/glyphs across fonts/scales/screens'
 )

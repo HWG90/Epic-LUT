@@ -66,7 +66,7 @@ Press **F9**, then **Load Current Gear**. Choose the LUT above either column, th
 1. Choose **Import DDS / ZIP / RAR**. Expand archive folders and choose a gold variant folder containing LUTs. Import loads colors without installing archive content.
 2. Choose the imported table: `lut001.dds` is LUT 1. Its swatch strip previews the primary colors.
 3. In Basic, choose the destination LUT above either gear column, then use **Apply Imported Texture** immediately below it. The main button shows the source filename; its arrow changes the source.
-4. Use **Apply LUT N to All Armor / Helmet LUTs** to apply the selected source across that gear.
+4. Use **Map LUTs to Armor**, **Map LUTs to Helmet** or **Map LUTs to Cape** in Basic or Import / Apply. Choose an imported table on the left, then click a current gear slot on the right to apply it. **Auto-map** orders numbered imports numerically: `lut000` goes to slot 1, `lut001` to slot 2, and imports repeat from the beginning when there are more destination slots. Pattern tables stay outside this material cycle; verified accompanying Pattern data is applied with its matching material. Each mapping action supports Undo.
 5. **Apply Matching LUTs** maps patch tables by resource ID to your worn gear. Unmatched, unidentified and duplicate-ID entries stay untouched.
 
 Press **F10**, then **Import / Apply** for full table previews. Every loaded Armor and Helmet LUT appears in its own scrollable column. Click a table's title or texture hash to select it; selecting a title leaves its colors unchanged. **Send to LUT Editor** copies the selected imported table into the editor.
@@ -130,7 +130,7 @@ Preview uses the game's lighter **Game Default UI pipeline**, with an independen
 
 **Save to Armory / Save Current Gear Preset** provides independent **Armor**, **Helmet** and **Cape** checkboxes, initially all checked. Choose the parts to include, press **Save**, then name the preset.
 
-Select a preset to preview it. Name-selector swatches give a quick glance; the full preview shows every saved LUT. Choose which parts to apply to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
+Select a preset to preview it. Name-selector swatches give a quick glance. Compact Armor, Helmet, Cape and Pattern lanes each have independent wheel and scrollbar controls. Identical tables within the same gear family share one preview with a count; every saved binding remains available for application and export. Choose which parts to apply to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
 
 **The Armory** provides independent **Armor**, **Helmet** and **Cape** checkboxes above one **Apply Preset** button. Parts available in the selected preset start checked; unavailable parts are disabled. Apply changes only the checked parts as one undoable action. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
 

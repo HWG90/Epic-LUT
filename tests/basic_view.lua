@@ -30,6 +30,7 @@ local selected, selected_kind
 local selected_calls, identify_calls = 0, 0
 local camo_toggles = {}
 local export_hits = 0
+local mapping_hits = { armor = 0, helmet = 0, cape = 0 }
 local Basic = dofile('src/editor/basic_view.lua')
 local view = Basic.new(
     function()
@@ -133,8 +134,9 @@ end
 for _, id in ipairs({
     'apply_import_armor',
     'apply_import_helmet',
-    'apply_file_armor',
-    'apply_file_helmet',
+    'imported_map_armor',
+    'imported_map_helmet',
+    'imported_map_cape',
     'identify_region',
     'stop_identify',
     'apply_matching',
@@ -156,6 +158,9 @@ for _, id in ipairs({
                 export_hits = export_hits + 1
             elseif id == 'identify_region' then
                 identify_calls = identify_calls + 1
+            elseif id:match('^imported_map_') then
+                local kind = id:match('^imported_map_(.+)$')
+                mapping_hits[kind] = mapping_hits[kind] + 1
             end
             return true
         end,
@@ -263,7 +268,7 @@ for _, c in ipairs(commands) do
     end
 end
 assert(
-    not apply_labels['Apply LUT 1 to All Armor']
+    not apply_labels['Map LUTs to Armor']
         and not apply_labels['Restore Imported']
         and not apply_labels['Apply Imported Texture'],
     'Unused import controls should be hidden'
@@ -276,8 +281,8 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(
-    imported_labels['Apply LUT 1 to All Armor']
-        and imported_labels['Apply LUT 1 to All Helmet']
+    imported_labels['Map LUTs to Armor']
+        and imported_labels['Map LUTs to Helmet']
         and imported_labels['Apply Imported Texture'],
     'Loaded import controls missing'
 )
@@ -438,6 +443,21 @@ local function tap_label(value)
         })
     end
 end
+state.loaded, state.cape_available, state.busy = saved_editor, true, false
+view.action_scroll = 0
+for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+    tap_label('Map LUTs to ' .. kind:gsub('^%l', string.upper))
+    assert(mapping_hits[kind] == 1, 'Basic mapping button lost its shared controller callback: ' .. kind)
+end
+state.busy = true
+for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+    tap_label('Map LUTs to ' .. kind:gsub('^%l', string.upper))
+    assert(mapping_hits[kind] == 1, 'Basic mapping remained active during import: ' .. kind)
+end
+state.busy, state.cape_available = false, false
+tap_label('Map LUTs to Cape')
+assert(mapping_hits.cape == 1, 'Basic mapping exposed an unavailable Cape')
+print('PASS Basic imported mapping: shared Armor/Helmet/Cape controller IDs and busy/unavailable guards')
 for _, format in ipairs({ 1, 2, 3, 4 }) do
     assert(handle.set('export_format', format))
     menu.compose(1920, 1080)
@@ -836,8 +856,8 @@ for _, loaded in ipairs({ false, true }) do
                         'Eight-row Basic layout retained stale scroll or rounding overflow'
                     )
                     assert(
-                        b.row_height >= 29 and math.abs(b.row_height * 8 - b.h) < 0.01,
-                        'Eight-row Basic swatches do not fill their available viewport'
+                        b.row_height >= 29 and b.row_height <= 40 and b.row_height * 8 <= b.h + 0.01,
+                        'Eight-row Basic swatches grew beyond their useful size or viewport'
                     )
                     local previous, square_count = nil, 0
                     local center = window.x + (b.camo_x + b.camo_width / 2) * window.scale
@@ -1500,7 +1520,7 @@ assert(ffi.string(camo_data, 23 * 64 * 16) == unchanged_pixels, 'Basic Camo chec
 package.loaded['epic.player_preview.v1'] = original_portrait
 native.release()
 print(
-    'PASS Basic eight-region layout: all16labels/squares/swatches visible together, stretched fill, no stale or rounded scroll, native ink and eighth-row hits across imports/fonts/screens/scales;64-row scrolling retained'
+    'PASS Basic eight-region layout: all16labels/squares/swatches visible together, capped heights, no stale or rounded scroll, native ink and eighth-row hits across imports/fonts/screens/scales;64-row scrolling retained'
 )
 print(
     'PASS Basic import placement: destination/source/region ink separation, stationary source and camo/copy chrome, first/final independent region clicks and native containment across windows/fonts/scales'

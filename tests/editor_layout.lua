@@ -454,7 +454,11 @@ for _, font in ipairs({ 12, 20 }) do
     local export = assert(label(bulk_commands, 'Export...'))
     local folder = assert(label(bulk_commands, 'Open Export Location'))
     assert(
-        naming.y > export.y + export.size and export.y > folder.y + folder.size,
+        naming.y > export.y + export.size
+            and (
+                export.y > folder.y + folder.size
+                or math.abs(export.y - folder.y) < 0.01 and export.x + #export.text * export.size * 0.5 < folder.x
+            ),
         'Bulk naming/Export/Folder controls collide after font resizing'
     )
 end

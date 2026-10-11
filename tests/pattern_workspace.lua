@@ -209,6 +209,45 @@ assert(
     #swatches == 3 and output.labels['Quick Editor: Pattern LUT'],
     'Quick strip does not show three Pattern swatches'
 )
+for _, rectangle in ipairs(swatches) do
+    assert(rectangle.w == 28 and rectangle.h == 28, 'Quick swatches stretched to fill the pane')
+end
+local sized_ui, sized_output = renderer(20)
+local sized_bounds =
+    { x = quick.x, y = quick.y, w = 1000, h = pattern.quick_height(sized_ui, 38), cell_width = 38, row_height = 38 }
+pattern.quick(sized_ui, sized_bounds, 'helmet')
+assert(
+    pattern.quick_height(sized_ui, 0) + 38 == sized_bounds.h,
+    'Quick height overhead cannot reserve actual row height'
+)
+local sized_count = 0
+for _, rectangle in ipairs(sized_output.rects) do
+    if rectangle.role == 'swatch_border' then
+        sized_count = sized_count + 1
+        assert(
+            rectangle.w == 38 and rectangle.h == 38,
+            'Quick Pattern swatches do not match the material table cell width/height'
+        )
+    end
+end
+assert(sized_count == 3 and scans == 0 and uploads == 0)
+local capped_ui, capped_output = renderer(20)
+pattern.quick(capped_ui, {
+    x = quick.x,
+    y = quick.y,
+    w = 2400,
+    h = pattern.quick_height(capped_ui, 100),
+    cell_width = 100,
+    row_height = 100,
+}, 'helmet')
+local capped_count = 0
+for _, rectangle in ipairs(capped_output.rects) do
+    if rectangle.role == 'swatch_border' then
+        capped_count = capped_count + 1
+        assert(rectangle.w == 40 and rectangle.h == 40, 'Quick painted borders bypassed the40px clamp')
+    end
+end
+assert(capped_count == 3 and scans == 0 and uploads == 0)
 hit(output, 'Quick Editor: Pattern LUT').callback()
 assert(pattern.is_open() and scans == 0, 'Opening workspace bypassed the manual load gate')
 pattern.popup(ui)

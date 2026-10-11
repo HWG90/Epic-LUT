@@ -3038,6 +3038,384 @@ function operations.choose_outfit_luts()
     frontend.menu.lut_apply_dialog = dialog
     return message('Choose current LUTs to apply. Associated Pattern LUTs are always included.')
 end
+function operations.open_import_map(kind, prepared)
+    assert(kind == 'armor' or kind == 'helmet' or kind == 'cape', 'Choose Armor, Helmet or Cape to map')
+    assert(frontend.menu and #palettes > 0, 'Import a LUT file first')
+    assert(not pending, 'Wait for the current import to finish')
+    local missing = false
+    for _, path in ipairs(palettes) do
+        missing = missing or (editor_tables[path] or source_tables[path]) == nil
+    end
+    if not prepared and (index_job or missing) then
+        operations.import_map_request = { kind = kind, palettes = palettes }
+        if not index_job then
+            index_job = table_index.start(palettes, source_tables, import_ids)
+        end
+        return message('Reading imported LUTs; the mapping chooser will open when ready.')
+    end
+    assert(stop_identification(), 'Highlight restoration pending')
+    if pattern_editor then
+        assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+    end
+    refresh(true)
+    if pattern_editor then
+        pattern_editor.scan()
+    end
+    local proof = assert(appearance_proof(), 'Current gear identity unavailable; load current gear again')
+    local catalog = palettes
+    local columns = {
+        { title = 'Imported LUTs', items = {} },
+        { title = 'Current ' .. (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)) .. ' LUTs', items = {} },
+    }
+    local sources, source_order, resources = {}, {}, {}
+    local function pixels(d)
+        return d and ffi.string(d.data, d.width * d.height * 16)
+    end
+    local function resource(path, d)
+        return import_ids[path] or source_tables[path] and source_tables[path].resource or d and d.resource
+    end
+    for index, path in ipairs(catalog) do
+        local d = editor_tables[path] or source_tables[path]
+        local id = 'source:' .. path
+        local name = path:gsub('\\', '/'):match('[^/]+$') or 'DDS'
+        local valid = d and d.data and d.width == 23 and d.height >= 1 and d.height <= 64
+        local r = {
+            id = id,
+            path = path,
+            document = d,
+            width = d and d.width,
+            height = d and d.height,
+            bytes = pixels(d),
+            resource = resource(path, d),
+            ordinal = index,
+            number = tonumber(name:lower():match('lut(%d+)')),
+            enabled = valid == true,
+        }
+        sources[id], source_order[#source_order + 1] = r, r
+        if r.resource and d then
+            resources[r.resource] = resources[r.resource] or {}
+            resources[r.resource][#resources[r.resource] + 1] = r
+        end
+        columns[1].items[#columns[1].items + 1] = {
+            id = id,
+            label = 'Imported LUT ' .. index .. ' / ' .. name,
+            enabled = r.enabled,
+            detail = d and d.width ~= 23 and 'Pattern LUT' or not d and 'Unavailable LUT' or nil,
+        }
+    end
+    local function receipt(b)
+        local original = original_luts and original_luts.get(b.original)
+        return {
+            binding = b,
+            unit = b.unit,
+            mesh = b.mesh,
+            material = b.material,
+            slot = b.slot or m.engine.LUT_SLOT,
+            save_key = b.save_key,
+            original = b.original,
+            current = b.current,
+            resource = original and original.resource,
+            width = original and original.width,
+            height = original and original.height,
+        }
+    end
+    local function validate_receipt(r)
+        local b, original = r.binding, original_luts and original_luts.get(r.original)
+        assert(
+            b.unit == r.unit
+                and b.mesh == r.mesh
+                and b.material == r.material
+                and b.original == r.original
+                and b.save_key == r.save_key
+                and (b.slot or m.engine.LUT_SLOT) == r.slot
+                and present(b)
+                and binding(b) == r.current,
+            'Current mapping target changed; reopen Map LUTs'
+        )
+        assert(
+            original and original.resource == r.resource and original.width == r.width and original.height == r.height,
+            'Original mapping target changed; load current gear again'
+        )
+    end
+    local targets, target_order = {}, {}
+    local container = kind == 'helmet' and 'helmet' or 'armor'
+    for _, choice in ipairs(current_choices(container)) do
+        if choice.kind == kind then
+            local target = { target = import_target(kind, choice.group), members = {}, patterns = {} }
+            local enabled, why = pcall(function()
+                assert(proof[kind], 'Current gear identity unavailable')
+                for _, b in ipairs(groups[choice.group].bindings) do
+                    if m.gear_catalog.kind(b) == kind then
+                        local r = receipt(b)
+                        validate_receipt(r)
+                        assert(r.width == 23, 'Current material LUT is not ready')
+                        target.members[#target.members + 1] = r
+                        for _, group in ipairs(pattern_editor and pattern_editor.all_groups or {}) do
+                            for _, p in ipairs(group.bindings) do
+                                if m.gear_catalog.kind(p) == kind and material_key(p) == material_key(b) then
+                                    target.patterns[material_key(b)] = receipt(p)
+                                end
+                            end
+                        end
+                    end
+                end
+                assert(#target.members > 0, 'Current LUT has no material bindings')
+            end)
+            target.enabled = enabled
+            target.item = {
+                id = choice.key,
+                label = (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)) .. ' LUT ' .. choice.ordinal,
+                enabled = enabled,
+                detail = not enabled and tostring(why):gsub('^.-%.lua:%d+:%s*', '') or nil,
+            }
+            targets[choice.key], target_order[#target_order + 1] = target, target
+            columns[2].items[#columns[2].items + 1] = target.item
+        end
+    end
+    local dialog = {
+        mode = 'mapping',
+        title = 'Map LUTs to ' .. (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)),
+        columns = columns,
+    }
+    local current_source = catalog[handle.get('palette')]
+    dialog.source_id = current_source and sources['source:' .. current_source].enabled and 'source:' .. current_source
+        or nil
+    if not dialog.source_id then
+        for _, r in ipairs(source_order) do
+            if r.enabled then
+                dialog.source_id = r.id
+                break
+            end
+        end
+    end
+    local function validate_catalog()
+        assert(
+            frontend.menu.lut_apply_dialog == dialog
+                and palettes == catalog
+                and #palettes == #source_order
+                and not pending
+                and not index_job,
+            'Imported palette changed; reopen Map LUTs'
+        )
+        for index, r in ipairs(source_order) do
+            local d = editor_tables[r.path] or source_tables[r.path]
+            assert(
+                palettes[index] == r.path
+                    and d == r.document
+                    and resource(r.path, d) == r.resource
+                    and (not d or d.width == r.width and d.height == r.height and pixels(d) == r.bytes),
+                'Imported LUT data changed; reopen Map LUTs'
+            )
+        end
+        local current = appearance_proof()
+        for _, k in ipairs({ 'armor', 'helmet', 'cape' }) do
+            assert(current and current[k] == proof[k], 'Worn gear changed; reopen Map LUTs')
+        end
+    end
+    local function run(assignments)
+        assert(#assignments > 0, 'No material LUTs available to map')
+        validate_catalog()
+        for _, assignment in ipairs(assignments) do
+            assert(
+                assignment.source.enabled and assignment.target.enabled,
+                'Imported source or current mapping target is not ready'
+            )
+            for _, r in ipairs(assignment.target.members) do
+                validate_receipt(r)
+            end
+        end
+        assert(stop_identification(), 'Highlight restoration pending')
+        if pattern_editor then
+            assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+        end
+        refresh(true)
+        if pattern_editor then
+            pattern_editor.scan()
+        end
+        validate_catalog()
+        local plans, included = {}, {}
+        for _, assignment in ipairs(assignments) do
+            local source, target = assignment.source, assignment.target
+            local actual, members = {}, {}
+            for _, group in ipairs(groups) do
+                if group.object == target.target.object then
+                    for _, b in ipairs(group.bindings) do
+                        if m.gear_catalog.kind(b) == kind then
+                            actual[material_key(b) .. ':' .. tostring(b.slot or m.engine.LUT_SLOT)] = b.save_key
+                            members[#members + 1] = b
+                        end
+                    end
+                end
+            end
+            assert(#members == #target.members, 'Current LUT members changed; reopen Map LUTs')
+            for key, value in pairs(target.target.binding_keys) do
+                assert(actual[key] == value, 'Current LUT members changed; reopen Map LUTs')
+            end
+            assignment.members, assignment.paired = members, {}
+            local variants = {}
+            for _, b in ipairs(members) do
+                local original = original_luts and original_luts.get(b.original)
+                local d = source.document
+                if handle.get('preserve_emissives') then
+                    assert(original_luts.loaded, 'Original game LUT snapshots are not ready')
+                    variants[b.original] = variants[b.original]
+                        or { document = m.original_luts.preserve(d, original, d.height > 8), targets = {} }
+                else
+                    variants[b.original] = variants[b.original] or { document = d, targets = {} }
+                end
+                variants[b.original].targets[#variants[b.original].targets + 1] = b
+                -- Only unique, metadata-certified resources at this exact native
+                -- material can establish an imported material/Pattern pair.
+                if source.resource and original.resource == source.resource and #resources[source.resource] == 1 then
+                    local p = target.patterns[material_key(b)]
+                    local candidates = p and p.resource and resources[p.resource]
+                    if
+                        candidates
+                        and #candidates == 1
+                        and candidates[1].document.width == 3
+                        and candidates[1].document.height == 1
+                    then
+                        validate_receipt(p)
+                        assert(
+                            p.width == 3 and p.height == 1 and p.slot == m.engine.PATTERN_SLOT,
+                            'Associated Pattern LUT is not ready'
+                        )
+                        local fresh
+                        for _, group in ipairs(pattern_editor.all_groups or {}) do
+                            for _, current in ipairs(group.bindings) do
+                                if
+                                    m.gear_catalog.kind(current) == kind
+                                    and material_key(current) == material_key(b)
+                                then
+                                    fresh = current
+                                end
+                            end
+                        end
+                        assert(
+                            fresh and fresh.original == p.original and fresh.current == p.current,
+                            'Associated Pattern target changed; reopen Map LUTs'
+                        )
+                        assignment.paired[material_key(b)] = fresh
+                        if not included[fresh] then
+                            plans[#plans + 1] =
+                                { document = candidates[1].document, targets = { fresh }, pattern = true }
+                            included[fresh] = true
+                        end
+                    end
+                end
+            end
+            for _, variant in pairs(variants) do
+                plans[#plans + 1] = variant
+            end
+        end
+        local before = assert(history, 'Mapping history is unavailable; reopen Epic LUT').capture()
+        local previous_proofs, previous_cape = operations.lut_apply_proofs, operations.armory_cape_proof
+        operations.lut_apply_proofs, operations.armory_cape_proof = proof, kind == 'cape' and proof.cape or nil
+        local ok, count = pcall(function()
+            local applied = 0
+            set_default(kind, nil)
+            for _, plan in ipairs(plans) do
+                if plan.pattern then
+                    applied = applied
+                        + assert(operations.pattern_session, 'Pattern application unavailable').apply(
+                            plan.document,
+                            plan.targets
+                        )
+                    remember_appearance(plan.targets, true)
+                else
+                    applied = applied + apply_bindings(plan.document, plan.targets)
+                    for _, b in ipairs(plan.targets) do
+                        basic_documents[kind .. ':' .. tostring(b.original)] =
+                            m.basic_state.clone(plan.document, plan.document.source)
+                    end
+                end
+            end
+            edit.remember_application, resume_done, resume_job = true, true, nil
+            save_setup()
+            return applied
+        end)
+        operations.lut_apply_proofs, operations.armory_cape_proof = previous_proofs, previous_cape
+        if not ok then
+            if before then
+                local restored, why = pcall(restore_action, before, capture_action())
+                assert(restored and why ~= false, tostring(count) .. '; mapping rollback failed: ' .. tostring(why))
+                -- History restoration clones palette lists and edited source
+                -- documents. Reuse this dialog only when every frozen byte
+                -- and resource still agrees with those restored copies.
+                local same = #palettes == #source_order
+                for index, r in ipairs(source_order) do
+                    local d = editor_tables[r.path] or source_tables[r.path]
+                    same = same
+                        and palettes[index] == r.path
+                        and resource(r.path, d) == r.resource
+                        and (
+                            not d and not r.document
+                            or d and d.width == r.width and d.height == r.height and pixels(d) == r.bytes
+                        )
+                end
+                if same then
+                    catalog = palettes
+                    for _, r in ipairs(source_order) do
+                        r.document = editor_tables[r.path] or source_tables[r.path]
+                    end
+                end
+            end
+            error(count, 0)
+        end
+        if before then
+            history.record(before, history.capture())
+        end
+        for _, assignment in ipairs(assignments) do
+            local target = assignment.target
+            target.item.mapped_source, target.item.detail =
+                assignment.source.id, columns[1].items[assignment.source.ordinal].label
+            -- Rebase only destinations we actually wrote. An unrelated foreign
+            -- write must not become a newly accepted mapping receipt.
+            target.members = {}
+            for _, b in ipairs(assignment.members) do
+                target.members[#target.members + 1] = receipt(b)
+            end
+            for key, b in pairs(assignment.paired) do
+                target.patterns[key] = receipt(b)
+            end
+        end
+        if frontend.menu then
+            frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
+        end
+        return true,
+            message('Mapped ' .. #assignments .. ' imported LUTs to ' .. count .. ' exact ' .. kind .. ' bindings.')
+    end
+    dialog.on_map = function(source_id, target_id)
+        local source, target = sources[source_id], targets[target_id]
+        assert(source and target, 'Mapping choices changed; reopen Map LUTs')
+        return run({ { source = source, target = target } })
+    end
+    dialog.on_auto_map = function()
+        local cycle = {}
+        for _, source in ipairs(source_order) do
+            if source.enabled then
+                cycle[#cycle + 1] = source
+            end
+        end
+        table.sort(cycle, function(a, b)
+            if a.number and b.number and a.number ~= b.number then
+                return a.number < b.number
+            end
+            if (a.number ~= nil) ~= (b.number ~= nil) then
+                return a.number ~= nil
+            end
+            return a.ordinal < b.ordinal
+        end)
+        assert(#cycle > 0, 'No material LUTs available to auto-map')
+        local assignments = {}
+        for index, target in ipairs(target_order) do
+            assignments[#assignments + 1] = { source = cycle[(index - 1) % #cycle + 1], target = target }
+        end
+        return run(assignments)
+    end
+    frontend.menu.lut_apply_dialog = dialog
+    return message('Choose an imported LUT, then click the current LUT to map it.')
+end
 local function sync_armory_export()
     if not handle then
         return
@@ -3417,6 +3795,18 @@ local function register(current)
         end,
         outfit_choose_luts_activate = function()
             local ok, value = pcall(operations.choose_outfit_luts)
+            return ok and value or message(tostring(value))
+        end,
+        imported_map_armor_activate = function()
+            local ok, value = pcall(operations.open_import_map, 'armor')
+            return ok and value or message(tostring(value))
+        end,
+        imported_map_helmet_activate = function()
+            local ok, value = pcall(operations.open_import_map, 'helmet')
+            return ok and value or message(tostring(value))
+        end,
+        imported_map_cape_activate = function()
+            local ok, value = pcall(operations.open_import_map, 'cape')
             return ok and value or message(tostring(value))
         end,
         global_undo_activate = function()
@@ -4284,6 +4674,7 @@ local function reset_transient_state()
         outfit_document = operations.outfit_document,
         armory_cape_available = operations.armory_cape_available,
         choose_outfit_luts = operations.choose_outfit_luts,
+        open_import_map = operations.open_import_map,
         sync_armory_cape = operations.sync_armory_cape,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
@@ -5105,9 +5496,18 @@ return {
                 local ok, why = coroutine.resume(index_job)
                 if not ok then
                     index_job = nil
+                    operations.import_map_request = nil
                     message('Could not index all tables: ' .. tostring(why))
                 elseif coroutine.status(index_job) == 'dead' then
                     index_job = nil
+                    local requested = operations.import_map_request
+                    operations.import_map_request = nil
+                    if requested and requested.palettes == palettes then
+                        local ready, value = pcall(operations.open_import_map, requested.kind, true)
+                        if not ready then
+                            message('Could not prepare mapping: ' .. tostring(value))
+                        end
+                    end
                 end
             end
             for _, control in ipairs(api.mods[handle.id].pages[1].controls) do

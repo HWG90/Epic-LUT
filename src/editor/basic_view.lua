@@ -45,7 +45,7 @@ function B.new(info, select_row, help, select_camo_row)
             local featured = enabled ~= false
                 and (id == 'populate_worn' or id == 'export_selected' or id == 'save_dds' or id == 'save_setup')
             local accent = featured and (id == 'populate_worn' and ui.load_color(state.load_seen) or { 244, 202, 53 })
-            ui.button(x, y, w, height or 28, label, function()
+            return ui.button(x, y, w, height or 28, label, function()
                 ui.activate(id)
             end, {
                 enabled = enabled,
@@ -97,7 +97,7 @@ function B.new(info, select_row, help, select_camo_row)
             local checkbox_width = math.max(28, (ui.text_width and ui.text_width('Camo', 12, 'hint') or 28) + gap * 2)
             local checkbox_x = x + region_label_width
             local color_offset = region_label_width + checkbox_width + gap
-            local row_height = rows == 8 and math.max(29, region_height / 8) or 29
+            local row_height = rows == 8 and math.max(29, math.min(40, region_height / 8)) or 29
             local maximum = math.max(0, math.ceil(rows * row_height - region_height - 0.01))
             local scroll = math.min(self.region_scroll[kind] or 0, maximum)
             self.region_maximum[kind], self.region_scroll[kind] = maximum, scroll
@@ -149,22 +149,26 @@ function B.new(info, select_row, help, select_camo_row)
                 )
                 local filename = (state.loaded.source or ''):gsub('\\', '/'):match('[^/]+$') or 'DDS'
                 local arrow_width = math.min(half / 3, math.max(control_height, ui.spacing and ui.spacing(44) or 44))
+                local import_label = 'Apply ' .. filename
+                local import_width = ui.width_cap and ui.width_cap(half, import_label, 'field') or half
+                local action_width = ui.width_cap and ui.width_cap(import_width - arrow_width, import_label, 'action')
+                    or import_width - arrow_width
                 button(
                     x,
                     import_y,
-                    half - arrow_width,
-                    'Apply ' .. filename,
+                    action_width,
+                    import_label,
                     'apply_import_' .. kind,
                     panel ~= nil and panel.group ~= nil and not state.busy,
                     nil,
                     control_height
                 )
-                ui.choice('palette', x + half - arrow_width, import_y, arrow_width, nil, {
+                ui.choice('palette', x + action_width, import_y, arrow_width, nil, {
                     button = true,
                     height = control_height,
                     enabled = not state.busy,
                     anchor_x = x,
-                    anchor_width = half,
+                    anchor_width = action_width + arrow_width,
                     help = 'Choose the imported texture. Press Apply to replace the LUT selected above.',
                 })
             end
@@ -443,11 +447,24 @@ function B.new(info, select_row, help, select_camo_row)
                 end
             end)
             choice('palette')
-            local index, source = state.palette_index or 1, not state.busy
-            buttons({
-                { 'Apply LUT ' .. index .. ' to All Armor', 'apply_file_armor', source },
-                { 'Apply LUT ' .. index .. ' to All Helmet', 'apply_file_helmet', source },
-            })
+            local source = not state.busy
+            local mapping = {
+                { 'Map LUTs to Armor', 'imported_map_armor', source },
+                { 'Map LUTs to Helmet', 'imported_map_helmet', source },
+                { 'Map LUTs to Cape', 'imported_map_cape', source and state.cape_available == true },
+            }
+            local mapping_width = 0
+            for _, item in ipairs(mapping) do
+                mapping_width = math.max(mapping_width, measure(item[1], 14) + gap * 4)
+            end
+            local columns = math.max(1, math.min(3, math.floor((width + gap) / (mapping_width + gap))))
+            for start = 1, #mapping, columns do
+                local group = {}
+                for index = start, math.min(#mapping, start + columns - 1) do
+                    group[#group + 1] = mapping[index]
+                end
+                buttons(group)
+            end
         end
         divider_row()
         paragraph('Armory Presets', 'heading')

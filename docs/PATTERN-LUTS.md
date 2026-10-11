@@ -4,6 +4,8 @@ Open **LUT Editor > Pattern LUT Editor** to replace the material table with the 
 
 Below the ordinary material table, **Quick Editor: Pattern LUT** provides three swatches. An explicit **Load Current Gear** also loads their current Pattern values without opening the workspace or resetting its edited values and history. Click a quick swatch to edit it; the full editor retains the advanced gates for unknown channels. Selecting Armor or Helmet closes the full Pattern workspace without restoring its edited bindings. Quick editing is disabled while a Cape material LUT is selected.
 
+The quick swatches align with the material grid and use its cell size, capped at 40 logical pixels. The layout reserves space for them together with the material rows and keeps a gap before Player Preview. Wider windows keep controls compact; the full Pattern workspace packs channel fields into two columns when space permits.
+
 Pattern LUTs contain **3 columns and 1 row**, bound through a separate pattern texture slot. They do not replace the 23-column material table. A garment can bind a pattern table without visibly using it; **Flash Pattern** identifies where the selected accent appears. **Stop Flash** restores its previous binding.
 
 - **Column 1 RGB:** accent color. Alpha is unknown.

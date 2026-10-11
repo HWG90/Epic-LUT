@@ -136,11 +136,32 @@ function M.pattern_thumbnail(preview, emit, x, y, size)
 end
 -- Custom workspaces use the same surfaces and interaction feedback as MCM.
 -- Accents remain explicit so Load, Save and Export retain their meaning.
+function M.width_cap(ui, available, label, kind, options)
+    local o = options or {}
+    local maximum = 760
+    if kind ~= 'field' then
+        local size = o.size or 14
+        local resolved = ui.text_size and ui.text_size(size, o.role) or size
+        local padding = ui.spacing and ui.spacing(o.padding or 8) or o.padding or 8
+        local measured = ui.text_width and ui.text_width(tostring(label or ''), size, o.role)
+        if not measured then
+            measured = 0
+            for _ in tostring(label or ''):gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+                measured = measured + resolved * 0.62
+            end
+        end
+        maximum = math.min(620, math.max(360, measured + padding * 2))
+    end
+    return math.max(0, math.min(available, maximum))
+end
 function M.custom_ui(ui)
     ui.theme = ui.epic_style and M.epic_palette or M.palette
     ui.decorate = M.custom_ui
     function ui.checkbox(...)
         return M.checkbox(ui, ...)
+    end
+    function ui.width_cap(width, label, kind, options)
+        return M.width_cap(ui, width, label, kind, options)
     end
     function ui.surface_color(x, y, w, h, options)
         local o, T = options or {}, ui.theme
@@ -153,8 +174,9 @@ function M.custom_ui(ui)
     end
     function ui.button(x, y, w, h, label, callback, options)
         local o, T = options or {}, ui.theme
+        w = M.width_cap(ui, w, label, o.field and 'field' or 'action', o)
         if ui.text_button and ui.text_button(x, y, w, h, label, callback, o) then
-            return
+            return w
         end
         local enabled = o.enabled ~= false
         local color = ui.surface_color(x, y, w, h, o)
@@ -189,6 +211,7 @@ function M.custom_ui(ui)
                 callback(...)
             end
         end, nil, nil, o.help)
+        return w
     end
     return ui
 end
@@ -3156,6 +3179,7 @@ function M.new(api, measure, Text)
                             return value
                         end,
                         number = function(id, x, y, width, value, prepare, enabled, lo, hi, selected)
+                            width = M.width_cap(primitives, width, nil, 'field')
                             local control = assert(mod.controls[id])
                             if drag and drag.control == control and drag.widget_x == x and drag.widget_y == y then
                                 value = drag.value
@@ -3311,8 +3335,11 @@ function M.new(api, measure, Text)
                             }
                         end,
                         preset = function(input_id, choice_id, x, y, width)
+                            width = M.width_cap(primitives, width, nil, 'field')
                             local input = assert(mod.controls[input_id])
                             local choice = assert(mod.controls[choice_id])
+                            local popup_width =
+                                M.width_cap(primitives, math.max(width, choice.dropdown_width or 0), nil, 'field')
                             local value = mod.handle.get(choice_id)
                             local editing = self.text_edit
                                 and self.text_edit.mod == mod
@@ -3320,13 +3347,12 @@ function M.new(api, measure, Text)
                             local owner = floating_context
                             if self.dropdown and self.dropdown.control == choice and self.dropdown.mod == mod then
                                 self.dropdown.x, self.dropdown.top = x, y - 4
-                                self.dropdown.width, self.dropdown.owner =
-                                    math.max(width, choice.dropdown_width or 0), owner
+                                self.dropdown.width, self.dropdown.owner = popup_width, owner
                             end
                             choice_bounds[choice] = {
                                 x = x,
                                 top = y - 4,
-                                width = math.max(width, choice.dropdown_width or 0),
+                                width = popup_width,
                                 owner = owner,
                             }
                             choice.input_control = input
@@ -3413,7 +3439,7 @@ function M.new(api, measure, Text)
                                     scroll = math.max(0, value - 4),
                                     x = x,
                                     top = y - 4,
-                                    width = math.max(width, choice.dropdown_width or 0),
+                                    width = popup_width,
                                     owner = owner,
                                 })
                             end)
@@ -3427,8 +3453,14 @@ function M.new(api, measure, Text)
                         choice = function(id, x, y, width, prepare, display)
                             local control = assert(mod.controls[id], 'Editor control missing: ' .. id)
                             display = display or {}
+                            width = M.width_cap(primitives, width, nil, 'field')
                             local anchor_x = display.anchor_x or x
-                            local anchor_width = math.max(display.anchor_width or width, control.dropdown_width or 0)
+                            local anchor_width = M.width_cap(
+                                primitives,
+                                math.max(display.anchor_width or width, control.dropdown_width or 0),
+                                nil,
+                                'field'
+                            )
                             local owner = floating_context
                             local key = tostring(owner and owner.id or 'main') .. ':' .. id
                             choice_widgets[key] = (choice_widgets[key] or 0) + 1
@@ -4928,6 +4960,7 @@ function M.new(api, measure, Text)
         end
         if self.lut_apply_dialog then
             local dialog = self.lut_apply_dialog
+            local mapping = dialog.mode == 'mapping'
             local pad = 14
             local dw, dh = math.min(800, ww - 48), math.min(580, wh - 64)
             local px, py = (ww - dw) / 2, (wh - dh) / 2
@@ -4975,7 +5008,22 @@ function M.new(api, measure, Text)
                     self.notice = dialog.error
                 end
             end
-            dialog.apply = apply
+            dialog.apply = not mapping and apply or nil
+            local function map_call(callback, ...)
+                if self.lut_apply_dialog ~= dialog or type(callback) ~= 'function' then
+                    return
+                end
+                local called, ok, status = pcall(callback, ...)
+                if called and ok ~= false then
+                    dialog.error = nil
+                    dialog.status = tostring(status or 'Mapping applied')
+                    self.notice = dialog.status
+                else
+                    dialog.status = nil
+                    dialog.error = tostring(called and status or ok)
+                    self.notice = dialog.error
+                end
+            end
             rect(px, py, dw, dh, T.panel, 0.99)
             rect(px, py + dh - header_height, dw, header_height, T.header)
             bounded(
@@ -4996,14 +5044,34 @@ function M.new(api, measure, Text)
                     end
                 end
             end
-            drawing.button(px + pad, toolbar_y, 140, bh, 'Select All', function()
-                select_all(true)
-            end)
-            drawing.button(px + pad + 148, toolbar_y, 140, bh, 'Clear All', function()
-                select_all(false)
-            end)
+            if mapping then
+                drawing.button(px + pad, toolbar_y, 140, bh, 'Auto-map', function()
+                    map_call(dialog.on_auto_map)
+                end, {
+                    enabled = type(dialog.on_auto_map) == 'function',
+                    accent = accent,
+                    ink = T.background,
+                })
+            else
+                drawing.button(px + pad, toolbar_y, 140, bh, 'Select All', function()
+                    select_all(true)
+                end)
+                drawing.button(px + pad + 148, toolbar_y, 140, bh, 'Clear All', function()
+                    select_all(false)
+                end)
+            end
             local caption_y = toolbar_y - hint_height - 4
-            bounded(px + pad, caption_y, 'Matching Pattern LUTs are always included.', 12, muted, dw - pad * 2, 'hint')
+            bounded(
+                px + pad,
+                caption_y,
+                mapping
+                        and 'Choose an imported LUT, then click its destination. Auto-map repeats imports in slot order.'
+                    or 'Matching Pattern LUTs are always included.',
+                12,
+                muted,
+                dw - pad * 2,
+                'hint'
+            )
             local column_top = caption_y - hint_height - 4
             local body_top = column_top - bh
             local body_bottom = py + bh + hint_height + pad * 2
@@ -5029,7 +5097,23 @@ function M.new(api, measure, Text)
                     local y = body_top + column.scroll - index * row_height
                     if y >= body_bottom - 0.01 and y + bh <= body_top + 0.01 then
                         local enabled = item.enabled ~= false
-                        drawing.checkbox(cx, y, 28, bh, enabled and item.checked == true, enabled)
+                        if mapping and ci == 2 then
+                            rect(cx, y, column_width - 10, bh, T.header)
+                        else
+                            drawing.checkbox(
+                                cx,
+                                y,
+                                28,
+                                bh,
+                                enabled
+                                    and (
+                                        mapping and dialog.source_id == item.id
+                                        or not mapping and item.checked == true
+                                    ),
+                                enabled
+                            )
+                        end
+                        local label_offset = mapping and ci == 2 and 8 or 34
                         local detail_width = item.detail
                                 and math.min(
                                     column_width * 0.4,
@@ -5037,12 +5121,12 @@ function M.new(api, measure, Text)
                                 )
                             or 0
                         bounded(
-                            cx + 34,
+                            cx + label_offset,
                             text_y(y, bh, 14, item.label or item.id),
                             item.label or item.id,
                             14,
                             enabled and white or muted,
-                            column_width - 46 - detail_width
+                            column_width - label_offset - 12 - detail_width
                         )
                         if item.detail then
                             bounded(
@@ -5057,7 +5141,17 @@ function M.new(api, measure, Text)
                         end
                         hit(cx, y, column_width - 10, bh, function()
                             if enabled then
-                                item.checked = item.checked ~= true
+                                if mapping then
+                                    if ci == 1 then
+                                        dialog.source_id = item.id
+                                    elseif dialog.source_id then
+                                        map_call(dialog.on_map, dialog.source_id, item.id)
+                                    else
+                                        dialog.error = 'Choose an imported LUT first.'
+                                    end
+                                else
+                                    item.checked = item.checked ~= true
+                                end
                             end
                         end, nil, nil, item.detail)
                     end
@@ -5077,20 +5171,24 @@ function M.new(api, measure, Text)
                     )
                 end
             end
-            if dialog.error then
-                bounded(px + pad, py + bh + pad + 4, dialog.error, 12, muted, dw - pad * 2, 'hint')
+            if dialog.error or dialog.status then
+                bounded(px + pad, py + bh + pad + 4, dialog.error or dialog.status, 12, muted, dw - pad * 2, 'hint')
             end
             local _, any = selected_ids()
-            drawing.button(
-                px + pad,
-                py + pad,
-                (dw - pad * 2 - 8) / 2,
-                bh,
-                'Apply',
-                apply,
-                { enabled = any, accent = any and accent, ink = T.background }
-            )
-            drawing.button(px + dw / 2 + 4, py + pad, (dw - pad * 2 - 8) / 2, bh, 'Cancel', cancel)
+            if mapping then
+                drawing.button(px + pad, py + pad, 140, bh, 'Close', cancel)
+            else
+                drawing.button(
+                    px + pad,
+                    py + pad,
+                    (dw - pad * 2 - 8) / 2,
+                    bh,
+                    'Apply',
+                    apply,
+                    { enabled = any, accent = any and accent, ink = T.background }
+                )
+                drawing.button(px + dw / 2 + 4, py + pad, (dw - pad * 2 - 8) / 2, bh, 'Cancel', cancel)
+            end
             dialog.bounds = { x = px, y = py, w = dw, h = dh }
             frame('lut_apply_dialog', px, py, dw, dh)
             paint_surface(first, popup_planes.dialog, 20)

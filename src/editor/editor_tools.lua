@@ -1,6 +1,7 @@
 -- Optional editor tools. Only the active tab composes controls; document actions
 -- remain in the editor registry so Basic and Advanced share the same behavior.
 local T = {}
+T.MAX_CONTENT_WIDTH, T.MAX_TAB_WIDTH = 760, 180
 local tabs = { 'import', 'rows', 'export', 'options' }
 local labels = { import = 'Import', rows = 'Rows', export = 'Export', options = 'Options' }
 local accent, ink = { 244, 202, 53 }, { 25, 28, 31 }
@@ -102,15 +103,32 @@ function T.new(deps)
         end
         local theme = ui.theme
         local white, muted = theme.white, theme.muted
-        local bx, width = x + 14, w - 36
+        local bx, frame_width = x + 14, w - 36
+        local width = math.min(T.MAX_CONTENT_WIDTH, frame_width)
         local dock_label = docked and 'Undock' or 'Dock'
         local dock_width = math.max(36, bh)
-        local dock_x = docked and bx + width - dock_width - math.max(28, bh) - 6 or x + w - 38 - dock_width
-        local half = (width - 8) / 2
+        local dock_x = docked and bx + frame_width - dock_width - math.max(28, bh) - 6 or x + w - 38 - dock_width
         local tab_y = y + ht - header_height - gap - bh
-        local top = tab_y - math.max(40, (ui.text_size and ui.text_size(14, 'hint') or 14) + gap * 2)
+        local close_width = docked and math.max(28, bh) or 0
+        local tab_available = frame_width - (docked and dock_width + close_width + 18 or 0)
+        local tab_rows, tab_cursor = 1, 0
+        local tab_layout = {}
+        for _, tab in ipairs(tabs) do
+            local measured = ui.text_width and ui.text_width(labels[tab], 14)
+                or #labels[tab] * (ui.text_size and ui.text_size(14) or 14) * 0.62
+            local tw =
+                math.min(T.MAX_TAB_WIDTH, tab_available, math.max(72, measured + (ui.spacing and ui.spacing(20) or 20)))
+            if tab_cursor > 0 and tab_cursor + tw > tab_available then
+                tab_rows, tab_cursor = tab_rows + 1, 0
+            end
+            tab_layout[#tab_layout + 1] =
+                { tab = tab, x = bx + tab_cursor, y = tab_y - (tab_rows - 1) * (bh + 6), w = tw }
+            tab_cursor = tab_cursor + tw + 6
+        end
+        local body_tab_y = tab_y - (tab_rows - 1) * (bh + 6)
+        local top = body_tab_y - math.max(40, (ui.text_size and ui.text_size(14, 'hint') or 14) + gap * 2)
         local step = bh + gap
-        local clip_bottom, clip_top = y + 12, tab_y - gap
+        local clip_bottom, clip_top = y + 12, body_tab_y - gap
         local offset = docked and self.scroll or 0
         local lowest = top
         local function visible(py, height)
@@ -155,10 +173,27 @@ function T.new(deps)
                 accent = featured and color,
                 ink = featured and ink,
                 help = help,
+                field = id and controls[id].type == 'input',
             })
         end
+        local function natural_width(text, field)
+            local measured = ui.text_width and ui.text_width(text, 14)
+                or #text * (ui.text_size and ui.text_size(14) or 14) * 0.62
+            local wanted =
+                math.min(width, math.max(field and 260 or 100, measured + (ui.spacing and ui.spacing(24) or 24)))
+            return ui.width_cap and ui.width_cap(wanted, text, field and 'field' or 'action') or wanted
+        end
         local function action(py, text, id, enabled, help)
-            button(bx, py, width, text, id, enabled, nil, help)
+            button(
+                bx,
+                py,
+                natural_width(text, id and controls[id] and controls[id].type == 'input'),
+                text,
+                id,
+                enabled,
+                nil,
+                help
+            )
         end
         local function choice(id, py, bw, px)
             py = py + offset
@@ -171,6 +206,19 @@ function T.new(deps)
             if visible(py, 1) then
                 ui.rect(bx, py, width, 1, theme.line)
             end
+        end
+        local function action_row(py, entries)
+            local px, line = bx, py
+            for _, entry in ipairs(entries) do
+                local bw =
+                    natural_width(entry[1], entry[2] and controls[entry[2]] and controls[entry[2]].type == 'input')
+                if px > bx and px + bw > bx + width then
+                    line, px = line - step, bx
+                end
+                button(px, line, bw, entry[1], entry[2], entry[3], entry[4], entry[5])
+                px = px + bw + gap
+            end
+            return line - step
         end
         local function preview(live)
             if ui.preview then
@@ -187,11 +235,11 @@ function T.new(deps)
                 or y + ht - header_height + (header_height - heading_size) / 2
             ui.bounded(bx, title_y, 'LUT Editor Tools', 14, white, dock_x - bx - 8, 'heading')
         end
-        local close_width = docked and math.max(28, bh) or 0
-        local tabw = (width - (docked and dock_width + close_width + 36 or 18)) / #tabs
-        for i, tab in ipairs(tabs) do
-            local tx = bx + (i - 1) * (tabw + 6)
-            ui.button(tx, tab_y, tabw, bh, labels[tab], function()
+        self.tab_bounds = tab_layout
+        self.content_bounds = { x = bx, y = clip_bottom, w = width, h = math.max(0, clip_top - clip_bottom) }
+        for _, layout in ipairs(tab_layout) do
+            local tab = layout.tab
+            ui.button(layout.x, layout.y, layout.w, bh, labels[tab], function()
                 self.open(tab)
             end, { selected = self.tab == tab })
         end
@@ -207,56 +255,104 @@ function T.new(deps)
         })
         dock_icon(ui, dock_x, dock_y, dock_width, bh, docked)
         if docked then
-            ui.button(bx + width - close_width, tab_y, close_width, bh, 'X', self.close, { help = 'Close Tools.' })
+            ui.button(
+                bx + frame_width - close_width,
+                tab_y,
+                close_width,
+                bh,
+                'X',
+                self.close,
+                { help = 'Close Tools.' }
+            )
         end
 
+        local function choice_width(id)
+            local control = controls[id]
+            local value = control and control.choices and control.choices[h.get(id)] or ''
+            local measured = ui.text_width and ui.text_width(value, 14) or #tostring(value) * 8
+            return math.min(width, math.max(240, measured + 112))
+        end
+        local function mapping_actions()
+            local entries = {}
+            for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                if controls['imported_map_' .. kind] then
+                    entries[#entries + 1] = {
+                        'Map LUTs to ' .. kind:sub(1, 1):upper() .. kind:sub(2),
+                        'imported_map_' .. kind,
+                        true,
+                    }
+                end
+            end
+            return entries
+        end
         if self.tab == 'import' then
             label(top, 'Import a palette, then choose the table to edit or apply.', muted, 'hint')
+            local first = { { 'Import DDS / ZIP / RAR...', 'browse', true } }
             if controls.populate_worn then
-                action(
-                    top - step * 6.5,
+                first[#first + 1] = {
                     'Load Current Gear',
                     'populate_worn',
                     true,
-                    'Read every worn LUT slot without changing its colors.'
-                )
+                    nil,
+                    'Read every worn LUT slot without changing its colors.',
+                }
             end
-            action(top - step, 'Import DDS / ZIP / RAR...', 'browse', true)
-            choice('palette', top - step * 2)
-            button(bx, top - step * 3, half, 'Preview Palette', nil, editor.preview ~= nil, function()
-                preview(false)
-            end)
-            button(
-                bx + half + 8,
-                top - step * 3,
-                half,
-                'Send to LUT Editor',
-                'save_palette',
-                true,
-                nil,
-                'Replace the editor table with the selected imported LUT. Gear is unchanged until applied.'
-            )
-            divider(top - step * 3 - 10)
+            local cursor = action_row(top - step, first)
+            choice('palette', cursor, choice_width('palette'))
+            cursor = action_row(cursor - step, {
+                {
+                    'Preview Palette',
+                    nil,
+                    editor.preview ~= nil,
+                    function()
+                        preview(false)
+                    end,
+                },
+                {
+                    'Send to LUT Editor',
+                    'save_palette',
+                    true,
+                    nil,
+                    'Replace the editor table with the selected imported LUT. Gear is unchanged until applied.',
+                },
+            })
+            divider(cursor + gap / 2)
+            cursor = cursor - gap
             if controls.editor_load_armor then
                 local gear = editor.gear or 'armor'
                 local selector = controls['basic_' .. gear .. '_lut']
                 local selected = selector and selector.choices[h.get('basic_' .. gear .. '_lut')]
                 local target = selected and selected:match('^Cape') and selected
                     or (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUT ' .. h.get('basic_' .. gear .. '_lut')
-                action(top - step * 4.3, 'Apply to ' .. target, 'editor_apply_' .. gear, d ~= nil)
-                action(
-                    top - step * 5.3,
-                    'Apply to All ' .. (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUTs',
-                    'editor_all_' .. gear,
-                    d ~= nil,
-                    'Apply the current editor table to every LUT on this gear. Send an imported LUT to the editor first.'
-                )
+                local mapping = mapping_actions()
+                if #mapping > 0 then
+                    action(cursor, 'Apply to ' .. target, 'editor_apply_' .. gear, d ~= nil)
+                    action_row(cursor - step, mapping)
+                else
+                    action_row(cursor, {
+                        { 'Apply to ' .. target, 'editor_apply_' .. gear, d ~= nil },
+                        {
+                            'Apply to All ' .. (gear == 'armor' and 'Armor' or 'Helmet') .. ' LUTs',
+                            'editor_all_' .. gear,
+                            d ~= nil,
+                            nil,
+                            'Apply the current editor table to every LUT on this gear. Send an imported LUT to the editor first.',
+                        },
+                    })
+                end
             else
-                choice('lut', top - step * 4.3, half)
-                button(bx + half + 8, top - step * 4.3, half, 'Preview Live LUT', nil, editor.preview ~= nil, function()
-                    preview(true)
-                end)
-                action(top - step * 5.3, 'Apply to checked targets', 'apply_editor', d ~= nil)
+                choice('lut', cursor, choice_width('lut'))
+                action_row(cursor - step, {
+                    {
+                        'Preview Live LUT',
+                        nil,
+                        editor.preview ~= nil,
+                        function()
+                            preview(true)
+                        end,
+                    },
+                    { 'Apply to checked targets', 'apply_editor', d ~= nil },
+                })
             end
         elseif self.tab == 'rows' then
             local selected = editor.selection
@@ -264,42 +360,56 @@ function T.new(deps)
             local target = multiple and ('Selected rows: ' .. selected.r1 .. '-' .. selected.r2)
                 or ('Selected row: ' .. h.get('edit_row'))
             label(top, target .. (d and ' / ' .. d.height or ' / Load a LUT first'), nil, 'heading')
+            local cursor = top - step
             if ui.preset then
-                local py = top - step + offset
+                local py = cursor + offset
                 if visible(py, 26) then
-                    ui.preset('row_preset', 'row_preset_select', bx, py, width)
+                    local name = h.get('row_preset') or ''
+                    local measured = ui.text_width and ui.text_width(name, 14) or #name * 8
+                    ui.preset('row_preset', 'row_preset_select', bx, py, math.min(width, math.max(360, measured + 240)))
                 end
             else
-                action(top - step, 'Preset: ' .. h.get('row_preset'), 'row_preset', true)
+                action(cursor, 'Preset: ' .. h.get('row_preset'), 'row_preset', true)
             end
-            action(top - step * 2, 'Save selected row', 'save_row', d ~= nil)
-            action(top - step * 3, multiple and 'Apply preset to rows' or 'Apply preset to row', 'load_row', d ~= nil)
-            divider(top - step * 3 - 10)
-            button(bx, top - step * 4.3, half, 'Copy row', 'copy_row', d ~= nil)
-            button(bx + half + 8, top - step * 4.3, half, 'Paste row', 'paste_row', d ~= nil and editor.row_clip ~= nil)
-            button(bx, top - step * 5.3, half, 'Reset row', 'reset_row', d ~= nil)
-            button(bx + half + 8, top - step * 5.3, half, 'Reset cell', 'reset_cell', d ~= nil)
-            action(top - step * 6.3, 'Import Paydex JSON...', 'import_paydex_rows', true)
+            cursor = action_row(cursor - step, {
+                { 'Save selected row', 'save_row', d ~= nil },
+                { multiple and 'Apply preset to rows' or 'Apply preset to row', 'load_row', d ~= nil },
+            })
+            divider(cursor + gap / 2)
+            cursor = action_row(cursor - gap, {
+                { 'Copy row', 'copy_row', d ~= nil },
+                { 'Paste row', 'paste_row', d ~= nil and editor.row_clip ~= nil },
+            })
+            cursor = action_row(cursor, {
+                { 'Reset row', 'reset_row', d ~= nil },
+                { 'Reset cell', 'reset_cell', d ~= nil },
+            })
+            action(cursor, 'Import Paydex JSON...', 'import_paydex_rows', true)
         elseif self.tab == 'export' then
             label(top, 'Choose what to export. A timestamp is added to each filename.', muted, 'hint')
-            action(
-                top - step,
-                'Name: ' .. (ui.input_value and ui.input_value('save_name') or h.get('save_name')),
-                'save_name',
-                true
-            )
-            choice('export_format', top - step * 2)
-            local bulk = h.get('export_format') == 4
-            if bulk then
-                choice('dds_naming', top - step * 3)
+            local cursor = top - step
+            local name = 'Name: ' .. (ui.input_value and ui.input_value('save_name') or h.get('save_name'))
+            local name_width, format_width = natural_width(name, true), choice_width('export_format')
+            button(bx, cursor, name_width, name, 'save_name', true)
+            if name_width + gap + format_width <= width then
+                choice('export_format', cursor, format_width, bx + name_width + gap)
+            else
+                cursor = cursor - step
+                choice('export_format', cursor, format_width)
             end
-            local export_row = bulk and 4 or 3
-            action(top - step * export_row, 'Export...', 'export_selected', d ~= nil or h.get('export_format') >= 3)
-            divider(top - step * export_row - 10)
-            action(top - step * (export_row + 1.3), 'Open Export Location', 'open_export', true)
+            cursor = cursor - step
+            if h.get('export_format') == 4 then
+                choice('dds_naming', cursor, choice_width('dds_naming'))
+                cursor = cursor - step
+            end
+            cursor = action_row(cursor, {
+                { 'Export...', 'export_selected', d ~= nil or h.get('export_format') >= 3 },
+                { 'Open Export Location', 'open_export', true },
+            })
+            divider(cursor + gap / 2)
             if controls.include_capes_in_armor_exports then
                 action(
-                    top - step * (export_row + 2.3),
+                    cursor - gap,
                     '[ '
                         .. (h.get('include_capes_in_armor_exports') and 'x' or ' ')
                         .. ' ] Include Capes in Armor Exports',
@@ -310,40 +420,34 @@ function T.new(deps)
             end
         else
             label(top, 'Apply and restoration options for the current gear.', muted, 'hint')
-            action(top - step, 'Load Debug LUT', 'load_debug_lut', true)
-            action(
-                top - step * 2,
-                '[ '
-                    .. (controls.preserve_emissives and h.get('preserve_emissives') and 'x' or ' ')
-                    .. ' ] Preserve Original Emissives',
-                'preserve_emissives',
-                true
-            )
+            local cursor = action_row(top - step, {
+                { 'Load Debug LUT', 'load_debug_lut', true },
+                {
+                    '[ '
+                        .. (controls.preserve_emissives and h.get('preserve_emissives') and 'x' or ' ')
+                        .. ' ] Preserve Original Emissives',
+                    'preserve_emissives',
+                    true,
+                },
+            })
             if controls.editor_load_armor then
-                button(bx, top - step * 3, half, 'All Armor LUTs', 'editor_all_armor', d ~= nil)
-                button(bx + half + 8, top - step * 3, half, 'All Helmet LUTs', 'editor_all_helmet', d ~= nil)
+                local mapping = mapping_actions()
+                cursor = action_row(cursor, #mapping > 0 and mapping or {
+                    { 'All Armor LUTs', 'editor_all_armor', d ~= nil },
+                    { 'All Helmet LUTs', 'editor_all_helmet', d ~= nil },
+                })
             else
-                button(
-                    bx,
-                    top - step * 3,
-                    half,
-                    '[ ' .. (h.get('target_helmet') and 'x' or ' ') .. ' ] Helmet',
-                    'target_helmet',
-                    true
-                )
-                button(
-                    bx + half + 8,
-                    top - step * 3,
-                    half,
-                    '[ ' .. (h.get('target_armor') and 'x' or ' ') .. ' ] Armor',
-                    'target_armor',
-                    true
-                )
+                cursor = action_row(cursor, {
+                    { '[ ' .. (h.get('target_helmet') and 'x' or ' ') .. ' ] Helmet', 'target_helmet', true },
+                    { '[ ' .. (h.get('target_armor') and 'x' or ' ') .. ' ] Armor', 'target_armor', true },
+                })
             end
-            divider(top - step * 3 - 10)
-            action(top - step * 4.3, 'Restore Arrowhead LUT (Original)', 'restore', true)
-            action(top - step * 5.3, 'Reset imported table', 'reset_custom', d ~= nil)
-            action(top - step * 6.3, 'Save applied setup', 'save_setup', true)
+            divider(cursor + gap / 2)
+            cursor = action_row(cursor - gap, {
+                { 'Restore Arrowhead LUT (Original)', 'restore', true },
+                { 'Reset imported table', 'reset_custom', d ~= nil },
+            })
+            action(cursor, 'Save applied setup', 'save_setup', true)
         end
         if docked then
             local viewport = math.max(0, clip_top - clip_bottom)

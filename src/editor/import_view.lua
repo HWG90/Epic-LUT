@@ -645,16 +645,16 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 rx + 12,
                 actions - 125,
                 apply_width,
-                'Apply LUT ' .. (state.palette_index or 1) .. ' to All Armor LUTs',
-                'apply_file_armor',
+                'Map LUTs to Armor',
+                'imported_map_armor',
                 state.loaded ~= nil and not state.busy
             )
             button(
                 rx + 18 + apply_width,
                 actions - 125,
                 apply_width,
-                'Apply LUT ' .. (state.palette_index or 1) .. ' to All Helmet LUTs',
-                'apply_file_helmet',
+                'Map LUTs to Helmet',
+                'imported_map_helmet',
                 state.loaded ~= nil and not state.busy
             )
             actions = actions - 70
@@ -663,26 +663,26 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 rx + 12,
                 actions - 36,
                 apply_width,
-                'Apply to All Armor LUTs',
-                'apply_file_armor',
+                'Map LUTs to Armor',
+                'imported_map_armor',
                 state.loaded ~= nil and not state.busy
             )
             button(
                 rx + 18 + apply_width,
                 actions - 36,
                 apply_width,
-                'Apply to All Helmet LUTs',
-                'apply_file_helmet',
+                'Map LUTs to Helmet',
+                'imported_map_helmet',
                 state.loaded ~= nil and not state.busy
             )
-            action_text(actions - 55, 'Applies to every LUT on that gear.', 'hint', muted)
+            action_text(actions - 55, 'Choose imported textures and map them to current gear slots.', 'hint', muted)
         end
         button(
             rx + 12,
             actions - 89,
             rw - 24,
-            'Apply to All Cape LUTs',
-            'apply_file_cape',
+            'Map LUTs to Cape',
+            'imported_map_cape',
             state.cape_available == true and state.loaded ~= nil and not state.busy
         )
         actions = actions - 38

@@ -70,20 +70,22 @@ function pattern.close()
     pattern.opened = false
     return true
 end
-function pattern.quick_height(ui)
-    return 34 + (ui.text_size and ui.text_size(13, 'heading') or 13) + (ui.spacing and ui.spacing(6) or 6)
+function pattern.quick_height(ui, cell_height)
+    return (ui.text_size and ui.text_size(13, 'heading') or 13)
+        + (ui.spacing and ui.spacing(6) or 6) * 2
+        + math.max(0, math.min(40, cell_height or 28))
 end
 function pattern.quick(ui, bounds, kind)
     quick_bounds, quick_kind = bounds, kind
     local gap = ui.spacing and ui.spacing(6) or 6
-    local width = (bounds.w - gap * 2) / 3
+    local width = math.min(40, bounds.cell_width, (bounds.w - gap * 2) / 3)
     ui.bounded(bounds.x, bounds.y + bounds.h - 18, 'Quick Pattern Host', 13, ui.theme.white, bounds.w, 'heading')
     for column = 1, 3 do
         ui.rect(
             bounds.x + (column - 1) * (width + gap),
             bounds.y + 2,
             width,
-            26,
+            bounds.row_height,
             { 30 * column, 50, 80 },
             nil,
             'pattern_quick_swatch'
@@ -256,7 +258,7 @@ local function contained(bounds)
     local tools = assert(editor.tools.bounds)
     assert(bounds.w > 0 and bounds.h > 0)
     assert(bounds.y >= tools.y + tools.h, 'Pattern surface overlaps docked Tools')
-    assert(bounds.x + bounds.w <= portrait_bounds.x, 'Pattern surface overlaps Player Preview')
+    assert(bounds.x + bounds.w <= portrait_bounds.x - 6, 'Pattern surface has no gap before Player Preview')
     local footer = assert(label(compose(), 'Brush'))
     local bottom = select(2, point(bounds.x, bounds.y))
     assert(bottom >= footer.y + footer.size, 'Pattern surface overlaps the material footer')
@@ -315,6 +317,15 @@ for _, c in ipairs(commands) do
     end
 end
 assert(swatches == 3 and quick_kind == 'armor')
+assert(quick_bounds.x == editor.grid_bounds.x + 82, 'Quick Pattern does not align with the first material cell')
+assert(
+    math.abs(quick_bounds.w - quick_bounds.cell_width * 23) < 0.01,
+    'Quick Pattern width does not track the material table'
+)
+assert(
+    quick_bounds.row_height == editor.tools_splitter.cell and quick_bounds.row_height <= 40,
+    'Quick Pattern does not track compact material cell size'
+)
 no_pattern_popup()
 menu.font_size, menu.ui_scale, menu.window_height = 20, 0.65, 1300
 commands = compose()
