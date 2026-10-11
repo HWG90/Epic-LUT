@@ -1,3 +1,23 @@
+# Epic LUT R5.7.1
+
+- Fixed patch exports losing distinct palettes on shared gear resources; keep verified material, mesh and kit assignments, with exact original values for unselected slots.
+- Fixed the export crash and background cache validation for large GPU patches. Export errors now report their actual cause; Load Current Gear retries failed reads.
+- MASTER OF CEREMONY and MASTER-CRAFTED-ARMOR exports passed actual-output checks; the installed exported patch was confirmed working in-game.
+- Basic prioritizes all eight regions. Load Current Gear covers Armor, Helmet and Cape.
+- Added initially unchecked Camo boxes per region, working Pattern/colorway recipes, and four tints above the selectors. Tint edits switch to Current / custom without closing the menu.
+- One Map LUTs to Gear dialog in Basic and Advanced, with Armor, Helmet and Cape columns. Auto-map follows numbered imports and repeats them as needed for each checked gear column.
+- Imported-texture Apply buttons now include a source dropdown next to their destination LUT selector.
+- Two quick Pattern swatches initialize below the LUT table. The full Pattern editor replaces the table workspace while preserving edits, channels, import/export and Undo/Redo.
+- Compact controls and table cells maximize visible rows. Docked Tools starts open; undocked Tools starts closed. Tools uses a remembered resizable split and independent scrolling.
+- Armory Save and Apply use Armor, Helmet and Cape checkboxes. Basic adds per-LUT selection and Select All with matching Patterns. Compact preview lanes show all gear and Patterns with scrollbars.
+- Preset names complete with Tab; Cancel works with empty names. Added recoverable preset removal, row previews and Paydex JSON row import.
+- Value fields apply typed numbers on click-away. Delete resets selected cells or rows with Undo.
+- Improved fonts, caret alignment, dropdown targets, clipping and import-progress spacing. Safer binding rollback, bounded texture retention and cleanup across reloads.
+- Held Player Preview poses retain Idle by default. Improved lossless sharing compression and larger binding counts within the same lobby limit; Shared Lobby LUT remains in testing.
+- BSL is the Nexus Main File. LLL and MDL are Optional Files. GitHub provides all three packages from the same source snapshot.
+
+---
+
 # Epic LUT R5.5.6
 
 - Restored Pattern LUT DDS and Patch export controls.

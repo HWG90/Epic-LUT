@@ -1,10 +1,24 @@
 # Changelog
 
-## Unreleased
+## R5.7.1 - 2026-10-11
 
+- Initialize the two quick Pattern swatches from current gear without opening the full Pattern workspace; preserve existing edits and history while refreshing their source.
+- Replace separate imported-target actions with one Map LUTs to Gear dialog in Basic and Advanced. Map imported tables to Armor, Helmet and Cape columns; Auto-map uses numeric source order, restarts for each checked gear family and cycles when destinations outnumber imports.
+- Preserve distinct palettes sharing one texture ID through verified Texture, Material and Unit mesh-slot replacements. Retain kit-fixed original IDs, original unselected mesh/LOD palettes and authentic raw resource bytes; refuse incompatible fixed assignments before staging.
+- Remove the unverified native provenance path after the export crash. Resolve bindings through genuine Lua Unit handles, hash-verified named mesh/material queries and rechecked exact source receipts; no ResourceManager material lookup or inferred multi-slot ordering.
+- Support valid empty Material texture tables, missing stock LUT roles for certified fixed assignments and opaque unselected mesh slots. Missing roles cannot authorize a material fork; unrelated unnamed sections do not invalidate an exact proved target.
+- Preserve legacy Armory assignment metadata and validate matching worn gear and applied preset values before binding-aware patch export. Keep saved presets unchanged while resolving their export references.
+- Fix fingerprint validation for loose GPU sidecars larger than 512 MiB using bounded streaming and exact measured lengths. Report real worker/cache errors without implicit restart; Load Current Gear explicitly retries failed or changed binding sources.
+- Independently audit the actual MASTER OF CEREMONY and MASTER-CRAFTED-ARMOR exports for exact pixels, resource chains and retained geometry. Both exports and the installed exported patch were confirmed working in-game for those tested assignments.
+- Keep Basic's Load Current Gear label consistent and include Cape loading.
+- Switch edited Basic camo colorways to Current / custom; keep the menu open and preserve unrelated channels when using the RGB picker.
+- Clamp expandable controls on both axes, keep quick Pattern swatches aligned with the grid, reserve a gap beside Player Preview and avoid dividers or progress indicators colliding with import text.
+- Present Armory previews in compact Armor, Helmet, Cape and Pattern lanes with independent scrollbars; group identical previews within a gear family while retaining every saved binding.
+- Add Tab completion for existing Armory preset names and a selected saved-row preview beside Rows controls.
+- Reset selected cells or rows to loaded original values with Delete as one undoable edit; keep text-field Delete behavior separate.
 - Replace Basic's separate preset apply buttons with a two-column LUT checkbox chooser and Select All. Apply selected Armor, Cape and Helmet LUTs with their associated Patterns as one checked transaction.
 - Commit typed Value Editor numbers when clicking away; retain invalid edits for correction. Canceling an Armory name skips validation and never saves, including when the name is empty.
-- Add a three-swatch Pattern quick editor below the material LUT table and place the complete Pattern editor in that workspace instead of a separate window. Preserve independent scrolling, editing, import/export and non-restoring navigation back to the material table.
+- Add a two-swatch Pattern quick editor below the material LUT table and place the complete Pattern editor in that workspace instead of a separate window. Keep the unknown third column intact and available through advanced controls. Preserve independent scrolling, editing, import/export and non-restoring navigation back to the material table.
 - Select Armor, Helmet and Cape independently with checkboxes when saving an Armory preset. Replace The Armory's stacked apply actions with the same three targets and one Apply Preset button, with grouped preflight, rollback and Undo.
 - Clamp Advanced LUT cell growth against the final space above docked Tools. Hiding Values or Preview keeps eight readable rows visible whenever they fit; cap oversized cells and retain scrolling for larger tables or tighter divider positions.
 - Give Basic mode enough minimum window height to show all eight regions together, expanding those rows to fill the available space. Remove its repeated title/help above the LUTs and measure the compact Load, gear and import headers. Retain scrolling for larger tables.
@@ -21,7 +35,7 @@
 - Select held Idle, Salute, Wave, Taunt and High Five poses in Player Preview; keep Idle as the default and load real game emote tracks only when selected.
 - Replace Tools' Dock/Undock text controls with opposing window icons beside Close; preserve tooltips and a separate draggable title area.
 - Begin controller refactoring by separating file-picker requests, retries, progress and worker polling into `import_picker`; preserve result acceptance and native ownership in the editor.
-- Start Tools docked and remember the last Dock/Undock choice across reloads.
+- Start Tools open on Import when docked; saved undocked Tools start closed. Remember the last Dock/Undock choice across reloads and preserve manual visibility within the loaded editor.
 - Add generated Jungle, Desert, Urban and Arctic colorways and four editable camo colors to Basic Mode.
 - Place Basic's modified-color notice inside the scrolling action pane and measure wrapped content to prevent overlapping export controls.
 - Resize docked Tools vertically with a draggable divider; retain the split across window resizing and redocking without changing LUT data.

@@ -1,18 +1,18 @@
-# Epic LUT R5.5.6
+# Epic LUT R5.7.1
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.5.6 includes matching Pattern LUTs in exports by default and adds a separate MDL package. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups.
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.7.1 adds compact mapping and preset controls, checked-region camo, an embedded Pattern editor, and patch exports that preserve verified gear assignments. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups. [What's new](docs/RELEASE-R5.7.1.md).
 
-[Download R5.5.6](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.7.1](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL:** import `Epic-LUT-R5.5.6-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL:** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.5.6-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
-- **MDL:** use `Epic-LUT-R5.5.6-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
+- **BSL (Nexus Main File):** import `Epic-LUT-R5.7.1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL (Nexus Optional File):** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.7.1-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
+- **MDL (Nexus Optional File):** use `Epic-LUT-R5.7.1-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
 
 The modular LLL package uses `main.lua` and requires LLL R30+. LLL can also load the MDL-compatible bundled package. MDL needs the bundled package; it cannot use the modular LLL package.
 
@@ -32,15 +32,15 @@ The **Rows** tools preview the selected saved row preset beside their controls. 
 
 The Pixel Grid uses the full height above a compact action bar. **Hide Values** gives it the inspector's width; **Show Values** restores the numeric editor. The setting is remembered.
 
-Use **Tools** to open the toolbox. Its **Import**, **Rows**, **Export**, and **Options** tabs appear once inside the docked or floating panel. **Scratch** opens a separate brush palette with color and alpha controls; it can stay open alongside the toolbox. Export keeps the shared format selector and timestamped filenames.
+Docked **Tools** starts open on **Import**; saved undocked Tools starts closed. Its **Import**, **Rows**, **Export**, and **Options** tabs appear once inside the docked or floating panel. Controls stay compact as the window widens. **Scratch** opens a separate brush palette with color and alpha controls; it can stay open alongside the toolbox. Export keeps the shared format selector and timestamped filenames.
 
 **Tools > Options > Load Debug LUT** loads the bundled 23x8 Debug table by **Plain Furniture** into the editor. Each load starts with a fresh copy; use the Apply controls to send it to gear.
 
-For one-click DDS export of every custom LUT currently applied to your Armor and Helmet, choose **Tools > Export > All Custom LUTs (DDS)**. Pick **LUT# + HEX**, **LUT# + Decimal**, **LUT#**, **HEX**, or **Decimal** naming, then press **Export**. The export name prefixes every file, for example `HONK LUT3-d3ce605892d5331b.dds`. Each batch gets a new timestamped folder under the export location. Pattern LUTs are included as `PatternLUT#`; unknown IDs use the LUT number.
+For one-click DDS export of every custom LUT currently applied to your gear, choose **Tools > Export > All Custom LUTs (DDS)**. Pick **LUT# + HEX**, **LUT# + Decimal**, **LUT#**, **HEX**, or **Decimal** naming, then press **Export**. The export name prefixes every file, for example `HONK LUT3-d3ce605892d5331b.dds`. Each batch gets a new timestamped folder under the export location. Pattern LUTs are included as `PatternLUT#`; unknown IDs use the LUT number. The Cape and Pattern export options control companion inclusion.
 
-To export a saved Armory collection without equipping it, select the preset and choose **Raw DDS (entire preset)**. **Save Current Gear Preset** keeps the currently applied Armor and/or Helmet LUTs in the app for later reuse.
+To export a saved Armory collection without equipping it, select the preset and choose **Raw DDS (entire preset)**. **Save Current Gear Preset** keeps the checked Armor, Helmet and Cape LUTs with their associated Patterns in the app for later reuse.
 
-Closing or popping out Player Preview returns its reserved grid width. Tools, Scratch and Pattern Editor can stay open independently.
+Closing or popping out Player Preview returns its reserved grid width. Tools and Scratch can stay open while the Pattern workspace replaces the material table.
 
 The active tools shortcut stays highlighted. Clicking it again keeps its window open; use that window's close button to close it. The LUT dropdown sits indented below Helmet/Armor, with Pattern Editor beside those gear buttons. Settings and the footer share one UI scale. Windows and popouts have visible borders.
 
@@ -48,18 +48,18 @@ The active tools shortcut stays highlighted. Clicking it again keeps its window 
 
 Material LUTs with up to **64 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
 
-Development builds coalesce continuous material edits to 15 live uploads per second and apply the final value immediately on release. Retained texture data stays bounded to 64 MiB and 16,384 allocations. Reloading Epic LUT reclaims eligible textures after its preview and live bindings finish cleanup. Restore alone preserves Undo/Redo; older allocations or uncertain ownership remain retained until Helldivers restarts. A limit refusal keeps the local draft available.
+Continuous material edits coalesce to 15 live uploads per second and apply the final value immediately on release. Retained texture data stays bounded to 64 MiB and 16,384 allocations. Reloading Epic LUT reclaims eligible textures after its preview and live bindings finish cleanup. Restore alone preserves Undo/Redo; older allocations or uncertain ownership remain retained until Helldivers restarts. A limit refusal keeps the local draft available.
 
 Tables above eight rows retain their added rows when Preserve Original Emissives is enabled. Original values are preserved for the rows present in the game snapshot; extra rows keep the imported values. DDS and patch export retain the custom row count. The model must reference those rows for them to be visible.
 
 ## Start with Basic
 
-Press **F9**, then **Load Current Gear**. Choose the LUT above either column, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact. Gear selectors stay gray until current or imported LUTs are ready. Gold Load buttons pulse until their first use.
+Press **F9**, then **Load Current Gear** to load Armor, Helmet and Cape. Choose the LUT above either column, then click a region color to edit it. Colors apply live to that table; alpha and material values remain intact. The layout prioritizes all eight regions; larger tables scroll. Gear selectors stay gray until current or imported LUTs are ready. Gold Load buttons pulse until their first use.
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
 - After importing, **Apply Imported Texture** appears directly below each destination LUT selector. Use the button's arrow to choose the source texture, then press **Apply [filename]** to apply it to the LUT selected above. Choosing a texture updates both buttons without applying it.
-- Development builds add a **Camo** checkbox beside each region, initially unchecked. Check the regions to edit, then choose **Off / Pattern 0–5**, a generated **Jungle, Desert, Urban or Arctic** colorway, or one of the four camo colors. These controls affect only checked regions as one undoable edit; unchecked rows retain every value. The color swatches show the first checked region. Pattern selection initializes dormant camo; colorways supply a complete setup using verified weapon controls and keep an existing active mask. Checking Helmet Region 8 explicitly includes it. Base colors, shader mode and emission remain intact. Neutral thumbnails use the actual game masks; the selected material's shader determines how camo appears.
+- A **Camo** checkbox sits beside each region, initially unchecked. Check the regions to edit, then choose **Off / Pattern 0–5**, a generated **Jungle, Desert, Urban or Arctic** colorway, or one of the four camo colors. These controls affect only checked regions as one undoable edit; unchecked rows retain every value. The color swatches above the selectors show the first checked region. Pattern selection initializes dormant camo; colorways supply a complete setup using the Match Your Colors camo recipe and keep an existing active mask. Editing a camo tint switches its colorway label to **Current / custom**. Checking Helmet Region 8 explicitly includes it. Base colors, shader mode and emission remain intact. Neutral thumbnails use the actual game masks; the selected material's shader determines how camo appears.
 - **Advanced Mode** in the header opens the full editor; **Basic Mode** brings you back.
 - Hover for guidance. Extra import controls appear only after loading a file.
 
@@ -92,7 +92,7 @@ Painting targets the clicked gear table. **Undo Last Action / Redo Last Action**
 
 ## LUT Editor
 
-Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including stock-game values. The Import toolbox includes Apply to All Armor LUTs or Apply to All Helmet LUTs beneath its selected-table action; it applies the current editor table.
+Choose **Load Current Gear**, then **Armor LUT** or **Helmet LUT** and a table. Loading reads every current worn LUT, including Cape and stock-game values, and initializes the quick Pattern swatches. The Import toolbox offers a selected-table Apply action and **Map LUTs to Gear** for explicit imported-table assignment or Auto-map.
 
 The labeled grid covers all **23 columns**, with a collapsible row value editor. Edit RGB, type floats, use material/camo selectors, or unlock advanced channels. Bump-map choices show R0-R25 alongside their material names, in actual column-2 R-value order. Drag in Select mode to select a rectangle; Shift-click also extends it. Ctrl+C/V copy and paste the grid selection, Ctrl+Z undoes an edit, and Ctrl+Shift+Z (or Ctrl+Y) redoes it. Click or drag row labels in Select mode to select whole rows; Shift-click extends the row range. Copy, select the destination rows, and paste from their top-left row. Full-row paste includes every RGBA channel and requires Advanced editing. Selected swatches keep their colors inside an outline. Grid tools also support drawing and moving pixels. Double-click color cells opens the picker; middle-click also copies the full pixel.
 
@@ -122,7 +122,7 @@ Use **Player Preview** or **F6** to see your worn character while editing. It do
 - Drag the title to move a floating panel; drag its corner to resize.
 - **Pop Out / Dock** changes placement.
 
-Current development builds add a footer pose selector: **Idle**, **Salute**, **Wave**, **Taunt** and **High Five**. Idle remains the default. Emotes hold a real game clip frame, loaded locally on first selection; changing poses retains your camera and current LUT edits. [Pose details](docs/PREVIEW-ANIMATION.md).
+A footer pose selector provides **Idle**, **Salute**, **Wave**, **Taunt** and **High Five**. Idle remains the default. Emotes hold a real game clip frame, loaded locally on first selection; changing poses retains your camera and current LUT edits. Continuous preview animation remains a separately named development build. [Pose details](docs/PREVIEW-ANIMATION.md).
 
 Menu and Player Preview native rendering pause when the game loses focus or its display dimensions are invalid, and resume when foreground rendering is ready. Close the preview or editor before switching game screens.
 
@@ -148,12 +148,12 @@ Presets live in `%LOCALAPPDATA%/Epic LUT/presets`. Library changes leave worn co
 
 To share a saved look, select it in **The Armory**, enter an export name and choose a format:
 
-- **Shareable Preset ZIP:** includes every saved Armor, Helmet and Pattern LUT. Use **Import Shared Preset** in The Armory to add it to another library.
+- **Shareable Preset ZIP:** includes every saved Armor, Helmet, Cape and Pattern LUT. Use **Import Shared Preset** in The Armory to add it to another library.
 - **Selected LUT Patch ZIP:** packages the selected saved table for a mod manager.
 - **Entire Preset Patch ZIP:** packages all tables in that preset together.
 - **Raw DDS:** exports the selected saved table for another editor.
 
-Exports use the saved preset, including its original texture destinations. Older presets still load; resave them to capture destination metadata before patch export. Filenames receive a timestamp and export folders open through **Open Export Location**.
+Exports use the saved preset and its verified assignments. Different material-bound palettes sharing one texture ID are retained through exact material and mesh-slot replacements. Gear overrides keep their required original texture IDs; conflicting fixed assignments or unproved destinations report an error before publishing files. For an older preset's binding-aware patch export, load the same gear and apply that preset first so its destinations can be verified. Shareable Preset ZIP and Raw DDS remain available without that proof. Filenames receive a timestamp and export folders open through **Open Export Location**. [Patch export details](docs/INTERNAL-PATCH-EXPORT.md).
 
 ## Restore and configure
 

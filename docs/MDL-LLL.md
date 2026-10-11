@@ -1,4 +1,4 @@
-# Epic LUT R5.5.6 - MDL API-2 package
+# Epic LUT R5.7.1 - MDL API-2 package
 
 The MDL ZIP contains the same Python-free editor as BSL, packaged as a standalone API-2 folder mod. Its entrypoint is `armor_lut_editor/mod.lua`. It contains no BSL startup archive and does not require Live Lua Loader to activate.
 
@@ -35,4 +35,4 @@ From the canonical Epic-LUT checkout:
 python build.py --loader mdl
 ```
 
-Output: `dist/Epic-LUT-R5.5.6-MDL.zip`. The former `--loader loose` option remains an alias for MDL and now uses the MDL filename by default. To build LLL R30's modular package, use `tools/build_lll.py` instead.
+Output: `dist/Epic-LUT-R5.7.1-MDL.zip`. The former `--loader loose` option remains an alias for MDL and now uses the MDL filename by default. To build LLL R30's modular package, use `tools/build_lll.py` instead. MDL is an **Optional File** on Nexus, alongside the optional LLL package; BSL is the Main File.

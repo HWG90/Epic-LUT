@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.5.6[/b][/size]
+[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.7.1[/b][/size]
 [size=5][b][color=#f1c232]STYLISH[/color] FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
@@ -9,15 +9,27 @@ Tactical pink. Pastel menace. A helmet that finally matches. Paint your Helldive
 [center][/center]
 [b]BASIC MODE[/b]
 [b]LESS FIDDLING. MORE FASHION.[/b]
-Press [b]F9[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
+Press [b]F9[/b]. [b]Load Current Gear[/b] covers Armor, Helmet and Cape. Pick a region. Pick a color.
 [b]Make freedom look good.
 [/b]
 [b]Advanced Mode[/b]
 [b]MORE FIDDLING. EVEN [i][color=#f1c232]MORE[/color][/i] FASHION.[/b]
-Press [b]F10[/b]. Load your current Armor & Helmet. Pick a region. Pick a color.
+Press [b]F10[/b]. Load your current gear. Pick a LUT. Edit its colors and materials.
 [b]Make freedom look [/b][i][b]sexy[/b][/i][b].[/b]
 
 Rebind menu controls in the Configuration Menu.
+
+[size=4][b]R5.7.1 - COMPACT EDITOR & GEAR EXPORT FIX[/b][/size]
+[list]
+[*][b]Patches keep the look.[/b] Export preserves verified material, mesh and kit assignments when palettes share a texture ID. Fixed the export crash and large-patch cache failures. The tested presets exported and their installed patch worked in-game.[/*]
+[*][b]More editor. Less sprawl.[/b] Basic prioritizes all eight regions. Grid cells, buttons and previews stay compact as the window expands. Docked Tools starts open; undocked Tools starts closed.[/*]
+[*][b]Camo where you want it.[/b] Check the regions, then choose a pattern, colorway or tint. Boxes start unchecked; the four colors sit above the selectors. Custom tints switch to Current / custom without closing the menu.[/*]
+[*][b]Map LUTs to Gear.[/b] One dialog in Basic and Advanced for Armor, Helmet and Cape. Auto-map follows numbered imports and repeats them across each checked gear column. Imported-texture Apply buttons include a source dropdown.[/*]
+[*][b]Patterns, right here.[/b] Two quick swatches initialize below the LUT table. The full Pattern editor replaces that table, retaining raw channels, import/export, flash and Undo/Redo.[/*]
+[*][b]A tidier Armory.[/b] Save and apply Armor, Helmet and Cape with checkboxes. Basic adds individual LUT checks and Select All with associated Patterns. Compact preview lanes show all gear and Patterns with scrollbars.[/*]
+[*][b]Small fixes that matter.[/b] Values commit on click-away. Delete resets selected cells with Undo. Preset names complete with Tab; Cancel works before typing. Row previews and Paydex JSON import are in Tools.[/*]
+[*][b]Three loader choices.[/b] BSL is the Main File. LLL and MDL are Optional Files. All three come from the same source snapshot and include Player Preview.[/*]
+[/list]
 
 [size=4][b]R5.5.6 - PATTERN EXPORTS & MDL[/b][/size]
 [list]
@@ -50,10 +62,10 @@ Rebind menu controls in the Configuration Menu.
 [list]
 [*][b]Colors that stay with you.[/b] Armor, Helmet and Pattern LUTs follow matching gear through hellpods, missions and ship transitions.[/*]
 [*][b]Quick color. Full control.[/b] Basic for easy painting; F10 opens the full LUT grid, material controls and named bump maps. Custom tables support up to 64 rows.[/*]
-[*][b]Room to work.[/b] Movable Tools, independent Scratch and Pattern windows, plain dropdowns, clear selection borders and font-scaled padding.[/*]
+[*][b]Room to work.[/b] Dockable Tools, independent Scratch, an embedded Pattern workspace, plain dropdowns, clear selection borders and font-scaled padding.[/*]
 [*][b]Copy like you expect.[/b] Text selection, clipboard colors and held-key repeat. Ctrl+C/V, Undo/Redo, drag selection and full multi-row copy/paste in the grid.[/*]
-[*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or apply a table to one LUT, all Armor LUTs or all Helmet LUTs.[/*]
-[*][b]Build your Armory.[/b] Save named looks, mix Armor and Helmet presets, and share importable preset ZIPs.[/*]
+[*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or map numbered tables to Armor, Helmet and Cape with manual assignment or Auto-map.[/*]
+[*][b]Build your Armory.[/b] Save named looks, mix Armor, Helmet and Cape with their Patterns, and share importable preset ZIPs.[/*]
 [*][u][color=#f1c232][size=4][b]Export your work.[/b][i] LUT patches, complete palette patches and raw DDS. Export every custom LUT in one click, with five naming formats and timestamped folders.[/i][/size][/color][/u][/*]
 [*][b]See the fit.[/b] Dock or pop out Player Preview. Pan, rotate and zoom using the game's Game Default rendering path.[/*]
 [*][b]Make it yours.[/b] Organized Configuration, optional MCM integration, synchronized UI scale, shortcuts and a permanent Preview-off setting.[/*]
@@ -65,9 +77,9 @@ Shared Lobby LUT is in testing.
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.5.6-BSL.zip[/b] and enable its BSL startup option.[/*]
-[*][b]MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.6-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
-[*][b]Live Lua Loader R30+ (GitHub):[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.5.6-LLL.zip[/b] into your loader's Mods directory, then enable it.[/*]
+[*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.7.1-BSL.zip[/b] and enable its BSL startup option.[/*]
+[*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
+[*][b]Optional File - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].[/*]
 [/list]
 [center][b]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/b]
@@ -95,7 +107,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6]GitHub downloads[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL / LLL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1]GitHub downloads[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

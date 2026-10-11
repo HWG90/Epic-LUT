@@ -1,31 +1,23 @@
-# EPIC LUT R5.5.6 :goose:
+# EPIC LUT R5.7.1 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
-Paint your Helldiver in-game. **F9** for Basic Mode; **F10** for the full LUT Editor.
+**F9** for Basic; **F10** for the full editor. **Load Current Gear** covers Armor, Helmet and Cape.
 
-**R5.5.6 — PATTERN EXPORTS & MDL**
-- Restored **Pattern LUT DDS and Patch exports**.
-- Matching Pattern LUTs are included with your LUT exports **by default**.
-- New **Include Pattern LUTs in Exports** option in Configuration, synced with MCM.
-- Dedicated **MDL package**, alongside BSL and LLL.
-- Player Preview keeps its **default idle pose**.
+**COMPACT EDITOR & GEAR EXPORT FIX**
+- Fixed the export crash and large-patch cache errors. Patches preserve verified material, mesh and kit assignments, including distinct palettes sharing a texture ID. Tested exports and the installed patch work in-game.
+- Basic prioritizes all 8 regions. Buttons, grids and previews stay compact; docked Tools starts open.
+- **Camo checkboxes** start unchecked. Apply patterns/colorways only to checked regions; custom tints switch to **Current / custom**.
+- One **Map LUTs to Gear** dialog in Basic and Advanced. **Auto-map** follows numbered imports and repeats them across checked Armor, Helmet and Cape columns.
+- Two quick **Pattern** swatches initialize below the table. The full Pattern editor opens in that same workspace with import/export and Undo/Redo.
+- Armory Save/Apply uses gear checkboxes; Basic adds individual LUT checks and **Select All**. Compact gear/Pattern previews have scrollbars.
+- Values commit on click-away. **Delete** resets selected cells with Undo. Preset names complete with **Tab**; Cancel works with empty names.
 
 **Shared Lobby LUT is in testing.**
 
-## A MASSIVE THANK YOU TO SCARPHEON
-For his time, patience and continued testing—and for mapping **all 26 bump maps** by their actual R values. His work was vital to getting **Export to Patch** working correctly and making Epic LUT a better tool for everyone. **Thank you, Scarpheon.**
+A massive thank you to **Scarpheon** for continued testing, Export to Patch help and mapping all 26 bump maps. Thanks to **Arkturus425**, **CowboyBingus**, **Plain Furniture**, **Lytatroan**, **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor**.
 
-Additional thanks to **Scarpheon** for his continued assistance with **Shared LUT testing**.
-
-**Arkturus425:** thank you for helping test the **Shared LUT Update**.
-
-**CowboyBingus:** native adapters and LUT foundation.
-**Plain Furniture:** Debug LUT.
-**[Lytatroan](https://www.nexusmods.com/profile/Lytatroan):** human-made thumbnail.
-Thanks to **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor** for ideas and inspiration.
-
-**Download:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.5.6
+**Downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
-**BSL** for Arsenal/HD2MM; **LLL** for Live Lua Loader R30+; **MDL** for API-2 loaders. Nexus has BSL and MDL; GitHub has all three. Enable one copy and turn Match Your Colors matching off. RAR needs 7-Zip.
+**BSL = Main File. LLL + MDL = Optional Files.** Enable one copy. Turn Match Your Colors matching off. RAR needs 7-Zip.
