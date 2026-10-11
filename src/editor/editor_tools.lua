@@ -5,6 +5,27 @@ local tabs = { 'import', 'rows', 'export', 'options' }
 local labels = { import = 'Import', rows = 'Rows', export = 'Export', options = 'Options' }
 local accent, ink = { 244, 202, 53 }, { 25, 28, 31 }
 
+local function dock_icon(ui, x, y, width, height, undock)
+    local w = math.min(width - 10, (height - 10) * 1.25)
+    local h, stroke = w / 1.25, math.max(ui.pixel_width or 1, w * 0.12)
+    local left, bottom = x + (width - w) / 2, y + (height - h) / 2
+    local function strip(px, py, sw, sh)
+        -- Mirroring the two windows gives the opposing action the same shape
+        -- and weight. Native rectangle strokes avoid a font-symbol dependency.
+        if undock then
+            px = w - px - sw
+        end
+        ui.rect(left + px, bottom + py, sw, sh, ui.theme.white, nil, 'control_icon')
+    end
+    strip(0, 0, w * 0.8, stroke)
+    strip(0, stroke, stroke, h * 0.75 - stroke)
+    local fx, fy, fw, fh = w * 0.2, h * 0.25, w * 0.8, h * 0.75
+    strip(fx, fy, fw, stroke)
+    strip(fx, fy + fh - stroke, fw, stroke)
+    strip(fx, fy + stroke, stroke, fh - stroke * 2)
+    strip(fx + fw - stroke, fy + stroke, stroke, fh - stroke * 2)
+end
+
 function T.new(deps)
     local editor, document = deps.editor, deps.document
     local self = { tab = 'import', docked = false, scroll = 0 }
@@ -61,6 +82,9 @@ function T.new(deps)
         local theme = ui.theme
         local white, muted = theme.white, theme.muted
         local bx, width = x + 14, w - 36
+        local dock_label = docked and 'Undock' or 'Dock'
+        local dock_width = math.max(36, bh)
+        local dock_x = docked and bx + width - dock_width - math.max(28, bh) - 6 or x + w - 38 - dock_width
         local half = (width - 8) / 2
         local tab_y = y + ht - header_height - gap - bh
         local top = tab_y - math.max(40, (ui.text_size and ui.text_size(14, 'hint') or 14) + gap * 2)
@@ -140,32 +164,27 @@ function T.new(deps)
             local title_y = ui.text_y
                     and ui.text_y(y + ht - header_height, header_height, 14, 'LUT Editor Tools', 'heading')
                 or y + ht - header_height + (header_height - heading_size) / 2
-            ui.bounded(bx, title_y, 'LUT Editor Tools', 14, white, width - 30, 'heading')
+            ui.bounded(bx, title_y, 'LUT Editor Tools', 14, white, dock_x - bx - 8, 'heading')
         end
-        local dock_label = docked and 'Undock' or 'Dock'
-        local dock_width = math.max(70, (ui.text_width and ui.text_width(dock_label, 14) or #dock_label * 8) + gap * 2)
         local close_width = docked and math.max(28, bh) or 0
-        local tabw = (width - dock_width - close_width - (docked and 36 or 30)) / #tabs
+        local tabw = (width - (docked and dock_width + close_width + 36 or 18)) / #tabs
         for i, tab in ipairs(tabs) do
             local tx = bx + (i - 1) * (tabw + 6)
             ui.button(tx, tab_y, tabw, bh, labels[tab], function()
                 self.open(tab)
             end, { selected = self.tab == tab })
         end
-        ui.button(
-            bx + width - dock_width - close_width - (docked and 6 or 0),
-            tab_y,
-            dock_width,
-            bh,
-            dock_label,
-            function()
-                self.set_docked(not docked)
-            end,
-            {
-                help = docked and 'Open Tools in its own window.'
-                    or 'Place Tools below the swatches inside the LUT Editor.',
-            }
-        )
+        local dock_y = docked and tab_y or y + ht - header_height + (header_height - bh) / 2
+        ui.button(dock_x, dock_y, dock_width, bh, '', function()
+            self.set_docked(not docked)
+        end, {
+            help = dock_label
+                .. (
+                    docked and ': open Tools in its own window.'
+                    or ': place Tools below the swatches inside the LUT Editor.'
+                ),
+        })
+        dock_icon(ui, dock_x, dock_y, dock_width, bh, docked)
         if docked then
             ui.button(bx + width - close_width, tab_y, close_width, bh, 'X', self.close, { help = 'Close Tools.' })
         end
@@ -342,10 +361,10 @@ function T.new(deps)
             return
         end
         self.bounds = nil
-        local _, header_height = metrics(ui)
+        local _, header_height, button_height = metrics(ui)
         ui.floating('editor_tools', function(x, y, w, ht)
             draw(ui, x, y, w, ht, false)
-        end, 620, 540, self.close, header_height, self.raise_pending)
+        end, 620, 540, self.close, header_height, self.raise_pending, math.max(36, button_height) + 6)
         self.raise_pending = false
     end
     return self

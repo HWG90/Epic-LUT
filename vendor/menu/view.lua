@@ -261,6 +261,7 @@ function M.new(sr, preview_only, diagnostic_log, shared_fonts)
     -- Each popup reserves >=16 integer layers. Roles stay inside its range
     -- when retained IDs survive and only a background/border is recreated.
     local surface_depth = {
+        control_icon = 12,
         window_background = 0,
         content_background = 1,
         control_fill = 4,
@@ -281,6 +282,7 @@ function M.new(sr, preview_only, diagnostic_log, shared_fonts)
         window_frame = 15,
     }
     local content_depth = {
+        control_icon = 20,
         window_background = 0,
         content_background = 0,
         control_fill = 10,

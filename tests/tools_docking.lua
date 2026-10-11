@@ -183,11 +183,71 @@ local function click(value, popup)
     local c = assert(label(compose(), value, popup), 'Missing control: ' .. value)
     tap(c.x + 2, c.y + 2)
 end
+local function docking_icon(commands, popup)
+    local left, bottom, right, top, count = math.huge, math.huge, -math.huge, -math.huge, 0
+    for _, c in ipairs(commands) do
+        if
+            c.type == 'rect'
+            and c.ui_role == 'control_icon'
+            and not not c.popup == popup
+            and (not popup or c.floating_id == 'editor_tools')
+        then
+            left, bottom = math.min(left, c.x), math.min(bottom, c.y)
+            right, top = math.max(right, c.x + c.w), math.max(top, c.y + c.h)
+            count = count + 1
+        end
+    end
+    assert(count >= 2 and right > left and top > bottom, 'Docking window icon missing')
+    return { x = left, y = bottom, w = right - left, h = top - bottom }
+end
+local function click_icon(popup, mode)
+    local commands = compose()
+    local icon = docking_icon(commands, popup)
+    local x, y = icon.x + icon.w / 2, icon.y + icon.h / 2
+    menu.tick({
+        down = function()
+            return false
+        end,
+        mouse = function()
+            return x, y
+        end,
+        wheel = function()
+            return 0
+        end,
+    })
+    compose()
+    menu.tooltip_started = -1
+    local helped = false
+    for _, c in ipairs(compose()) do
+        helped = helped or c.type == 'text' and (c.full_text or c.text or ''):find('^' .. mode .. ':') ~= nil
+    end
+    assert(helped, 'Docking icon hover lost its action tooltip: ' .. mode)
+    local position = menu.floating_positions.editor_tools
+    local old_x, old_y = position and position.x, position and position.y
+    tap(x, y)
+    assert(
+        menu.visible and editor.tools.is_open() and not menu.is_interacting(),
+        'Docking icon dragged/closed the window'
+    )
+    assert(not position or position.x == old_x and position.y == old_y, 'Docking icon moved the floating window')
+end
 local initial_pixels = ffi.string(document.data, document.width * document.height * 16)
 editor.tools.open('rows')
 assert(not editor.tools.is_docked(), 'Tools no longer defaults to its independent window')
 do
     local floating_rows = compose()
+    local icon = docking_icon(floating_rows, true)
+    local close = assert(label(floating_rows, 'X', true))
+    local window = assert(menu.floating_bounds)
+    assert(
+        icon.x + icon.w < close.x and icon.y + icon.h <= window.y + window.h,
+        'Floating Dock icon is not in the header beside Close'
+    )
+    local title = assert(label(floating_rows, 'LUT Editor Tools', true))
+    assert(
+        icon.y < title.y + title.size and icon.y + icon.h > title.y,
+        'Floating Dock icon is not aligned with the title bar'
+    )
     local previous = assert(label(floating_rows, 'my-row', true))
     for _, name in ipairs({
         'Save selected row',
@@ -201,7 +261,7 @@ do
         previous = current
     end
 end
-click('Dock', true)
+click_icon(true, 'Dock')
 local commands = compose()
 tab_sets(commands, 1, 0)
 assert(editor.tools.is_open() and editor.tools.is_docked() and editor.tools.bounds, 'Dock did not retain active Tools')
@@ -354,7 +414,7 @@ for _, scenario in ipairs({ { 12, 0.7, 1000 }, { 20, 0.85, 1000 }, { 12, 1.15, 8
     editor.tools.scroll = 0
     compose()
     contained()
-    assert(label(compose(), 'Undock', false), 'Dock toggle disappeared after font/scale change')
+    docking_icon(compose(), false)
     reveal('Reset row')
 end
 -- A taller editor must give the dock all free height, beyond the old 260 cap.
@@ -398,7 +458,7 @@ import_control.disabled = true
 click('Import Paydex JSON...', false)
 assert(imports == 1, 'Busy Paydex import button still activated')
 import_control.disabled = false
-click('Undock', false)
+click_icon(false, 'Undock')
 commands = compose()
 tab_sets(commands, 0, 1)
 assert(
@@ -411,10 +471,10 @@ for _, window in ipairs(menu.floating_windows) do
         floating = window
     end
 end
-assert(floating and editor.tools.tab == 'rows' and label(commands, 'Dock', true), 'Undock lost tabs/window controls')
+assert(floating and editor.tools.tab == 'rows' and docking_icon(commands, true), 'Undock lost tabs/window controls')
 document = current
 assert(ffi.string(document.data, document.width * document.height * 16) == initial_pixels)
-click('Dock', true)
+click_icon(true, 'Dock')
 commands = compose()
 local closing_bounds = assert(editor.tools.bounds)
 local close_button
@@ -442,5 +502,5 @@ assert(
 assert(not editor.tools.bounds, 'Closed Tools retained dock wheel ownership')
 package.loaded['epic.player_preview.v1'] = prior_preview
 print(
-    'PASS Tools docking: shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
+    'PASS Tools docking: actual window icons/header tooltips, shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
 )

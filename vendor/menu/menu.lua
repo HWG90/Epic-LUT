@@ -3128,7 +3128,7 @@ function M.new(api, measure, Text)
                                 self.notice = 'Type value; Enter saves, Escape cancels'
                             end)
                         end,
-                        floating = function(id, draw, width, height, close, header_height, raise)
+                        floating = function(id, draw, width, height, close, header_height, raise, header_buttons_width)
                             self.floating_positions = self.floating_positions or {}
                             local position = self.floating_positions[id]
                                 or {
@@ -3144,6 +3144,7 @@ function M.new(api, measure, Text)
                                 height = height,
                                 close = close,
                                 header_height = header_height or 28,
+                                header_buttons_width = header_buttons_width or 0,
                             }
                             local found = false
                             for _, b in ipairs(self.floating_windows or {}) do
@@ -4128,9 +4129,15 @@ function M.new(api, measure, Text)
             end
             frame('floating:' .. tostring(f.id), fx, fy, f.width, f.height)
             local header_height = f.header_height or 28
-            hit(fx, fy + f.height - header_height, f.width - 32, header_height, function(mx, my)
-                preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
-            end)
+            hit(
+                fx,
+                fy + f.height - header_height,
+                math.max(0, f.width - 32 - (f.header_buttons_width or 0)),
+                header_height,
+                function(mx, my)
+                    preview_drag = { window = p, dx = mx - p.x, dy = my - p.y, max_x = w - fw, max_y = h - fh }
+                end
+            )
             text(
                 fx + f.width - 20,
                 self.epic_typography and text_y(fy + f.height - header_height, header_height, 14, 'X')
