@@ -105,6 +105,12 @@ local resources = {
 }
 local set = C.decode(resources)
 assert(#set.names == 5 and set.clips.enter.duration == 1)
+assert(#C.POSES == 5 and C.POSES[1].id == 'idle' and C.find_pose('idle').clip == nil)
+assert(C.find_pose('wave').time == 0.58 and C.find_pose('taunt').time == 0.4)
+assert(not C.find_pose('guess') and not C.find_pose(1), 'Unknown preview pose accepted')
+local idle, idle_phase, idle_time = C.sample(nil, 0, 'idle')
+assert(idle == nil and idle_phase == 'idle' and idle_time == 0, 'Idle unnecessarily required an authored dataset')
+assert(not pcall(C.sample, set, 0, 'wave'), 'Legacy cache invented a missing Wave clip')
 local initial, phase = C.sample(set, 0)
 assert(
     phase == 'saluting' and math.abs(initial.r_hand[13] - 0.3) < 0.001 and math.abs(initial.r_hand[14] - 0.3) < 0.001,
@@ -128,6 +134,45 @@ assert(
 local p, q, scale = C.pose(held.r_index_finger1)
 assert(math.abs(q[1]) + math.abs(q[2]) > 0.3, 'Authored curled-finger quaternion was lost')
 assert(math.abs(scale[1] - 1) < 1e-6 and p[1] == p[1])
+local catalog_resources = {}
+for key, value in pairs(resources) do
+    catalog_resources[key] = value
+end
+catalog_resources.wave = clip(false, nil, true)
+catalog_resources.taunt = clip(true, nil, true)
+catalog_resources.highfive = clip(true)
+local catalog = C.decode(catalog_resources)
+for _, id in ipairs({ 'salute', 'wave', 'taunt', 'highfive' }) do
+    local pose, phase, at = C.sample(catalog, 0, id)
+    assert(at == C.find_pose(id).time and phase == (id == 'salute' and 'saluting' or id))
+    for _, time in ipairs({ 0.1, 2, 120, 3600 }) do
+        local held, held_phase, held_at = catalog.sample(time, id)
+        assert(held_phase == phase and held_at == at, 'Selected emote body frame advanced')
+        for name, matrix in pairs(pose) do
+            for i = 1, 16 do
+                assert(math.abs(held[name][i] - matrix[i]) < 1e-12)
+            end
+        end
+    end
+end
+local wave = C.sample(catalog, 0, 'wave')
+assert(math.abs(wave.r_hand[13] - initial.r_hand[13]) > 0.01, 'Selecting Wave reused Salute data/time')
+assert(not pcall(C.sample, catalog, 0, 'guess'), 'Unknown emote pose reached the sampler')
+assert(not pcall(C.sample, catalog, 0, false), 'Invalid pose type silently selected Salute')
+for _, mode in ipairs({ 'truncated', 'bone_count', 'short_duration' }) do
+    local bad = {}
+    for key, value in pairs(catalog_resources) do
+        bad[key] = value
+    end
+    if mode == 'truncated' then
+        bad.wave = bad.wave:sub(1, -3)
+    elseif mode == 'bone_count' then
+        bad.wave = bad.wave:sub(1, 4) .. u32(6) .. bad.wave:sub(9)
+    else
+        bad.wave = bad.wave:sub(1, 8) .. f32(0.25) .. bad.wave:sub(13)
+    end
+    assert(not pcall(C.decode, bad), 'Malformed new emote clip accepted: ' .. mode)
+end
 for _, t in ipairs({ -1, 0 / 0, math.huge, 'bad' }) do
     assert(not pcall(C.sample, set, t))
 end
@@ -196,6 +241,6 @@ for _, fault in ipairs({ 'short', 'nan', 'additive', 'count', 'cycle', 'bone', '
     assert(not pcall(C.decode, bad), 'Malformed authored data accepted: ' .. fault)
 end
 print(
-    'PASS authored clip CPU parser: held salute across elapsed time, authored salute/finger FK, compressed/uncompressed transforms, sound exclusion, scales and malformed bounds'
+    'PASS authored clip CPU parser: exact held pose catalog, legacy salute, Idle without assets, selected emote/FK/time isolation, compressed/uncompressed transforms and malformed bounds'
 )
-return { module = C, resources = resources, set = set }
+return { module = C, resources = resources, set = set, catalog = catalog }

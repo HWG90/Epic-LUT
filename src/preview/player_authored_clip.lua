@@ -9,7 +9,27 @@ Clip.FILES = {
     enter = '070b422612518deb.931e336d7646cc26.bin',
     hold = 'e32b270524630569.931e336d7646cc26.bin',
     exit = '39250e5b6313a0b2.931e336d7646cc26.bin',
+    wave = 'f7d81dbe0142b9ee.931e336d7646cc26.bin',
+    taunt = 'a4950a590f729419.931e336d7646cc26.bin',
+    highfive = '75205314048dcdaa.931e336d7646cc26.bin',
 }
+-- Labels follow exact event/transition names in the captured avatar graph.
+-- Held times were sampled and decoded against this same 90-bone rig. Idle
+-- uses the ordinary game preview; selecting it requires no authored worker.
+Clip.POSES = {
+    { id = 'idle', label = 'Idle' },
+    { id = 'salute', label = 'Salute', clip = 'hold', time = 0 },
+    { id = 'wave', label = 'Wave', clip = 'wave', time = 0.58 },
+    { id = 'taunt', label = 'Taunt', clip = 'taunt', time = 0.4 },
+    { id = 'highfive', label = 'High Five', clip = 'highfive', time = 0 },
+}
+function Clip.find_pose(id)
+    for _, pose in ipairs(Clip.POSES) do
+        if pose.id == id then
+            return pose
+        end
+    end
+end
 local function finite(n)
     return type(n) == 'number' and n == n and math.abs(n) < math.huge
 end
@@ -320,8 +340,16 @@ function Clip.decode(resources)
     for _, name in ipairs({ 'standing', 'enter', 'hold', 'exit' }) do
         set.clips[name] = animation(assert(resources[name], 'Authored ' .. name .. ' missing'), #names)
     end
-    set.sample = function(time)
-        return Clip.sample(set, time)
+    -- Legacy decoder fixtures and experimental fallback sets remain valid.
+    -- Runtime load() reads the complete versioned file catalog below.
+    for _, name in ipairs({ 'wave', 'taunt', 'highfive' }) do
+        if resources[name] then
+            set.clips[name] = animation(resources[name], #names)
+            assert(Clip.find_pose(name).time <= set.clips[name].duration, 'Preview held frame exceeds clip duration')
+        end
+    end
+    set.sample = function(time, pose_id)
+        return Clip.sample(set, time, pose_id)
     end
     return set
 end
@@ -382,11 +410,17 @@ local function curve(track, time, rotation)
     end
     return v
 end
-function Clip.sample(set, time)
+function Clip.sample(set, time, pose_id)
     assert(finite(time) and time >= 0, 'Authored animation time invalid')
-    -- Hold the raised-fist pose. The driver keeps its independent clock for
-    -- cape sway, so the body never cycles back through idle, entry or exit.
-    local phase, at, clip = 'saluting', 0, set.clips.hold
+    local pose = assert(Clip.find_pose(pose_id == nil and 'salute' or pose_id), 'Unknown preview pose')
+    if pose.id == 'idle' then
+        return nil, 'idle', 0
+    end
+    local clip = assert(set.clips[pose.clip], 'Preview pose clip unavailable: ' .. pose.id)
+    local phase, at = pose.id == 'salute' and 'saluting' or pose.id, pose.time
+    assert(finite(at) and at >= 0 and at <= clip.duration, 'Preview held frame exceeds clip duration')
+    -- Body time stays at the selected authored frame. The driver retains its
+    -- independent cape clock, without playing emote entry/exit or sound events.
     local world, named = {}, {}
     for i, node in ipairs(set.nodes) do
         local local_pose = node.rest

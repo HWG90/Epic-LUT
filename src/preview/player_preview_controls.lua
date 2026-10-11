@@ -15,6 +15,8 @@ function C.new()
         animating = true,
         animation_available = false,
         animation_pending = false,
+        pose = 'idle',
+        pose_available = true,
     }
     function self.cancel()
         self.drag = nil
@@ -45,6 +47,8 @@ function C.new()
             elseif y < self.y then
                 if x > self.x + self.w - 24 and not self.docked then
                     self.resize = { x = x, y = y, w = self.w, h = self.h, top = self.y + self.h }
+                elseif self.pose_available and x >= self.x + self.w / 3 and x <= self.x + self.w * 2 / 3 then
+                    event = 'pose'
                 elseif
                     (self.animation_available or self.animation_pending)
                     and x >= self.x + self.w / 3

@@ -25,7 +25,7 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `outfit_presets.lua`, `direct_setup.lua`: disk formats and validation. Native application belongs to the session controller.
 - `player_preview_input.lua`: owns mouse/wheel wrappers and restores only wrappers it still owns.
 - `player_preview*.lua`: preview model, controls, rendering and lifecycle. It owns copied garments and its render resources, not the borrowed game world's simulation.
-- `player_animation.lua`: applies procedural standing/salute and cape poses to existing independently owned garments, using captured hierarchies and immutable poses. It creates no avatar or simulation world.
+- `player_animation.lua`: samples selected authored emote poses on existing independently owned garments, using captured hierarchies and immutable poses. It creates no avatar or simulation world.
 
 ## Working conventions
 
@@ -96,7 +96,7 @@ Local collections preserve up to 4,096 destination rows, with a separate 2 MiB m
 
 Player Preview selects `ui_3d` and renders to its owned portrait output directly. The initialized UI-world lease and queue cleanup fence remain required. [Render path and Transmog comparison](PREVIEW-RENDER-PATH.md) documents the native material differences that still need live acceptance.
 
-[Preview animation](PREVIEW-ANIMATION.md) uses the existing owned garment copies and pose setters. Hierarchies are captured before flattening only for explicitly enabled animation candidates. Its focused update path is separate from material synchronization; Pause/Play shares the portrait footer, and normal renderer-fence cleanup still protects the garments. Standard packages remain static. The previous extra-avatar/simulation-world path was removed after a native component-creation crash.
+[Preview poses](PREVIEW-ANIMATION.md) use the existing owned garment copies and pose setters. Idle is the default in every package and starts no animation worker. Selecting a real emote lazily loads the bounded local clip cache and rebuilds the copied portrait with its hierarchy captured before flattening. Pose changes retain camera and layout state and wait for the normal renderer fence before retiring garments. The transient pose chooser uses the existing menu dropdown renderer, with a screen anchor for popped-out portraits. The previous extra-avatar/simulation-world path was removed after a native component-creation crash.
 
 ## Development references
 

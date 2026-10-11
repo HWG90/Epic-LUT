@@ -16,7 +16,9 @@ public static class EpicAuthoredPreviewReader {
  const int FileBudget = 16 * 1024 * 1024, SetBudget = 32 * 1024 * 1024;
  const long MetadataBudget = 512L * 1024 * 1024, RowBudget = 6000000;
  static readonly ulong[] Clips = {0x759c08277f1296d0UL, 0x070b422612518debUL,
-                                0xe32b270524630569UL, 0x39250e5b6313a0b2UL};
+                                0xe32b270524630569UL, 0x39250e5b6313a0b2UL,
+                                0xf7d81dbe0142b9eeUL, 0xa4950a590f729419UL,
+                                0x75205314048dcdaaUL};
  static readonly BindingFlags Hidden = BindingFlags.Instance | BindingFlags.NonPublic;
  static string Key(ulong name, ulong kind) {return name.ToString("x16")+"."+kind.ToString("x16")+".bin";}
  static uint U(byte[] bytes, int at) {
@@ -92,7 +94,7 @@ public static class EpicAuthoredPreviewReader {
    if(names.Remove(OwnerArchive))names.Insert(0,OwnerArchive);
    foreach(string archive in names) {
     Check(status,clock);
-    File.WriteAllText(status,"Loading exact authored salute: "+bodies.Count+"/6 resources; "+visited+" TOCs, "+rows+" rows");
+    File.WriteAllText(status,"Loading exact authored poses: "+bodies.Count+"/"+wanted.Count+" resources; "+visited+" TOCs, "+rows+" rows");
     byte[] header=Read(reader,method,archive,0,72,status,clock);metadata+=72;
     if(U(header,0)!=0xf0000011)continue;
     uint types=U(header,4),count=U(header,8);
@@ -114,7 +116,7 @@ public static class EpicAuthoredPreviewReader {
     if(bodies.Count==wanted.Count)break;
    }
   }
-  if(bodies.Count!=wanted.Count)throw new Exception("Exact authored salute resources missing: "+bodies.Count+"/6");
+  if(bodies.Count!=wanted.Count)throw new Exception("Exact authored pose resources missing: "+bodies.Count+"/"+wanted.Count);
   Validate(bodies);
   foreach(string filename in wanted) {
    Check(status,clock);
@@ -122,7 +124,7 @@ public static class EpicAuthoredPreviewReader {
    if(!path.StartsWith(output.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new Exception("Authored cache path leaves version folder");
    Atomic(path,bodies[filename]);
   }
-  File.WriteAllText(status,"Authored salute ready: 6 resources, "+total+" bytes; "+visited+" TOCs");
+  File.WriteAllText(status,"Authored poses ready: "+wanted.Count+" resources, "+total+" bytes; "+visited+" TOCs");
   return bodies.Count;
  }
 }

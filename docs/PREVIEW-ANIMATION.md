@@ -1,13 +1,13 @@
-# Player Preview animation
+# Player Preview poses
 
-The current development candidate holds the existing independent garment copies in the game's authored raised-fist salute pose, with gentle additional cape sway. It creates no additional avatar, animation component or simulation world. Standard packages keep the established static preview; animation is enabled only by an explicitly named test build.
+Player Preview starts in Idle. Its footer pose selector offers Idle, Salute, Wave, Taunt and High Five in docked and floating previews. Emotes hold a selected frame of the game's authored clip. The preview creates no additional avatar, animation component or simulation world; pose writes affect its existing independent garment copies.
 
 ```powershell
 python build.py --loader mdl --preview-animation --output Epic-LUT-Garment-Animation-MDL.zip
 python build.py --preview-animation --output Epic-LUT-Garment-Animation-BSL.zip
 ```
 
-The managed development workflow installs this candidate with guarded backups. On first use, a background PowerShell/.NET worker reads the six exact animation/rig resources from the installed game into a local cache; the preview shows Loading until they decode. No Python or downloaded animation assets are required. Use one Epic LUT copy and its normal loader lifecycle. Open Player Preview from the LUT Editor, check that the salute stays held while the cape moves, then check Pause/Play, rotation, pan, a live LUT edit, closing/reopening and Alt-Tab. Missing pose capabilities leave the static portrait available. Visual acceptance remains an in-game check.
+The managed development workflow installs matching packages with guarded backups. Selecting the first emote starts a background PowerShell/.NET worker that reads the exact animation/rig resources from the installed game into a local cache. Idle starts no worker. No Python or downloaded animation assets are required. Use one Epic LUT copy and its normal loader lifecycle. Open Player Preview, choose each pose, then check rotation, pan, a live LUT edit, switching back to Idle, closing/reopening and Alt-Tab. Missing pose capabilities leave the static portrait available. Visual acceptance remains an in-game check.
 
 ## Motion and ownership
 
@@ -15,7 +15,7 @@ The model records each newly spawned garment's original hierarchy before the sta
 
 Joint poses are resolved across the complete set of owned garments. The helmet, torso, upper arm, forearm and glove can each supply a different part of the salute chain. A single garment need not contain the complete skeleton. A bounds-checked CPU sampler decodes the authored position, rotation and scale tracks, including all finger bones, and resolves the complete actor hierarchy before retargeting it to the separate copied garments. Captured boss/hips supplies a common rigid placement rather than the starting limb pose.
 
-The body holds the first pose of the authored salute hold clip indefinitely. Idle, entry and exit do not repeat, and the held body tracks do not advance. The sampler resolves the authored transforms directly rather than creating an engine animation component. Cape sway uses the driver's independent clock; no physical cloth simulation is run. The driver updates in focused callbacks with a bounded delta; returning from Alt-Tab starts with zero delta. Pause freezes cape movement, and Play resumes it. The existing portrait camera, LUT synchronization, controls and per-frame redraw path stay shared.
+The body holds its selected authored frame indefinitely. Entry and exit do not repeat, and held body tracks do not advance. The sampler resolves the authored transforms directly rather than creating an engine animation component. No physical cloth simulation is run. The driver updates in focused callbacks with a bounded delta; returning from Alt-Tab starts with zero delta. The existing portrait camera, LUT synchronization, controls and per-frame redraw path stay shared. A pose change retires the previous copied model through its normal render fence before rebuilding; the latest selection wins while retirement is pending.
 
 Callbacks with no delta use the existing measured frame clock; numeric one-argument callbacks are also accepted. Diagnostic one-frame requests end on closing and do not freeze later UI openings.
 
@@ -32,3 +32,5 @@ The saved dump reports `0xc0000005` at `helldivers2.exe+0x7feba1`. Instructions 
 The generic Stingray API documents bare world creation, string resource/node/event arguments and animation/scene updates. Those contracts alone do not establish Helldivers' native initialization requirements. [Application reference](https://help.autodesk.com/cloudhelp/ENU/Stingray-Help/lua_ref/ns_stingray_Application.html), [Unit reference](https://help.autodesk.com/cloudhelp/ENU/Stingray-Help/lua_ref/obj_stingray_Unit.html), [World reference](https://help.autodesk.com/cloudhelp/ENU/Stingray-Help/lua_ref/obj_stingray_World.html).
 
 The authored sampler uses the clips identified by the captured graph: `lineup_idle` (base layer 0/state 59), `action_salute_01` (layer 8/state 176), authored completion into hold 178, and `action_salute_exit` into exit 177 and then state 0. Its ordered clips are `759c08277f1296d0`, `070b422612518deb`, `e32b270524630569` and `39250e5b6313a0b2`. These facts were decoded with bounds checks against SDK revision [5a886256](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition/tree/5a886256e54db52b5d228335eae20ce796f87fc0). Game resources, dumps and captured binaries remain ignored evidence and are excluded from packages.
+
+The selectable catalog also uses `action_wave_01` (layer 8/state 199, `f7d81dbe0142b9ee` at 0.58 seconds), `emote_taunt` (layer 8/state 135, `a4950a590f729419` at 0.4 seconds), and the High Five offer hold (layer 8/state 139, `75205314048dcdaa` at zero). All three clips decode against the same 90-bone rig with non-additive transforms. The selected frames were checked through bounded decoding and joint transforms; their visual appearance still requires in-game acceptance.

@@ -240,3 +240,107 @@ assert(#openings == 6, 'Stacked window openings logged per-frame instead of per-
 print(
     'PASS dropdown visibility contract: prior working layer region, three/eight window stacks and bounded once-per-open diagnostics'
 )
+
+-- The native Player Preview is a separate surface, so its pose chooser has no
+-- menu floating owner. Its explicit screen anchor must still open outside the
+-- editor, with selection routed through the transient pose handle.
+do
+    menu.on_dropdown_open = nil
+    local selected, changes = 1, 0
+    local pose_handle = api.register({
+        id = 'preview_pose_transient',
+        name = 'Player Preview Pose',
+        hidden = true,
+        pages = {
+            {
+                id = 'pose',
+                name = 'Pose',
+                require_confirmation = false,
+                controls = {
+                    {
+                        id = 'preview_pose',
+                        type = 'choice',
+                        label = 'Pose',
+                        choices = { 'Idle', 'Salute', 'Hug' },
+                        default = 1,
+                        on_change = function(value)
+                            selected, changes = value, changes + 1
+                        end,
+                    },
+                },
+            },
+        },
+    })
+    local pose_mod = api.mods[pose_handle.id]
+    menu.compose(1920, 1080)
+    local b = menu.window_bounds
+    local preview = { x = 1780, y = 950, w = 130, h = 120 }
+    assert(
+        preview.x > b.x + b.w and preview.x + preview.w <= 1920 and preview.y + preview.h <= 1080,
+        'Preview anchor fixture must be outside the editor and inside the display'
+    )
+    local function open_pose(screen_anchor)
+        menu.open_dropdown({
+            mod = pose_mod,
+            control = pose_mod.controls.preview_pose,
+            selected = pose_handle.get('preview_pose'),
+            scroll = 0,
+            x = (preview.x + preview.w / 3 - b.x) / b.scale,
+            top = (preview.y + 20 - b.y) / b.scale,
+            width = 220 / b.scale,
+            owner = nil,
+            screen_anchor = screen_anchor,
+            preview_owner = 'player_preview',
+        })
+    end
+    local function dropdown_frame(commands)
+        for _, c in ipairs(commands) do
+            if c.window_frame == 'dropdown' then
+                return assert(c.frame_bounds)
+            end
+        end
+        error('Preview pose dropdown has no visible frame')
+    end
+    open_pose(true)
+    local pose_commands = menu.compose(1920, 1080)
+    local frame = dropdown_frame(pose_commands)
+    assert(
+        frame.x > b.x + b.w and frame.x + frame.w <= 1920 and frame.y >= 0 and frame.y + frame.h <= 1080,
+        'Screen-anchored pose list was clamped into the editor or outside the display'
+    )
+    assert(menu.dropdown.owner == nil and menu.dropdown.preview_owner == 'player_preview')
+    local salute
+    for _, c in ipairs(pose_commands) do
+        if c.full_text == 'Salute' then
+            salute = c
+        end
+    end
+    assert(salute and salute.x > b.x + b.w, 'Pose choice is not visible beside the floating preview')
+    input(salute.x + 3, salute.y + 3, true)
+    input(salute.x + 3, salute.y + 3, false)
+    assert(
+        not menu.dropdown and pose_handle.get('preview_pose') == 2 and selected == 2 and changes == 1,
+        'External pose list did not commit exactly one choice to its transient handle'
+    )
+    open_pose(true)
+    menu.key(40)
+    menu.key(27)
+    assert(
+        menu.visible and not menu.dropdown and pose_handle.get('preview_pose') == 2 and changes == 1,
+        'Escape committed the preview pose or closed the editor'
+    )
+    open_pose(false)
+    local normal_frame = dropdown_frame(menu.compose(1920, 1080))
+    assert(
+        normal_frame.x >= b.x
+            and normal_frame.x + normal_frame.w <= b.x + b.w
+            and normal_frame.y >= b.y
+            and normal_frame.y + normal_frame.h <= b.y + b.h,
+        'Normal ownerless dropdown escaped its existing editor-frame clamp'
+    )
+    menu.key(27)
+    pose_handle.unregister()
+    print(
+        'PASS preview pose dropdown: external screen anchor/display clamp, transient choice commit, Escape cancellation and unchanged normal frame clamp'
+    )
+end

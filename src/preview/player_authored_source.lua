@@ -1,12 +1,12 @@
 -- Read local authored animation resources through an owned background worker.
 -- Game archives are never decoded by the render callback or shipped in ZIPs.
-local Source = {}
+local Source = { CACHE_FOLDER = 'authored-poses-v2', SCHEMA = '2' }
 function Source.new(m, host)
     host = host or {}
     local paths = host.paths or m.paths.new(m)
-    local folder = paths.cache .. '/authored-salute'
+    local folder = paths.cache .. '/' .. Source.CACHE_FOLDER
     local scripts = paths.cache .. '/authored-worker'
-    local self = { state = 'idle', status = 'Loading salute', data = nil }
+    local self = { state = 'idle', status = 'Loading preview poses', data = nil }
     local io_api = host.io or io
     local now = host.time or os.clock
     local function read(path, limit)
@@ -36,10 +36,10 @@ function Source.new(m, host)
         end)))
     end
     local function report(why)
-        self.state, self.status = 'failed', 'Salute unavailable'
+        self.state, self.status = 'failed', 'Preview poses unavailable'
         self.error = tostring(why):sub(1, 1024)
         if host.log then
-            pcall(host.log, 'preview: authored salute unavailable ' .. self.error)
+            pcall(host.log, 'preview: authored poses unavailable ' .. self.error)
         end
     end
     local function heartbeat()
@@ -135,16 +135,16 @@ function Source.new(m, host)
             local marker =
                 assert(read(folder .. '/complete.txt', 4096), 'Authored animation worker ended without a result')
             local path, schema = marker:match('^([^\r\n]+)\r?\n([^\r\n]+)')
-            assert(path and schema == '1', 'Authored animation cache schema changed')
+            assert(path and schema == Source.SCHEMA, 'Authored animation cache schema changed')
             local normalized = path:gsub('\\', '/')
             local prefix = folder:gsub('\\', '/') .. '/'
             assert(normalized:sub(1, #prefix):lower() == prefix:lower(), 'Authored cache path escapes its folder')
             local stamp = normalized:sub(#prefix + 1)
             assert(#stamp == 64 and not stamp:find('[^%x]'), 'Authored animation cache identity is invalid')
             self.data = assert(m.player_authored_clip.load(normalized), 'Authored animation cache is empty')
-            self.state, self.status, self.error = 'ready', 'Salute ready', nil
+            self.state, self.status, self.error = 'ready', 'Preview poses ready', nil
             if host.log then
-                pcall(host.log, 'preview: authored salute resources decoded from local game cache')
+                pcall(host.log, 'preview: authored pose resources decoded from local game cache')
             end
         end)
         if not ok then

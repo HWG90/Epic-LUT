@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Select held Idle, Salute, Wave, Taunt and High Five poses in Player Preview; keep Idle as the default and load real game emote tracks only when selected.
 - Replace Tools' Dock/Undock text controls with opposing window icons beside Close; preserve tooltips and a separate draggable title area.
 - Begin controller refactoring by separating file-picker requests, retries, progress and worker polling into `import_picker`; preserve result acceptance and native ownership in the editor.
 - Resize docked Tools vertically with a draggable divider; retain the split across window resizing and redocking without changing LUT data.

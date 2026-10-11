@@ -20,6 +20,7 @@ local render_fault
 local retry_at = 0
 local recovery_attempts = 0
 local controls = m.player_preview_controls.new()
+local pose_state = { applied = 'idle', pending = false, reopen = false }
 local source_signature
 local source_elapsed = 0
 local recovery_elapsed = 0
@@ -95,6 +96,12 @@ local floating_geometry
 local dock_hidden = false
 local floating_on_editor = false
 local input_bridge
+local function clear_pose_dropdown()
+    local front = package.loaded['dbf.epic_lut.frontend.v1']
+    if front and front.menu and front.menu.dropdown and front.menu.dropdown.preview_owner == public then
+        front.menu.dropdown = nil
+    end
+end
 local function release_input()
     if input_bridge then
         input_bridge.release()
@@ -120,7 +127,11 @@ local function unhook()
     wrapper = nil
     previous = nil
 end
-local function close()
+local function close(pose_transition)
+    clear_pose_dropdown()
+    if not pose_transition then
+        pose_state.reopen = false
+    end
     release_input()
     unhook()
     due = false
@@ -154,6 +165,7 @@ local function reset_transients()
     floating_geometry, dock_hidden, floating_on_editor = nil, false, false
     input_bridge = nil
     controls = m.player_preview_controls.new()
+    pose_state = { applied = 'idle', pending = false, reopen = false }
 end
 local function discard_request()
     os.remove(request_path)
@@ -256,6 +268,82 @@ local function inspect()
     assert(identity, why)
     return adapter.capture(identity)
 end
+local function pose_notice(text)
+    local front = package.loaded['dbf.epic_lut.frontend.v1']
+    if front and front.menu then
+        front.menu.notice = text
+        front.menu.redraw_revision = (front.menu.redraw_revision or 0) + 1
+    end
+    log('preview: ' .. text)
+end
+local function pose_failed(why)
+    pose_state.pending, pose_state.caption_dirty = false, true
+    pose_state.error = tostring(why)
+    controls.pose = pose_state.applied
+    controls.animation_pending, controls.animation_error = false, pose_state.error
+    pose_notice('Preview pose unavailable: ' .. pose_state.error)
+end
+local function update_pose()
+    if pose_state.caption_dirty and controller.state == 'ready' then
+        adapter.layout_panel()
+        pose_state.caption_dirty = false
+    end
+    if not pose_state.pending then
+        return false
+    end
+    local selected = controls.pose
+    if selected ~= 'idle' then
+        if authored_source and (authored_source.state == 'closed' or authored_source.state == 'failed') then
+            if authored_source.state == 'failed' and not pose_state.source_retry then
+                pose_failed(authored_source.error or 'Authored pose resources unavailable')
+                return false
+            end
+            if not authored_source.close() then
+                return false
+            end
+            authored_source = nil
+        end
+        if not authored_source then
+            authored_source = m.player_authored_source.new(m, { time = memory.time, log = log })
+        end
+        pose_state.source_retry = false
+        authored_source.start()
+        authored_source.tick()
+        if authored_source.state == 'failed' then
+            pose_failed(authored_source.error or 'Authored pose resources unavailable')
+            return false
+        end
+        if not authored_source.get() then
+            return false
+        end
+    elseif authored_source and (authored_source.state == 'loading' or authored_source.state == 'failed') then
+        if not authored_source.close() then
+            return false
+        end
+    end
+    if controller.state ~= 'closed' and not close(true) then
+        return true
+    end
+    pose_state.pending = false
+    controls.animation_pending = false
+    if pose_state.reopen then
+        local ok, why = pcall(open)
+        if not ok then
+            close(true)
+            pose_state.applied = 'idle'
+            pose_failed(why)
+        elseif controller.model.animation_failed then
+            pose_state.applied = 'idle'
+            pose_failed(controls.animation_error or 'Owned garment pose unavailable')
+        else
+            pose_state.applied = selected
+        end
+    else
+        pose_state.applied = selected
+    end
+    pose_state.reopen = false
+    return true
+end
 local function initialize_preview(ctx)
     local owner = package.loaded['epic.player_preview.v1']
     assert(not owner or owner == public, 'Player Preview is already owned by another addon instance')
@@ -270,10 +358,12 @@ local function initialize_preview(ctx)
     log = ctx.log
     initialization_stage = 'memory'
     memory = m.bingus_memory.new(m.bingus_runtime)
-    local authored = PREVIEW_ANIMATION_ENABLED == true and m.preview_animation == 'authored_salute'
-    if authored then
-        authored_source = m.player_authored_source.new(m, { time = memory.time, log = log })
-    end
+    controls.pose_available = not not (
+        m.player_authored_clip
+        and m.player_authored_clip.POSES
+        and m.player_authored_clip.find_pose
+        and m.player_authored_source
+    )
     game = memory.address(assert(memory.module('game.dll')))
     local native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
     initialization_stage = 'submission_bindings'
@@ -287,17 +377,93 @@ local function initialize_preview(ctx)
         submit = submit,
         game = game,
         use_ui_world = true,
-        -- Only a separately named development build enables the garment-pose
-        -- driver. Standard packages keep the established static portrait.
-        animate = PREVIEW_ANIMATION_ENABLED == true,
-        authored = authored,
-        animation_source = authored_source,
+        -- Every package starts with the static portrait. An explicit pose
+        -- request supplies authored data and captures only owned hierarchies.
+        animate = false,
+        get_animation_source = function()
+            return authored_source
+        end,
         controls = controls,
     })
     controller = m.player_preview.new(adapter)
     activated = true
-    if authored_source and public.is_enabled() then
-        authored_source.start()
+    public.get_pose = function()
+        return controls.pose or 'idle', pose_state.error
+    end
+    public.set_pose = function(id)
+        if not activated or not public.is_enabled() then
+            return false, 'Player Preview is turned off'
+        end
+        local selected = m.player_authored_clip and m.player_authored_clip.find_pose(id)
+        if not selected then
+            return false, 'Unknown Player Preview pose'
+        end
+        if id ~= 'idle' and not m.player_authored_source then
+            return false, 'Authored pose resources unavailable in this preview'
+        end
+        if controls.pose == id and not pose_state.error then
+            return true
+        end
+        clear_pose_dropdown()
+        controls.pose = id
+        controls.animation_pending, controls.animation_error = id ~= 'idle', nil
+        pose_state.pending, pose_state.error, pose_state.caption_dirty = true, nil, true
+        pose_state.source_retry = true
+        pose_state.reopen = pose_state.reopen or controller.state ~= 'closed'
+        return true
+    end
+    public.open_pose_dropdown = function()
+        local front = package.loaded['dbf.epic_lut.frontend.v1']
+        local menu = front and front.menu
+        local catalog = m.player_authored_clip and m.player_authored_clip.POSES
+        if
+            not menu
+            or not menu.open_dropdown
+            or not catalog
+            or not controls.pose_available
+            or not public.is_ready()
+        then
+            return false
+        end
+        local choices, selected = {}, 1
+        for index, pose in ipairs(catalog) do
+            choices[index] = pose.label
+            if pose.id == controls.pose then
+                selected = index
+            end
+        end
+        local control = { id = 'player_preview_pose', type = 'choice', choices = choices }
+        local handle = {}
+        handle.get = function()
+            for index, pose in ipairs(catalog) do
+                if pose.id == controls.pose then
+                    return index
+                end
+            end
+            return 1
+        end
+        handle.preview = handle.get
+        handle.set = function(id, value)
+            if id ~= control.id or type(value) ~= 'number' or value % 1 ~= 0 or not catalog[value] then
+                return false, 'Unknown Player Preview pose'
+            end
+            return public.set_pose(catalog[value].id)
+        end
+        handle.edit = handle.set
+        local b = menu.window_bounds or { x = 0, y = 0, scale = 1 }
+        menu.open_dropdown({
+            mod = { handle = handle },
+            control = control,
+            selected = selected,
+            scroll = 0,
+            x = (controls.x + controls.w / 3 - b.x) / b.scale,
+            top = (controls.y - b.y) / b.scale,
+            width = math.max(160, controls.w / 3) / b.scale,
+            screen_anchor = true,
+            preview_owner = public,
+        })
+        controls.cancel()
+        return true
     end
     public.before_editor_close = function()
         recovering = false
@@ -441,12 +607,10 @@ editor.on_update = function(ctx, dt)
         return
     end
     if authored_source then
-        if public.is_enabled() then
-            authored_source.start()
-        end
         authored_source.tick()
     end
     if not render_ready() then
+        clear_pose_dropdown()
         due = false
         controls.cancel()
         suspended = true
@@ -454,7 +618,7 @@ editor.on_update = function(ctx, dt)
     end
     local resumed = suspended
     suspended = false
-    if close_pending and not close() then
+    if close_pending and not close(pose_state.pending and pose_state.reopen) then
         return
     end
     dock_age = dock_age + (dt or 0)
@@ -501,11 +665,20 @@ editor.on_update = function(ctx, dt)
         close()
         log('preview: closed with editor before game UI transition')
     end
+    if front and front.menu.visible then
+        local ok, changed = pcall(update_pose)
+        if not ok then
+            pose_failed(changed)
+        elseif changed then
+            return
+        end
+    end
     local editor_page = dock_request and dock_age < 0.2 and front and front.menu.visible
     local wants_dock = editor_page and not floating_on_editor
     controls.can_dock = editor_page
     if wants_dock then
         if not docked then
+            clear_pose_dropdown()
             floating_geometry = { controls.x, controls.y, controls.w, controls.h }
             docked = true
             controls.docked = true
@@ -525,6 +698,7 @@ editor.on_update = function(ctx, dt)
             adapter.layout_panel()
         end
     elseif docked then
+        clear_pose_dropdown()
         docked = false
         controls.docked = false
         dock_hidden = false
@@ -685,12 +859,17 @@ editor.on_update = function(ctx, dt)
                         close()
                     elseif event == 'dock' then
                         public.toggle()
+                    elseif event == 'pose' then
+                        public.open_pose_dropdown()
                     elseif event == 'move' or event == 'resize' or event == 'animation' then
+                        clear_pose_dropdown()
                         adapter.layout_panel()
                     elseif event == 'rotate' or event == 'pan' then
+                        clear_pose_dropdown()
                         adapter.rotate(controller.camera, controls.yaw, controls)
                         due = true
                     elseif event == 'zoom' then
+                        clear_pose_dropdown()
                         adapter.zoom(controller.camera, controls.fov)
                         adapter.rotate(controller.camera, controls.yaw, controls)
                         due = true

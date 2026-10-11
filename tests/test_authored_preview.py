@@ -12,7 +12,8 @@ AVATAR = '4d1c334d294dfa97'
 UNIT = 'e0a48d0be9a7453f'
 BONES = '18dead01056b72e9'
 ANIMATION = '931e336d7646cc26'
-CLIPS = ('759c08277f1296d0', '070b422612518deb', 'e32b270524630569', '39250e5b6313a0b2')
+CLIPS = ('759c08277f1296d0', '070b422612518deb', 'e32b270524630569', '39250e5b6313a0b2',
+         'f7d81dbe0142b9ee', 'a4950a590f729419', '75205314048dcdaa')
 OWNER = '18235e0c9ec0e636'
 
 
@@ -39,10 +40,14 @@ def bodies():
     return result
 
 
-def fixture(folder, fallback=False, missing=False, oversized=False):
+def fixture(folder, fallback=False, missing=False, oversized=False, pose_bones=False, pose_stream=False):
     folder.mkdir(parents=True)
     expected = bodies()
     resources = dict(expected)
+    if pose_bones:
+        bad = bytearray(resources[CLIPS[-1], ANIMATION])
+        struct.pack_into('<I', bad, 4, 3)
+        resources[CLIPS[-1], ANIMATION] = bytes(bad)
     if missing:
         resources.pop((CLIPS[-1], ANIMATION))
     # Same name, wrong type must never be mistaken for the unit or bones.
@@ -60,6 +65,8 @@ def fixture(folder, fallback=False, missing=False, oversized=False):
             struct.pack_into('<QQQ', archive, p, int(resource, 16), int(kind, 16), at)
             size = 16*1024*1024+1 if oversized and (resource, kind) == (AVATAR, UNIT) else len(body)
             struct.pack_into('<I', archive, p+56, size)
+            if pose_stream and (resource, kind) == (CLIPS[-1], ANIMATION):
+                struct.pack_into('<I', archive, p+60, 4)
         records.append((name, len(combined), len(archive)))
         combined.extend(archive)
     bundle_name = 'bundles.00.nxa'
@@ -103,7 +110,7 @@ class AuthoredPreviewWorker(unittest.TestCase):
             result = subprocess.run(command(game, output), capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
             lines = (output/'complete.txt').read_text().splitlines()
-            self.assertEqual(lines[1:], ['1'])
+            self.assertEqual(lines[1:], ['2'])
             stamp = hashlib.sha256((game/'bundles.nxa').read_bytes()).hexdigest().upper()
             version = Path(lines[0])
             self.assertEqual(version, output/stamp)
@@ -151,6 +158,19 @@ class AuthoredPreviewWorker(unittest.TestCase):
         self.assertNotEqual(process.returncode, 0, stdout+stderr)
         self.assertIn('canceled', (canceled/'error.txt').read_text())
         self.assertFalse((canceled/'complete.txt').exists())
+
+    def test_new_pose_rig_and_stream_validation_before_publication(self):
+        for name, options, message in [
+            ('pose-bones', {'pose_bones': True}, 'skeleton count differs'),
+            ('pose-stream', {'pose_stream': True}, 'unsupported external stream'),
+        ]:
+            game, output = self.root/name, self.root/(name+'-cache')
+            fixture(game, **options)
+            result = subprocess.run(command(game, output), capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, (output/'error.txt').read_text())
+            self.assertFalse((output/'complete.txt').exists())
+            self.assertFalse(list(output.rglob('*.bin')))
 
     def test_cache_cannot_write_into_game_data(self):
         game = self.root/'game'

@@ -203,7 +203,7 @@ function Native.new(E, m, host)
             end
         end
     end
-    local model = m.player_model.new(E, {
+    local model_host = {
         animate = host.animate == true,
         note = host.log,
         copy_materials = copy_materials,
@@ -214,29 +214,38 @@ function Native.new(E, m, host)
             host.failed_model = model
             error(why, 0)
         end,
-    })
-    local animations = host.animate
-        and m.player_animation
-        and m.player_animation.new(E, {
-            log = host.log,
-            authored = host.authored == true,
-            clip_module = m.player_authored_clip,
-            clips = host.animation_source and host.animation_source.get,
-        })
+    }
+    local model = m.player_model.new(E, model_host)
+    local animations
+    local function animation_source()
+        return host.get_animation_source and host.get_animation_source() or host.animation_source
+    end
     local function start_animation(result)
-        if result.animation or result.animation_failed or not host.animate then
+        local selected = result.pose and result.pose ~= 'idle'
+        if result.animation or result.animation_failed or result.pose == 'idle' or not (selected or host.animate) then
             return false
         end
-        if host.authored and not (host.animation_source and host.animation_source.get()) then
+        local source = animation_source()
+        local authored = selected or host.authored == true
+        if authored and not (source and source.get()) then
             if host.controls then
                 host.controls.animation_available = false
-                host.controls.animation_pending = host.animation_source and host.animation_source.state == 'loading'
-                host.controls.animation_error = host.animation_source and host.animation_source.error
-                    or 'Authored salute resources unavailable'
+                host.controls.animation_pending = source and source.state == 'loading'
+                host.controls.animation_error = source and source.error or 'Authored pose resources unavailable'
             end
             return false
         end
         local started, session = pcall(function()
+            if not animations then
+                animations = m.player_animation
+                    and m.player_animation.new(E, {
+                        log = host.log,
+                        authored = authored,
+                        clip_module = m.player_authored_clip,
+                        clips = source and source.get,
+                        pose = result.pose,
+                    })
+            end
             assert(animations, 'Preview animation module unavailable')
             return assert(animations.create(result), 'Preview animation driver did not initialize')
         end)
@@ -248,7 +257,7 @@ function Native.new(E, m, host)
         if started then
             result.animation = session
             host.log(
-                host.authored and 'preview: authored Helldiver salute prepared'
+                authored and ('preview: authored Helldiver pose prepared ' .. (result.pose or 'salute'))
                     or 'preview: standing/salute garment poses prepared'
             )
         else
@@ -485,7 +494,14 @@ function Native.new(E, m, host)
     end
     function adapter.create_model(world, gear)
         host.log('preview: copy ' .. #gear.plan.pieces .. ' equipped pieces')
+        local pose = host.controls and host.controls.pose
+        model_host.capture_animation = pose ~= nil and pose ~= 'idle'
+        animations = nil -- The previous model's driver retired through quiesce.
         local result = model.create(world, gear.plan)
+        result.pose = pose
+        if host.controls and pose == 'idle' then
+            host.controls.animation_available, host.controls.animation_pending = false, false
+        end
         if host.use_ui_world then
             result.preview_offset = { 100, 0, 0 }
             for _, piece in ipairs(result.pieces) do
@@ -503,7 +519,7 @@ function Native.new(E, m, host)
             end
             error(why, 0)
         end
-        if host.animate then
+        if host.animate or pose and pose ~= 'idle' then
             start_animation(result)
         end
         return result
@@ -686,14 +702,14 @@ function Native.new(E, m, host)
         local function rect(x, y, w, h, color)
             keep('rect', G.rect(panel.gui, E.Vector3(x, y, 152), E.Vector2(w, h), color))
         end
-        local function text(label, x, y)
+        local function text(label, x, y, size)
             keep(
                 'text',
                 G.text(
                     panel.gui,
                     label,
                     'core/performance_hud/debug',
-                    16,
+                    size or 16,
                     'core/performance_hud/debug',
                     E.Vector3(x, y, 153),
                     E.Color(255, 255, 235, 100)
@@ -726,7 +742,15 @@ function Native.new(E, m, host)
             text(host.controls.docked and 'Pop Out' or 'Dock', panel.x + panel.w - 94, panel.y + panel.h + 8)
         end
         text('- Zoom', panel.x + 8, panel.y - 20)
-        if host.controls and (host.controls.animation_available or host.controls.animation_pending) then
+        if host.controls and host.controls.pose_available then
+            local c = host.controls
+            local pose = m.player_authored_clip and m.player_authored_clip.find_pose(c.pose or 'idle')
+            local label = (pose and pose.label or 'Idle') .. (c.animation_pending and '...' or ' v')
+            local available = math.max(8, panel.w / 3 - 8)
+            local size = math.min(16, available / (#label * 0.7))
+            text(label, panel.x + panel.w / 3 + 4, panel.y - 20, size)
+            text('+Zoom', panel.x + panel.w * 2 / 3 + 2, panel.y - 20)
+        elseif host.controls and (host.controls.animation_available or host.controls.animation_pending) then
             text(
                 host.controls.animation_pending and 'Loading...' or (host.controls.animating and 'Pause' or 'Play'),
                 panel.x + panel.w / 2 - 22,
@@ -832,7 +856,11 @@ function Native.new(E, m, host)
         return model.apply(value, palettes)
     end
     function adapter.advance_model(value, dt)
-        if host.authored and not value.animation and not value.animation_failed then
+        if
+            (host.authored or value.pose and value.pose ~= 'idle')
+            and not value.animation
+            and not value.animation_failed
+        then
             assert(lease_live(value.world), 'Preview context disappeared')
             local pending = host.controls and host.controls.animation_pending
             local started = start_animation(value)

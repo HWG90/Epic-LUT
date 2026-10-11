@@ -199,4 +199,21 @@ U.scene_graph_parent, cycle = parent_api, true
 local cyclic = animated.create('world', static_plan)
 assert(cyclic.pieces[1].animation_bind == nil and cyclic.pieces[1].animation_error:find('cycle', 1, true))
 animated.destroy(cyclic)
+-- One static adapter can request hierarchy capture for a fenced pose rebuild,
+-- then return to its original path. Capture always precedes copied-node links.
+U.scene_graph_parent, cycle = parent_api, false
+local capture_host = { capture_animation = false, copy_materials = function() end, retain_failed = function() end }
+local selectable = M.new(E, capture_host)
+local before_capture = hierarchy_reads
+local idle_copy = selectable.create('world', static_plan)
+assert(hierarchy_reads == before_capture and not idle_copy.pieces[1].animation_bind)
+selectable.destroy(idle_copy)
+capture_host.capture_animation = true
+local selected_copy = selectable.create('world', static_plan)
+assert(hierarchy_reads == before_capture + 9 and selected_copy.pieces[1].animation_bind)
+selectable.destroy(selected_copy)
+capture_host.capture_animation = false
+local idle_again = selectable.create('world', static_plan)
+assert(hierarchy_reads == before_capture + 9 and not idle_again.pieces[1].animation_bind)
+selectable.destroy(idle_again)
 print('PASS gated owned hierarchy capture, immutable bind poses and static fallback for missing/cyclic animation data')

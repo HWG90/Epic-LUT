@@ -122,14 +122,16 @@ local env = setmetatable({
         player_preview_controls = dofile('src/preview/player_preview_controls.lua'),
         player_preview_input = dofile('src/preview/player_preview_input.lua'),
         player_preview = dofile('src/preview/player_preview.lua'),
+        player_authored_clip = dofile('src/preview/player_authored_clip.lua'),
         player_preview_native = {
             new = function(_, _, host)
                 factories = factories + 1
                 current_controls = host.controls
                 assert(
-                    host.animate == true and current_controls.animating == true,
-                    'Candidate did not enable owned animation'
+                    host.animate == false and current_controls.pose == 'idle' and current_controls.animating == true,
+                    'A package enabled animation before an explicit pose selection'
                 )
+                current_controls.pose_available = false -- Isolate legacy Pause/Play input coverage.
                 current_controls.animation_available = true
                 return a
             end,
@@ -740,6 +742,9 @@ env.m.player_authored_source = {
         source.tick = function()
             source.polls = source.polls + 1
         end
+        source.get = function()
+            return nil
+        end
         source.close = function()
             if not source.can_close then
                 return false
@@ -754,8 +759,11 @@ env.m.player_authored_source = {
 editor.on_enable(ctx)
 front.menu.visible = true
 local authored_worker = authored_records[#authored_records]
-assert(authored_worker.starts == 1 and public.toggle())
+assert(not authored_worker, 'Animation package started a worker before explicit selection')
+assert(public.toggle() and public.set_pose('salute'))
 editor.on_update(ctx, 0.1)
+authored_worker = authored_records[#authored_records]
+assert(authored_worker.starts == 1)
 assert(authored_worker.polls == 1)
 local pending_base_disables = base_disables
 assert(not editor.on_disable() and not front.menu.visible and base_disables == pending_base_disables)
@@ -763,10 +771,9 @@ assert(not editor.on_cleanup_poll(), 'Authored worker lost its pending cancellat
 authored_worker.can_close = true
 assert(editor.on_cleanup_poll() and authored_worker.state == 'closed')
 disabled = true
+local before_disabled_sources = #authored_records
 editor.on_enable(ctx)
-authored_worker = authored_records[#authored_records]
-assert(authored_worker.starts == 0, 'Disabled Player Preview started an authored game-data worker')
-authored_worker.can_close = true
+assert(#authored_records == before_disabled_sources, 'Disabled Player Preview started an authored game-data worker')
 assert(editor.on_disable())
 disabled = false
 env.m.preview_animation, env.m.player_authored_source = nil, nil

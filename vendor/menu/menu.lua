@@ -4190,7 +4190,7 @@ function M.new(api, measure, Text)
             local top = math.max(height + 8, math.min(wh - 68, d.top))
             local dw = math.min(ww - 16, d.width or 250)
             local x = math.max(8, math.min(ww - dw - 8, d.x))
-            if d.owner then
+            if d.owner or d.screen_anchor then
                 top = math.max(-oy / s + height + 8, math.min((h - oy) / s - 8, d.top))
                 dw = math.min(w / s - 16, d.width or 250)
                 x = math.max(-ox / s + 8, math.min((w - ox) / s - dw - 8, d.x))

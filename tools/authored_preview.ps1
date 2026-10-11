@@ -35,22 +35,22 @@ try {
  $cancelFile=Join-Path $outputRoot 'progress.txt.cancel';if(Test-Path -LiteralPath $cancelFile){Remove-Item -LiteralPath $cancelFile}
  $marker=Join-Path $outputRoot 'complete.txt';if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  $status=Join-Path $outputRoot 'progress.txt'
- [IO.File]::WriteAllText($status,'Checking authored salute game index...')
+ [IO.File]::WriteAllText($status,'Checking authored preview pose game index...')
  $index=Join-Path $gameRoot 'bundles.nxa';$stamp=Get-IndexStamp $index
  $versionFolder=Join-Path $outputRoot $stamp
  Assert-CachePath $versionFolder
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
- foreach($name in @('4d1c334d294dfa97.e0a48d0be9a7453f.bin','4d1c334d294dfa97.18dead01056b72e9.bin','759c08277f1296d0.931e336d7646cc26.bin','070b422612518deb.931e336d7646cc26.bin','e32b270524630569.931e336d7646cc26.bin','39250e5b6313a0b2.931e336d7646cc26.bin')){Assert-CachePath (Join-Path $versionFolder $name)}
- [IO.File]::WriteAllText($status,'Preparing authored salute reader...')
+ foreach($name in @('4d1c334d294dfa97.e0a48d0be9a7453f.bin','4d1c334d294dfa97.18dead01056b72e9.bin','759c08277f1296d0.931e336d7646cc26.bin','070b422612518deb.931e336d7646cc26.bin','e32b270524630569.931e336d7646cc26.bin','39250e5b6313a0b2.931e336d7646cc26.bin','f7d81dbe0142b9ee.931e336d7646cc26.bin','a4950a590f729419.931e336d7646cc26.bin','75205314048dcdaa.931e336d7646cc26.bin')){Assert-CachePath (Join-Path $versionFolder $name)}
+ [IO.File]::WriteAllText($status,'Preparing authored preview pose reader...')
  $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'original_snapshots.cs'))+"`n"+[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'authored_preview_reader.cs'))
  $imports=[regex]::Matches($source,'(?m)^using [^;]+;') | ForEach-Object {$_.Value} | Select-Object -Unique
  $body=[regex]::Replace($source,'(?m)^using [^;]+;\r?\n?','')
  Add-Type -TypeDefinition (($imports -join "`n")+"`n"+$body)
  $count=[EpicAuthoredPreviewReader]::Run($gameRoot,$versionFolder,$OwnerPID,$status)
- if($count -ne 6){throw 'Authored salute resource set is incomplete'}
+ if($count -ne 9){throw 'Authored preview pose resource set is incomplete'}
  if((Get-IndexStamp $index) -ne $stamp){throw 'Game index changed during authored animation extraction'}
  if(Test-Path -LiteralPath $cancelFile){throw 'Authored animation extraction canceled'}
- Write-AtomicText $marker ($versionFolder+"`n1`n")
+ Write-AtomicText $marker ($versionFolder+"`n2`n")
  Write-Output $versionFolder
 } catch {
  if($cacheValidated -and [IO.Directory]::Exists($outputRoot)){[IO.File]::WriteAllText((Join-Path $outputRoot 'error.txt'),$_.Exception.Message)}

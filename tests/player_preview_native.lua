@@ -452,6 +452,7 @@ retained_probes.black = nil
 local animation_events, sessions = {}, {}
 local fence_failed, driver_cleanup_failed, driver_create_failed = false, false, false
 local copy_destroys, driver_advances = 0, 0
+local model_capture, animation_hosts = {}, {}
 local worlds = { 'main', 'simulation', 'owned', 'ui' }
 local AE = {
     Application = {
@@ -513,9 +514,10 @@ local AM = {
         end,
     },
     player_model = {
-        new = function()
+        new = function(_, model_host)
             return {
                 create = function(world)
+                    model_capture[#model_capture + 1] = model_host.capture_animation == true
                     return {
                         world = world,
                         pieces = {
@@ -540,7 +542,8 @@ local AM = {
         end,
     },
     player_animation = {
-        new = function()
+        new = function(_, animation_options)
+            animation_hosts[#animation_hosts + 1] = animation_options
             return {
                 create = function(value)
                     assert(value.world == 'owned' and value.pieces[1].node_count == 2)
@@ -706,6 +709,55 @@ assert(
 )
 
 -- The dedicated simulation world is not a candidate for either GUI producer.
+worlds = { 'main', 'simulation', 'owned', 'ui' }
+-- Standard static adapters acquire no animation hierarchy/driver until a
+-- non-idle pose is explicitly chosen. Each rebuilt model gets a fresh driver.
+worlds = { 'main', 'owned', 'ui' }
+local pose_controls = { pose = 'idle', animating = true }
+local pose_source = {
+    get = function()
+        return {}
+    end,
+    state = 'ready',
+}
+local poses = N.new(AE, AM, {
+    animate = false,
+    controls = pose_controls,
+    get_animation_source = function()
+        return pose_source
+    end,
+    memory = {},
+    log = function() end,
+    native = animation_host.native,
+})
+local before_driver_count = #animation_hosts
+local still_model = poses.create_model('owned', { plan = { pieces = { piece } } })
+assert(not still_model.animation and not model_capture[#model_capture] and #animation_hosts == before_driver_count)
+assert(poses.quiesce())
+poses.destroy_model(still_model)
+pose_controls.pose = 'wave'
+local wave_model = poses.create_model('owned', { plan = { pieces = { piece } } })
+assert(wave_model.animation and model_capture[#model_capture] and #animation_hosts == before_driver_count + 1)
+assert(animation_hosts[#animation_hosts].pose == 'wave' and animation_hosts[#animation_hosts].authored)
+assert(poses.quiesce())
+poses.destroy_model(wave_model)
+pose_controls.pose = 'taunt'
+local taunt_model = poses.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    taunt_model.animation
+        and #animation_hosts == before_driver_count + 2
+        and animation_hosts[#animation_hosts].pose == 'taunt'
+)
+assert(poses.quiesce())
+poses.destroy_model(taunt_model)
+pose_controls.pose = 'idle'
+local returned_idle = poses.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    not returned_idle.animation and not model_capture[#model_capture] and #animation_hosts == before_driver_count + 2
+)
+assert(poses.quiesce())
+poses.destroy_model(returned_idle)
+print('PASS native explicit poses: static Idle gate, owned hierarchy capture, fresh selected driver and return to Idle')
 worlds = { 'main', 'simulation', 'owned', 'ui' }
 local registry_key = 'epic.preview.animation-worlds.v1'
 local old_registry = package.loaded[registry_key]

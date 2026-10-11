@@ -640,6 +640,48 @@ near(
     1e-6
 )
 assert(exact_scaled.close(), 'Validated affine construction retained native resources')
+-- Every explicitly selected authored frame is applied once, including fingers
+-- and cape. Later ticks retain stale-unit guards without cycling or re-writing.
+split.render.alive, glove.source.alive = true, true
+for _, id in ipairs({ 'salute', 'wave', 'taunt', 'highfive' }) do
+    local held = Animation.new(split.E, {
+        authored = true,
+        clip_module = authored_fixture.module,
+        clips = authored_fixture.catalog,
+        pose = id,
+    })
+    local session = held.create(split.model)
+    assert(session.pose == id and session.advance(0.02, true))
+    local held_expected = authored_fixture.module.sample(authored_fixture.catalog, 0, id)
+    local pelvis_basis =
+        multiply(pelvis.animation_bind.poses[pelvis.unit.names.hips]:unbox(), pelvis.model_pose:unbox())
+    local aligned = multiply(inverse(held_expected.hips), pelvis_basis)
+    near(
+        multiply(glove.unit.poses[glove.unit.names.r_hand], glove.model_pose:unbox()),
+        multiply(held_expected.r_hand, aligned),
+        1e-6
+    )
+    near(
+        multiply(glove.unit.poses[glove.unit.names.r_index_finger1], glove.model_pose:unbox()),
+        multiply(held_expected.r_index_finger1, aligned),
+        1e-6
+    )
+    local once = #split.writes
+    for _ = 1, 20 do
+        assert(not session.advance(30, true))
+    end
+    assert(#split.writes == once and session.frames == 1, 'Held emote kept writing or cycled')
+    glove.source.alive = false
+    assert(
+        not pcall(session.advance, 0.02, true) and #split.writes == once,
+        'Held emote skipped its stale ownership guard'
+    )
+    glove.source.alive = true
+    assert(session.close())
+end
+print(
+    'PASS selected authored poses: held Salute/Wave/Taunt/High Five, exact hand/finger mappings, one write and retained stale ownership guards'
+)
 print(
     'PASS authored segmented retarget: exact hand/finger transforms, stable pelvis alignment, preserved kit bases/portrait roots, pause/stale guards and required-data/scale fallback'
 )

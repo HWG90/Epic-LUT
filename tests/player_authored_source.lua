@@ -2,7 +2,7 @@ local Source = dofile('src/preview/player_authored_source.lua')
 local clock, live, stop_ok, decode_ok = 0, true, true, true
 local files, closes, starts, decoded = {}, 0, 0, 0
 local stamp = string.rep('a', 64)
-local output = 'test/cache/authored-salute'
+local output = 'test/cache/authored-poses-v2'
 local data = { authored = true }
 local function make()
     files, clock, live, stop_ok, decode_ok = {}, 0, true, true, true
@@ -90,7 +90,7 @@ source.start()
 assert(source.state == 'loading' and starts == 1 and files[output .. '/owner-heartbeat.txt'] == '123')
 source.start()
 assert(starts == 1, 'Started overlapping authored workers')
-files[output .. '/complete.txt'] = output .. '/' .. stamp .. '\n1\n'
+files[output .. '/complete.txt'] = output .. '/' .. stamp .. '\n2\n'
 clock = 0.3
 source.tick()
 assert(source.state == 'loading' and not source.get() and decoded == 0, 'Read a marker while its writer was active')
@@ -100,7 +100,12 @@ assert(source.state == 'ready' and source.get() == data and closes == 1 and deco
 source.tick()
 assert(decoded == 1, 'Decoded cache again on a stable frame')
 assert(source.close() and source.get() == nil)
-for _, marker in ipairs({ 'elsewhere/' .. stamp .. '\n1\n', output .. '/..\n1\n', output .. '/' .. stamp .. '\n2\n' }) do
+for _, marker in ipairs({
+    'elsewhere/' .. stamp .. '\n2\n',
+    output .. '/..\n2\n',
+    output .. '/' .. stamp .. '\n1\n',
+    'test/cache/authored-salute/' .. stamp .. '\n2\n',
+}) do
     source = make()
     source.start()
     files[output .. '/complete.txt'] = marker
@@ -117,7 +122,7 @@ stop_ok = true
 assert(source.close() and not source.worker and files[output .. '/progress.txt.cancel'] == 'cancel')
 source = make()
 source.start()
-files[output .. '/complete.txt'] = output .. '/' .. stamp .. '\n1\n'
+files[output .. '/complete.txt'] = output .. '/' .. stamp .. '\n2\n'
 decode_ok, live, clock = false, false, 0.3
 source.tick()
 assert(source.state == 'failed' and source.error:find('Malformed authored clip', 1, true))

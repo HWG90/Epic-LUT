@@ -114,6 +114,8 @@ Use **Player Preview** or **F6** to see your worn character while editing. It do
 - Drag the title to move a floating panel; drag its corner to resize.
 - **Pop Out / Dock** changes placement.
 
+Current development builds add a footer pose selector: **Idle**, **Salute**, **Wave**, **Taunt** and **High Five**. Idle remains the default. Emotes hold a real game clip frame, loaded locally on first selection; changing poses retains your camera and current LUT edits. [Pose details](docs/PREVIEW-ANIMATION.md).
+
 Menu and Player Preview native rendering pause when the game loses focus or its display dimensions are invalid, and resume when foreground rendering is ready. Close the preview or editor before switching game screens.
 
 SDK names come from a compact, pinned Community Edition catalog. Unknown resources and shader parents remain unknown. [SDK integration details](docs/SDK-INTEGRATION.md).

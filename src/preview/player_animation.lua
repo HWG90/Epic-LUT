@@ -92,6 +92,11 @@ local function create_authored(E, host, model, manager)
         'Authored animation resources are not ready'
     )
     assert(type(C.sample) == 'function' and type(C.pose) == 'function', 'Authored animation sampler unavailable')
+    local pose_id = host.pose
+    if pose_id ~= nil then
+        local pose = C.find_pose and C.find_pose(pose_id)
+        assert(pose and pose.clip, 'Selected authored pose is unavailable')
+    end
     for name, methods in pairs(REQUIRED) do
         for _, method in ipairs(methods) do
             assert(
@@ -172,7 +177,7 @@ local function create_authored(E, host, model, manager)
         members[unit] = true
     end
     local maps, reference, total = {}, {}, 0
-    local initial = C.sample(dataset, 0)
+    local initial = C.sample(dataset, 0, pose_id)
     for i, piece in ipairs(model.pieces) do
         local unit, n, bind = piece.unit, piece.node_count, piece.animation_bind
         assert(
@@ -272,6 +277,7 @@ local function create_authored(E, host, model, manager)
         mode = 'authored',
         mapped_joints = total,
         anchor = anchor_name,
+        pose = pose_id,
     }
     function session.stop()
         if session.state ~= 'closed' then
@@ -317,34 +323,43 @@ local function create_authored(E, host, model, manager)
             )
             assert(not map.source or U.alive(map.source), 'Equipped source changed; rebuild preview')
         end
+        -- An explicitly selected emote is one held frame. The legacy optional
+        -- driver retains its cape clock; held poses need no repeated writes.
+        if pose_id and session.frames > 0 then
+            return false
+        end
         clock = clock + math.min(dt, Animation.MAX_DT)
-        local sampled, phase, age = C.sample(dataset, clock)
+        local sampled, phase, age = C.sample(dataset, clock, pose_id)
         local common = {}
         for name in pairs(reference) do
             common[name] = box(X.multiply(native_pose(assert(sampled[name])):unbox(), alignment:unbox()))
         end
-        -- Authored clips carry all finger rotations. Add only a small separate
-        -- cape sway to their resulting poses, without entering cloth simulation.
-        for depth = 1, 8 do
-            local name = 'cape' .. depth
-            if common[name] then
-                local p = { E.Vector3.to_elements(X.translation(common[name]:unbox())) }
-                local identity = Q.axis_angle(E.Vector3(1, 0, 0), 0)
-                local turn =
-                    Q.axis_angle(E.Vector3(1, 0, 0), math.sin(clock * 1.8 - depth * 0.42) * (0.006 + depth * 0.0008))
-                local delta = box(
-                    X.multiply(
-                        X.multiply(
-                            X.from_quaternion_position(identity, E.Vector3(-p[1], -p[2], -p[3])),
-                            X.from_quaternion_position(turn, E.Vector3(0, 0, 0))
-                        ),
-                        X.from_quaternion_position(identity, E.Vector3(p[1], p[2], p[3]))
+        -- Only legacy playback adds cape sway. Explicit poses preserve their
+        -- complete authored frame, including the cape, without cloth simulation.
+        if not pose_id then
+            for depth = 1, 8 do
+                local name = 'cape' .. depth
+                if common[name] then
+                    local p = { E.Vector3.to_elements(X.translation(common[name]:unbox())) }
+                    local identity = Q.axis_angle(E.Vector3(1, 0, 0), 0)
+                    local turn = Q.axis_angle(
+                        E.Vector3(1, 0, 0),
+                        math.sin(clock * 1.8 - depth * 0.42) * (0.006 + depth * 0.0008)
                     )
-                )
-                for later = depth, 8 do
-                    local child = 'cape' .. later
-                    if common[child] then
-                        common[child] = box(X.multiply(common[child]:unbox(), delta:unbox()))
+                    local delta = box(
+                        X.multiply(
+                            X.multiply(
+                                X.from_quaternion_position(identity, E.Vector3(-p[1], -p[2], -p[3])),
+                                X.from_quaternion_position(turn, E.Vector3(0, 0, 0))
+                            ),
+                            X.from_quaternion_position(identity, E.Vector3(p[1], p[2], p[3]))
+                        )
+                    )
+                    for later = depth, 8 do
+                        local child = 'cape' .. later
+                        if common[child] then
+                            common[child] = box(X.multiply(common[child]:unbox(), delta:unbox()))
+                        end
                     end
                 end
             end
