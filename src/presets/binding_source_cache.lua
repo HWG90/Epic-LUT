@@ -298,7 +298,7 @@ function C.new(m, host)
                         local hashed, digest = pcall(m.binding_provenance.digest, function()
                             local chunk = file:read(65536)
                             return chunk and #chunk > 0 and chunk or nil
-                        end)
+                        end, size)
                         assert(file:close())
                         assert(hashed, digest)
                         receipt[#receipt + 1] = tostring(size) .. '\t' .. digest .. '\t'

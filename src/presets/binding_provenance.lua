@@ -5,10 +5,19 @@ P.UNIT, P.MATERIAL = 'e0a48d0be9a7453f', 'eac0b497876adedf'
 P.LUT, P.PATTERN = 0x7e662968, 0x81d4c49d
 -- SHA256 uses the Windows BCrypt API already used by bingus_memory.
 -- These OS calls neither operate on game objects nor allocate game resources.
-function P.digest(bytes)
+function P.digest(bytes, expected_bytes)
     assert(
         type(bytes) == 'function' or type(bytes) == 'string' and #bytes <= P.MAX_PART,
         'Invalid binding digest payload'
+    )
+    assert(
+        expected_bytes == nil
+            or type(bytes) == 'function'
+                and type(expected_bytes) == 'number'
+                and expected_bytes >= 0
+                and expected_bytes <= 9007199254740991
+                and expected_bytes % 1 == 0,
+        'Invalid binding digest expected length'
     )
     local ffi = require('ffi')
     if not pcall(ffi.typeof, 'epic_binding_hash_marker') then
@@ -32,17 +41,18 @@ function P.digest(bytes)
             'Binding SHA256 creation failed'
         )
         if type(bytes) == 'function' then
-            local total = 0
+            local total, limit = 0, expected_bytes or 512 * 1024 * 1024
             while true do
                 local chunk = bytes()
                 if chunk == nil then
                     break
                 end
                 assert(type(chunk) == 'string' and #chunk > 0 and #chunk <= 65536, 'Invalid binding digest chunk')
+                assert(#chunk <= limit - total, 'Binding digest file exceeds its limit')
                 total = total + #chunk
-                assert(total <= 512 * 1024 * 1024, 'Binding digest file exceeds its limit')
                 assert(lib.epic_binding_BCryptHashData(hash[0], chunk, #chunk, 0) == 0, 'Binding SHA256 update failed')
             end
+            assert(expected_bytes == nil or total == expected_bytes, 'Binding digest file length differs')
         else
             assert(lib.epic_binding_BCryptHashData(hash[0], bytes, #bytes, 0) == 0, 'Binding SHA256 update failed')
         end

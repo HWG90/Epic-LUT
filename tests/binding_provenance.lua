@@ -5,6 +5,38 @@ local Units = dofile('src/gear/unit_identity.lua')
 local Materials = dofile('src/gear/material_identity.lua')
 assert(P.digest('') == 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
 assert(P.digest('abc') == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+local function chunks(chunk, count)
+    local left = count
+    return function()
+        if left > 0 then
+            left = left - 1
+            return chunk
+        end
+    end
+end
+assert(P.digest(chunks('abc', 1), 3) == P.digest('abc'))
+assert(P.digest(chunks('abc', 0), 0) == P.digest(''))
+local function bad_digest(reader, expected, message)
+    local ok, why = pcall(P.digest, reader, expected)
+    assert(not ok and tostring(why):find(message, 1, true), tostring(why))
+end
+for _, expected in ipairs({ -1, 1.5, math.huge, -math.huge, 0 / 0, 9007199254740992, '3', false, {} }) do
+    bad_digest(chunks('abc', 1), expected, 'Invalid binding digest expected length')
+end
+bad_digest('abc', 3, 'Invalid binding digest expected length')
+bad_digest(chunks('abc', 1), 4, 'Binding digest file length differs')
+bad_digest(chunks('abc', 1), 2, 'Binding digest file exceeds its limit')
+bad_digest(chunks('a', 1), 0, 'Binding digest file exceeds its limit')
+bad_digest(chunks('', 1), 0, 'Invalid binding digest chunk')
+bad_digest(chunks(('x'):rep(65537), 1), 65537, 'Invalid binding digest chunk')
+bad_digest(('x'):rep(P.MAX_PART + 1), nil, 'Invalid binding digest payload')
+local large_chunk, large_count = ('x'):rep(65536), 8193
+assert(
+    P.digest(chunks(large_chunk, large_count), #large_chunk * large_count)
+        == '8bb025e68d2f9f697f887606ed50d6e29322bb579851d07162ba47979db3313f',
+    'An exact-sized streamed patch larger than 512 MiB was refused or hashed incorrectly'
+)
+bad_digest(chunks(large_chunk, large_count), nil, 'Binding digest file exceeds its limit')
 local function word(n)
     return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256)
 end

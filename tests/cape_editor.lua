@@ -2660,6 +2660,7 @@ do
         m.unit_identity, m.material_identity, m.binding_names, m.binding_unit_layout
     local old_resolve, old_resolve_live, old_avatar_units = m.avatar.resolve, m.avatar.resolve_live, m.avatar.units
     local cache, starts, captures, closed, ready, close_ready, fail = nil, 0, 0, 0, false, false, false
+    local start_attempts, start_failure, tick_failure, scope_failure = 0, nil, nil, nil
     local unit_lookups, kit_reads, material_lookups, worker_creates, resolver_creates = 0, 0, 0, 0, 0
     local logs = {}
     ctx.log = function(text)
@@ -2771,13 +2772,21 @@ do
                 index_stamp = ('a'):rep(64),
                 start = function(units)
                     assert(#units == 3)
+                    start_attempts = start_attempts + 1
+                    if start_failure then
+                        return false, start_failure
+                    end
                     starts = starts + 1
-                    cache.state = 'loading'
+                    cache.state, cache.error = 'loading', nil
                     return true
                 end,
                 tick = function()
-                    if ready then
-                        cache.state = 'ready'
+                    if cache.state == 'loading' then
+                        if tick_failure then
+                            cache.state, cache.error = 'failed', tick_failure
+                        elseif ready then
+                            cache.state = 'ready'
+                        end
                     end
                 end,
                 close = function()
@@ -2794,6 +2803,10 @@ do
                     return true
                 end,
                 validate_scope = function()
+                    if scope_failure then
+                        cache.state, cache.status = 'stale', 'Binding source scope changed; reload current gear'
+                        return false, scope_failure
+                    end
                     return true
                 end,
             }
@@ -2897,9 +2910,49 @@ do
     frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
     legacy = saved_outfit
     assert(#legacy.entries == 3 and not legacy.entries[1].binding_provenance, 'Pending cache broke an ordinary save')
+    assert(h.set('armory_export_format', 3))
+    local function export_refused(text)
+        local before_captures, before_history, before_starts = captures, #action_history.undo, starts
+        local why = api.mods[h.id].controls.armory_export.on_activate()
+        assert(why:find(text, 1, true), why)
+        assert(
+            captures == before_captures
+                and #action_history.undo == before_history
+                and starts == before_starts
+                and created == texture_count
+                and api.mods[h.id] == registered
+                and frontend.menu == menu
+                and bound[armor][1] == native_before[1]
+                and bound[cape][1] == native_before[2]
+                and bound[helmet][1] == native_before[3],
+            'Pending/refused export mutated bindings, history, menu or restarted its worker'
+        )
+        return why
+    end
+    local pending_status = 'Reading exact binding sources; retry Export after the background cache is ready'
+    export_refused(pending_status)
+    export_refused(pending_status)
+    assert(start_attempts == 1, 'Pending Export requested another binding worker')
+    tick_failure = 'Fixture archive reader rejected ambiguous unit resources'
+    runtime.on_update(ctx, 0)
+    assert(
+        basic_info().status:find(tick_failure, 1, true) and not basic_info().status:find(pending_status, 1, true),
+        'Failed cache did not replace the pending export status'
+    )
+    export_refused(tick_failure)
+    export_refused(tick_failure)
+    assert(start_attempts == 1 and cache.error == tick_failure, 'Export discarded the failed worker reason')
+    tick_failure, cache.state = nil, 'idle'
+    start_failure = 'Fixture previous worker cleanup pending'
+    export_refused(start_failure)
+    assert(start_attempts == 2 and cache.state == 'idle', 'Cache-start refusal was masked or restarted')
+    start_failure, cache.state = nil, 'closed'
+    why = api.mods[h.id].controls.armory_export.on_activate()
+    assert(why == pending_status and starts == 2 and start_attempts == 3, 'Closed cache did not start exactly once')
     local count = captures
     ready = true
     runtime.on_update(ctx, 0)
+    assert(basic_info().status == 'Exact binding sources ready; retry Export', 'Ready cache left the pending status')
     assert(captures == count + 3 and created == texture_count, 'Read-only source probe created textures')
     local probe = 0
     for _, log in ipairs(logs) do
@@ -2914,6 +2967,24 @@ do
     assert(h.set('armory_export_format', 3))
     activate('armory_export')
     assert(exported and exported.verified and exported.key == legacy.entries[1].key)
+    cache.state, ready = 'loading', false
+    export_refused(pending_status)
+    activate('save_setup')
+    local unrelated_status = basic_info().status
+    assert(unrelated_status ~= pending_status)
+    ready = true
+    runtime.on_update(ctx, 0)
+    assert(basic_info().status == unrelated_status, 'Cache completion overwrote an unrelated user action status')
+    scope_failure = 'Fixture current loose patch payloads changed'
+    export_refused(scope_failure)
+    assert(cache.state == 'stale' and cache.error == scope_failure, 'Scope rejection lost its exact reason')
+    export_refused(scope_failure)
+    assert(start_attempts == 3, 'Stale scope Export silently restarted the cache')
+    scope_failure, ready = nil, false
+    activate('populate_worn')
+    assert(starts == 3 and cache.state == 'loading' and not cache.error, 'Explicit Load did not retry stale sources')
+    ready = true
+    runtime.on_update(ctx, 0)
     local original = legacy.entries[2].original
     legacy.entries[2].original = { resource = 'eeeeeeeeeeeeeeee', width = 23, height = 8 }
     count = captures

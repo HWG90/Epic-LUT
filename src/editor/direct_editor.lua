@@ -7,6 +7,7 @@ local bindings, gear_catalog
 local sharing, pattern_editor, armory_mirror
 local edit = {} -- Current document, imported source, target and revision baseline.
 local status = 'Load a DDS or ZIP, then refresh the live LUT list.'
+local BINDING_EXPORT_PENDING = 'Reading exact binding sources; retry Export after the background cache is ready'
 local pending, palettes = nil, {}
 local table_index
 local operations = {}
@@ -2545,14 +2546,31 @@ function operations.probe_binding_sources()
         )
     end
 end
+local function binding_export_unavailable(cache)
+    return tostring(cache.error or cache.status or 'Exact binding sources unavailable')
+        .. '; press Load Current Gear to retry'
+end
 function operations.binding_export_provider(preset)
     local hydrated, matches = {}
     local function prepare()
         local resolver, why = operations.ensure_binding_provenance()
         assert(resolver, why or 'Verified named Lua binding identity unavailable')
-        if operations.provenance_cache.state ~= 'ready' or not operations.provenance_cache.validate_scope() then
-            operations.request_binding_sources()
-            error('Reading exact binding sources; retry Export after the background cache is ready', 0)
+        local cache = operations.provenance_cache
+        if cache.state == 'failed' or cache.state == 'stale' then
+            error(binding_export_unavailable(cache), 0)
+        end
+        if cache.state == 'idle' or cache.state == 'closed' then
+            local started, reason = operations.request_binding_sources()
+            assert(started, reason or 'Exact binding source request could not start')
+        end
+        if cache.state == 'loading' then
+            error(BINDING_EXPORT_PENDING, 0)
+        end
+        assert(cache.state == 'ready', binding_export_unavailable(cache))
+        local valid, reason = cache.validate_scope()
+        if not valid then
+            cache.error = reason or cache.status or 'Current binding source scope changed'
+            error(binding_export_unavailable(cache), 0)
         end
         assert(stop_identification(), 'Highlight restoration pending')
         if pattern_editor then
@@ -5777,7 +5795,17 @@ return {
             pcall(updates.tick, dt)
         end
         if operations.provenance_cache then
-            pcall(operations.provenance_cache.tick)
+            local cache = operations.provenance_cache
+            local ticked, tick_error = pcall(cache.tick)
+            if status == BINDING_EXPORT_PENDING then
+                if not ticked then
+                    message('Binding source cache update failed: ' .. tostring(tick_error))
+                elseif cache.state == 'ready' then
+                    message('Exact binding sources ready; retry Export')
+                elseif cache.state == 'failed' or cache.state == 'stale' then
+                    message(binding_export_unavailable(cache))
+                end
+            end
             local ok, why = pcall(operations.probe_binding_sources)
             if not ok and ctx.log then
                 ctx.log('Binding provenance probe unavailable: ' .. tostring(why):sub(1, 512))

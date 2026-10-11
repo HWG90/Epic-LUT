@@ -218,12 +218,27 @@ dataset()
 files[folder .. '/scope.meta'] = 'top-level-game-data-patches-v1\n1\n' .. P.digest(receipt) .. '\n'
 time = time + 1
 cache.tick()
+local scope_lengths = {}
+m.binding_provenance = setmetatable({
+    digest = function(bytes, expected)
+        if type(bytes) == 'function' then
+            assert(expected ~= nil, 'Patch scope hashing omitted its measured file size')
+            scope_lengths[#scope_lengths + 1] = expected
+        end
+        return P.digest(bytes, expected)
+    end,
+}, { __index = P })
 assert(cache.validate_scope())
+assert(
+    #scope_lengths == 3 and scope_lengths[1] == 4 and scope_lengths[2] == 3 and scope_lengths[3] == 6,
+    'Patch scope hashing did not pass each exact measured file size'
+)
 files['C:/game/data/' .. patch .. '.gpu_resources'] = 'BAD'
 assert(
     not cache.validate_scope() and cache.state == 'stale',
     'Changed same-size GPU patch body reused stale provenance'
 )
+m.binding_provenance = P
 patch_names = {}
 cache.close()
 cache = new()
