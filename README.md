@@ -30,7 +30,7 @@ No Python or MCM installation required. Windows PowerShell/.NET handles file pic
 
 The Pixel Grid uses the full height above a compact action bar. **Hide Values** gives it the inspector's width; **Show Values** restores the numeric editor. The setting is remembered.
 
-Use the gold **Tools** button to open the movable toolbox and reveal **Import**, **Rows**, **Export**, and **Options** beside it. They switch the same toolbox. **Scratch** opens a separate brush palette with color and alpha controls; it can stay open alongside the toolbox. Export keeps the shared format selector and timestamped filenames.
+Use **Tools** to open the toolbox. Its **Import**, **Rows**, **Export**, and **Options** tabs appear once inside the docked or floating panel. **Scratch** opens a separate brush palette with color and alpha controls; it can stay open alongside the toolbox. Export keeps the shared format selector and timestamped filenames.
 
 **Tools > Options > Load Debug LUT** loads the bundled 23x8 Debug table by **Plain Furniture** into the editor. Each load starts with a fresh copy; use the Apply controls to send it to gear.
 
@@ -96,7 +96,7 @@ Click the texture ID beside the LUT dropdown to give it a custom name. Names are
 
 Use **Tools → Rows → Import Paydex JSON...** to choose a Paydex row-presets JSON file. Imported rows appear immediately in the preset selector. Choose a destination row and press **Apply preset to row** separately. The importer preserves full RGBA/material values, reuses identical existing presets, and gives conflicting names a suffix instead of overwriting them.
 
-Use **Dock / Undock** in Tools to place its tabs below the swatches inside the LUT Editor or return them to a floating window. The docked Tools body scrolls independently when space is limited.
+Use **Dock / Undock** in Tools to place its tabs below the swatches inside the LUT Editor or return them to a floating window. Drag the horizontal divider between the table and Tools up or down to adjust their space; the split is retained when resizing or redocking. The docked Tools body scrolls independently when space is limited.
 
 Select multiple rows through their row labels, or select their first-column cells, then **Apply preset to selected rows** to fill every selected row with the preset as one undoable edit. Use the **X** beside a saved row, palette or Armory preset to remove it from the library. Removed files remain recoverable; the applied appearance is preserved.
 

@@ -2035,7 +2035,21 @@ function M.new(api, measure, Text)
             end
             return baseline
         end
+        local active_viewport
         local function hovering(x, y, rw, rh)
+            if
+                active_viewport
+                and self.pointer_x
+                and self.pointer_y
+                and (
+                    self.pointer_x < active_viewport.x
+                    or self.pointer_x >= active_viewport.x + active_viewport.w
+                    or self.pointer_y < active_viewport.y
+                    or self.pointer_y >= active_viewport.y + active_viewport.h
+                )
+            then
+                return false
+            end
             return self.pointer_x
                 and self.pointer_y
                 and self.pointer_x >= ox + x * s
@@ -2080,7 +2094,9 @@ function M.new(api, measure, Text)
             end
             for i = first, #commands do
                 local command = commands[i]
-                command.layer, command.paint_plane, command.paint_span = plane, plane, span
+                local offset = command.surface_offset or 0
+                command.layer, command.paint_plane, command.paint_span =
+                    plane + offset, plane + offset, offset > 0 and 20 or span
             end
         end
 
@@ -2319,6 +2335,153 @@ function M.new(api, measure, Text)
                 double_click = owned(double),
                 floating_owner = owner and owner.id,
             }
+        end
+
+        local function surface(plane)
+            assert(plane == 110 or plane == 130, 'Unsupported custom UI surface plane')
+            local first, finished = #commands + 1, false
+            return function()
+                assert(not finished, 'Custom UI surface already finished')
+                finished = true
+                for index = first, #commands do
+                    local command = commands[index]
+                    command.layer, command.paint_plane, command.paint_span = plane, plane, 20
+                    command.surface_offset = plane - 100
+                end
+            end
+        end
+        local function viewport(bounds, draw, covers)
+            local function finite(value)
+                return type(value) == 'number' and value == value and value > -math.huge and value < math.huge
+            end
+            assert(
+                type(bounds) == 'table'
+                    and finite(bounds.x)
+                    and finite(bounds.y)
+                    and finite(bounds.w)
+                    and finite(bounds.h)
+                    and bounds.w > 0
+                    and bounds.h > 0
+                    and finite(bounds.x + bounds.w)
+                    and finite(bounds.y + bounds.h),
+                'Invalid custom UI viewport'
+            )
+            assert(type(draw) == 'function' and not active_viewport, 'Invalid or nested custom UI viewport draw')
+            assert(
+                type(covers) == 'table'
+                    and finite(covers.top)
+                    and finite(covers.bottom)
+                    and covers.top >= bounds.y + bounds.h
+                    and covers.bottom <= bounds.y
+                    and type(covers.color) == 'table',
+                'Invalid custom UI viewport covers'
+            )
+            for channel = 1, 3 do
+                assert(
+                    finite(covers.color[channel]) and covers.color[channel] >= 0 and covers.color[channel] <= 255,
+                    'Invalid custom UI viewport cover color'
+                )
+            end
+            local clip = { x = ox + bounds.x * s, y = oy + bounds.y * s, w = bounds.w * s, h = bounds.h * s }
+            assert(
+                finite(clip.x)
+                    and finite(clip.y)
+                    and finite(clip.w)
+                    and finite(clip.h)
+                    and finite(clip.x + clip.w)
+                    and finite(clip.y + clip.h),
+                'Invalid scaled custom UI viewport'
+            )
+            local first, hit_first = #commands + 1, #hits + 1
+            local editing = self.text_edit
+            local old_field = editing and editing.field_bounds
+            active_viewport = clip
+            local ok, why = pcall(draw)
+            active_viewport = nil
+            if not ok then
+                while #commands >= first do
+                    commands[#commands] = nil
+                end
+                while #hits >= hit_first do
+                    hits[#hits] = nil
+                end
+                if self.text_edit then
+                    self.text_edit.field_bounds = self.text_edit == editing and old_field or nil
+                end
+                error(why, 0)
+            end
+            local function intersect(rectangle)
+                local x, y = math.max(rectangle.x, clip.x), math.max(rectangle.y, clip.y)
+                local right = math.min(rectangle.x + rectangle.w, clip.x + clip.w)
+                local top = math.min(rectangle.y + rectangle.h, clip.y + clip.h)
+                if right > x and top > y then
+                    return x, y, right - x, top - y
+                end
+            end
+            local body = {}
+            for index = first, #commands do
+                local command = commands[index]
+                local keep = true
+                if command.type == 'rect' then
+                    local x, y, width, height = intersect(command)
+                    keep = x ~= nil
+                    if keep then
+                        command.x, command.y, command.w, command.h = x, y, width, height
+                    end
+                elseif command.type == 'text' then
+                    local ink = text_metrics(command.size / s, command.text, command.text_role, true)
+                    -- The native text primitive keeps its baseline. Opaque
+                    -- edge masks hide only the ink outside this vertical box.
+                    keep = command.y + ink.max_y * s > clip.y and command.y + ink.min_y * s < clip.y + clip.h
+                end
+                if keep then
+                    command.layer, command.paint_plane, command.paint_span = 110, 110, 20
+                    command.surface_offset = 10
+                    command.viewport = clip
+                    body[#body + 1] = command
+                end
+            end
+            while #commands >= first do
+                commands[#commands] = nil
+            end
+            for _, command in ipairs(body) do
+                commands[#commands + 1] = command
+            end
+            local visible_hits = {}
+            for index = hit_first, #hits do
+                local item = hits[index]
+                local x, y, width, height = intersect(item)
+                if x then
+                    item.x, item.y, item.w, item.h, item.viewport = x, y, width, height, clip
+                    visible_hits[#visible_hits + 1] = item
+                end
+            end
+            while #hits >= hit_first do
+                hits[#hits] = nil
+            end
+            for _, item in ipairs(visible_hits) do
+                hits[#hits + 1] = item
+            end
+            local field = self.text_edit and self.text_edit.field_bounds
+            if field and (self.text_edit ~= editing or field ~= old_field) then
+                local x, y, width, height = intersect(field)
+                if x then
+                    field.x, field.y, field.w, field.h, field.viewport = x, y, width, height, clip
+                else
+                    self.text_edit.field_bounds = nil
+                end
+            end
+            local function mask(y, height)
+                if height <= 0 then
+                    return
+                end
+                rect(bounds.x, y, bounds.w, height, covers.color, 1, 'viewport_mask')
+                local command = commands[#commands]
+                command.layer, command.paint_plane, command.paint_span, command.viewport = 110, 110, 20, clip
+                command.surface_offset = 10
+            end
+            mask(bounds.y + bounds.h, covers.top - bounds.y - bounds.h)
+            mask(covers.bottom, bounds.y - covers.bottom)
         end
 
         local function scrollbar(role, x, y, height, total, visible, offset, on_scroll)
@@ -2773,6 +2936,8 @@ function M.new(api, measure, Text)
                             return hovering(x, y, rw, rh)
                         end,
                         scrollbar = scrollbar,
+                        surface = surface,
+                        viewport = viewport,
                         text_size = function(size, role)
                             return M.text_size(self, size, role)
                         end,
@@ -3947,7 +4112,8 @@ function M.new(api, measure, Text)
         if custom_drag and custom_drag.owner and not floating_by_id[custom_drag.owner] then
             cancel_custom_drag('owner closed')
         end
-        for ordinal, f in ipairs(floating_requests) do
+        local floating_plane = 210
+        for _, f in ipairs(floating_requests) do
             local p = f.position
             local fw, fh = f.width * s, f.height * s
             local fx, fy = (p.x - ox) / s, (p.y - oy) / s
@@ -3955,6 +4121,11 @@ function M.new(api, measure, Text)
             floating_context = f
             hit(fx, fy, f.width, f.height, function() end)
             f.draw(fx, fy, f.width, f.height)
+            local frame_first = #commands + 1
+            local expanded = false
+            for index = first, frame_first - 1 do
+                expanded = expanded or commands[index].surface_offset ~= nil
+            end
             frame('floating:' .. tostring(f.id), fx, fy, f.width, f.height)
             local header_height = f.header_height or 28
             hit(fx, fy + f.height - header_height, f.width - 32, header_height, function(mx, my)
@@ -3979,16 +4150,26 @@ function M.new(api, measure, Text)
                 f.close()
             end)
             floating_context = nil
-            paint_surface(first, 210 + (ordinal - 1) * 20, 20)
+            -- Child viewports occupy +10..+25 and fixed chrome +30..+45.
+            -- The owned outer frame sits above both and below the next window.
+            if expanded then
+                for index = frame_first, #commands do
+                    commands[index].surface_offset = 40
+                end
+            end
+            local span = expanded and 60 or 20
+            paint_surface(first, floating_plane, span)
+            floating_plane = floating_plane + span
             for i = first, #commands do
                 commands[i].popup = true
                 commands[i].floating_id = f.id
             end
         end
         -- Reuse the native draw-layer region that rendered earlier releases.
-        -- Integer roles occupy 0..15; twenty layers keep every surface separate.
-        local last_floating_plane = #floating_requests > 0 and 210 + (#floating_requests - 1) * 20 or 180
-        local popup_planes = { dropdown = math.max(300, last_floating_plane + 20) }
+        -- Floating windows reserve their complete child viewport/chrome range.
+        -- Ordinary dropdown/picker/dialog surfaces still require twenty layers.
+        local last_floating_top = #floating_requests > 0 and floating_plane or 200
+        local popup_planes = { dropdown = math.max(300, last_floating_top) }
         popup_planes.picker = math.max(340, popup_planes.dropdown + 20)
         popup_planes.dialog = math.max(380, popup_planes.picker + 20)
         popup_planes.tooltip = math.max(420, popup_planes.dialog + 20)

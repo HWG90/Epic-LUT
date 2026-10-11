@@ -2,10 +2,12 @@
 
 ## Unreleased
 
+- Resize docked Tools vertically with a draggable divider; retain the split across window resizing and redocking without changing LUT data.
+- Keep partially visible Value Editor text rendering at both scroll edges, with clipped controls and fixed chrome above the scrolling content.
 - Align Value Editor labels and numeric fields to measured font bounds; add thumb/track dragging and finer scrolling without clipping beneath its header.
 - Recover workspace height above the status divider, move the docked Tools title into the footer, and place Paydex JSON import last below Reset Row.
 - Flash camo color contributions as well as Base during region identification, preserving original data and restoring only owned live bindings.
-- Fill the available grid space with docked Tools and show its tabs only inside the docked or floating panel; keep JSON import below Apply in the Rows panel.
+- Fill the available grid space with docked Tools and show its tabs only inside the docked or floating panel.
 - Apply row presets to every selected row whose selection includes column 1, as one undoable full-RGBA edit.
 - Add removal X buttons to saved-row, palette and Armory preset choosers, with recoverable backups and preserved applied colors.
 - Import Paydex JSON row libraries directly from Tools > Rows, preserving complete float RGBA values, existing presets and the current editor/gear state.

@@ -9,6 +9,7 @@ function V.new(deps)
     local rgb, editable, color_columns = deps.rgb, deps.editable, deps.color_columns
     local ffi = require('ffi')
     local selection_drag
+    local splitter_drag
     local function same_source(state)
         local current = document()
         return current == state.document
@@ -25,6 +26,18 @@ function V.new(deps)
         if selection_drag and (not same_source(selection_drag) or h.get('grid_tool') ~= 1) then
             selection_drag.cancel()
         end
+        if
+            splitter_drag
+            and (
+                not same_source(splitter_drag)
+                or self.tools ~= splitter_drag.tools
+                or not self.tools.is_open()
+                or not self.tools.is_docked()
+            )
+        then
+            splitter_drag.stop('Tools layout changed')
+        end
+        self.tools_splitter = nil
         local mod = self.api.mods[h.id]
         local theme = ui.theme
         local dark, blue, white, muted = theme.panel, theme.header, theme.white, theme.muted
@@ -76,8 +89,9 @@ function V.new(deps)
         local content_bottom = footer_band + 4 * font_scale
         local gridbottom = ui.y + content_bottom
         local portrait = not self.embedded and package.loaded['epic.player_preview.v1']
-        local function panel(x, y, w, height, title, reserved)
+        local function panel(x, y, w, height, title, reserved, header_plane)
             ui.rect(x, y, w, height, dark)
+            local finish_header = header_plane and ui.surface and ui.surface(header_plane)
             local header_y = y + height - panel_header_height
             ui.rect(x, header_y, w, panel_header_height, blue)
             if ui.epic_style then
@@ -105,6 +119,9 @@ function V.new(deps)
                 math.max(0, w - 16 * font_scale - (reserved or 0)),
                 'heading'
             )
+            if finish_header then
+                finish_header()
+            end
         end
         local function button(x, y, w, label, id, height)
             w = math.max(0, math.min(w, ui.x + ui.w - x - 6))
@@ -151,8 +168,17 @@ function V.new(deps)
             local copy_label, paste_label = compact and 'Copy' or 'Copy Value', compact and 'Paste' or 'Paste Value'
             local action_width = math.min(110, math.max(46, (rightw - 110) / 2))
             local reserved = actions and action_width * 2 + 10 or 0
-            panel(right, gridbottom, rightw, ui.h - content_bottom, compact and 'Values' or 'Value Editor', reserved)
+            panel(
+                right,
+                gridbottom,
+                rightw,
+                ui.h - content_bottom,
+                compact and 'Values' or 'Value Editor',
+                reserved,
+                130
+            )
             if actions then
+                local finish_actions = ui.surface and ui.surface(130)
                 local function value_action(id, label, x)
                     local control = mod.controls[id]
                     ui.button(x, top - panel_header_height + 2, action_width, panel_header_height - 4, label, function()
@@ -161,6 +187,9 @@ function V.new(deps)
                 end
                 value_action('copy_value', copy_label, right + rightw - 8 - action_width * 2 - 4)
                 value_action('paste_value', paste_label, right + rightw - 8 - action_width)
+                if finish_actions then
+                    finish_actions()
+                end
             end
         end
         local function open_tools(tab)
@@ -184,6 +213,7 @@ function V.new(deps)
             end
         end
         if not self.embedded then
+            local finish_footer = ui.surface and ui.surface(130)
             ui.rect(ui.x, ui.y, ui.w, footer_band, dark)
             local function shortcut(x, width, label, action, selected, enabled, primary)
                 ui.button(x, ui.y + footer_inset, width, footer_height, label, action, {
@@ -284,6 +314,9 @@ function V.new(deps)
                 shortcut(fx + gap, stop_width, 'Stop Highlight', function()
                     ui.activate('stop_identify')
                 end)
+            end
+            if finish_footer then
+                finish_footer()
             end
         end -- main footer
         if gear_controls then
@@ -525,6 +558,30 @@ function V.new(deps)
             -- Tools fills everything below those rows, down to the footer.
             dock_tools(grid_top - cell * rows - 30 - 8 * font_scale)
             if tools_bounds then
+                local total = grid_top - tools_bounds.y - 30 - 8 * font_scale
+                local maximum = math.max(0, total - cell * math.min(2, d.height) - 8 * font_scale)
+                minimum = math.min(minimum, maximum)
+                local ratio = self.tools.split_ratio
+                if type(ratio) == 'number' and ratio == ratio and math.abs(ratio) ~= math.huge then
+                    tools_bounds.h = math.max(minimum, math.min(maximum, ratio * total))
+                else
+                    tools_bounds.h = math.max(minimum, math.min(maximum, tools_bounds.h))
+                end
+                local line_y = tools_bounds.y + tools_bounds.h + 4 * font_scale
+                local hit_height = 8 * font_scale + 2
+                self.tools_splitter = {
+                    x = tools_bounds.x,
+                    y = line_y - hit_height / 2,
+                    w = tools_bounds.w,
+                    h = hit_height,
+                    line_y = line_y,
+                    line_offset = 4 * font_scale,
+                    bottom = tools_bounds.y,
+                    total = total,
+                    minimum = minimum,
+                    maximum = maximum,
+                    cell = cell,
+                }
                 grid_floor = tools_bounds.y + tools_bounds.h + 8 * font_scale + 30
                 space = math.max(4, grid_top - grid_floor)
             end
@@ -833,6 +890,7 @@ function V.new(deps)
             end
         end
         if show_values then
+            local finish_options = ui.surface and ui.surface(130)
             local inspector_button_width = (rightw - 21) / 2
             local inspector_gap = 6 * font_scale
             local selector_y = top - panel_header_height - inspector_gap - 26
@@ -870,6 +928,9 @@ function V.new(deps)
                 'unlock',
                 options_height
             )
+            if finish_options then
+                finish_options()
+            end
             local clip_top, clip_bottom = options_y - inspector_gap, gridbottom + 12
             local viewport = math.max(0, clip_top - clip_bottom)
             self.value_viewport = { x = right, y = clip_bottom, w = rightw, h = viewport }
@@ -877,9 +938,7 @@ function V.new(deps)
             local scroll = math.max(0, self.value_scroll)
             local cursor = clip_top + scroll
             local function visible(y, height)
-                -- Fractional glyph heights accumulate through long columns.
-                -- Treat numerical roundoff at an exact edge as contained.
-                return y >= clip_bottom - 1e-6 and y + height <= clip_top + 1e-6
+                return viewport > 0 and y < clip_top and y + height > clip_bottom
             end
             local function text_height(size, value, role, padding, minimum)
                 return math.max(
@@ -890,7 +949,7 @@ function V.new(deps)
             end
             local function text_inside(y, height, size, value, role)
                 if not ui.text_metrics or not ui.text_y then
-                    return true
+                    return visible(y, height)
                 end
                 local ink = ui.text_metrics(size, value, role)
                 local baseline = ui.text_y(y, height, size, value, role)
@@ -917,209 +976,240 @@ function V.new(deps)
                 return lines
             end
             self.value_wheel_step = math.max(8, math.min(24, text_height(13, 'Value', 'hint', 1, 14)))
-            for r = 1, d.height do
-                if h.get('group_rows') or r == row then
-                    local selected_row = r
-                    local row_label = (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r
-                    local row_heading_height = text_height(14, row_label, 'heading', 4, 23)
-                    cursor = cursor - row_heading_height - 2 * font_scale
-                    if
-                        visible(cursor, row_heading_height)
-                        and text_inside(cursor, row_heading_height, 14, row_label, 'heading')
-                    then
-                        local row_selected = r == row
-                        if not ui.epic_style or self.open_row == r or row_selected then
-                            ui.rect(
-                                right + 8,
-                                cursor,
-                                rightw - 20,
-                                row_heading_height,
-                                (
-                                    ui.surface_color(
-                                        right + 8,
-                                        cursor,
-                                        rightw - 20,
-                                        row_heading_height,
-                                        { selected = r == row }
-                                    )
-                                )
-                            )
-                        end
-                        if ui.epic_style then
-                            local edge = ui.pixel_width or 1
-                            ui.rect(right + 8, cursor, rightw - 20, edge, theme.line, nil, 'control_accent')
-                            if row_selected then
+            local content
+            local function draw_body()
+                for r = 1, d.height do
+                    if h.get('group_rows') or r == row then
+                        local selected_row = r
+                        local row_label = (self.open_row == r and 'v ' or '> ') .. 'Row ' .. r
+                        local row_heading_height = text_height(14, row_label, 'heading', 4, 23)
+                        cursor = cursor - row_heading_height - 2 * font_scale
+                        if text_inside(cursor, row_heading_height, 14, row_label, 'heading') then
+                            local row_selected = r == row
+                            if not ui.epic_style or self.open_row == r or row_selected then
                                 ui.rect(
                                     right + 8,
                                     cursor,
-                                    edge * 2,
+                                    rightw - 20,
                                     row_heading_height,
-                                    theme.brass,
-                                    nil,
-                                    'control_accent'
+                                    (
+                                        ui.surface_color(
+                                            right + 8,
+                                            cursor,
+                                            rightw - 20,
+                                            row_heading_height,
+                                            { selected = r == row }
+                                        )
+                                    )
                                 )
                             end
-                        end
-                        local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
-                        ui.text(
-                            right + 13,
-                            ui.text_y and ui.text_y(cursor, row_heading_height, 14, row_label, 'heading') or cursor + 6,
-                            row_label,
-                            14,
-                            ui.epic_style and (row_selected and theme.brass or white)
-                                or can_identify and {
-                                    math.floor(175 + 69 * pulse),
-                                    math.floor(180 + 22 * pulse),
-                                    math.floor(140 - 87 * pulse),
-                                }
-                                or white,
-                            'heading'
-                        )
-                        ui.hit(right + 8, cursor, can_identify and 24 or rightw - 20, row_heading_height, function()
-                            local expanded = self.open_row ~= selected_row
-                            assert(h.set('edit_row', selected_row))
-                            self.value_scroll = 0
-                            self.sync()
-                            self.open_row = expanded and selected_row or nil
-                        end)
-                        if can_identify then
-                            ui.hit(right + 32, cursor, rightw - 44, row_heading_height, function()
+                            if ui.epic_style then
+                                local edge = ui.pixel_width or 1
+                                ui.rect(right + 8, cursor, rightw - 20, edge, theme.line, nil, 'control_accent')
+                                if row_selected then
+                                    ui.rect(
+                                        right + 8,
+                                        cursor,
+                                        edge * 2,
+                                        row_heading_height,
+                                        theme.brass,
+                                        nil,
+                                        'control_accent'
+                                    )
+                                end
+                            end
+                            local pulse = 0.5 + 0.5 * math.sin(os.clock() * 3)
+                            ui.text(
+                                right + 13,
+                                ui.text_y and ui.text_y(cursor, row_heading_height, 14, row_label, 'heading')
+                                    or cursor + 6,
+                                row_label,
+                                14,
+                                ui.epic_style and (row_selected and theme.brass or white)
+                                    or can_identify and {
+                                        math.floor(175 + 69 * pulse),
+                                        math.floor(180 + 22 * pulse),
+                                        math.floor(140 - 87 * pulse),
+                                    }
+                                    or white,
+                                'heading'
+                            )
+                            ui.hit(right + 8, cursor, can_identify and 24 or rightw - 20, row_heading_height, function()
                                 local expanded = self.open_row ~= selected_row
                                 assert(h.set('edit_row', selected_row))
                                 self.value_scroll = 0
                                 self.sync()
                                 self.open_row = expanded and selected_row or nil
-                                if expanded then
-                                    ui.activate('identify_region')
-                                end
                             end)
-                        end
-                    end
-                    if self.open_row == r then
-                        for c = 1, d.width do
-                            local selected_col = c
-                            if self.focus_column == c then
-                                self.value_scroll = math.max(0, clip_top + scroll - cursor)
-                                self.focus_column = nil
+                            if can_identify then
+                                ui.hit(right + 32, cursor, rightw - 44, row_heading_height, function()
+                                    local expanded = self.open_row ~= selected_row
+                                    assert(h.set('edit_row', selected_row))
+                                    self.value_scroll = 0
+                                    self.sync()
+                                    self.open_row = expanded and selected_row or nil
+                                    if expanded then
+                                        ui.activate('identify_region')
+                                    end
+                                end)
                             end
-                            local function prepare(channel)
-                                assert(h.set('edit_row', selected_row))
-                                assert(h.set('edit_column', selected_col))
-                                for i, col in ipairs(color_columns) do
-                                    if col == selected_col then
-                                        assert(h.set('color_field', i))
-                                        break
+                        end
+                        if self.open_row == r then
+                            for c = 1, d.width do
+                                local selected_col = c
+                                if self.focus_column == c then
+                                    self.value_scroll = math.max(0, clip_top + scroll - cursor)
+                                    self.focus_column = nil
+                                end
+                                local function prepare(channel)
+                                    assert(h.set('edit_row', selected_row))
+                                    assert(h.set('edit_column', selected_col))
+                                    for i, col in ipairs(color_columns) do
+                                        if col == selected_col then
+                                            assert(h.set('color_field', i))
+                                            break
+                                        end
+                                    end
+                                    self.sync()
+                                    if channel and self.focus_value then
+                                        self.focus_value(selected_row, selected_col, channel)
                                     end
                                 end
-                                self.sync()
-                                if channel and self.focus_value then
-                                    self.focus_value(selected_row, selected_col, channel)
-                                end
-                            end
-                            local column_label = 'Column ' .. c .. ': ' .. semantics.columns[c]
-                            local column_heading_height = text_height(14, column_label, 'heading', 3, 21)
-                            cursor = cursor - column_heading_height
-                            if
-                                visible(cursor, column_heading_height)
-                                and text_inside(cursor, column_heading_height, 14, column_label, 'heading')
-                            then
-                                ui.bounded(
-                                    right + 12,
-                                    ui.text_y and ui.text_y(cursor, column_heading_height, 14, column_label, 'heading')
-                                        or cursor + 3,
-                                    column_label,
-                                    14,
-                                    white,
-                                    rightw - 58,
-                                    'heading'
-                                )
-                                if true then
-                                    local index = semantics.index(r, c, 1, d.width, d.height)
-                                    local chip_y = cursor + (column_heading_height - 18) / 2
-                                    ui.rect(right + rightw - 40, chip_y, 24, 18, rgb(d.data, index), nil, 'swatch_fill')
-                                    ui.hit(right + rightw - 40, chip_y, 24, 18, function()
-                                        prepare()
-                                        ui.activate('cell_color')
-                                    end)
-                                end
-                            end
-                            for _, line in
-                                ipairs(
-                                    words(semantics.hints[c] or 'Unconfirmed shader meaning. Raw values are retained.')
-                                )
-                            do
-                                local line_height = text_height(13, line, 'hint', 2, 14)
-                                cursor = cursor - line_height
-                                if
-                                    visible(cursor, line_height) and text_inside(cursor, line_height, 13, line, 'hint')
-                                then
+                                local column_label = 'Column ' .. c .. ': ' .. semantics.columns[c]
+                                local column_heading_height = text_height(14, column_label, 'heading', 3, 21)
+                                cursor = cursor - column_heading_height
+                                if text_inside(cursor, column_heading_height, 14, column_label, 'heading') then
                                     ui.bounded(
                                         right + 12,
-                                        ui.text_y and ui.text_y(cursor, line_height, 13, line, 'hint') or cursor + 2,
-                                        line,
-                                        13,
-                                        muted,
-                                        rightw - 36,
-                                        'hint'
+                                        ui.text_y
+                                                and ui.text_y(
+                                                    cursor,
+                                                    column_heading_height,
+                                                    14,
+                                                    column_label,
+                                                    'heading'
+                                                )
+                                            or cursor + 3,
+                                        column_label,
+                                        14,
+                                        white,
+                                        rightw - 58,
+                                        'heading'
                                     )
-                                end
-                            end
-                            for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
-                                local selected_channel = ch
-                                local enum = (c == 1 and ch == 4 and 'shader_mode')
-                                    or (c == 2 and ch == 1 and 'detail_texture')
-                                    or (c == 22 and ch == 4 and 'camo_pattern')
-                                local numeric_height = math.max(21, (ui.text_size and ui.text_size(14) or 14) + 8)
-                                local field_height = math.max(
-                                    enum and 26 or numeric_height,
-                                    ui.control_height and ui.control_height(14, 5, 26) or 0
-                                )
-                                cursor = cursor - field_height - 4
-                                local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
-                                local widget_height = enum and 26 or numeric_height
-                                local channel_label = name:upper()
-                                local selected_field = r == h.get('edit_row') and c == h.get('edit_column')
-                                local field_label = enum and mod.controls[enum].choices[h.get(enum)]
-                                    or (selected_field and ui.input_value and ui.input_value('cell_' .. name))
-                                    or string.format('%.7g', value)
-                                if
-                                    visible(cursor, field_height)
-                                    and text_inside(cursor, widget_height, 13, channel_label)
-                                    and text_inside(cursor, widget_height, 14, tostring(field_label))
-                                then
-                                    ui.text(
-                                        right + 12,
-                                        ui.text_y and ui.text_y(cursor, widget_height, 13, channel_label) or cursor + 6,
-                                        channel_label,
-                                        13,
-                                        muted
-                                    )
-                                    if enum and ui.choice then
-                                        ui.choice(enum, right + 29, cursor, rightw - 46, function()
-                                            prepare(selected_channel)
+                                    if true then
+                                        local index = semantics.index(r, c, 1, d.width, d.height)
+                                        local chip_y = cursor + (column_heading_height - 18) / 2
+                                        ui.rect(
+                                            right + rightw - 40,
+                                            chip_y,
+                                            24,
+                                            18,
+                                            rgb(d.data, index),
+                                            nil,
+                                            'swatch_fill'
+                                        )
+                                        ui.hit(right + rightw - 40, chip_y, 24, 18, function()
+                                            prepare()
+                                            ui.activate('cell_color')
                                         end)
-                                    elseif ui.number then
-                                        local lo, hi = semantics.range(c, ch, value)
-                                        ui.number('cell_' .. name, right + 29, cursor, rightw - 46, value, function()
-                                            prepare(selected_channel)
-                                        end, editable(d, c, ch), lo, hi, selected_field)
-                                    else
-                                        ui.text(right + 29, cursor + 5, string.format('%.7g', value), 13, white)
                                     end
                                 end
-                            end
-                            cursor = cursor - 10
-                            if visible(cursor, 1) then
-                                ui.rect(right + 10, cursor, rightw - 22, 1, { 65, 70, 75 })
+                                for _, line in
+                                    ipairs(
+                                        words(
+                                            semantics.hints[c] or 'Unconfirmed shader meaning. Raw values are retained.'
+                                        )
+                                    )
+                                do
+                                    local line_height = text_height(13, line, 'hint', 2, 14)
+                                    cursor = cursor - line_height
+                                    if text_inside(cursor, line_height, 13, line, 'hint') then
+                                        ui.bounded(
+                                            right + 12,
+                                            ui.text_y and ui.text_y(cursor, line_height, 13, line, 'hint') or cursor + 2,
+                                            line,
+                                            13,
+                                            muted,
+                                            rightw - 36,
+                                            'hint'
+                                        )
+                                    end
+                                end
+                                for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
+                                    local selected_channel = ch
+                                    local enum = (c == 1 and ch == 4 and 'shader_mode')
+                                        or (c == 2 and ch == 1 and 'detail_texture')
+                                        or (c == 22 and ch == 4 and 'camo_pattern')
+                                    local numeric_height = math.max(21, (ui.text_size and ui.text_size(14) or 14) + 8)
+                                    local field_height = math.max(
+                                        enum and 26 or numeric_height,
+                                        ui.control_height and ui.control_height(14, 5, 26) or 0
+                                    )
+                                    cursor = cursor - field_height - 4
+                                    local value = tonumber(d.data[semantics.index(r, c, ch, d.width, d.height)])
+                                    local widget_height = enum and 26 or numeric_height
+                                    local channel_label = name:upper()
+                                    local selected_field = r == h.get('edit_row') and c == h.get('edit_column')
+                                    local field_label = enum and mod.controls[enum].choices[h.get(enum)]
+                                        or (selected_field and ui.input_value and ui.input_value('cell_' .. name))
+                                        or string.format('%.7g', value)
+                                    if
+                                        visible(cursor, field_height)
+                                        or text_inside(cursor, widget_height, 13, channel_label)
+                                        or text_inside(cursor, widget_height, 14, tostring(field_label))
+                                    then
+                                        ui.text(
+                                            right + 12,
+                                            ui.text_y and ui.text_y(cursor, widget_height, 13, channel_label)
+                                                or cursor + 6,
+                                            channel_label,
+                                            13,
+                                            muted
+                                        )
+                                        if enum and ui.choice then
+                                            ui.choice(enum, right + 29, cursor, rightw - 46, function()
+                                                prepare(selected_channel)
+                                            end)
+                                        elseif ui.number then
+                                            local lo, hi = semantics.range(c, ch, value)
+                                            ui.number(
+                                                'cell_' .. name,
+                                                right + 29,
+                                                cursor,
+                                                rightw - 46,
+                                                value,
+                                                function()
+                                                    prepare(selected_channel)
+                                                end,
+                                                editable(d, c, ch),
+                                                lo,
+                                                hi,
+                                                selected_field
+                                            )
+                                        else
+                                            ui.text(right + 29, cursor + 5, string.format('%.7g', value), 13, white)
+                                        end
+                                    end
+                                end
+                                cursor = cursor - 10
+                                if visible(cursor, 1) then
+                                    ui.rect(right + 10, cursor, rightw - 22, 1, { 65, 70, 75 })
+                                end
                             end
                         end
                     end
                 end
+                content = clip_top + scroll - cursor
+                self.value_max = math.max(0, content - viewport)
+                self.value_scroll = math.max(0, math.min(self.value_scroll, self.value_max))
             end
-            local content = clip_top + scroll - cursor
-            self.value_max = math.max(0, content - viewport)
-            self.value_scroll = math.max(0, math.min(self.value_scroll, self.value_max))
+            if ui.viewport and viewport > 0 then
+                ui.viewport(self.value_viewport, draw_body, { top = top, bottom = ui.y, color = dark })
+            else
+                draw_body()
+            end
             if self.value_max > 0 and ui.scrollbar then
+                local finish_scrollbar = ui.surface and ui.surface(130)
                 ui.scrollbar(
                     'value_editor',
                     right + rightw - 8,
@@ -1136,9 +1226,77 @@ function V.new(deps)
                         self.focus_column = nil
                     end
                 )
+                if finish_scrollbar then
+                    finish_scrollbar()
+                end
             end
         end -- optional Value Editor
         overlays()
+        local divider = self.tools_splitter
+        if divider then
+            local hovering = ui.hovering and ui.hovering(divider.x, divider.y, divider.w, divider.h)
+            local color = splitter_drag and theme.focus or hovering and theme.border_hover or theme.border
+            local stroke = 2 * (ui.pixel_width or 1)
+            ui.rect(divider.x, divider.line_y - stroke / 2, divider.w, stroke, color, nil, 'control_accent')
+            ui.rect(
+                divider.x + divider.w / 2 - 16 * font_scale,
+                divider.line_y - stroke * 1.5,
+                32 * font_scale,
+                stroke * 3,
+                color,
+                nil,
+                'control_accent'
+            )
+            if ui.begin_drag and divider.maximum > divider.minimum then
+                ui.hit(divider.x, divider.y, divider.w, divider.h, function()
+                    local state = {
+                        document = d,
+                        data = d.data,
+                        width = d.width,
+                        height = d.height,
+                        source = d.source,
+                        gear = self.gear,
+                        tools = self.tools,
+                    }
+                    local function clear()
+                        state.tools.splitter_dragging = false
+                        if splitter_drag == state then
+                            splitter_drag = nil
+                        end
+                    end
+                    local function move(_, y)
+                        if splitter_drag ~= state or not y then
+                            return
+                        end
+                        local current = self.tools_splitter
+                        if
+                            not current
+                            or not same_source(state)
+                            or not state.tools.is_open()
+                            or not state.tools.is_docked()
+                        then
+                            state.stop('Tools layout changed')
+                            return
+                        end
+                        if not state.grab then
+                            state.grab = y - current.line_y
+                            return
+                        end
+                        local height = math.max(
+                            current.minimum,
+                            math.min(current.maximum, y - state.grab - current.line_offset - current.bottom)
+                        )
+                        state.tools.split_ratio = height / current.total
+                    end
+                    state.stop = ui.begin_drag(move, function(x, y)
+                        move(x, y)
+                        clear()
+                    end, clear)
+                    splitter_drag = state
+                    state.tools.splitter_dragging = true
+                end, nil, nil, 'Drag to resize the LUT table and docked Tools.')
+            end
+        end
     end
     return layout
 end

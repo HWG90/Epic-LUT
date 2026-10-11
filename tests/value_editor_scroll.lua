@@ -90,20 +90,24 @@ local function body_text(c)
         or text == 'Off / default'
         or text == 'Off'
 end
-local function contained(commands)
+local partial_top, partial_bottom = false, false
+local function clipped(commands)
     local v, text_count = bounds(), 0
     for _, c in ipairs(commands) do
-        if c.type == 'text' and c.x >= v.x and body_text(c) then
+        if c.type == 'text' and c.x >= v.x and body_text(c) and c.viewport then
             local ink = menu.text_metrics(c.size, c.full_text or c.text)
             assert(
-                c.y + ink.min_y >= v.y - 0.01 and c.y + ink.max_y <= v.y + v.h + 0.01,
-                'Value text extends through the fixed header/footer: ' .. tostring(c.full_text or c.text)
+                c.y + ink.max_y > v.y and c.y + ink.min_y < v.y + v.h,
+                'Fully offscreen Value text still renders: ' .. tostring(c.full_text or c.text)
             )
+            partial_top = partial_top or c.y + ink.max_y > v.y + v.h + 0.01
+            partial_bottom = partial_bottom or c.y + ink.min_y < v.y - 0.01
             text_count = text_count + 1
         elseif
             c.type == 'rect'
             and c.x >= v.x
             and c.ui_role == 'control_fill'
+            and c.viewport
             and c.y < v.y + v.h
             and c.y + c.h > v.y
         then
@@ -129,7 +133,7 @@ for _, scenario in ipairs({ { 12, 0.85 }, { 20, 1 }, { 20, 0.7 }, { 12, 1.15 } }
     menu.font_size, menu.ui_scale = scenario[1], scenario[2]
     editor.value_scroll = 0
     local commands = compose()
-    contained(commands)
+    clipped(commands)
     local top_thumb = thumb(commands)
     local v = bounds()
     assert(top_thumb.y + top_thumb.h <= v.y + v.h + 0.01, 'Thumb overhangs the Value Editor header')
@@ -137,13 +141,13 @@ for _, scenario in ipairs({ { 12, 0.85 }, { 20, 1 }, { 20, 0.7 }, { 12, 1.15 } }
     assert(wheel_step >= 8 and wheel_step <= 24, 'Value wheel retained its coarse 90px step')
     menu.wheel(-120, v.x + v.w / 2, v.y + v.h / 2)
     assert(math.abs(editor.value_scroll - wheel_step) < 0.01, 'Value wheel did not use the measured fine step')
-    contained(compose())
+    clipped(compose())
     menu.wheel(120, v.x + v.w / 2, v.y + v.h / 2)
     assert(editor.value_scroll == 0, 'Fine upward wheel did not return to the top')
     drag_to(true)
     assert(editor.value_scroll >= editor.value_max - 1, 'Dragging thumb down did not reach the last values')
     commands = compose()
-    contained(commands)
+    clipped(commands)
     local last_row = false
     for _, c in ipairs(commands) do
         if (c.full_text or c.text) == '> Row 8' then
@@ -156,7 +160,7 @@ for _, scenario in ipairs({ { 12, 0.85 }, { 20, 1 }, { 20, 0.7 }, { 12, 1.15 } }
     drag_to(false)
     assert(editor.value_scroll <= 1, 'Dragging thumb up did not return to the first values')
     commands = compose()
-    contained(commands)
+    clipped(commands)
     v = bounds()
     local current = thumb(commands)
     tap(current.x + current.w / 2, v.y + v.h * 0.3)
@@ -164,10 +168,10 @@ for _, scenario in ipairs({ { 12, 0.85 }, { 20, 1 }, { 20, 0.7 }, { 12, 1.15 } }
         editor.value_scroll > 0 and editor.value_scroll < editor.value_max,
         'Scrollbar track did not navigate into the values'
     )
-    contained(compose())
+    clipped(compose())
     for _, fraction in ipairs({ 0, 0.05, 0.37, 0.7, 1 }) do
         editor.value_scroll = editor.value_max * fraction
-        contained(compose())
+        clipped(compose())
     end
     assert(
         ffi.string(doc.data, doc.width * doc.height * 16) == original and doc.revision == original_revision,
@@ -180,6 +184,7 @@ for _, scenario in ipairs({ { 12, 0.85 }, { 20, 1 }, { 20, 0.7 }, { 12, 1.15 } }
         'Scrolling changed the editing selection'
     )
 end
+assert(partial_top and partial_bottom, 'Partially visible Value text disappears at a viewport edge')
 for _, flag in ipairs({ 'read_only', 'stale' }) do
     doc[flag] = true
     editor.value_scroll = 0
@@ -195,5 +200,5 @@ assert(handle.set('value_editor_visible', false))
 compose()
 assert(not editor.value_bounds and not editor.value_viewport, 'Collapsed Value Editor retained scroll ownership')
 print(
-    'PASS Value Editor scroll: measured whole-ink viewport, fixed header clearance, bidirectional thumb/track drag, fine wheel, fonts/scales, read-only/stale browsing and unchanged LUT/selection'
+    'PASS Value Editor scroll: partial ink at both viewport edges, clipped controls, bidirectional thumb/track drag, fine wheel, fonts/scales, read-only/stale browsing and unchanged LUT/selection'
 )

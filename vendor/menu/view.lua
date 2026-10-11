@@ -277,6 +277,7 @@ function M.new(sr, preview_only, diagnostic_log, shared_fonts)
         marker_fill = 10,
         selection_outline = 11,
         text_caret = 13,
+        viewport_mask = 14,
         window_frame = 15,
     }
     local content_depth = {
@@ -296,6 +297,7 @@ function M.new(sr, preview_only, diagnostic_log, shared_fonts)
         marker_fill = 18,
         text_selection = 19,
         text_caret = 21,
+        viewport_mask = 24,
         window_frame = 25,
     }
     local function command_depth(c)

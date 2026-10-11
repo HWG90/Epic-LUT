@@ -19,7 +19,7 @@ from tools.lua_runner import LuaRunner
 
 TESTS = (
     'sdk_catalog', 'resource_labels', 'armory_dropdown_hover', 'ui_styling', 'typography', 'window_frames', 'player_authored_clip', 'player_authored_source', 'player_animation',
-    'tooltip_wrapping', 'lut_editor_hierarchy', 'editor_surface_typography', 'floating_windows', 'window_render_order', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'integer_layers', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'native_text_metrics', 'ui_font', 'ui_font_render', 'font_padding', 'custom_layout_space', 'value_editor_scroll', 'camo_region_indicator',
+    'tooltip_wrapping', 'lut_editor_hierarchy', 'editor_surface_typography', 'floating_windows', 'window_render_order', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'integer_layers', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'native_text_metrics', 'ui_font', 'ui_font_render', 'font_padding', 'custom_layout_space', 'value_editor_scroll', 'viewport_clipping', 'tools_splitter', 'camo_region_indicator',
     'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc',
     'frontend', 'frontend_suspension', 'startup_bridge', 'bindings', 'catalog_split_read', 'catalog_worker',
     'startup_apply_gate', 'appearance_state', 'appearance_persistence', 'direct_appearance_runtime', 'cape_editor', 'direct_editor', 'palette_editor', 'standalone_frontend',
