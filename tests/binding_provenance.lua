@@ -98,6 +98,17 @@ local deps = {
     end,
 }
 local resolver = P.new(deps)
+local denied_calls = gets
+local denied = P.new(deps)
+local accepted, why = pcall(denied.capture, binding, context)
+assert(
+    not accepted and why:find('disabled', 1, true) and gets == denied_calls,
+    'Default provenance executed native lookups'
+)
+deps.material_lookup = function(resource)
+    local result = tonumber(native.can_get(P.MATERIAL, resource))
+    return result and result ~= 0 and native.get(P.MATERIAL, resource) or nil
+end
 local source, refs = resolver.capture(binding, context)
 assert(
     source.verified and source.section == 0xabc12345 and source.material == mat and source.unit == unit,

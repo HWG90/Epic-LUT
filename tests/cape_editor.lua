@@ -2655,7 +2655,9 @@ do
     local old_sr, old_log = rawget(_G, 'stingray'), ctx.log
     local old_provenance, old_cache, old_export = m.binding_provenance, m.binding_source_cache, m.preset_export
     local old_script, old_reader = m.binding_provenance_script, m.binding_provenance_reader
+    local old_lookup, old_can_get, old_get = m.certified_material_lookup, native.can_get, native.get
     local cache, starts, captures, closed, ready, close_ready, fail = nil, 0, 0, 0, false, false, false
+    local unit_lookups, kit_reads, material_lookups, worker_creates, resolver_creates = 0, 0, 0, 0, 0
     local logs = {}
     ctx.log = function(text)
         logs[#logs + 1] = text
@@ -2663,18 +2665,21 @@ do
     _G.stingray = {
         Unit = {
             resource_name = function(unit)
+                unit_lookups = unit_lookups + 1
                 return '#ID[' .. string.format('%016x', unit) .. ']'
             end,
         },
     }
     m.binding_provenance = {
         kit_override = function(_, _, identity)
+            kit_reads = kit_reads + 1
             return false, { id = identity.armor, body = identity.body, archive = '1234567890abcdef' }
         end,
         encode = function(refs)
             return refs.kind .. ':' .. refs.key
         end,
         new = function(deps)
+            resolver_creates = resolver_creates + 1
             return {
                 capture = function(b, context)
                     captures = captures + 1
@@ -2698,6 +2703,7 @@ do
     }
     m.binding_source_cache = {
         new = function()
+            worker_creates = worker_creates + 1
             cache = {
                 state = 'idle',
                 index_stamp = ('a'):rep(64),
@@ -2733,6 +2739,15 @@ do
         end,
     }
     m.binding_provenance_script, m.binding_provenance_reader = '61', '62'
+    m.certified_material_lookup = nil
+    native.can_get, native.get =
+        function()
+            material_lookups = material_lookups + 1
+            error('Production Material ResourceManager call reached', 0)
+        end, function()
+            material_lookups = material_lookups + 1
+            error('Production Material ResourceManager call reached', 0)
+        end
     local options, exported
     m.preset_export = {
         lut_choices = function()
@@ -2741,8 +2756,10 @@ do
         new = function(_, _, value)
             options = value
             return {
-                save = function(_, preset)
-                    exported = options.binding_provenance(preset.entries[1])
+                save = function(_, preset, format)
+                    if format == 3 then
+                        exported = options.binding_provenance(preset.entries[1])
+                    end
                     return 'C:/fixture/export', 'assignment fixture'
                 end,
             }
@@ -2759,10 +2776,51 @@ do
     assert(not cache and starts == 0, 'Startup requested binding sources')
     local native_before, texture_count = { bound[armor][1], bound[cape][1], bound[helmet][1] }, created
     activate('populate_worn')
-    assert(starts == 1 and cache.state == 'loading')
     activate('save_setup')
     frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
     local legacy = saved_outfit
+    assert(
+        #legacy.entries == 3 and not legacy.entries[1].binding_provenance,
+        'Disabled provenance broke an ordinary save'
+    )
+    local registered, menu, history_count = api.mods[h.id], frontend.menu, #action_history.undo
+    assert(h.set('armory_export_format', 3))
+    local why = api.mods[h.id].controls.armory_export.on_activate()
+    assert(why:find('temporarily disabled after a crash', 1, true), 'Conflicting export did not refuse clearly')
+    assert(h.set('armory_export_format', 1))
+    activate('armory_export')
+    runtime.on_update(ctx, 0)
+    assert(
+        not cache
+            and starts == 0
+            and worker_creates == 0
+            and resolver_creates == 0
+            and unit_lookups == 0
+            and kit_reads == 0
+            and material_lookups == 0
+            and captures == 0,
+        'Disabled production provenance reached a new native lookup or worker during Load/save/export'
+    )
+    assert(
+        created == texture_count
+            and #action_history.undo == history_count
+            and api.mods[h.id] == registered
+            and frontend.menu == menu
+            and bound[armor][1] == native_before[1]
+            and bound[cape][1] == native_before[2]
+            and bound[helmet][1] == native_before[3],
+        'Controlled export refusal changed native colors, history or the menu'
+    )
+    -- Only this synthetic test supplies the independently certified callback.
+    -- Production packages do not register or infer one from can_get/get.
+    m.certified_material_lookup = function()
+        return 1
+    end
+    activate('populate_worn')
+    assert(starts == 1 and cache.state == 'loading')
+    activate('save_setup')
+    frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
+    legacy = saved_outfit
     assert(#legacy.entries == 3 and not legacy.entries[1].binding_provenance, 'Pending cache broke an ordinary save')
     local count = captures
     ready = true
@@ -2784,7 +2842,7 @@ do
     local original = legacy.entries[2].original
     legacy.entries[2].original = { resource = 'eeeeeeeeeeeeeeee', width = 23, height = 8 }
     count = captures
-    local why = api.mods[h.id].controls.armory_export.on_activate()
+    why = api.mods[h.id].controls.armory_export.on_activate()
     assert(
         why:find('does not uniquely match', 1, true) and captures == count,
         'Legacy export retargeted different resource context'
@@ -2821,8 +2879,9 @@ do
     _G.stingray, ctx.log = old_sr, old_log
     m.binding_provenance, m.binding_source_cache, m.preset_export = old_provenance, old_cache, old_export
     m.binding_provenance_script, m.binding_provenance_reader = old_script, old_reader
+    m.certified_material_lookup, native.can_get, native.get = old_lookup, old_can_get, old_get
     print(
-        'PASS capture/export provenance glue: explicit-only owned worker/probe, pending-cache saves, optionalrefs, full legacy resource/pixel context, pointer refusal and deferred cleanup; no texture writes'
+        'PASS capture/export provenance glue: default runtime refusal before native lookup/worker, controlled export status, ordinary saves, test-only certified callback, full legacy context and deferred cleanup; no texture writes'
     )
 end
 os.remove(fixture .. '/' .. armor_file)

@@ -309,17 +309,15 @@ function P.kit_override(read, game, identity, binding, unit_hash, texture_slot)
 end
 function P.new(deps)
     assert(
-        deps.native
-            and deps.engine
-            and deps.unit_source
-            and deps.material_source
-            and deps.unit_resource
-            and deps.kit_override,
+        deps.engine and deps.unit_source and deps.material_source and deps.unit_resource and deps.kit_override,
         'Binding provenance dependencies unavailable'
     )
     local self = {}
-    local material_type = deps.engine.name64(P.MATERIAL)
     function self.capture(binding, context)
+        assert(
+            type(deps.material_lookup) == 'function',
+            'Native material source lookup is disabled pending an independently certified binding API'
+        )
         local kind, key, original = context.kind, context.key, context.original
         assert(original and original.resource, 'Original live texture metadata unavailable')
         assert(
@@ -337,15 +335,11 @@ function P.new(deps)
         assert(kit_override == false, 'Active kit texture override requires kit-aware export')
         local matches = {}
         for _, candidate in ipairs(sections(unit)) do
-            local name = deps.engine.name64(candidate.material)
-            local ready = tonumber(deps.native.can_get(material_type, name))
-            if ready and ready ~= 0 then
-                local pointer = tonumber(deps.native.get(material_type, name))
-                if pointer and pointer == binding.material then
-                    local material = source(deps.material_source(candidate.material), candidate.material, P.MATERIAL)
-                    if texture(material, slot) == original.resource:lower() then
-                        matches[#matches + 1] = { section = candidate.section, material = material }
-                    end
+            local pointer = tonumber(deps.material_lookup(candidate.material))
+            if pointer and pointer == binding.material then
+                local material = source(deps.material_source(candidate.material), candidate.material, P.MATERIAL)
+                if texture(material, slot) == original.resource:lower() then
+                    matches[#matches + 1] = { section = candidate.section, material = material }
                 end
             end
         end

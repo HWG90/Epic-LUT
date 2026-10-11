@@ -2394,6 +2394,12 @@ function operations.provenance_read(address, size)
     return memory.read_into(ffi.cast('const uint8_t *', address), size, buffer) and ffi.string(buffer, size) or nil
 end
 function operations.ensure_binding_provenance()
+    -- Material ResourceManager signatures and object ownership are not live
+    -- certified. Production packages supply no callback, so this refuses
+    -- before unit APIs, kit reads, worker launches or material lookups.
+    if type(m.certified_material_lookup) ~= 'function' then
+        return nil
+    end
     if operations.provenance_resolver then
         return operations.provenance_resolver
     end
@@ -2409,7 +2415,6 @@ function operations.ensure_binding_provenance()
     end
     local cache = m.binding_source_cache.new(m, { paths = paths, log = ctx.log })
     local resolver = m.binding_provenance.new({
-        native = native,
         engine = m.engine,
         present = present,
         binding = binding,
@@ -2420,6 +2425,7 @@ function operations.ensure_binding_provenance()
             local identity = assert(m.avatar.resolve(memory, game, appearance_read), 'Current kit identity unavailable')
             return m.binding_provenance.kit_override(operations.provenance_read, game, identity, b, hash, slot)
         end,
+        material_lookup = m.certified_material_lookup,
     })
     operations.provenance_cache, operations.provenance_resolver = cache, resolver
     return resolver
@@ -2468,6 +2474,10 @@ function operations.request_binding_sources()
     return ok, why
 end
 function operations.probe_binding_sources()
+    if type(m.certified_material_lookup) ~= 'function' then
+        operations.provenance_probe_requested = nil
+        return
+    end
     local cache = operations.provenance_cache
     if not operations.provenance_probe_requested or not cache or cache.state ~= 'ready' then
         return
@@ -2529,6 +2539,12 @@ end
 function operations.binding_export_provider(preset)
     local hydrated, matches = {}
     local function prepare()
+        if type(m.certified_material_lookup) ~= 'function' then
+            error(
+                'Binding-aware patch export is temporarily disabled after a crash. Export a Shareable Preset ZIP to retain every LUT assignment.',
+                0
+            )
+        end
         local resolver = assert(operations.ensure_binding_provenance(), 'Binding provenance resolver unavailable')
         if operations.provenance_cache.state ~= 'ready' or not operations.provenance_cache.validate_scope() then
             operations.request_binding_sources()
