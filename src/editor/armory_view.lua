@@ -77,8 +77,14 @@ function A.new(info, preview)
         button('Save Current Gear Preset', 'save_setup')
         local outfit = state.raw and state.raw.outfit
         local armor_count = outfit and (#outfit.armor + #(outfit.cape or {})) or 0
-        button('Apply Preset Armor LUTs', 'outfit_apply_armor', armor_count > 0)
+        button(
+            outfit and (#(outfit.cape or {}) > 0 or state.armory_cape_available) and 'Apply Preset Armor + Cape LUTs'
+                or 'Apply Preset Armor LUTs',
+            'outfit_apply_armor',
+            armor_count > 0
+        )
         button('Apply Preset Helmet LUTs', 'outfit_apply_helmet', outfit ~= nil and #outfit.helmet > 0)
+        button('Apply Preset Cape LUTs', 'outfit_apply_cape', state.armory_cape_available == true)
         separator()
         button('Rename Preset', 'outfit_rename', outfit ~= nil)
         button('Delete Preset', 'outfit_delete', outfit ~= nil)

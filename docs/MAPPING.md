@@ -4,6 +4,14 @@ Navigation: **Epic LUT → Armor → Semantics / grid cell** for armor; **Helmet
 
 Material field numbering follows research on 23-column LUTs. Base Color is column 1 (zero-based pixel column 0). RGB recolors; alpha carries shader behavior. Camo colors are columns 17–20; camo fade is column 21 alpha; column 22 contains selector/scale/pattern controls. Unknown fields remain unknown. Semantic names describe parameters, not named armor surfaces.
 
+## Basic camo masks
+
+Basic's selectors change column 22 A (-1 off, 0–5 pattern) across every row of the selected 23-column LUT. They preserve the existing camo tints, sharpness, strength, scale and shader modes. Choosing a pattern cannot enable dormant colors or scale automatically.
+
+The current game's ArmorTemplate binds `CustomizationCamoTilerArray` (slot `0f5ff78d`) to texture `eecf271273d7090c`, a 256×256 RGBA8 array with six slices and nine mips. The preview worker reads mip 4: 16×16, 1,024 bytes per slice, at offset 348,160 within each 349,524-byte slice. The six neutral mask thumbnails are not a full shader render; the source RGB channels contain packed masks and its alpha is zero. Slice 5 duplicates slice 0 in this atlas.
+
+SDK inspection at commit `5a886256e54db52b5d228335eae20ce796f87fc0` also finds weapon `PaintSchemeArctic`, `PaintSchemeArcticCamo`, `PaintSchemeDesert`, `PaintSchemeDesertCamo`, `PaintSchemeForest`, `PaintSchemeForestCamo`, `PaintSchemeUrban` and `PaintSchemeUrbanCamo` shader variables. Their palettes and mappings to Armor mask indices are unverified, so the selector keeps numeric pattern names.
+
 ## Emission
 
 The current research mapping describes column 14 R as emission strength (small values around 0.001–0.06); other channels and dependencies are uncertain. It is **not a confirmed RGB emission-color picker**. Effect protection makes it read-only and disables the irrelevant color picker. Deliberately unlock material effects to experiment with raw strength; this does not establish that every shader consumes it the same way.

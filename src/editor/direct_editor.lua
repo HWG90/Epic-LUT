@@ -166,6 +166,9 @@ local function refresh(silent)
     local previous_object = previous and previous.object
     local result = gear_catalog.refresh(bindings.owned, previous_object)
     groups, bindings.owned = result.groups, result.owned
+    if operations.sync_armory_cape then
+        operations.sync_armory_cape()
+    end
     if edit.import_gear_signature ~= result.signature then
         edit.import_gear_signature = result.signature
         if import_view then
@@ -469,6 +472,53 @@ local function recover_appearance(dt)
     end
 end
 local function initialize_editor_state()
+    operations.live_edit = m.live_edit and m.live_edit.new()
+    if m.texture_lifetime and native.destroy then
+        local cohort = { sessions = {} }
+        retain.cohort = cohort
+        operations.texture_cohort = cohort
+        operations.texture_lifetime = m.texture_lifetime.new({
+            retain = retain,
+            cohort = cohort,
+            certified = function()
+                if not cohort.cleanup_ready then
+                    return false, 'Addon cleanup is incomplete'
+                end
+                if #(package.loaded['epic.preview.retired.targets'] or {}) > 0 then
+                    return false, 'Lost preview context may still hold LUT textures'
+                end
+                for _, session in ipairs(cohort.sessions or {}) do
+                    local ok, why = session.retirement_certificate()
+                    if not ok then
+                        return false, why
+                    end
+                end
+                return true
+            end,
+            drain = function()
+                if frontend and frontend.render_ready then
+                    local ok, ready = pcall(frontend.render_ready)
+                    if not ok or not ready then
+                        return nil, 'Texture retirement waits for game focus and valid rendering'
+                    end
+                end
+                -- Keep the attempt before calling native code: an exception can
+                -- leave a queued creation/destruction with unknown completion.
+                local keep = { data = ffi.new('float[4]', { 0, 0, 0, 1 }) }
+                retain.fence_pending = retain.fence_pending or {}
+                retain.fence_pending[#retain.fence_pending + 1] = keep
+                local fence, why = m.engine.create_texture(native, 1, 1, keep.data, read, small)
+                keep.texture = fence
+                assert(fence, why)
+                native.destroy(fence.handle)
+                table.remove(retain.fence_pending)
+                return fence
+            end,
+            destroy = function(texture)
+                native.destroy(texture.handle)
+            end,
+        })
+    end
     operations.appearance_proof = appearance_proof
     operations.import_target = import_target
     operations.checked_editor_target = checked_editor_target
@@ -514,6 +564,9 @@ local function initialize_editor_state()
     })
     bindings = m.binding_session.new({
         retain = retain,
+        dead = function(b)
+            return native.alive(b.unit) == 0
+        end,
         present = present,
         binding = binding,
         key = material_key,
@@ -521,8 +574,34 @@ local function initialize_editor_state()
             return m.engine.create_texture(native, width, height, data, read, small)
         end,
         bind = function(b, object)
+            local camo_target = operations.camo_write_target
+            if
+                camo_target
+                and camo_target.kit_proof
+                and m.gear_catalog.kind(b) == camo_target.kind
+                and object == b.current
+            then
+                local proof = appearance_proof()
+                assert(
+                    proof and proof[camo_target.kind] == camo_target.kit_proof,
+                    'Worn kit changed; load current colors again'
+                )
+            end
+            if b.cape and operations.armory_cape_proof then
+                local proof = appearance_proof()
+                assert(
+                    proof and proof.cape == operations.armory_cape_proof,
+                    'Cape kit changed; load current gear again'
+                )
+            end
             m.engine.bind(native, b.material, m.engine.LUT_SLOT, object)
             native.commit(b.mesh)
+            if b.cape and operations.armory_cape_proof then
+                b.applied_cape_proof = operations.armory_cape_proof
+            end
+            if b.cape and camo_target then
+                b.applied_cape_proof = camo_target.kit_proof
+            end
         end,
     })
     basic_state = m.basic_state.new()
@@ -1112,6 +1191,19 @@ import_state = function()
                 resource = group and resource_id(group.object) or 'unavailable',
                 unavailable = not doc and original_luts and original_luts.loaded and key ~= nil,
             }
+            if m.basic_camo then
+                local camo = api.mods[handle.id].controls['basic_' .. container .. '_camo']
+                if camo then
+                    local disabled = pending ~= nil or not m.basic_camo.available(doc) or not group
+                    camo.disabled = false
+                    camo.choice_pattern_previews = operations.camo_thumbnails
+                    operations.syncing_basic_camo = true
+                    local called, ok, why = pcall(handle.set, camo.id, m.basic_camo.selection(doc))
+                    operations.syncing_basic_camo = false
+                    camo.disabled = disabled
+                    assert(called and ok, why or ok)
+                end
+            end
             if doc then
                 previews[container] = {
                     {
@@ -1201,6 +1293,7 @@ import_state = function()
         armor = previews.armor,
         helmet = previews.helmet,
         cape_available = #m.gear_catalog.targets(groups, 5, nil, 'cape') > 0,
+        armory_cape_available = operations.armory_cape_available(armory_collection and armory_collection.selected),
         loaded = edit.imported,
         import_description = m.import_description,
         import_detail = picker.detail,
@@ -1290,6 +1383,87 @@ checked_editor_target = function(target)
     error('Cape material changed; load current Cape colors again')
 end
 operations.checked_editor_target = checked_editor_target
+local function apply_basic_camo(container, choice)
+    assert(stop_identification(), 'Highlight restoration pending')
+    refresh(true)
+    local panel = import_state().raw.basic[container]
+    assert(panel and m.basic_camo.available(panel.document), 'Load a current Armor or Helmet material LUT first')
+    local target = import_target(panel.kind, panel.group)
+    local index = checked_editor_target(target)
+    local targets = {}
+    for _, b in ipairs(groups[index].bindings) do
+        if m.gear_catalog.kind(b) == panel.kind then
+            targets[#targets + 1] = b
+        end
+    end
+    assert(#targets > 0, 'Selected LUT has no current material bindings')
+    local document = m.basic_state.copier().copy(panel.document)
+    local rows = m.basic_camo.apply(document, choice)
+    local previous = operations.camo_write_target
+    operations.camo_write_target = target
+    local ok, count = pcall(apply_bindings, document, targets)
+    operations.camo_write_target = previous
+    assert(ok, count)
+    basic_documents[panel.key] = document
+    for _, b in ipairs(targets) do
+        basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] = document
+    end
+    edit.editor_target = nil
+    basic_selected = target
+    basic_selected.container, basic_selected.key = container, panel.key
+    basic_imported, edit.loaded = edit.imported, document
+    edit.preview_document, edit.preview_revision = document, document.revision
+    if palette_editor then
+        palette_editor.sync()
+    end
+    if frontend.menu then
+        frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
+    end
+    return message(
+        'Applied '
+            .. m.basic_camo.CHOICES[choice]
+            .. ' to all '
+            .. rows
+            .. ' regions in this '
+            .. m.gear_catalog.label(panel.kind)
+            .. ' LUT ('
+            .. count
+            .. ' bindings).'
+    )
+end
+operations.apply_basic_camo = apply_basic_camo
+local function update_camo_previews()
+    if not m.camo_patterns or not m.basic_camo or not frontend or not frontend.menu or not handle then
+        return
+    end
+    local page = api.mods[handle.id].pages[frontend.menu.page]
+    local visible = frontend.menu.visible and page and page.id == 'basic'
+    if
+        visible
+        and not operations.camo_basic_visible
+        and operations.camo_source
+        and operations.camo_source.state == 'closed'
+    then
+        operations.camo_source = nil
+    end
+    operations.camo_basic_visible = visible
+    if visible and not operations.camo_source then
+        operations.camo_source = m.camo_patterns.new(m, { time = memory.time, log = ctx.log })
+        operations.camo_source.start()
+    end
+    local source = operations.camo_source
+    if source then
+        source.tick()
+        if source.state == 'failed' then
+            source.close()
+        end
+        if source.get() and not operations.camo_thumbnails then
+            operations.camo_thumbnails = m.basic_camo.thumbnails(source.get())
+            frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
+        end
+    end
+end
+operations.update_camo_previews = update_camo_previews
 local function load_editor_target(container)
     assert(stop_identification(), 'Highlight restoration pending')
     refresh(true)
@@ -1742,6 +1916,7 @@ local function capture_action()
     local snapshot = {
         bytes = 0,
         owned = {},
+        pattern_owned = {},
         basic = {},
         editor_tables = {},
         defaults = {},
@@ -1776,18 +1951,24 @@ local function capture_action()
         edit.loaded and ffi.string(edit.loaded.data, edit.loaded.width * edit.loaded.height * 16) or '',
         edit.loaded and edit.loaded.source or '',
     }
-    for _, b in ipairs(bindings.owned) do
-        snapshot.owned[#snapshot.owned + 1] = {
-            binding = b,
-            key = material_key(b),
-            current = b.current,
-            texture = b.texture,
-            cape_proof = b.applied_cape_proof,
-            cape_resource = b.cape and appearance_resource(b) or nil,
-            save_key = b.save_key,
-            document = document(b.document),
-        }
-        signature[#signature + 1] = material_key(b) .. ':' .. tostring(b.current)
+    for _, pool in ipairs({
+        { session = bindings, records = snapshot.owned, pattern = false },
+        { session = operations.pattern_session, records = snapshot.pattern_owned, pattern = true },
+    }) do
+        for _, b in ipairs(pool.session and pool.session.owned or {}) do
+            local key = material_key(b) .. (pool.pattern and ':pattern' or '')
+            pool.records[#pool.records + 1] = {
+                binding = b,
+                key = key,
+                current = b.current,
+                texture = b.texture,
+                cape_proof = b.applied_cape_proof,
+                cape_resource = b.cape and appearance_resource(b) or nil,
+                save_key = b.save_key,
+                document = document(b.document),
+            }
+            signature[#signature + 1] = key .. ':' .. tostring(b.current)
+        end
     end
     for k, v in pairs(defaults) do
         snapshot.defaults[k] = v
@@ -1848,6 +2029,7 @@ local function restore_action(snapshot, expected)
     snapshot.default_proofs = {}
     snapshot.palettes = {}
     snapshot.owned = {}
+    snapshot.pattern_owned = {}
     for k, d in pairs(saved.basic) do
         snapshot.basic[k] = clone(d)
     end
@@ -1861,77 +2043,157 @@ local function restore_action(snapshot, expected)
     for k, v in pairs(saved.palettes) do
         snapshot.palettes[k] = v
     end
-    for i, e in ipairs(saved.owned) do
-        local copy = {}
-        for k, v in pairs(e) do
-            copy[k] = v
+    for _, name in ipairs({ 'owned', 'pattern_owned' }) do
+        for i, e in ipairs(saved[name] or {}) do
+            local copy = {}
+            for k, v in pairs(e) do
+                copy[k] = v
+            end
+            copy.document = clone(e.document)
+            snapshot[name][i] = copy
         end
-        copy.document = clone(e.document)
-        snapshot.owned[i] = copy
     end
     assert(stop_identification(), 'Highlight restoration pending')
     local proof = appearance_proof()
     for _, frame in ipairs({ snapshot, expected }) do
-        for _, entry in ipairs(frame.owned) do
-            assert(
-                not entry.cape_proof or (proof and proof.cape == entry.cape_proof),
-                'Cape kit changed; cannot safely undo or redo its old material colors'
-            )
-            assert(
-                not entry.cape_resource
-                    or (
-                        entry.binding.cape
-                        and entry.binding.save_key == entry.save_key
-                        and appearance_resource(entry.binding) == entry.cape_resource
-                    ),
-                'Cape resource changed; cannot safely undo or redo its old colors'
-            )
+        for _, name in ipairs({ 'owned', 'pattern_owned' }) do
+            for _, entry in ipairs(frame[name] or {}) do
+                assert(
+                    not entry.cape_proof or (proof and proof.cape == entry.cape_proof),
+                    'Cape kit changed; cannot safely undo or redo its old material colors'
+                )
+                assert(
+                    not entry.cape_resource
+                        or (
+                            entry.binding.cape
+                            and entry.binding.save_key == entry.save_key
+                            and appearance_resource(entry.binding) == entry.cape_resource
+                        ),
+                    'Cape resource changed; cannot safely undo or redo its old colors'
+                )
+            end
         end
     end
-    local desired, expected_bindings = {}, {}
-    for _, entry in ipairs(snapshot.owned) do
-        desired[entry.key] = entry
-    end
-    for _, entry in ipairs(expected.owned) do
-        expected_bindings[entry.key] = entry
-    end
     local plans = {}
-    for _, b in ipairs(bindings.owned) do
-        local key = material_key(b)
-        local e = expected_bindings[key]
-        assert(e and present(b) and binding(b) == e.current, 'Gear bindings changed; cannot safely undo this action')
-        local d = desired[key]
-        plans[#plans + 1] = { binding = b, old = b.current, object = d and d.current or b.original, desired = d }
+    local pools = {
+        { session = bindings, name = 'owned', slot = m.engine.LUT_SLOT, suffix = '' },
+        {
+            session = operations.pattern_session,
+            name = 'pattern_owned',
+            slot = m.engine.PATTERN_SLOT,
+            suffix = ':pattern',
+        },
+    }
+    local function read_plan(plan)
+        return m.engine.binding(read, plan.binding.material, plan.slot, small, big)
     end
-    for key, d in pairs(desired) do
-        if not expected_bindings[key] then
-            local b = d.binding
-            assert(present(b) and binding(b) == b.original, 'Gear changed; cannot safely redo this action')
-            plans[#plans + 1] = { binding = b, old = b.original, object = d.current, desired = d }
+    for _, pool in ipairs(pools) do
+        local desired, expected_bindings, owned = {}, {}, {}
+        for _, entry in ipairs(snapshot[pool.name] or {}) do
+            desired[entry.key] = entry
+        end
+        for _, entry in ipairs(expected[pool.name] or {}) do
+            expected_bindings[entry.key] = entry
+        end
+        assert(pool.session or not next(desired) and not next(expected_bindings), 'Pattern application unavailable')
+        for _, b in ipairs(pool.session and pool.session.owned or {}) do
+            local key = material_key(b) .. pool.suffix
+            owned[key] = true
+            local e, d = expected_bindings[key], desired[key]
+            local plan = {
+                binding = b,
+                slot = pool.slot,
+                pool = pool,
+                old = b.current,
+                object = d and d.current or b.original,
+                desired = d,
+                cape_proof = e and e.cape_proof or d and d.cape_proof,
+            }
+            assert(
+                e and present(b) and b.current == e.current and read_plan(plan) == e.current,
+                'Gear bindings changed; cannot safely undo this action'
+            )
+            plans[#plans + 1] = plan
+        end
+        for key in pairs(expected_bindings) do
+            assert(owned[key], 'Gear ownership changed; cannot safely undo this action')
+        end
+        for key, d in pairs(desired) do
+            if not expected_bindings[key] then
+                local b = d.binding
+                local plan = {
+                    binding = b,
+                    slot = pool.slot,
+                    pool = pool,
+                    old = b.original,
+                    object = d.current,
+                    desired = d,
+                    cape_proof = d.cape_proof,
+                }
+                assert(present(b) and read_plan(plan) == b.original, 'Gear changed; cannot safely redo this action')
+                plans[#plans + 1] = plan
+            end
         end
     end
     local changed = {}
     local ok, why = pcall(function()
         for _, plan in ipairs(plans) do
-            changed[#changed + 1] = plan
-            m.engine.bind(native, plan.binding.material, m.engine.LUT_SLOT, plan.object)
-            native.commit(plan.binding.mesh)
-            assert(binding(plan.binding) == plan.object)
+            assert(
+                present(plan.binding) and read_plan(plan) == plan.old,
+                'Gear bindings changed during history restoration'
+            )
+            if plan.cape_proof then
+                local current_proof = appearance_proof()
+                assert(
+                    current_proof and current_proof.cape == plan.cape_proof,
+                    'Cape kit changed during history restoration'
+                )
+            end
+            if plan.object ~= plan.old then
+                changed[#changed + 1] = plan
+                m.engine.bind(native, plan.binding.material, plan.slot, plan.object)
+                native.commit(plan.binding.mesh)
+                assert(read_plan(plan) == plan.object)
+            end
         end
     end)
     if not ok then
         for i = #changed, 1, -1 do
             local p = changed[i]
-            if present(p.binding) and binding(p.binding) == p.object then
-                pcall(function()
-                    m.engine.bind(native, p.binding.material, m.engine.LUT_SLOT, p.old)
+            if present(p.binding) and read_plan(p) == p.object then
+                local restored = pcall(function()
+                    m.engine.bind(native, p.binding.material, p.slot, p.old)
                     native.commit(p.binding.mesh)
+                    assert(read_plan(p) == p.old)
                 end)
+                if not restored and present(p.binding) and read_plan(p) == p.object then
+                    -- The forward write is still ours. Keep its exact receipt
+                    -- so later Restore/cleanup can remove it even when this
+                    -- history action could not finish its rollback.
+                    local b, d = p.binding, p.desired
+                    b.current, b.previous = p.object, p.old
+                    b.texture, b.document = d and d.texture or nil, d and d.document or nil
+                    b.applied_cape_proof = d and d.cape_proof or p.cape_proof
+                    local found = false
+                    for _, owned in ipairs(p.pool.session.owned) do
+                        if material_key(owned) == material_key(b) then
+                            found = true
+                            break
+                        end
+                    end
+                    if not found then
+                        p.pool.session.owned[#p.pool.session.owned + 1] = b
+                    end
+                end
             end
         end
         error(why, 0)
     end
-    bindings.owned = {}
+    for _, pool in ipairs(pools) do
+        if pool.session then
+            pool.session.owned = {}
+        end
+    end
     for _, plan in ipairs(plans) do
         local b, d = plan.binding, plan.desired
         b.current = plan.object
@@ -1940,7 +2202,7 @@ local function restore_action(snapshot, expected)
         b.document = d and d.document or nil
         b.applied_cape_proof = d and d.cape_proof or nil
         if d then
-            bindings.owned[#bindings.owned + 1] = b
+            plan.pool.session.owned[#plan.pool.session.owned + 1] = b
         end
     end
     edit.imported = snapshot.imported
@@ -2097,18 +2359,72 @@ local function keep_outfit(name, save_kind)
             .. ' LUTs in The Armory.'
     )
 end
+function operations.outfit_documents(preset)
+    local exact = {}
+    for _, entry in ipairs(preset and preset.entries or {}) do
+        exact[entry.kind .. ':' .. entry.key] = entry.document
+    end
+    return exact
+end
+function operations.outfit_document(exact, b, pattern)
+    local key = (pattern and 'p:' or '') .. b.save_key
+    -- Early presets recorded every non-Helmet mount as Armor. Only a currently
+    -- recognized Cape at the exact saved destination can use that legacy entry.
+    return exact[m.gear_catalog.kind(b) .. ':' .. key] or (b.cape and exact['armor:' .. key])
+end
+function operations.armory_cape_available(preset)
+    local proof = preset and appearance_proof()
+    if not proof or not proof.cape then
+        return false
+    end
+    local exact = operations.outfit_documents(preset)
+    for _, collection in ipairs({ groups, pattern_editor and pattern_editor.all_groups or {} }) do
+        local pattern = collection ~= groups
+        for _, group in ipairs(collection) do
+            for _, b in ipairs(group.bindings) do
+                local d = b.cape and operations.outfit_document(exact, b, pattern)
+                if d and present(b) and binding(b) == b.current and appearance_resource(b) then
+                    if pattern and d.width == 3 and d.height == 1 or not pattern and d.width == 23 then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+function operations.sync_armory_cape()
+    local controls = handle and api.mods[handle.id].controls
+    if controls and controls.outfit_apply_cape then
+        controls.outfit_apply_cape.disabled =
+            not operations.armory_cape_available(armory_collection and armory_collection.selected)
+    end
+end
 local function apply_outfit(kind)
     local selected_outfit = assert(armory_collection and armory_collection.selected, 'Choose an outfit preset first')
     assert(stop_identification(), 'Highlight restoration pending')
     if pattern_editor then
         assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
     end
+    if kind == 'cape' or kind == 'armor' then
+        for _, session in ipairs({ bindings, operations.pattern_session or {} }) do
+            for _, b in ipairs(session.owned or {}) do
+                assert(
+                    not b.cape or not present(b) or binding(b) == b.current,
+                    'Cape binding changed; load current gear again'
+                )
+            end
+        end
+    end
     refresh(true)
-    local exact = {}
+    local exact = operations.outfit_documents(selected_outfit)
     local has_saved = false
     for _, entry in ipairs(selected_outfit.entries) do
-        if entry.kind == kind or (kind == 'armor' and entry.kind == 'cape') then
-            exact[entry.kind .. ':' .. entry.key] = entry.document
+        if
+            entry.kind == kind
+            or (kind == 'armor' and entry.kind == 'cape')
+            or (kind == 'cape' and entry.kind == 'armor')
+        then
             has_saved = true
         end
     end
@@ -2118,8 +2434,10 @@ local function apply_outfit(kind)
         for _, b in ipairs(group.bindings) do
             if b[kind] or (kind == 'armor' and b.cape) then
                 assert(present(b) and binding(b) == b.current, 'Gear changed; load current gear again')
-                local d = exact[m.gear_catalog.kind(b) .. ':' .. b.save_key]
+                local d = operations.outfit_document(exact, b, false)
                 if d then
+                    assert(d.width == 23, 'Saved material LUT must have 23 columns')
+                    assert(not b.cape or appearance_resource(b), 'Current Cape resource identity unavailable')
                     batches[d] = batches[d] or {}
                     table.insert(batches[d], b)
                     if ctx.log then
@@ -2155,9 +2473,10 @@ local function apply_outfit(kind)
         pattern_editor.scan()
         for _, group in ipairs(pattern_editor.all_groups or {}) do
             for _, b in ipairs(group.bindings) do
-                local d = (b[kind] or (kind == 'armor' and b.cape))
-                    and exact[m.gear_catalog.kind(b) .. ':p:' .. b.save_key]
+                local d = (b[kind] or (kind == 'armor' and b.cape)) and operations.outfit_document(exact, b, true)
                 if d then
+                    assert(d.width == 3 and d.height == 1, 'Saved Pattern LUT must be 3 x 1')
+                    assert(not b.cape or appearance_resource(b), 'Current Cape resource identity unavailable')
                     assert(present(b) and binding(b) == b.current, 'Pattern gear changed; load current gear again')
                     patterns[d] = patterns[d] or {}
                     patterns[d][#patterns[d] + 1] = b
@@ -2169,19 +2488,50 @@ local function apply_outfit(kind)
         next(batches) or next(patterns),
         'No saved LUT bindings match this gear; select a table and apply it manually to adapt the preset'
     )
+    local cape_proof
+    for _, plans in ipairs({ batches, patterns }) do
+        for _, targets in pairs(plans) do
+            for _, b in ipairs(targets) do
+                if b.cape then
+                    local proof = appearance_proof()
+                    cape_proof =
+                        assert(proof and proof.cape, 'Current Cape identity unavailable; load current gear again')
+                end
+            end
+        end
+    end
+    local function apply_batch(session, document, targets, pattern)
+        local previous = operations.armory_cape_proof
+        operations.armory_cape_proof = cape_proof
+        local ok, count = pcall(function()
+            if cape_proof then
+                local proof = appearance_proof()
+                assert(proof and proof.cape == cape_proof, 'Cape kit changed; load current gear again')
+            end
+            if pattern then
+                local applied = session.apply(document, targets)
+                remember_appearance(targets, true)
+                return applied
+            end
+            return apply_bindings(document, targets)
+        end)
+        operations.armory_cape_proof = previous
+        assert(ok, count)
+        return count
+    end
     set_default(kind, nil) -- A multi-LUT preset never becomes a blanket override for unmatched pieces.
     resume_done = true
     resume_job = nil
     local count = 0
     for d, targets in pairs(batches) do
-        count = count + apply_bindings(d, targets)
+        count = count + apply_batch(bindings, d, targets, false)
         for _, b in ipairs(targets) do
             basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] = m.basic_state.clone(d, d.source)
         end
     end
     for d, targets in pairs(patterns) do
-        count = count + assert(operations.pattern_session, 'Pattern application unavailable').apply(d, targets)
-        remember_appearance(targets, true)
+        count = count
+            + apply_batch(assert(operations.pattern_session, 'Pattern application unavailable'), d, targets, true)
     end
     assert(count > 0, 'No worn gear bindings available for this preset')
     edit.remember_application = true
@@ -2204,6 +2554,7 @@ local function sync_armory_export()
     end
     local controls = api.mods[handle.id].controls
     local selected = armory_collection and armory_collection.selected
+    operations.sync_armory_cape()
     controls.armory_export.disabled = not selected
     local lut = controls.armory_export_lut
     lut.choices = m.preset_export and m.preset_export.lut_choices(selected) or { 'Choose a saved preset first' }
@@ -2557,6 +2908,11 @@ local function register(current)
         outfit_apply_helmet_activate = function()
             return action(function()
                 return apply_outfit('helmet')
+            end)
+        end,
+        outfit_apply_cape_activate = function()
+            return action(function()
+                return apply_outfit('cape')
             end)
         end,
         global_undo_activate = function()
@@ -3023,7 +3379,18 @@ local function register(current)
         end
     end
     if m.basic_view then
-        table.insert(pages, 1, { id = 'basic', name = 'Basic', require_confirmation = false, controls = {} })
+        table.insert(pages, 1, {
+            id = 'basic',
+            name = 'Basic',
+            require_confirmation = false,
+            controls = m.basic_camo and m.basic_camo.controls(function(kind, value)
+                if not operations.syncing_basic_camo then
+                    return action(function()
+                        return operations.apply_basic_camo(kind, value)
+                    end)
+                end
+            end) or {},
+        })
     end
     if m.armory_view then
         table.insert(pages, #pages, {
@@ -3273,6 +3640,16 @@ local function close()
     -- Loader cleanup polls replace normal updates. Hide retained UI and release
     -- its input lease before any worker or native cleanup can defer unloading.
     local dismissed = not frontend or not frontend.dismiss or frontend.dismiss()
+    local portrait = package.loaded['epic.player_preview.v1']
+    if portrait and portrait.before_editor_close then
+        local ok, done = pcall(portrait.before_editor_close)
+        if not ok or not done then
+            return false
+        end
+    end
+    if operations.camo_source and not operations.camo_source.close() then
+        return false
+    end
     if armory_mirror and not armory_mirror.close() then
         return false
     end
@@ -3308,6 +3685,44 @@ local function close()
     if not restore() then
         return false
     end
+    if not dismissed or frontend and not frontend.close() then
+        return false
+    end
+    if operations.texture_lifetime then
+        operations.texture_cohort.cleanup_ready = true
+        local done = operations.texture_lifetime.close()
+        local state = operations.texture_lifetime
+        if not done then
+            if operations.texture_retirement_note ~= state.reason then
+                operations.texture_retirement_note = state.reason
+                ctx.log('Epic LUT texture retirement pending: ' .. tostring(state.reason))
+            end
+            return false
+        end
+        if not operations.texture_retirement_reported then
+            operations.texture_retirement_reported = true
+            ctx.log(
+                'Epic LUT texture retirement: '
+                    .. state.state
+                    .. ', freed '
+                    .. state.freed_count
+                    .. ' textures / '
+                    .. state.freed_bytes
+                    .. ' bytes'
+                    .. (state.reason and ('; ' .. state.reason) or '')
+            )
+        end
+        if retain.cohort == operations.texture_cohort then
+            retain.cohort = nil
+        end
+    end
+    -- Only complete addon cleanup discards history and dormant appearance
+    -- references. Pending cleanup and ordinary Restore keep Undo/Redo intact.
+    history = nil
+    defaults, default_proofs, appearance_pending = {}, {}, {}
+    if appearance then
+        appearance.clear()
+    end
     if handle then
         handle.unregister()
         handle = nil
@@ -3315,20 +3730,26 @@ local function close()
     if preferences then
         preferences.close()
     end
-    return dismissed and (not frontend or frontend.close())
+    return true
 end
 local function reset_transient_state()
     -- Cleanup must finish before these references are replaced. Uploaded backing
-    -- buffers in retain and the import sequence belong to the process lifetime.
+    -- Uncertified buffers in retain and the import sequence survive activations.
     ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor = nil
     updates, bindings, gear_catalog, sharing, pattern_editor, armory_mirror = nil
-    -- Keep only stateless export helpers; services and jobs belong to the old
+    -- Keep only stateless helpers; services and jobs belong to the old
     -- activation. A shared table also keeps the initializer within LuaJIT's
     -- captured-variable limit.
     local export_helpers = {
         include_patterns_in_exports = operations.include_patterns_in_exports,
         selected_export_bindings = operations.selected_export_bindings,
         export_pattern_entries = operations.export_pattern_entries,
+        apply_basic_camo = operations.apply_basic_camo,
+        update_camo_previews = operations.update_camo_previews,
+        outfit_documents = operations.outfit_documents,
+        outfit_document = operations.outfit_document,
+        armory_cape_available = operations.armory_cape_available,
+        sync_armory_cape = operations.sync_armory_cape,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
@@ -3422,6 +3843,9 @@ return {
                 session = function()
                     return m.binding_session.new({
                         retain = retain,
+                        dead = function(b)
+                            return native.alive(b.unit) == 0
+                        end,
                         present = present,
                         binding = binding,
                         key = function(b)
@@ -3538,6 +3962,9 @@ return {
                     bindings = function()
                         return m.binding_session.new({
                             retain = retain,
+                            dead = function(b)
+                                return native.alive(b.unit) == 0
+                            end,
                             present = present,
                             binding = binding,
                             key = function(b)
@@ -3651,6 +4078,9 @@ return {
         if m.pattern_luts then
             local pattern_session = m.binding_session.new({
                 retain = retain,
+                dead = function(b)
+                    return native.alive(b.unit) == 0
+                end,
                 present = present,
                 binding = binding,
                 key = function(b)
@@ -3660,8 +4090,18 @@ return {
                     return m.engine.create_texture(native, w, h, data, read, small)
                 end,
                 bind = function(b, object)
+                    if b.cape and operations.armory_cape_proof then
+                        local proof = appearance_proof()
+                        assert(
+                            proof and proof.cape == operations.armory_cape_proof,
+                            'Cape kit changed; load current gear again'
+                        )
+                    end
                     m.engine.bind(native, b.material, m.engine.PATTERN_SLOT, object)
                     native.commit(b.mesh)
+                    if b.cape and operations.armory_cape_proof then
+                        b.applied_cape_proof = operations.armory_cape_proof
+                    end
                 end,
             })
             local pattern_indicator = m.region_indicator.new({
@@ -3996,6 +4436,11 @@ return {
             edit.appearance_error = nil
         end
         frontend.tick(dt)
+        local camo_ok, camo_error = pcall(operations.update_camo_previews)
+        if not camo_ok and operations.camo_error ~= camo_error then
+            operations.camo_error = camo_error
+            ctx.log('Camo previews unavailable: ' .. tostring(camo_error))
+        end
         local current = frontend.resolve()
         if current then
             register(current)
@@ -4082,25 +4527,35 @@ return {
             if edit.loaded ~= edit.preview_document then
                 edit.preview_document = edit.loaded
                 edit.preview_revision = edit.loaded and (edit.loaded.revision or 0)
-            elseif edit.loaded and (edit.loaded.revision or 0) ~= edit.preview_revision then
-                edit.preview_revision = edit.loaded.revision or 0
-                if not frontend.basic_mode and edit.editor_target then
-                    action(function()
-                        checked_editor_target(edit.editor_target)
-                        live_select_suppressed = true
-                        local ok, why = handle.set('lut', edit.editor_target.group)
-                        live_select_suppressed = false
-                        assert(ok, why)
-                        assert(handle.set('scope', 1))
-                        return apply(edit.loaded, edit.editor_target.kind)
-                    end)
-                elseif
-                    (frontend.basic_mode and basic_selected)
-                    or (not frontend.basic_mode and (handle.get('target_armor') or handle.get('target_helmet')))
-                then
-                    action(function()
-                        return apply_checked(edit.loaded)
-                    end)
+                if operations.live_edit then
+                    operations.live_edit.reset()
+                end
+            else
+                local dirty = edit.loaded and (edit.loaded.revision or 0) ~= edit.preview_revision
+                local active = frontend.menu and frontend.menu.is_interacting and frontend.menu.is_interacting()
+                local ready = operations.live_edit and operations.live_edit.ready(dirty, active, dt)
+                if dirty and (ready or not operations.live_edit) then
+                    -- Consume the latest attempted revision only when due. A failed
+                    -- write keeps the draft and waits for a new edit or explicit retry.
+                    edit.preview_revision = edit.loaded.revision or 0
+                    if not frontend.basic_mode and edit.editor_target then
+                        action(function()
+                            checked_editor_target(edit.editor_target)
+                            live_select_suppressed = true
+                            local ok, why = handle.set('lut', edit.editor_target.group)
+                            live_select_suppressed = false
+                            assert(ok, why)
+                            assert(handle.set('scope', 1))
+                            return apply(edit.loaded, edit.editor_target.kind)
+                        end)
+                    elseif
+                        (frontend.basic_mode and basic_selected)
+                        or (not frontend.basic_mode and (handle.get('target_armor') or handle.get('target_helmet')))
+                    then
+                        action(function()
+                            return apply_checked(edit.loaded)
+                        end)
+                    end
                 end
             end
             if index_job then

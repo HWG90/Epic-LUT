@@ -16,6 +16,7 @@ local kits = { body = 7, armor = 11, helmet = 12, cape = 13 }
 local units, materials, bound, originals, live = {}, {}, {}, {}, {}
 local created, frontend, saved_outfit, bulk_entries, mirror_entries, shared_entries = 0
 local include_capes, gear_ready, proof_ready, basic_select = true, true, true
+local basic_info, action_history
 local after_write
 local stock = { width = 23, height = 8, data = ffi.new('float[736]'), resource = '1111111111111111' }
 stock.data[0] = 0.125
@@ -63,6 +64,8 @@ local m = {
     binding_session = dofile('src/gear/binding_session.lua'),
     gear_catalog = dofile('src/gear/gear_catalog.lua'),
     basic_state = dofile('src/core/basic_state.lua'),
+    basic_camo = dofile('src/editor/basic_camo.lua'),
+    live_edit = dofile('src/editor/live_edit.lua'),
     region_indicator = dofile('src/gear/region_indicator.lua'),
     editor_registry = dofile('src/editor/editor_registry.lua'),
     lut_editor = dofile('src/editor/lut_editor.lua'),
@@ -80,7 +83,12 @@ local m = {
     import_picker = dofile('src/imports/import_picker.lua'),
     import_protocol = dofile('src/imports/import_protocol.lua'),
     file_io = dofile('src/core/file_io.lua'),
-    action_history = dofile('src/core/action_history.lua'),
+    action_history = {
+        new = function(...)
+            action_history = dofile('src/core/action_history.lua').new(...)
+            return action_history
+        end,
+    },
     windows = {
         row_presets = function()
             return {}
@@ -183,6 +191,7 @@ local m = {
     },
     basic_view = {
         new = function(info, select)
+            basic_info = info
             basic_select = select
             return { draw = function() end, wheel = function() end }
         end,
@@ -393,6 +402,22 @@ assert(
 local both = save('both')
 assert(#both.armor > 0 and #both.cape > 0 and #both.helmet > 0, 'Both save omitted a gear kind')
 activate('restore')
+activate('outfit_apply_cape')
+assert(
+    bound[cape][1] == custom and bound[armor][1] == 1001 and bound[helmet][1] == 1002 and bound[cape][3] == 999,
+    'Armory Cape application changed same-resource Armor/Helmet or the Cape tint slot'
+)
+activate('global_undo')
+assert(
+    bound[cape][1] == 1001 and bound[armor][1] == 1001 and bound[helmet][1] == 1002,
+    'Armory Cape Undo escaped its scope'
+)
+activate('global_redo')
+assert(
+    bound[cape][1] == custom and bound[armor][1] == 1001 and bound[helmet][1] == 1002,
+    'Armory Cape Redo lost the isolated application'
+)
+activate('restore')
 activate('outfit_apply_armor')
 assert(
     bound[armor][1] ~= 1001 and bound[cape][1] == custom and bound[helmet][1] == 1002,
@@ -572,7 +597,552 @@ assert(
     'Imported Cape Redo did not restore the isolated application'
 )
 os.remove(fixture .. '/cape-import.dds')
+-- Armory compatibility uses exact current Cape destinations, never an arbitrary
+-- Armor table. Typed Cape entries take priority over historical Armor labels.
+do
+    activate('restore')
+    local cape_doc = { width = 23, height = 8, data = ffi.new('float[736]') }
+    cape_doc.data[0], cape_doc.data[3] = 0.8125, 1.625
+    local legacy_doc = { width = 23, height = 8, data = ffi.new('float[736]') }
+    legacy_doc.data[0] = 0.25
+    local function choose(entries)
+        saved_outfit = { name = 'Cape fixture', entries = entries, armor = {}, helmet = {}, cape = {} }
+        for _, entry in ipairs(entries) do
+            saved_outfit[entry.kind][#saved_outfit[entry.kind] + 1] = entry.document
+        end
+        assert(h.set('outfit_preset', 1) and h.set('outfit_preset', 2))
+    end
+    choose({
+        { kind = 'armor', key = '0:1:0:0', document = legacy_doc },
+        { kind = 'cape', key = '0:1:0:0', document = cape_doc },
+    })
+    activate('outfit_apply_cape')
+    local typed = bound[cape][1]
+    assert(
+        typed ~= 4001 and bound[armor][1] == 4001 and bound[helmet][1] == 4002,
+        'Typed Cape selection escaped current destination'
+    )
+    activate('restore')
+    choose({ { kind = 'armor', key = '0:1:0:0', document = cape_doc } })
+    assert(not api.mods[h.id].controls.outfit_apply_cape.disabled, 'Legacy same-destination Cape entry is unavailable')
+    activate('outfit_apply_cape')
+    assert(
+        bound[cape][1] == typed and bound[armor][1] == 4001,
+        'Legacy Cape adaptation chose another Armor destination'
+    )
+    activate('restore')
+    choose({ { kind = 'armor', key = '0:2:0:0', document = cape_doc } })
+    local count = created
+    local accepted = pcall(h.activate, 'outfit_apply_cape')
+    assert(
+        not accepted and created == count and bound[cape][1] == 4001,
+        'Unmatched Armor entry became a blanket Cape override'
+    )
+    choose({ { kind = 'cape', key = '0:1:0:0', document = cape_doc } })
+    proof_ready = false
+    local refused = api.mods[h.id].controls.outfit_apply_cape.on_activate()
+    assert(
+        refused:find('Current Cape identity unavailable', 1, true) and created == count and bound[cape][1] == 4001,
+        'Armory Cape wrote without current identity'
+    )
+    proof_ready = true
+    activate('populate_worn')
+    bound[cape][1] = 777777
+    refused = api.mods[h.id].controls.outfit_apply_cape.on_activate()
+    assert(
+        refused:find('Current Cape resource identity unavailable', 1, true)
+            and created == count
+            and bound[cape][1] == 777777,
+        'Armory Cape adopted a foreign texture'
+    )
+    bound[cape][1] = 4001
+    activate('populate_worn')
+    local extra = cape + 20
+    materials[units[2].unit][2] = { mesh = extra + 10, material = extra, mesh_index = 0, material_index = 1 }
+    bound[extra] = { [1] = 4001, [3] = 998 }
+    activate('populate_worn')
+    choose({
+        { kind = 'cape', key = '0:1:0:0', document = cape_doc },
+        { kind = 'cape', key = '0:1:0:1', document = cape_doc },
+    })
+    activate('outfit_apply_cape')
+    assert(
+        bound[cape][1] == typed and bound[extra][1] == typed and bound[extra][3] == 998,
+        'Armory Cape missed a matched second material'
+    )
+    activate('global_undo')
+    assert(
+        bound[cape][1] == 4001 and bound[extra][1] == 4001 and bound[armor][1] == 4001,
+        'Multiple Cape targets were not one Undo action'
+    )
+    activate('global_redo')
+    assert(bound[cape][1] == typed and bound[extra][1] == typed, 'Multiple Cape targets were not one Redo action')
+    activate('restore')
+    after_write = function(material)
+        if material == cape then
+            kits.cape = 99
+        end
+    end
+    refused = api.mods[h.id].controls.outfit_apply_cape.on_activate()
+    after_write = nil
+    assert(
+        refused:find('Cape kit changed', 1, true) and bound[extra][1] == 4001,
+        'Armory Cape continued writing after a same-mount kit switch'
+    )
+    activate('populate_worn')
+    assert(bound[cape][1] == 4001, 'Failed Armory Cape write lost the proof needed to retire its own prior color')
+    kits.cape = 13
+end
 runtime.on_disable(ctx)
+-- Cape Pattern entries use their dedicated owned session and slot. They never
+-- reach the 23-column material upload or the separate tint/emblem binding.
+do
+    actor(5)
+    armor, cape, helmet = current()
+    local uploads = {}
+    for index, material in ipairs({ armor, cape, helmet }) do
+        local pattern =
+            { width = 3, height = 1, data = ffi.new('float[12]'), resource = string.format('%016x', 5002 + index) }
+        pattern.data[0] = index * 0.125
+        bound[material][2], originals[5002 + index] = 5002 + index, pattern
+    end
+    m.engine.PATTERN_SLOT = 2
+    m.pattern_luts = dofile('src/editor/pattern_luts.lua')
+    m.engine.create_texture = function(_, width, height, data)
+        assert(width == 23 or width == 3 and height == 1, 'Wrong Cape DDS entered texture upload')
+        created = created + 1
+        local texture = { object = 90000 + created, width = width, height = height, data = data }
+        uploads[texture.object] = ffi.string(data, width * height * 16)
+        return texture
+    end
+    m.engine.bind = function(_, material, slot, object)
+        assert(slot == 1 or slot == 2, 'Armory Cape touched tint/emblem slot')
+        bound[material][slot] = object
+    end
+    m.direct_setup.new = function()
+        return {
+            read = function()
+                return {}
+            end,
+            clear = function() end,
+            save = function()
+                return 1
+            end,
+        }
+    end
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    activate('populate_worn')
+    local material = { width = 23, height = 8, data = ffi.new('float[736]') }
+    local pattern = { width = 3, height = 1, data = ffi.new('float[12]') }
+    material.data[0], pattern.data[0], pattern.data[3] = 0.6875, 0.9375, 1.875
+    ffi.cast('uint32_t*', pattern.data)[7] = 0x80000000
+    saved_outfit = {
+        name = 'Cape fixture',
+        armor = { stock },
+        helmet = { stock },
+        cape = { material, pattern },
+        entries = {
+            { kind = 'armor', key = '0:2:0:0', document = stock },
+            { kind = 'helmet', key = '0:0:0:0', document = stock },
+            { kind = 'cape', key = '0:1:0:0', document = material },
+            { kind = 'cape', key = 'p:0:1:0:0', document = pattern },
+        },
+    }
+    assert(h.set('outfit_preset', 2))
+    local history_count = #action_history.undo
+    activate('outfit_apply_cape')
+    assert(
+        uploads[bound[cape][1]] == ffi.string(material.data, 23 * 8 * 16)
+            and uploads[bound[cape][2]] == ffi.string(pattern.data, 48),
+        'Armory Cape material/Pattern upload did not preserve exact F32 bytes'
+    )
+    assert(
+        bound[armor][1] == 5001
+            and bound[armor][2] == 5003
+            and bound[helmet][1] == 5002
+            and bound[helmet][2] == 5005
+            and bound[cape][3] == 999,
+        'Armory Cape Pattern application changed unrelated material/Pattern/tint slots'
+    )
+    local material_object, pattern_object = bound[cape][1], bound[cape][2]
+    assert(
+        #action_history.undo == history_count + 1,
+        'Mixed Cape material/Pattern application split its history action'
+    )
+    activate('global_undo')
+    assert(bound[cape][1] == 5001 and bound[cape][2] == 5004, 'Mixed Cape Undo did not restore both exact slots')
+    activate('global_redo')
+    assert(
+        bound[cape][1] == material_object and bound[cape][2] == pattern_object,
+        'Mixed Cape Redo did not restore both owned textures'
+    )
+    history_count = #action_history.undo
+    bound[cape][2] = 888888
+    local accepted, refusal = h.activate('global_undo')
+    assert(
+        not accepted
+            and refusal:find('Gear bindings changed', 1, true)
+            and bound[cape][1] == material_object
+            and bound[cape][2] == 888888
+            and #action_history.undo == history_count,
+        'Foreign Pattern rejection partially undid the Cape material or moved history'
+    )
+    bound[cape][2] = pattern_object
+    local bind, fail_pattern = m.engine.bind, true
+    m.engine.bind = function(native_arg, target, slot, object)
+        if target == cape and slot == 2 and fail_pattern then
+            fail_pattern = false
+            error('simulated Pattern history write failure', 0)
+        end
+        return bind(native_arg, target, slot, object)
+    end
+    accepted = h.activate('global_undo')
+    m.engine.bind = bind
+    assert(
+        not accepted
+            and bound[cape][1] == material_object
+            and bound[cape][2] == pattern_object
+            and #action_history.undo == history_count,
+        'Failed Pattern history write did not roll back the preceding material write'
+    )
+    activate('global_undo')
+    assert(
+        bound[cape][1] == 5001 and bound[cape][2] == 5004,
+        'Mixed Cape history did not remain retryable after rollback'
+    )
+    activate('global_redo')
+    -- A failed Redo rollback must retain only its still-owned forward write,
+    -- including when the desired pool was empty before that Redo began.
+    activate('global_undo')
+    local redo_count = #action_history.redo
+    m.engine.bind = function(native_arg, target, slot, object)
+        if target == cape and (slot == 2 and object == pattern_object or slot == 1 and object == 5001) then
+            error('simulated history rollback failure', 0)
+        end
+        return bind(native_arg, target, slot, object)
+    end
+    accepted = h.activate('global_redo')
+    m.engine.bind = bind
+    assert(
+        not accepted
+            and bound[cape][1] == material_object
+            and bound[cape][2] == 5004
+            and #action_history.redo == redo_count,
+        'Failed history rollback lost the exact partial forward state or moved history'
+    )
+    activate('restore')
+    assert(bound[cape][1] == 5001 and bound[cape][2] == 5004, 'Cape material/Pattern originals failed to restore')
+    -- If a foreign writer wins during rollback, its third object is neither
+    -- claimed as ours nor removed by the later Restore.
+    activate('outfit_apply_cape')
+    activate('global_undo')
+    m.engine.bind = function(native_arg, target, slot, object)
+        if target == cape and slot == 2 and object == pattern_object then
+            error('simulated Pattern Redo failure', 0)
+        elseif target == cape and slot == 1 and object == 5001 then
+            bound[target][slot] = 999999
+            error('foreign writer replaced rollback target', 0)
+        end
+        return bind(native_arg, target, slot, object)
+    end
+    accepted = h.activate('global_redo')
+    m.engine.bind = bind
+    assert(
+        not accepted and bound[cape][1] == 999999 and bound[cape][2] == 5004,
+        'History rollback overwrote a foreign third object'
+    )
+    activate('restore')
+    assert(bound[cape][1] == 999999, 'Restore adopted a foreign object from failed history rollback')
+    bound[cape][1] = 5001
+    activate('refresh')
+    saved_outfit.entries = { saved_outfit.entries[4] }
+    saved_outfit.armor, saved_outfit.helmet, saved_outfit.cape = {}, {}, { pattern }
+    assert(h.set('outfit_preset', 1) and h.set('outfit_preset', 2))
+    assert(not api.mods[h.id].controls.outfit_apply_cape.disabled, 'Matched Pattern-only Cape preset cannot apply')
+    activate('outfit_apply_cape')
+    assert(
+        bound[cape][1] == 5001 and uploads[bound[cape][2]] == ffi.string(pattern.data, 48),
+        'Pattern-only Cape preset altered its material'
+    )
+    activate('restore')
+    local count = created
+    bound[cape][2] = 888888
+    local refused = api.mods[h.id].controls.outfit_apply_cape.on_activate()
+    assert(
+        refused:find('Current Cape resource identity unavailable', 1, true)
+            and created == count
+            and bound[cape][2] == 888888,
+        'Cape Pattern application adopted a foreign binding'
+    )
+    bound[cape][2] = 5004
+    runtime.on_disable(ctx)
+end
+-- Basic camo is a whole-table edit on the chosen resource/kind. It does not
+-- depend on a selected row and keeps both live writes and the local draft safe.
+do
+    actor(6)
+    armor, cape, helmet = current()
+    local other, same = armor + 20, armor + 30
+    materials[units[1].unit][2] = { mesh = other + 10, material = other, mesh_index = 0, material_index = 1 }
+    materials[units[1].unit][3] = { mesh = same + 10, material = same, mesh_index = 0, material_index = 2 }
+    bound[other], bound[same] = { [1] = 6003, [3] = 0 }, { [1] = 6001, [3] = 0 }
+    local other_doc = m.basic_state.clone(stock)
+    other_doc.resource = '2222222222222222'
+    originals[6003] = other_doc
+    local uploads, fail_next = {}, false
+    m.engine.create_texture = function(_, width, height, data)
+        assert(width == 23 or width == 3 and height == 1)
+        created = created + 1
+        local texture = { object = 90000 + created, width = width, height = height, data = data }
+        uploads[texture.object] = ffi.string(data, width * height * 16)
+        return texture
+    end
+    m.engine.bind = function(_, material, slot, object)
+        if fail_next and material == armor then
+            fail_next = false
+            error('simulated camo bind failure', 0)
+        end
+        bound[material][slot] = object
+        if after_write then
+            after_write(material)
+        end
+    end
+    local source, close_ready, starts = nil, false, 0
+    m.camo_patterns = {
+        new = function()
+            starts = starts + 1
+            source = {
+                state = 'ready',
+                start = function() end,
+                tick = function() end,
+                get = function()
+                    return nil
+                end,
+                close = function()
+                    source.closes = (source.closes or 0) + 1
+                    return close_ready
+                end,
+            }
+            return source
+        end,
+    }
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    activate('populate_worn')
+    frontend.basic_mode = true
+    api.focus_page(h.id, 'basic')
+    assert(h.set('basic_armor_lut', 1) and h.set('edit_row', 7))
+    local initial = basic_info().raw.basic.armor.document
+    local before = ffi.string(initial.data, initial.width * initial.height * 16)
+    local count = #action_history.undo
+    assert(h.set('basic_armor_camo', 7))
+    local applied = basic_info().raw.basic.armor.document
+    local expected = ffi.new('float[736]')
+    ffi.copy(expected, before, #before)
+    for row = 1, 8 do
+        expected[((row - 1) * 23 + 21) * 4 + 3] = 4
+    end
+    local bytes = ffi.string(expected, #before)
+    local armor_camo = bound[armor][1]
+    assert(
+        applied ~= initial
+            and ffi.string(initial.data, #before) == before
+            and ffi.string(applied.data, #before) == bytes
+            and uploads[armor_camo] == bytes,
+        'Basic camo changed the old draft or fields outside all-row column 22 alpha'
+    )
+    assert(
+        bound[same][1] == armor_camo
+            and bound[other][1] == 6003
+            and bound[cape][1] == 6001
+            and bound[cape][3] == 999
+            and bound[helmet][1] == 6002,
+        'Selected Armor camo escaped its exact resource/kind bindings'
+    )
+    assert(#action_history.undo == count + 1, 'Whole-table camo was not one history action')
+    activate('global_undo')
+    assert(
+        bound[armor][1] == 6001
+            and bound[same][1] == 6001
+            and ffi.string(basic_info().raw.basic.armor.document.data, #before) == before,
+        'Basic camo Undo lost the original live/local table'
+    )
+    activate('global_redo')
+    assert(
+        bound[armor][1] == armor_camo
+            and bound[same][1] == armor_camo
+            and ffi.string(basic_info().raw.basic.armor.document.data, #before) == bytes,
+        'Basic camo Redo lost the full table'
+    )
+    assert(h.set('basic_helmet_camo', 4))
+    local helmet_doc = basic_info().raw.basic.helmet.document
+    for row = 1, 8 do
+        assert(helmet_doc.data[((row - 1) * 23 + 21) * 4 + 3] == 1, 'Helmet camo requires a row selection')
+    end
+    assert(
+        bound[armor][1] == armor_camo and bound[cape][1] == 6001 and bound[other][1] == 6003,
+        'Helmet camo changed Armor/Cape/other resource'
+    )
+    assert(basic_select(1, 'helmet'))
+    helmet_doc = basic_info().raw.basic.helmet.document
+    local interacting, was_interacting = true, frontend.menu.is_interacting
+    frontend.menu.is_interacting = function()
+        return interacting
+    end
+    local drag_start = created
+    for frame = 1, 120 do
+        helmet_doc.data[0] = frame / 256
+        helmet_doc.revision = (helmet_doc.revision or 0) + 1
+        runtime.on_update(ctx, 1 / 60)
+    end
+    assert(created - drag_start <= 31, 'Continuous Basic edits still allocate one texture per frame')
+    helmet_doc.data[0] = 0.98765
+    helmet_doc.revision = helmet_doc.revision + 1
+    interacting = false
+    runtime.on_update(ctx, 0)
+    assert(
+        uploads[bound[helmet][1]] == ffi.string(helmet_doc.data, helmet_doc.width * helmet_doc.height * 16),
+        'Drag release did not apply the latest complete LUT immediately'
+    )
+    local quiet_count = created
+    for _ = 1, 10 do
+        runtime.on_update(ctx, 0)
+    end
+    assert(created == quiet_count, 'Idle editor continues allocating textures')
+    frontend.menu.is_interacting = was_interacting
+    local old = basic_info().raw.basic.armor.document
+    local old_bytes, old_object, old_history = ffi.string(old.data, #before), bound[armor][1], #action_history.undo
+    fail_next = true
+    assert(h.set('basic_armor_camo', 8))
+    assert(
+        basic_info().raw.basic.armor.document == old
+            and ffi.string(old.data, #before) == old_bytes
+            and bound[armor][1] == old_object
+            and bound[same][1] == old_object
+            and #action_history.undo == old_history,
+        'Failed camo application committed a changed local draft/history/live table'
+    )
+    runtime.on_disable(ctx)
+    actor(7)
+    armor, cape, helmet = current()
+    same = armor + 30
+    materials[units[1].unit][2] = { mesh = same + 10, material = same, mesh_index = 0, material_index = 1 }
+    bound[same] = { [1] = 7001, [3] = 0 }
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    activate('populate_worn')
+    frontend.basic_mode = true
+    api.focus_page(h.id, 'basic')
+    assert(h.set('basic_armor_lut', 1))
+    basic_info()
+    after_write = function(material)
+        if material == armor then
+            kits.armor = 99
+        end
+    end
+    assert(h.set('basic_armor_camo', 8))
+    after_write, kits.armor = nil, 11
+    assert(
+        bound[armor][1] == 7001 and bound[same][1] == 7001,
+        'Camo forward writes continued across a same-mount kit switch'
+    )
+    bound[cape][1] = 6104
+    originals[6104] = { width = 16, height = 5, data = ffi.new('float[320]'), resource = '3333333333333333' }
+    activate('refresh')
+    basic_info()
+    local cape_choice
+    for index, target in ipairs(api.mods[h.id].controls.basic_armor_lut.choice_targets) do
+        if target.kind == 'cape' then
+            cape_choice = index
+        end
+    end
+    assert(h.set('basic_armor_lut', assert(cape_choice)))
+    local unsupported = basic_info().raw.basic.armor.document
+    assert(
+        unsupported.width == 16 and api.mods[h.id].controls.basic_armor_camo.disabled,
+        'Unsupported Cape layout leaves Basic camo active'
+    )
+    count = created
+    assert(
+        not pcall(h.set, 'basic_armor_camo', 4) and created == count and bound[cape][1] == 6104,
+        'Disabled Cape camo issued a GPU edit'
+    )
+    frontend.menu.visible = true
+    runtime.on_update(ctx, 0)
+    assert(starts == 1 and source, 'Basic camo preview source did not start on its page')
+    local registered = api.mods[h.id]
+    assert(
+        runtime.on_disable(ctx) == false and source.closes == 1 and api.mods[h.id] == registered,
+        'Pending camo source cleanup released its activation early'
+    )
+    assert(
+        not pcall(runtime.on_enable, ctx) and starts == 1 and api.mods[h.id] == registered,
+        'Pending camo source was replaced by a new activation'
+    )
+    close_ready = true
+    assert(
+        runtime.on_disable(ctx) ~= false and not api.mods[h.id],
+        'Completed camo source cleanup did not release the activation'
+    )
+end
+-- Complete cleanup reclaims only the current certified cohort after the preview
+-- acknowledges closure and render fences drain both detachment and disposal.
+do
+    m.texture_lifetime = dofile('src/gear/texture_lifetime.lua')
+    actor(8)
+    armor, cape, helmet = current()
+    local events, lut_handle = {}, nil
+    local retire = package.loaded['epic.direct_lut.retained.v1']
+    local previous_records, previous_bytes = #retire.records, retire.bytes
+    m.engine.create_texture = function(_, width, height, data)
+        created = created + 1
+        local texture =
+            { handle = 100000 + created, object = 200000 + created, data = data, width = width, height = height }
+        if width == 1 then
+            assert(bound[armor][1] == 8001, 'Render drain preceded original binding restoration')
+            events[#events + 1] = 'fence'
+        else
+            assert(width == 23 and height == 8)
+            lut_handle = texture.handle
+        end
+        return texture
+    end
+    native.destroy = function(handle)
+        events[#events + 1] = handle == lut_handle and 'destroy LUT' or 'destroy fence'
+    end
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    activate('populate_worn')
+    frontend.basic_mode = true
+    api.focus_page(h.id, 'basic')
+    assert(h.set('basic_armor_lut', 1))
+    basic_info().raw.basic.armor.document.data[0] = 1.23456
+    assert(h.set('basic_armor_camo', 8) and lut_handle)
+    assert(#retire.records == previous_records + 1)
+    local preview_closed = false
+    package.loaded['epic.player_preview.v1'] = {
+        before_editor_close = function()
+            return preview_closed
+        end,
+    }
+    assert(runtime.on_disable(ctx) == false and #events == 0, 'Texture disposal ran while preview cleanup was pending')
+    preview_closed = true
+    assert(runtime.on_disable(ctx) ~= false)
+    package.loaded['epic.player_preview.v1'] = nil
+    assert(
+        table.concat(events, ',') == 'fence,destroy fence,destroy LUT,fence,destroy fence',
+        'Complete cleanup omitted or reordered a texture retirement fence'
+    )
+    assert(
+        #retire.records == previous_records and retire.bytes == previous_bytes and not retire.cohort,
+        'Certified texture cleanup freed legacy buffers or retained its own completed cohort'
+    )
+end
 os.remove(fixture .. '/' .. armor_file)
 os.remove(fixture .. '/' .. filename)
 print(

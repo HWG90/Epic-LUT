@@ -65,6 +65,8 @@ parts.append('m.dev_build_id='+repr(args.dev_stamp or 'release')+'\n')
 parts.append('m.debug_lut_dds_hex='+repr((ROOT/'assets/debug-lut.dds').read_bytes().hex())+'\n')
 parts.append('m.original_snapshot_script=' + repr((ROOT/'tools/original_snapshots.ps1').read_bytes().hex()) + '\n')
 parts.append('m.original_snapshot_reader=' + repr((ROOT/'tools/original_snapshots.cs').read_bytes().hex()) + '\n')
+parts.append('m.camo_preview_script=' + repr((ROOT/'tools/camo_preview.ps1').read_bytes().hex()) + '\n')
+parts.append('m.camo_preview_reader=' + repr((ROOT/'tools/camo_preview_reader.cs').read_bytes().hex()) + '\n')
 if args.player_preview:
     parts.append('m.authored_preview_script=' + repr((ROOT/'tools/authored_preview.ps1').read_bytes().hex()) + '\n')
     parts.append('m.authored_preview_reader=' + repr((ROOT/'tools/authored_preview_reader.cs').read_bytes().hex()) + '\n')

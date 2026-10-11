@@ -16,6 +16,7 @@ local view = dofile('src/editor/armory_view.lua').new(function()
 end)
 local saved
 local exports = {}
+local actions = {}
 local menu
 local controls = {
     { id = 'armory_search', type = 'input', allow_empty = true, label = 'Search', default = '' },
@@ -66,6 +67,7 @@ for _, id in ipairs({
     'save_setup',
     'outfit_apply_armor',
     'outfit_apply_helmet',
+    'outfit_apply_cape',
     'basic_save',
     'basic_export',
     'open_editor',
@@ -78,6 +80,7 @@ for _, id in ipairs({
         type = 'button',
         label = id,
         on_activate = function()
+            actions[#actions + 1] = id
             if id == 'armory_export' then
                 exports[#exports + 1] = {
                     format = api.mods.armory_test.handle.get('armory_export_format'),
@@ -268,6 +271,23 @@ local function tap_label(value)
             end,
         })
     end
+end
+do
+    local previous = state.raw.outfit
+    state.raw.outfit = { armor = { document }, cape = { document }, helmet = { document } }
+    state.armory_cape_available = true
+    view.sidebar_scroll = 0
+    assert(composed('Apply Preset Armor + Cape LUTs'), 'Armory combined action hides its Cape scope')
+    tap_label('Apply Preset Cape LUTs')
+    assert(actions[#actions] == 'outfit_apply_cape', 'Armory Cape action used an Armor/Helmet callback')
+    state.armory_cape_available = false
+    local count = #actions
+    tap_label('Apply Preset Cape LUTs')
+    assert(#actions == count, 'Armory Cape action stays clickable without a matching current Cape')
+    state.raw.outfit = nil
+    tap_label('Apply Preset Cape LUTs')
+    assert(#actions == count, 'Armory Cape action stays clickable without a selected preset')
+    state.raw.outfit, state.armory_cape_available = previous, nil
 end
 for format = 1, 4 do
     assert(h.set('armory_export_format', format))

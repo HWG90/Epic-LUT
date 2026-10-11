@@ -61,6 +61,49 @@ function M.control_border(ui, x, y, w, h, color)
     ui.rect(x, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
     ui.rect(x + w - stroke, y + stroke, stroke, math.max(0, h - stroke * 2), color, nil, 'control_border')
 end
+-- Small decoded pattern masks share the regular popup plane. Merge adjacent
+-- pixels so previews remain cheap to retain and never need another GUI.
+function M.pattern_thumbnail(preview, emit, x, y, size)
+    if
+        not preview
+        or not preview.width
+        or not preview.height
+        or not preview.colors
+        or preview.width < 1
+        or preview.width > 16
+        or preview.height < 1
+        or preview.height > 16
+        or preview.width % 1 ~= 0
+        or preview.height % 1 ~= 0
+        or #preview.colors ~= preview.width * preview.height
+    then
+        return
+    end
+    for row = 0, preview.height - 1 do
+        local first = 0
+        while first < preview.width do
+            local color = preview.colors[row * preview.width + first + 1]
+            local last = first + 1
+            while last < preview.width do
+                local next_color = preview.colors[row * preview.width + last + 1]
+                if color[1] ~= next_color[1] or color[2] ~= next_color[2] or color[3] ~= next_color[3] then
+                    break
+                end
+                last = last + 1
+            end
+            emit(
+                x + first * size / preview.width,
+                y + (preview.height - row - 1) * size / preview.height,
+                (last - first) * size / preview.width,
+                size / preview.height,
+                color,
+                nil,
+                'swatch_fill'
+            )
+            first = last
+        end
+    end
+end
 -- Custom workspaces use the same surfaces and interaction feedback as MCM.
 -- Accents remain explicit so Load, Save and Export retain their meaning.
 function M.custom_ui(ui)
@@ -4242,6 +4285,7 @@ function M.new(api, measure, Text)
                 text_focus = index == d.selected
 
                 local preview = d.control.choice_previews and d.control.choice_previews[index]
+                local pattern_preview = d.control.choice_pattern_previews and d.control.choice_pattern_previews[index]
                 local detail = d.control.choice_details and d.control.choice_details[index]
                 local can_delete = index > 1
                     and type(d.control.on_delete_choice) == 'function'
@@ -4255,7 +4299,7 @@ function M.new(api, measure, Text)
                     choice_label,
                     detail and 13 or 18,
                     index == d.selected and selection_text or white,
-                    math.max(0, dw - (preview and 138 or 24) - delete_width)
+                    math.max(0, dw - (preview and 138 or pattern_preview and 56 or 24) - delete_width)
                 )
                 if detail then
                     bounded(
@@ -4280,6 +4324,9 @@ function M.new(api, measure, Text)
                         end
                     end
                     rect(x + dw - 70 - delete_width, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
+                end
+                if pattern_preview then
+                    M.pattern_thumbnail(pattern_preview, rect, x + dw - 44 - delete_width, y - 1, 24)
                 end
 
                 hit(x + 3, y - 4, dw - 16, 30, function()

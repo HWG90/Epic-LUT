@@ -46,6 +46,8 @@ The active tools shortcut stays highlighted. Clicking it again keeps its window 
 
 Material LUTs with up to **64 rows** remain editable. Scroll over the Pixel Grid or use its row-page buttons; choosing a row brings it into view. Basic's region list and the Value Editor scroll separately. Region labels flash the actual selected row on the model when that material uses it.
 
+Development builds coalesce continuous material edits to 15 live uploads per second and apply the final value immediately on release. Retained texture data stays bounded to 64 MiB and 16,384 allocations. Reloading Epic LUT reclaims eligible textures after its preview and live bindings finish cleanup. Restore alone preserves Undo/Redo; older allocations or uncertain ownership remain retained until Helldivers restarts. A limit refusal keeps the local draft available.
+
 Tables above eight rows retain their added rows when Preserve Original Emissives is enabled. Original values are preserved for the rows present in the game snapshot; extra rows keep the imported values. DDS and patch export retain the custom row count. The model must reference those rows for them to be visible.
 
 ## Start with Basic
@@ -54,6 +56,7 @@ Press **F9**, then **Load Current Armor & Helmet**. Choose the LUT above either 
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
+- Development builds add **Camo** beneath each column. **Off / Pattern 0–5** changes every region in that selected LUT as one undoable edit. Existing camo colors, scale and material effects stay intact; zero camo colors or scale can leave a pattern invisible. Neutral thumbnails use the actual game masks. Weapon paint names such as Arctic and Desert are not yet mapped to these Armor pattern indices.
 - **Advanced Mode** in the header opens the full editor; **Basic Mode** brings you back.
 - Hover for guidance. Extra import controls appear only after loading a file.
 
@@ -127,6 +130,8 @@ Preview uses the game's lighter **Game Default UI pipeline**, with an independen
 **Save to Armory / Save Current Gear Preset** asks for **Armor Only, Helmet Only, or Both**, then a name.
 
 Select a preset to preview it. Name-selector swatches give a quick glance; the full preview shows every saved LUT. Apply either half separately to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
+
+Development builds also provide **Apply Preset Cape LUTs** for saved Cape material and Pattern entries matching the current Cape. This leaves Armor and Helmet untouched. The combined Armor action reads **Armor + Cape** when the preset includes Cape data. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
 
 Presets live in `%LOCALAPPDATA%/Epic LUT/presets`. Library changes leave worn colors unchanged.
 

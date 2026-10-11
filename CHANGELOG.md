@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reclaim eligible owned LUT textures after complete addon cleanup using binding readback and two render fences; retain uncertain or legacy allocations. Give editing a bounded 64 MiB / 16,384-record budget and coalesce continuous material edits to 15 live uploads per second, flushing the final value when editing ends.
+- Restore owned material and Pattern LUTs together through action Undo/Redo, preflight both slots and roll back partial failures without overwriting another mod's bindings.
+- Add independent Apply Cape in The Armory, matching saved Cape material and Pattern entries to current Cape destinations, with support for older Armor-labelled Cape entries.
+- Add separate Armor and Helmet camo pattern selectors beneath Basic Mode's regions; apply to every row in the selected LUT, preserve other fields and provide thumbnails decoded from the game's actual mask atlas.
 - Select held Idle, Salute, Wave, Taunt and High Five poses in Player Preview; keep Idle as the default and load real game emote tracks only when selected.
 - Replace Tools' Dock/Undock text controls with opposing window icons beside Close; preserve tooltips and a separate draggable title area.
 - Begin controller refactoring by separating file-picker requests, retries, progress and worker polling into `import_picker`; preserve result acceptance and native ownership in the editor.

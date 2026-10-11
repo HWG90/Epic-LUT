@@ -7,12 +7,16 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `direct_editor.lua`: coordinates the active edit session, gear selection, UI actions and background jobs. This is still the principal extraction target.
 - `gear_catalog.lua`: discovers local material groups, preserves original identities for owned writes, and filters selected/gear-wide application scopes without UI mutations.
 - `binding_session.lua`: owns Epic LUT binding writes, immutable retained texture buffers, per-operation rollback and restoration. It never guesses foreign ownership. The controller supplies native callbacks; tests can supply ordinary Lua tables.
+- `texture_lifetime.lua`: retires one activation's certified owned textures after complete preview/session cleanup, drains queued work, destroys owned handles and drains destruction before releasing data/cache references. Legacy or uncertain allocations remain quarantined.
+- `live_edit.lua`: coalesces continuous document changes to 15 material uploads per second. Discrete edits and the final release/cancel value apply immediately; document mutation and owned native writes remain separate.
 - `table_index.lua`: cooperatively decodes a snapshot of imported paths, retaining resource metadata and skipping cached documents.
 - `import_job.lua`: owns one external worker, cancellation, retries, timeouts and shutdown; emits results without editing palettes.
 - `import_picker.lua`: assembles file-picker requests, remembers retry mode, polls the worker and reports progress through injected callbacks. Result acceptance, DDS loading and native application remain in the controller.
 - `armory_collection.lua`: named collection previews, selection, save, rename and confirmation dialogs; native application stays in the controller.
 - `import_protocol.lua`: validates bounded worker progress/results and constructs result/progress/cancel paths. It does not mutate session state or call native APIs.
 - `basic_state.lua`: independent editor documents and history copies. History copying preserves resource metadata and original pixels, deduplicates shared documents, and accounts for both pixel buffers.
+- `basic_camo.lua`: whole-LUT pattern selection and bounded neutral thumbnails. It changes only column 22 A on supported material documents; the controller clones, validates the selected kit/slot, applies through the owned binding session and records history.
+- `camo_patterns.lua`: lazily owns a cancellable background worker and validates six exact mask-cache files. The bounded worker reads only the locally installed game atlas mip; render callbacks never read game archives. Masks are cached locally and excluded from packages.
 - `editor_registry.lua`: stable editor control IDs and presentation schema; requires named session callbacks and performs no gear writes.
 - `lut_files.lua`: validated DDS names, row-preset offsets and full-document exports shared by editor and controller.
 - `file_io.lua`: bounded reads and deterministic handle cleanup, used by document and preset loading.
@@ -32,6 +36,8 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 Use module-local state for a service instance. Keep dependency injection at construction boundaries. Avoid runtime filesystem module loading and new globals. `package.loaded` entries are reserved for deliberate cross-addon services and retained native-resource lifetime.
 
 Native writes must validate liveness and ownership first. Roll back only writes owned by the operation. Never free queued texture buffers or borrowed worlds to reduce memory usage. Treat callback failures as actionable errors; keep retry state when cleanup cannot safely fiDo nish.
+
+The immutable texture cache is bounded to 64 MiB of retained pixels and 16,384 allocation records. Texture cache hits remain usable at the cap. Restore alone preserves textures for Undo/Redo. Complete addon cleanup can reclaim a new activation's allocations only after every touched binding has been proved restored, preview copies are retired, and two render fences separate detachment, owned handle destruction and backing-buffer release. Legacy allocations, inaccessible or foreign bindings, uncertain native failures and lost preview contexts remain quarantined until a game restart. This byte bound excludes native descriptors and cached string-key overhead. Continuous editing is coalesced before allocation; retained buffers remain immutable.
 
 UI draws should be read-only apart from view-local layout state. Reuse immutable labels and descriptions. Preserve stable IDs, stored settings and native resource identity during refactors. Avoid introducing aliases that become a second authority for the same preference.
 

@@ -1,8 +1,8 @@
--- Primary RGB only. No shader, alpha or raw-column controls.
+-- Primary RGB and whole-LUT camo. No shader, alpha or raw-column controls.
 local B = {}
 function B.new(info, select_row, help)
     help = help or {}
-    local self = { scroll = 0, action_scroll = 0 }
+    local self = { action_scroll = 0, region_scroll = {}, region_maximum = {}, region_bounds = {} }
     function self.wheel(x, y, delta)
         local actions = self.action_bounds
         if
@@ -15,10 +15,14 @@ function B.new(info, select_row, help)
             self.action_scroll = math.max(0, math.min(self.action_maximum or 0, self.action_scroll - delta / 120 * 36))
             return true
         end
-        local b = self.bounds
-        if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
-            self.scroll = math.max(0, math.min(self.maximum or 0, self.scroll - delta / 120 * 36))
-            return true
+        for kind, b in pairs(self.region_bounds) do
+            if x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
+                self.region_scroll[kind] = math.max(
+                    0,
+                    math.min(self.region_maximum[kind] or 0, (self.region_scroll[kind] or 0) - delta / 120 * 36)
+                )
+                return true
+            end
         end
     end
     function self.draw(ui)
@@ -65,15 +69,21 @@ function B.new(info, select_row, help)
         )
         local panels = state.raw and state.raw.basic
         button(ui.x + 10, top - 85, left - 20, 'Load Current Armor & Helmet', 'populate_worn')
-        local cliptop, clipbottom = top - 142, ui.y + (state.loaded and 102 or 56)
-        local y = cliptop + self.scroll
-        self.bounds = { x = ui.x, y = clipbottom, w = left, h = cliptop - clipbottom }
-        local rows = 0
+        local gap = ui.spacing and ui.spacing(4) or 4
+        local camo_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
+        local camo_heading_y = camo_y + 26 + gap
+        local cliptop, clipbottom = top - 142, camo_heading_y + math.max(heading_size, hint_size) + gap
+        local region_height = math.max(0, cliptop - clipbottom)
         local half = (left - 26) / 2
         for n, kind in ipairs({ 'armor', 'helmet' }) do
             local x = ui.x + 10 + (n - 1) * (half + 6)
             local panel = state.raw and state.raw.basic and state.raw.basic[kind]
             local document = state.palette_ready ~= false and panel and panel.document
+            local rows = document and document.height or 0
+            local maximum = math.max(0, rows * 29 + 11 - region_height)
+            local scroll = math.min(self.region_scroll[kind] or 0, maximum)
+            self.region_maximum[kind], self.region_scroll[kind] = maximum, scroll
+            self.region_bounds[kind] = { x = x, y = clipbottom, w = half, h = region_height }
             ui.bounded(
                 x,
                 top - 110,
@@ -87,9 +97,8 @@ function B.new(info, select_row, help)
                 ui.bounded(x + 65, top - 110, 'ID: ' .. panel.resource, 12, muted, half - 65, 'hint')
             end
             ui.choice('basic_' .. kind .. '_lut', x, top - 142, half)
-            local cursor = top - 153 + self.scroll
+            local cursor = top - 153 + scroll
             if document then
-                rows = math.max(rows, document.height)
                 for row = 1, document.height do
                     cursor = cursor - 29
                     if cursor >= clipbottom and cursor + 28 <= cliptop then
@@ -135,6 +144,32 @@ function B.new(info, select_row, help)
                 )
                 ui.bounded(x, top - 201, 'Try another LUT # or Load Current Colors.', 12, muted, half, 'hint')
             end
+            ui.bounded(x, camo_heading_y, 'Camo', 12, white, half, 'heading')
+            local label_width = ui.text_width and ui.text_width('Camo', 12, 'heading') or heading_size * 2.5
+            ui.bounded(
+                x + label_width + gap * 2,
+                camo_heading_y,
+                'All regions in this LUT',
+                12,
+                muted,
+                math.max(0, half - label_width - gap * 2),
+                'hint'
+            )
+            ui.choice('basic_' .. kind .. '_camo', x, camo_y, half)
+            if ui.scrollbar and maximum > 0 and region_height > 0 then
+                ui.scrollbar(
+                    'basic_' .. kind .. '_regions',
+                    x + half - 3,
+                    clipbottom,
+                    region_height,
+                    rows * 29 + 11,
+                    region_height,
+                    scroll,
+                    function(value)
+                        self.region_scroll[kind] = value
+                    end
+                )
+            end
             if state.loaded then
                 ui.bounded(x, ui.y + 80, 'Single LUT Import', 12, white, half, 'heading')
                 local filename = state.loaded and (state.loaded.source or ''):gsub('\\', '/'):match('[^/]+$') or 'DDS'
@@ -168,9 +203,6 @@ function B.new(info, select_row, help)
                 button(x, ui.y + 10, half, 'Copy Armor', 'basic_copy_armor')
             end
         end
-        y = cliptop + self.scroll - rows * 29 - 11
-        self.maximum = math.max(0, cliptop + self.scroll - y - (cliptop - clipbottom))
-        self.scroll = math.min(self.scroll, self.maximum)
         button(right + width - 150, ui.y - 24, 150, 'Stop Highlight', 'stop_identify')
         local portrait = package.loaded['epic.player_preview.v1']
         if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then

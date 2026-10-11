@@ -42,6 +42,7 @@ local required = {
     'lut_change',
     'open_editor_activate',
     'outfit_apply_armor_activate',
+    'outfit_apply_cape_activate',
     'outfit_apply_helmet_activate',
     'outfit_delete_activate',
     'outfit_preset_change',
@@ -177,6 +178,14 @@ function R.pages(callbacks, defaults)
                     type = 'button',
                     label = 'Apply Outfit Helmet',
                     on_activate = callbacks.outfit_apply_helmet_activate,
+                },
+                {
+                    id = 'outfit_apply_cape',
+                    type = 'button',
+                    label = 'Apply Preset Cape LUTs',
+                    description = 'Apply only saved LUTs matching current Cape destinations. Armor and Helmet remain unchanged.',
+                    disabled = true,
+                    on_activate = callbacks.outfit_apply_cape_activate,
                 },
                 { id = 'armory_export_name', type = 'input', label = 'Armory export name', default = 'my-preset' },
                 {

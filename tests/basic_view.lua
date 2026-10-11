@@ -20,12 +20,12 @@ local state = {
     helmet_checked = false,
 }
 state.raw = { basic = { armor = { document = state.editor }, helmet = { document = state.editor } } }
-local selected
+local selected, selected_kind
 local export_hits = 0
 local view = dofile('src/editor/basic_view.lua').new(function()
     return state
-end, function(row)
-    selected = row
+end, function(row, kind)
+    selected, selected_kind = row, kind
 end)
 local controls = {
     { id = 'palette', type = 'choice', label = 'Imported LUT', choices = { 'Import first', 'LUT 2' }, default = 1 },
@@ -62,6 +62,14 @@ local controls = {
 for _, kind in ipairs({ 'armor', 'helmet' }) do
     controls[#controls + 1] =
         { id = 'basic_' .. kind .. '_lut', type = 'choice', label = kind .. ' LUT', choices = { 'LUT 1' }, default = 1 }
+    controls[#controls + 1] = {
+        id = 'basic_' .. kind .. '_camo',
+        type = 'choice',
+        presentation = 'dropdown',
+        label = kind .. ' Camo',
+        choices = { 'Off', 'Pattern 0', 'Pattern 1' },
+        default = 1,
+    }
 end
 for _, kind in ipairs({ 'armor', 'helmet' }) do
     controls[#controls + 1] = {
@@ -208,10 +216,12 @@ end
 assert(matching, 'Basic matching-import action missing')
 -- Compact Basic keeps the actions above the footer and scrolls independently of regions.
 assert(view.action_maximum > 0, 'Loaded Basic actions need a scroll range at 780px window height')
-local region_scroll = view.scroll
+local armor_scroll, helmet_scroll = view.region_scroll.armor, view.region_scroll.helmet
 assert(view.wheel(view.action_bounds.x + 10, view.action_bounds.y + 10, -1200), 'Basic action pane ignored wheel input')
 assert(
-    view.action_scroll == view.action_maximum and view.scroll == region_scroll,
+    view.action_scroll == view.action_maximum
+        and view.region_scroll.armor == armor_scroll
+        and view.region_scroll.helmet == helmet_scroll,
     'Action scrolling moved primary regions'
 )
 for _, resolution in ipairs({ { 1920, 1080 }, { 1280, 720 } }) do
@@ -264,7 +274,12 @@ for _, pressed in ipairs({ true, false }) do
 end
 assert(export_hits == 1, 'Scrolled Basic export button could not be clicked')
 
-menu.compose(1920, 1080)
+view.wheel(view.region_bounds.armor.x + 10, view.region_bounds.armor.y + 10, -1200)
+for _, c in ipairs(menu.compose(1920, 1080)) do
+    if c.full_text == 'Region 8' and c.x < menu.window_bounds.x + menu.window_bounds.w * 0.54 then
+        row8 = c
+    end
+end
 local x, y = row8.x + 85, row8.y + 2
 menu.tick({
     down = function(k)
@@ -365,6 +380,117 @@ tap_label('Export...')
 assert(export_hits == prior, 'Basic bulk export remained active during an import')
 state.busy = false
 state.editor = saved_editor
+-- Camo stays in a fixed, compact footer. Region wheels belong to their gear
+-- column and expose every row even when an imported-LUT action is present.
+local camo_data = ffi.new('float[?]', 23 * 64 * 4)
+local camo_document = { data = camo_data, width = 23, height = 64 }
+state.raw.basic.armor.document, state.raw.basic.helmet.document = camo_document, camo_document
+menu.text_metrics = function(size)
+    return { min_y = -0.2 * size, max_y = 0.85 * size }
+end
+local function column_label(commands, kind, label)
+    local b, window = view.region_bounds[kind], menu.window_bounds
+    local left, right = window.x + b.x * window.scale, window.x + (b.x + b.w) * window.scale
+    for _, c in ipairs(commands) do
+        if (c.full_text or c.text) == label and c.x >= left and c.x < right then
+            return c
+        end
+    end
+end
+local function tap(command)
+    for _, pressed in ipairs({ true, false }) do
+        menu.tick({
+            down = function(key)
+                return pressed and key == 1
+            end,
+            mouse = function()
+                return command.x + 2, command.y + 2
+            end,
+            wheel = function()
+                return 0
+            end,
+        })
+    end
+end
+for _, loaded in ipairs({ false, true }) do
+    state.loaded = loaded and saved_editor or nil
+    for _, font in ipairs({ 12, 20 }) do
+        for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+            menu.font_size, menu.ui_scale = font, scale
+            view.region_scroll.armor, view.region_scroll.helmet = 0, 0
+            local before = menu.compose(1920, 1080)
+            local camo_armor = assert(column_label(before, 'armor', 'Off'))
+            local camo_helmet = assert(column_label(before, 'helmet', 'Off'))
+            for _, kind in ipairs({ 'armor', 'helmet' }) do
+                local b = view.region_bounds[kind]
+                local heading = assert(column_label(before, kind, 'Camo'))
+                assert(column_label(before, kind, 'All regions in this LUT'))
+                local field = assert(column_label(before, kind, 'Off'))
+                local footer_label = loaded and 'Single LUT Import'
+                    or (kind == 'armor' and 'Copy Helmet' or 'Copy Armor')
+                local footer = assert(column_label(before, kind, footer_label))
+                assert(
+                    heading.y - 0.2 * heading.size > field.y + 0.85 * field.size,
+                    'Camo heading overlaps its selector'
+                )
+                assert(
+                    field.y - 0.2 * field.size > footer.y + 0.85 * footer.size,
+                    'Camo overlaps the lower import/copy action'
+                )
+                assert(view.wheel(b.x + 5, b.y + 5, -12000))
+                assert(view.region_scroll[kind] == view.region_maximum[kind] and view.region_scroll[kind] > 0)
+                if kind == 'armor' then
+                    assert(view.region_scroll.helmet == 0, 'Armor region wheel moved Helmet regions')
+                end
+                local after = menu.compose(1920, 1080)
+                local last =
+                    assert(column_label(after, kind, 'Region 64'), 'Last row disappeared behind the Camo footer')
+                local window = menu.window_bounds
+                assert(last.y - 0.2 * last.size >= window.y + b.y * window.scale)
+                assert(last.y + 0.85 * last.size <= window.y + (b.y + b.h) * window.scale)
+                local current = assert(column_label(after, kind, 'Off'))
+                assert(current.y == field.y, 'Region scrolling moved the Camo selector')
+                assert(
+                    column_label(after, kind, footer_label).y == footer.y,
+                    'Region scrolling moved the lower actions'
+                )
+                -- Click the last color swatch through its current scroll position.
+                tap({ x = window.x + (b.x + 82) * window.scale, y = last.y })
+                assert(
+                    selected == 64 and selected_kind == kind and menu.color_picker,
+                    'Scrolled final region hit the wrong gear'
+                )
+                menu.close_color(false)
+            end
+            local after = menu.compose(1920, 1080)
+            assert(
+                column_label(after, 'armor', 'Off').y == camo_armor.y
+                    and column_label(after, 'helmet', 'Off').y == camo_helmet.y
+            )
+            local before_armor, before_helmet = view.region_scroll.armor, view.region_scroll.helmet
+            view.wheel(view.action_bounds.x + 5, view.action_bounds.y + 5, -1200)
+            assert(
+                view.region_scroll.armor == before_armor and view.region_scroll.helmet == before_helmet,
+                'Action scrolling moved gear regions'
+            )
+        end
+    end
+end
+menu.font_size, menu.ui_scale = 12, 1
+tap(assert(column_label(menu.compose(1920, 1080), 'armor', 'Off')))
+assert(menu.dropdown and menu.dropdown.control.id == 'basic_armor_camo')
+menu.key(40)
+menu.key(13)
+assert(
+    handle.get('basic_armor_camo') == 2 and handle.get('basic_helmet_camo') == 1,
+    'Camo chooser changed the other gear column'
+)
+api.mods.basic_test.controls.basic_helmet_camo.disabled = true
+tap(assert(column_label(menu.compose(1920, 1080), 'helmet', 'Off')))
+assert(not menu.dropdown, 'Registry-disabled Camo opened an editable dropdown')
+print(
+    'PASS Basic Camo: fixed per-gear chooser, native font clearance, independent 64-row scrolling and clicks, imported footer separation, scaled layout and registry-disabled behavior'
+)
 print(
     'PASS Basic: eight primary regions at compact size, standard color picker, import/export/preset controls, no advanced fields'
 )

@@ -44,11 +44,13 @@ local function run(mode, enabled)
             remove = function() end,
         },
         package = { loaded = registry },
-        stingray = { Gui = {
-            resolution = function()
-                return 1920, 1080
-            end,
-        } },
+        stingray = {
+            Gui = {
+                resolution = function()
+                    return 1920, 1080
+                end,
+            },
+        },
     }
     fixture['src/editor/direct_editor.lua'] = {
         on_enable = function() end,
@@ -86,15 +88,16 @@ local function run(mode, enabled)
         end,
     }
     fixture['src/preview/player_preview_controls.lua'] = dofile('src/preview/player_preview_controls.lua')
+    fixture['src/preview/player_authored_clip.lua'] = dofile('src/preview/player_authored_clip.lua')
     fixture['src/preview/player_preview.lua'] = dofile('src/preview/player_preview.lua')
     fixture['src/preview/player_preview_native.lua'] = {
         new = function(_, m, host)
             assert(
-                host.animate == enabled and host.authored == enabled,
-                'Generated modular gate never reached the native adapter'
+                host.animate == false and not host.authored and host.controls.pose == 'idle',
+                'Generated modular preview no longer defaults to asset-free Idle'
             )
             assert(m.preview_animation == (enabled and 'authored_salute' or 'disabled'))
-            assert((host.animation_source ~= nil) == enabled)
+            assert(type(host.get_animation_source) == 'function' and host.get_animation_source() == nil)
             fixture.metadata = m
             return {
                 quiesce = function()
@@ -143,7 +146,12 @@ local function run(mode, enabled)
     }, { id = 'armor_lut_editor', dir = 'fixture', metadata = { name = 'Epic LUT' } }, snapshot, function() end)
     assert(api.scope.PREVIEW_ANIMATION_ENABLED == enabled and api.scope.m ~= foreign_m)
     definition.on_enable({ log = function() end, on_cleanup = function() end })
-    assert(fixture.starts == (enabled and 1 or 0), 'Authored worker startup differs from modular build mode')
+    assert(fixture.starts == 0, 'Idle bootstrap unexpectedly started an authored worker')
+    local portrait = assert(registry['epic.player_preview.v1'])
+    assert(portrait.get_pose() == 'idle')
+    assert(portrait.set_pose('wave') and portrait.get_pose() == 'wave')
+    assert(fixture.starts == 0, 'Pose selection started its worker outside an update')
+    assert(portrait.set_pose('idle') and portrait.get_pose() == 'idle')
     assert(definition.on_disable())
     assert(_G.m == foreign_m and _G.PREVIEW_ANIMATION_ENABLED == true, 'Modular bootstrap changed global flags')
     return api.scope.m
@@ -156,5 +164,5 @@ assert(
 _G.EPIC_BOOTSTRAP_FIXTURE = nil
 _G.m, _G.PREVIEW_ANIMATION_ENABLED = old_m, old_gate
 print(
-    'PASS actual modular bootstrap: private authored/static gates, native host, worker startup and isolated instances'
+    'PASS actual modular bootstrap: private authored/static metadata, asset-free Idle, explicit lazy pose choices and isolated instances'
 )
