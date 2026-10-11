@@ -11,6 +11,7 @@ local api = core.new({
     end,
 })
 local scans, uploads, restored, marks = 0, 0, 0, 0
+local quick_loaded, quick_kind = false, 'helmet'
 local objects, sources = {}, {}
 for index, kind in ipairs({ 'armor', 'helmet' }) do
     local object = 100 + index
@@ -63,6 +64,14 @@ local pattern = dofile('src/editor/pattern_luts.lua').new({
     end,
     original = function(object)
         return sources[object]
+    end,
+    cached_original = function(object)
+        return sources[object]
+    end,
+    quick_bindings = function()
+        if quick_loaded then
+            return quick_kind, objects, quick_kind == 'helmet' and objects[2].material or objects[1].material
+        end
     end,
     resource_id = function(object)
         return '[0x' .. object .. ']'
@@ -197,7 +206,7 @@ local ui, output = renderer(12)
 local quick = { x = 40, y = 50, w = 660, h = pattern.quick_height(ui) }
 assert(quick.h <= 60, 'Quick Pattern strip consumes too many material row heights')
 pattern.quick(ui, quick, 'helmet')
-assert(scans == 0 and uploads == 0 and pattern.document == nil and pattern.gear == 'helmet')
+assert(scans == 0 and uploads == 0 and pattern.document == nil and pattern.gear == nil)
 local swatches = {}
 for _, rectangle in ipairs(output.rects) do
     if rectangle.role == 'swatch_border' then
@@ -300,6 +309,10 @@ pattern.scan()
 assert(pattern.document == nil and scans == cached_scans + 1)
 ui, output = renderer(12)
 pattern.quick(ui, quick, 'helmet')
+assert(pattern.document == nil and scans == cached_scans + 1, 'Quick drawing loaded or discovered gear')
+quick_loaded = true
+pattern.tick(0.5)
+pattern.quick(ui, quick, 'helmet')
 assert(
     pattern.document == edited_document
         and pattern.undo == edited_undo
@@ -336,7 +349,15 @@ assert(
 )
 pattern.quick(ui, quick, 'armor')
 assert(
-    pattern.gear == 'armor' and scans == cached_scans + 3 and pattern.document.data[0] == sources[101].data[0],
+    pattern.gear == 'helmet' and scans == cached_scans + 2,
+    'Quick drawing changed the full workspace gear selection'
+)
+assert(pattern.dismiss())
+quick_kind = 'armor'
+pattern.tick(0.5)
+pattern.quick(ui, quick, 'armor')
+assert(
+    pattern.gear == 'armor' and scans == cached_scans + 2 and pattern.document.data[0] == sources[101].data[0],
     'Quick Pattern retained Helmet values after material gear changed'
 )
 local expected_scans = scans
@@ -358,6 +379,7 @@ assert(
 )
 
 pattern.column, pattern.raw, pattern.scroll = 1, false, 0
+assert(pattern.show('armor'))
 assert(handle.set('pattern_export_name', 'embedded-pattern'))
 pattern.import(sources[101])
 ui, output = renderer(12)

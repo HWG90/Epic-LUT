@@ -907,14 +907,6 @@ function P.new(deps)
         kind = kind == 'helmet' and 'helmet' or 'armor'
         -- The update pass hydrates known targets. Drawing must not rediscover
         -- native gear or turn an unavailable snapshot into a black palette.
-        if self.gear == kind and self.ready and #self.groups > 0 and not self.document and not self.waiting then
-            -- Save/apply may refresh bindings with scan(), which clears only
-            -- the selected view. Reuse its matching cached owned document.
-            local ok, why = pcall(self.load, false, deps.cached_original ~= nil)
-            if not ok then
-                note(tostring(why))
-            end
-        end
         local title = 'Quick Editor: Pattern LUT'
         local heading = metric(ui, 13, title, 'heading')
         local gap, width, height = quick_cells(ui, bounds, heading)
