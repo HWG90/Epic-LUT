@@ -116,9 +116,6 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         ui.rect(rx, content_bottom, rw, content_height, theme.panel)
         local divider = theme.line
         ui.rect(rx - 9, content_bottom, 1, content_height, divider, nil, 'control_accent')
-        for _, offset in ipairs({ 184 }) do
-            ui.rect(rx + 12, top - offset, rw - 24, 1, divider, nil, 'control_accent')
-        end
         local heading_size = ui.text_size and ui.text_size(14, 'heading') or 14
         local header_height = math.max(30, heading_size + (ui.spacing and ui.spacing(12) or 12))
         ui.rect(ui.x, top - header_height, lw, header_height, theme.header)
@@ -500,28 +497,73 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         end
         colors('Armor', 'armor', 0)
         colors('Helmet', 'helmet', lw / 2)
-        button(rx + 12, top - 77, rw - 24, 'Choose file - DDS / ZIP / RAR...', 'browse')
+        local right_gap = ui.spacing and ui.spacing(6) or 6
+        local hint_height = ui.control_height and ui.control_height(12, 2, 16, 'hint') or 16
+        local right_cursor = top - header_height - 12
+        local function right_button(label, id, enabled)
+            right_cursor = right_cursor - row_height
+            button(rx + 12, right_cursor, rw - 24, label, id, enabled, row_height)
+            local bounds = { x = rx + 12, y = right_cursor, w = rw - 24, h = row_height }
+            right_cursor = right_cursor - right_gap
+            return bounds
+        end
+        local function hint_lines(value, available)
+            local lines, line = {}, ''
+            for word in tostring(value or ''):gmatch('%S+') do
+                local next_line = line == '' and word or line .. ' ' .. word
+                local measured = ui.text_width and ui.text_width(next_line, 12, 'hint') or #next_line * 7
+                if #lines == 0 and line ~= '' and measured > available then
+                    lines[1], line = line, word
+                else
+                    line = next_line
+                end
+            end
+            lines[#lines + 1] = line
+            return lines
+        end
+        local function right_hint(value, x, available, color, minimum)
+            local lines = hint_lines(value, available)
+            local height = math.max(minimum or 0, #lines * hint_height)
+            right_cursor = right_cursor - height
+            for index, line in ipairs(lines) do
+                local y = right_cursor + (#lines - index) * hint_height
+                ui.bounded(
+                    x,
+                    ui.text_y and ui.text_y(y, hint_height, 12, line, 'hint') or y + 3,
+                    line,
+                    12,
+                    color or muted,
+                    available,
+                    'hint'
+                )
+            end
+            local bounds = { x = x, y = right_cursor, w = available, h = height }
+            right_cursor = right_cursor - right_gap
+            return bounds
+        end
+        self.import_header = { browse = right_button('Choose file - DDS / ZIP / RAR...', 'browse') }
         if state.loaded then
             local path = (state.loaded.source or 'Imported LUT'):gsub('\\', '/')
             local relative = path:match('/Epic LUT/(.*)') or path:match('[^/]+$') or path
-            ui.bounded(
-                rx + 12,
-                top - 98,
-                'Imported: ' .. (state.import_description or relative),
-                12,
-                muted,
-                rw - 24,
-                'hint'
-            )
+            self.import_header.source =
+                right_hint('Imported: ' .. (state.import_description or relative), rx + 12, rw - 24)
         end
-        local y = top - 117
         if state.busy then
-            local spin = math.floor(state.time * 8) % 8
+            local message = (
+                state.import_detail and state.import_detail ~= '' and state.import_detail
+                or state.phase
+                or 'Importing...'
+            ) .. (state.waiting and '' or '  ' .. (state.progress or 0) .. '% completed')
+            local status = right_hint(message, rx + 55, rw - 67, white, 32)
+            self.import_header.status = status
+            local spin = math.floor((state.time or 0) * 8) % 8
+            local cy = status.y + status.h / 2
+            self.import_header.spinner = { x = rx + 16, y = cy - 13, w = 26, h = 26 }
             for i = 0, 7 do
                 local angle = i * math.pi / 4
                 ui.rect(
-                    rx + 29 + math.cos(angle) * 11,
-                    y + 8 + math.sin(angle) * 11,
+                    rx + 27 + math.cos(angle) * 9,
+                    cy - 2 + math.sin(angle) * 9,
                     4,
                     4,
                     i == spin and { 244, 202, 53 } or { 75, 88, 100 },
@@ -529,41 +571,35 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                     'control_accent'
                 )
             end
-            ui.text(
-                rx + 55,
-                y + 5,
-                (state.import_detail and state.import_detail ~= '' and state.import_detail or state.phase)
-                    .. (state.waiting and '' or '  ' .. (state.progress or 0) .. '% completed'),
-                14,
-                white
-            )
         else
-            ui.bounded(rx + 12, y + 5, state.status, 14, muted, rw - 24, 'hint')
+            self.import_header.status = right_hint(state.status, rx + 12, rw - 24, muted)
         end
         if state.busy then
-            button(rx + 12, top - 161, (rw - 29) / 2, 'Cancel import', 'cancel_import')
-            button(rx + 17 + (rw - 29) / 2, top - 161, (rw - 29) / 2, 'Retry file picker', 'retry_import')
+            right_cursor = right_cursor - row_height
+            button(rx + 12, right_cursor, (rw - 29) / 2, 'Cancel import', 'cancel_import', nil, row_height)
+            button(
+                rx + 17 + (rw - 29) / 2,
+                right_cursor,
+                (rw - 29) / 2,
+                'Retry file picker',
+                'retry_import',
+                nil,
+                row_height
+            )
+            right_cursor = right_cursor - right_gap
         end
-        button(
-            rx + 12,
-            top - 203,
-            rw - 24,
-            'Send to LUT Editor',
-            'save_palette',
-            state.loaded ~= nil and not state.busy
-        )
-        ui.bounded(
-            rx + 12,
-            top - 224,
-            'Overwrites the editor table; does not apply to gear.',
-            13,
-            muted,
-            rw - 24,
-            'hint'
-        )
-        local preview_height =
-            math.max(44, math.min(200, content_height - ((state.palette_count or 0) > 1 and 670 or 570)))
-        local preview_top = top - 246
+        ui.rect(rx + 12, right_cursor, rw - 24, 1, divider, nil, 'control_accent')
+        self.import_header.divider_y = right_cursor
+        right_cursor = right_cursor - right_gap
+        self.import_header.send =
+            right_button('Send to LUT Editor', 'save_palette', state.loaded ~= nil and not state.busy)
+        self.import_header.guidance =
+            right_hint('Overwrites the editor table; does not apply to gear.', rx + 12, rw - 24)
+        local preview_title_y = right_cursor - hint_height
+        right_cursor = preview_title_y - right_gap
+        local preview_top = right_cursor
+        local reserved_actions = ((state.palette_count or 0) > 1 and 70 or 0) + 221
+        local preview_height = math.max(44, math.min(200, preview_top - content_bottom - reserved_actions - 70))
         local preview_bottom = preview_top - preview_height
         self.import_bounds = { x = rx + 12, y = preview_bottom, w = rw - 24, h = preview_height }
         local imported = state.raw and state.raw.tables or state.tables or {}
@@ -573,7 +609,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         end
         text(
             rx + 12,
-            top - 238,
+            ui.text_y and ui.text_y(preview_title_y, hint_height, 14, 'Imported file', 'hint') or preview_title_y,
             'Imported file: ' .. #imported .. ' LUT' .. (#imported == 1 and '' or 's') .. ' / Column 1',
             'hint'
         )
@@ -607,7 +643,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
         local actions = preview_bottom - 30
         local action_bottom = content_bottom + math.max(34, (ui.text_size and ui.text_size(13, 'hint') or 13) + 20)
         local action_top = preview_bottom - 18
-        local tail = ((state.palette_count or 0) > 1 and 70 or 0) + 259
+        local tail = ((state.palette_count or 0) > 1 and 70 or 0) + 221
         self.action_max = math.max(0, action_bottom - (actions - tail))
         self.action_scroll = math.max(0, math.min(self.action_max, self.action_scroll or 0))
         self.action_bounds = { x = rx, y = action_bottom, w = rw, h = math.max(0, action_top - action_bottom) }
@@ -619,8 +655,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
                 ui.bounded(rx + 12, y, value, 14, color or white, rw - 24, role)
             end
         end
-        action_text(actions, 'Apply Imported LUT ' .. (state.palette_index or 1), 'heading')
-        local apply_width = (rw - 30) / 2
+        action_text(actions, 'Map Imported LUTs to Gear', 'heading')
         local matching = state.raw and state.raw.matching
         if (state.palette_count or 0) > 1 then
             button(
@@ -644,17 +679,9 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             button(
                 rx + 12,
                 actions - 125,
-                apply_width,
-                'Map LUTs to Armor',
-                'imported_map_armor',
-                state.loaded ~= nil and not state.busy
-            )
-            button(
-                rx + 18 + apply_width,
-                actions - 125,
-                apply_width,
-                'Map LUTs to Helmet',
-                'imported_map_helmet',
+                rw - 24,
+                'Map LUTs to Gear',
+                'imported_map_gear',
                 state.loaded ~= nil and not state.busy
             )
             actions = actions - 70
@@ -662,30 +689,13 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             button(
                 rx + 12,
                 actions - 36,
-                apply_width,
-                'Map LUTs to Armor',
-                'imported_map_armor',
-                state.loaded ~= nil and not state.busy
-            )
-            button(
-                rx + 18 + apply_width,
-                actions - 36,
-                apply_width,
-                'Map LUTs to Helmet',
-                'imported_map_helmet',
+                rw - 24,
+                'Map LUTs to Gear',
+                'imported_map_gear',
                 state.loaded ~= nil and not state.busy
             )
             action_text(actions - 55, 'Choose imported textures and map them to current gear slots.', 'hint', muted)
         end
-        button(
-            rx + 12,
-            actions - 89,
-            rw - 24,
-            'Map LUTs to Cape',
-            'imported_map_cape',
-            state.cape_available == true and state.loaded ~= nil and not state.busy
-        )
-        actions = actions - 38
         button(
             rx + 12,
             actions - 95,

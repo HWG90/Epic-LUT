@@ -419,6 +419,24 @@ assert(
 local both = save('both')
 assert(#both.armor > 0 and #both.cape > 0 and #both.helmet > 0, 'Both save omitted a gear kind')
 do
+    local before, history_count, save_count = created, #action_history.undo, outfit_save_calls
+    local selector = api.mods[h.id].controls.outfit_preset
+    local choices = selector.choices
+    selector.choices = { 'Choose a saved outfit...' }
+    activate('save_setup')
+    local dialog = assert(frontend.menu.outfit_dialog)
+    assert(
+        #dialog.names == 1 and dialog.names[1] == 'Cape fixture',
+        'Preset name completion used the filtered Armory choices'
+    )
+    assert(
+        created == before and #action_history.undo == history_count and outfit_save_calls == save_count,
+        'Opening name completion created a native/history/save action'
+    )
+    frontend.menu.outfit_dialog = nil
+    selector.choices = choices
+end
+do
     local native_before = { bound[armor][1], bound[cape][1], bound[helmet][1], bound[cape][3] }
     local texture_count, history_count = created, #action_history.undo
     for flags = 1, 7 do
@@ -1930,6 +1948,123 @@ do
     end
     assert(created == quiet_count, 'Idle editor continues allocating textures')
     frontend.menu.is_interacting = was_interacting
+    -- The real RGB-only picker must keep Basic open. Cancel is a pure UI
+    -- operation; committing from a named colorway changes only checked RGB.
+    do
+        local Menu = dofile('vendor/menu/menu.lua')
+        local saved_menu, saved_patterns = frontend.menu, m.camo_patterns
+        -- The thumbnail worker's pending shutdown is tested below separately.
+        m.camo_patterns = nil
+        local menu = Menu.new(api, function(value, size)
+            return #value * size * 0.5
+        end, dofile('src/platform/text_editor.lua'))
+        menu.visible, menu.focus = true, 'settings'
+        menu.window_width, menu.window_height = 1100, 1000
+        for index, page in ipairs(api.mods[h.id].pages) do
+            if page.id == 'basic' then
+                menu.page = index
+            end
+        end
+        frontend.menu = menu
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            local rows = kind == 'armor' and armor_rows or { [2] = true, [4] = true }
+            choose_rows(kind, rows)
+            local prefix = 'basic_' .. kind .. '_camo'
+            local material = kind == 'armor' and armor or helmet
+            local panel = basic_info().raw.basic[kind]
+            local initial_bytes, initial_object = ffi.string(panel.document.data, #before), bound[material][1]
+            assert(h.set(prefix .. '_colorway', 5))
+            panel = basic_info().raw.basic[kind]
+            local preset_bytes, preset_object = ffi.string(panel.document.data, #before), bound[material][1]
+            assert(h.get(prefix .. '_colorway') == 5)
+            local control = api.mods[h.id].controls[prefix .. '_color_3']
+            assert(not control.picker_preview and not control.picker_alpha and control.can_open_picker())
+            local texture_count, history_count = created, #action_history.undo
+            local native_before = {}
+            for _, target in ipairs({ armor, same, other, cape, helmet }) do
+                native_before[target] = bound[target][1]
+            end
+            local picker = { mod = api.mods[h.id], control = control, rgb = { 17, 68, 235 }, picker_mode = 1 }
+            menu.color_picker = picker
+            for _ = 1, 3 do
+                for _, command in ipairs(menu.compose(1920, 1080)) do
+                    assert(not (command.text and command.text:find('attempt to ', 1, true)), command.text)
+                end
+            end
+            menu.close_color(false)
+            assert(
+                menu.visible
+                    and not menu.color_picker
+                    and created == texture_count
+                    and #action_history.undo == history_count
+            )
+            assert(
+                bound[material][1] == preset_object
+                    and ffi.string(panel.document.data, #before) == preset_bytes
+                    and h.get(prefix .. '_colorway') == 5,
+                'Canceled Camo picker changed its preset or live colors'
+            )
+            assert(control.can_open_picker())
+            menu.color_picker = { mod = api.mods[h.id], control = control, rgb = { 17, 68, 235 }, picker_mode = 1 }
+            local previous_action = action_history.undo[history_count]
+            menu.commit_color()
+            assert(
+                menu.visible and not menu.color_picker,
+                'Camo commit closed Basic or failed to close its RGB-only picker'
+            )
+            assert(h.get(prefix .. '_colorway') == 1, 'Manual Camo commit kept the named preset until a later render')
+            local expected = tinted(preset_bytes, { [3] = '1144EB' }, rows)
+            assert(
+                uploads[bound[material][1]] == expected
+                    and ffi.string(basic_info().raw.basic[kind].document.data, #before) == expected,
+                'Custom Camo changed pattern, scale, alpha, unchecked rows or another color'
+            )
+            for target, object in pairs(native_before) do
+                if target ~= material and not (kind == 'armor' and target == same) then
+                    assert(bound[target][1] == object, 'Real Camo picker changed another gear resource')
+                end
+            end
+            if kind == 'armor' then
+                assert(bound[same][1] == bound[armor][1])
+            end
+            assert(
+                action_history.undo[#action_history.undo] ~= previous_action
+                    and #action_history.undo <= history_count + 1
+            )
+            local committed_object, committed_count = bound[material][1], created
+            for _ = 1, 3 do
+                runtime.on_update(ctx, 1 / 60)
+                basic_info()
+                menu.compose(1920, 1080)
+            end
+            assert(
+                menu.visible
+                    and bound[material][1] == committed_object
+                    and created == committed_count
+                    and h.get(prefix .. '_colorway') == 1,
+                'Later Camo rendering reapplied its former named preset'
+            )
+            activate('global_undo')
+            assert(
+                bound[material][1] == preset_object
+                    and ffi.string(basic_info().raw.basic[kind].document.data, #before) == preset_bytes
+                    and h.get(prefix .. '_colorway') == 5,
+                'Custom Camo Undo did not restore its complete named preset'
+            )
+            activate('global_redo')
+            basic_info()
+            assert(uploads[bound[material][1]] == expected and h.get(prefix .. '_colorway') == 1)
+            activate('global_undo')
+            activate('global_undo')
+            assert(
+                bound[material][1] == initial_object
+                    and ffi.string(basic_info().raw.basic[kind].document.data, #before) == initial_bytes
+            )
+            assert_scope(basic_info().raw.basic[kind], rows)
+        end
+        choose_rows('helmet', helmet_rows)
+        frontend.menu, m.camo_patterns = saved_menu, saved_patterns
+    end
     local old = basic_info().raw.basic.armor.document
     local old_bytes, old_object, old_history = ffi.string(old.data, #before), bound[armor][1], #action_history.undo
     fail_next = true
@@ -2206,7 +2341,19 @@ do
     local function same(expected)
         for _, material in ipairs(physical) do
             for slot = 1, 3 do
-                assert(bound[material][slot] == expected[material][slot], 'Mapping changed an unselected native group')
+                assert(
+                    bound[material][slot] == expected[material][slot],
+                    debug.traceback(
+                        'Mapping changed an unselected native group: '
+                            .. material
+                            .. ':'
+                            .. slot
+                            .. ' actual='
+                            .. tostring(bound[material][slot])
+                            .. ' expected='
+                            .. tostring(expected[material][slot])
+                    )
+                )
             end
         end
     end
@@ -2342,13 +2489,148 @@ do
             end
         end
     end
+    local function unified()
+        activate('imported_map_gear')
+        local d = assert(frontend.menu.lut_apply_dialog)
+        assert(d.mode == 'mapping' and d.gear_columns and d.title == 'Map LUTs to Gear' and #d.columns == 4)
+        local source_items, family_items = {}, {}
+        for _, item in ipairs(d.columns[1].items) do
+            source_items[item.label:match('(lut%d%d%d%.dds)$')] = item
+            assert(item.label:match('^LUT '), 'Unified source label retained the wider Imported prefix')
+        end
+        local ids = {}
+        for index, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            local column = d.columns[index + 1]
+            assert(
+                column.kind == kind
+                    and column.title == (kind == 'armor' and 'Armor' or kind == 'helmet' and 'Helmet' or 'Cape')
+            )
+            assert(column.checked == column.enabled)
+            family_items[kind] = column.items
+            for _, item in ipairs(column.items) do
+                assert(
+                    not ids[item.id] and item.id:match('^' .. kind .. ':'),
+                    'Unified mapping IDs collide between gear families'
+                )
+                ids[item.id] = true
+            end
+        end
+        assert(#family_items.armor == 5 and #family_items.helmet == 1 and #family_items.cape == 1)
+        return d, source_items, family_items
+    end
+    dialog, sources, target_items = unified()
+    count_before, history_count = created, #action_history.undo
+    refused(dialog.on_auto_map, 'Choose Armor, Helmet and/or Cape')
+    refused(function()
+        dialog.on_auto_map({})
+    end, 'Choose Armor, Helmet and/or Cape')
+    refused(function()
+        dialog.on_auto_map({ armor = true, gloves = true })
+    end, 'Invalid auto-map gear selection')
+    refused(function()
+        dialog.on_auto_map({ armor = 1 })
+    end, 'Invalid auto-map gear selection')
+    dialog.columns[4].checked = false
+    before = snapshot()
+    assert(dialog.on_map(sources['lut000.dds'].id, target_items.cape[1].id))
+    assert(uploads[bound[cape][1]] == ffi.string(zero.data, 23 * 8 * 16))
+    for _, material in ipairs(physical) do
+        if material ~= cape then
+            assert(bound[material][1] == before[material][1] and bound[material][2] == before[material][2])
+        end
+    end
+    assert(target_items.cape[1].mapped_source == sources['lut000.dds'].id)
+    activate('global_undo')
+    same(before)
+    dialog, sources, target_items = unified()
+    before, history_count = snapshot(), #action_history.undo
+    previous_action = action_history.undo[history_count]
+    assert(dialog.on_auto_map({ armor = true, helmet = true, cape = false }))
+    for index, material in ipairs(armor_targets) do
+        assert(uploads[bound[material][1]] == ffi.string((index % 2 == 1 and zero or one).data, 23 * 8 * 16))
+    end
+    assert(
+        uploads[bound[helmet][1]] == ffi.string(zero.data, 23 * 8 * 16),
+        'Helmet did not restart at the first imported LUT'
+    )
+    assert(bound[cape][1] == before[cape][1] and bound[cape][2] == before[cape][2], 'Unchecked Cape family changed')
+    assert(uploads[bound[armor][2]] == ffi.string(pattern.data, 48), 'Mixed-family mapping omitted the proven Pattern')
+    assert(target_items.helmet[1].mapped_source == sources['lut000.dds'].id and not target_items.cape[1].mapped_source)
+    assert(action_history.undo[#action_history.undo] ~= previous_action and #action_history.undo <= history_count + 1)
+    activate('global_undo')
+    same(before)
+    dialog, sources, target_items = unified()
+    before, history_count = snapshot(), #action_history.undo
+    bind, forward = m.engine.bind, 0
+    m.engine.bind = function(_, material, slot, object)
+        if slot == 1 and object >= 90000 then
+            forward = forward + 1
+            if material == cape then
+                error('Simulated mixed-family Cape failure', 0)
+            end
+        end
+        return bind(_, material, slot, object)
+    end
+    accepted, why = pcall(dialog.on_auto_map, { armor = true, helmet = true, cape = true })
+    m.engine.bind = bind
+    assert(
+        not accepted
+            and forward >= 7
+            and why:find('Simulated mixed-family Cape failure', 1, true)
+            and not why:find('rollback failed', 1, true)
+    )
+    same(before)
+    assert(#action_history.undo == history_count and frontend.menu.lut_apply_dialog == dialog)
+    for _, items in pairs(target_items) do
+        for _, item in ipairs(items) do
+            assert(not item.mapped_source, 'Failed batch published partial mapping labels')
+        end
+    end
+    -- Retry the same dialog after its own rollback. All families independently
+    -- restart the source cycle; one Undo must restore their prior custom state.
+    previous_action = action_history.undo[history_count]
+    assert(dialog.on_auto_map({ armor = true, helmet = true, cape = true }))
+    for _, material in ipairs({ helmet, cape }) do
+        assert(uploads[bound[material][1]] == ffi.string(zero.data, 23 * 8 * 16))
+    end
+    assert(action_history.undo[#action_history.undo] ~= previous_action and #action_history.undo <= history_count + 1)
+    activate('global_undo')
+    same(before)
     original = originals[9030]
     originals[9030] = nil
     activate('imported_map_armor')
     dialog = frontend.menu.lut_apply_dialog
     assert(not dialog.columns[2].items[4].enabled)
     refused(dialog.on_auto_map, 'current mapping target is not ready')
+    dialog, sources, target_items = unified()
+    assert(dialog.columns[2].enabled and dialog.columns[2].checked and not target_items.armor[4].enabled)
+    refused(function()
+        dialog.on_auto_map({ armor = true, helmet = true, cape = true })
+    end, 'current mapping target is not ready')
+    before = snapshot()
+    assert(dialog.on_auto_map({ armor = false, helmet = true, cape = true }))
+    for _, material in ipairs(armor_targets) do
+        assert(
+            bound[material][1] == before[material][1] and bound[material][2] == before[material][2],
+            'Unchecked unready Armor was inspected or changed'
+        )
+    end
+    activate('global_undo')
+    same(before)
     originals[9030] = original
+    original = originals[9002]
+    originals[9002] = nil
+    dialog, sources, target_items = unified()
+    assert(not dialog.columns[3].enabled and not dialog.columns[3].checked and not target_items.helmet[1].enabled)
+    refused(function()
+        dialog.on_auto_map({ helmet = true })
+    end, 'Selected auto-map gear is not ready')
+    before = snapshot()
+    assert(dialog.on_auto_map({ cape = true }))
+    assert(bound[helmet][1] == before[helmet][1] and bound[helmet][2] == before[helmet][2])
+    activate('global_undo')
+    same(before)
+    originals[9002] = original
     metadata = assert(io.open(fixture .. '/resources.tsv', 'wb'))
     metadata:write('lut002.dds\t8888888888888888\n')
     metadata:close()
@@ -2365,6 +2647,183 @@ do
     for _, name in ipairs({ 'lut000.dds', 'lut001.dds', 'lut002.dds', 'resources.tsv' }) do
         os.remove(fixture .. '/' .. name)
     end
+end
+-- Worker/probe and legacy hydration glue, with no texture/native writes.
+do
+    actor(10)
+    armor, cape, helmet = current()
+    local old_sr, old_log = rawget(_G, 'stingray'), ctx.log
+    local old_provenance, old_cache, old_export = m.binding_provenance, m.binding_source_cache, m.preset_export
+    local old_script, old_reader = m.binding_provenance_script, m.binding_provenance_reader
+    local cache, starts, captures, closed, ready, close_ready, fail = nil, 0, 0, 0, false, false, false
+    local logs = {}
+    ctx.log = function(text)
+        logs[#logs + 1] = text
+    end
+    _G.stingray = {
+        Unit = {
+            resource_name = function(unit)
+                return '#ID[' .. string.format('%016x', unit) .. ']'
+            end,
+        },
+    }
+    m.binding_provenance = {
+        kit_override = function(_, _, identity)
+            return false, { id = identity.armor, body = identity.body, archive = '1234567890abcdef' }
+        end,
+        encode = function(refs)
+            return refs.kind .. ':' .. refs.key
+        end,
+        new = function(deps)
+            return {
+                capture = function(b, context)
+                    captures = captures + 1
+                    assert(deps.present(b) and deps.binding(b) == b.current)
+                    if fail then
+                        error('No unique loaded material/SectionID pointer proof (matches=0)', 0)
+                    end
+                    return {
+                        version = 1,
+                        kind = context.kind,
+                        key = context.key,
+                        verified = true,
+                        texture_slot = b.slot or m.engine.LUT_SLOT,
+                        original_texture = context.original.resource,
+                        unit = { resource = deps.unit_resource(b.unit) },
+                        kit_override = false,
+                    }, { version = 1, kind = context.kind, key = context.key }
+                end,
+            }
+        end,
+    }
+    m.binding_source_cache = {
+        new = function()
+            cache = {
+                state = 'idle',
+                index_stamp = ('a'):rep(64),
+                start = function(units)
+                    assert(#units == 3)
+                    starts = starts + 1
+                    cache.state = 'loading'
+                    return true
+                end,
+                tick = function()
+                    if ready then
+                        cache.state = 'ready'
+                    end
+                end,
+                close = function()
+                    closed = closed + 1
+                    if close_ready then
+                        cache.state = 'closed'
+                        return true
+                    end
+                    return false
+                end,
+                unit = function() end,
+                material = function() end,
+                id_available = function()
+                    return true
+                end,
+                validate_scope = function()
+                    return true
+                end,
+            }
+            return cache
+        end,
+    }
+    m.binding_provenance_script, m.binding_provenance_reader = '61', '62'
+    local options, exported
+    m.preset_export = {
+        lut_choices = function()
+            return { 'Saved LUT' }
+        end,
+        new = function(_, _, value)
+            options = value
+            return {
+                save = function(_, preset)
+                    exported = options.binding_provenance(preset.entries[1])
+                    return 'C:/fixture/export', 'assignment fixture'
+                end,
+            }
+        end,
+    }
+    originals[10001] = m.basic_state.clone(stock)
+    originals[10002] = m.basic_state.clone(stock)
+    for _, object in ipairs({ 10001, 10002 }) do
+        originals[object].patch_source = '9ba626afa44a3aa3\n' .. string.rep('\0', 340)
+    end
+    runtime.on_enable(ctx)
+    runtime.on_update(ctx, 0)
+    h = api.mods.epic_direct_lut.handle
+    assert(not cache and starts == 0, 'Startup requested binding sources')
+    local native_before, texture_count = { bound[armor][1], bound[cape][1], bound[helmet][1] }, created
+    activate('populate_worn')
+    assert(starts == 1 and cache.state == 'loading')
+    activate('save_setup')
+    frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
+    local legacy = saved_outfit
+    assert(#legacy.entries == 3 and not legacy.entries[1].binding_provenance, 'Pending cache broke an ordinary save')
+    local count = captures
+    ready = true
+    runtime.on_update(ctx, 0)
+    assert(captures == count + 3 and created == texture_count, 'Read-only source probe created textures')
+    local probe = 0
+    for _, log in ipairs(logs) do
+        if log:find('BINDING_PROVENANCE_PROBE', 1, true) then
+            probe = probe + 1
+            assert(log:find('matched=3', 1, true))
+        end
+    end
+    assert(probe == 1)
+    runtime.on_update(ctx, 0)
+    assert(captures == count + 3, 'Completed source probe repeated')
+    assert(h.set('armory_export_format', 3))
+    activate('armory_export')
+    assert(exported and exported.verified and exported.key == legacy.entries[1].key)
+    local original = legacy.entries[2].original
+    legacy.entries[2].original = { resource = 'eeeeeeeeeeeeeeee', width = 23, height = 8 }
+    count = captures
+    local why = api.mods[h.id].controls.armory_export.on_activate()
+    assert(
+        why:find('does not uniquely match', 1, true) and captures == count,
+        'Legacy export retargeted different resource context'
+    )
+    legacy.entries[2].original = original
+    local old = legacy.entries[1].document
+    legacy.entries[1].document = m.basic_state.clone(old)
+    legacy.entries[1].document.data[0] = legacy.entries[1].document.data[0] + 0.25
+    why = api.mods[h.id].controls.armory_export.on_activate()
+    assert(why:find('Apply this legacy preset', 1, true), 'Legacy export guessed unmatched active colors')
+    legacy.entries[1].document = old
+    fail = true
+    why = api.mods[h.id].controls.armory_export.on_activate()
+    assert(why:find('pointer proof', 1, true), 'Unproven native material pointer accepted')
+    fail = false
+    activate('save_setup')
+    frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
+    assert(
+        saved_outfit.entries[1].binding_provenance
+            and saved_outfit.entries[1].binding_provenance.key == saved_outfit.entries[1].key
+    )
+    assert(
+        created == texture_count
+            and bound[armor][1] == native_before[1]
+            and bound[cape][1] == native_before[2]
+            and bound[helmet][1] == native_before[3]
+    )
+    assert(
+        runtime.on_disable(ctx) == false and closed == 1 and api.mods[h.id],
+        'Pending provenance cleanup released controller'
+    )
+    close_ready = true
+    assert(runtime.on_disable(ctx) ~= false and not api.mods[h.id])
+    _G.stingray, ctx.log = old_sr, old_log
+    m.binding_provenance, m.binding_source_cache, m.preset_export = old_provenance, old_cache, old_export
+    m.binding_provenance_script, m.binding_provenance_reader = old_script, old_reader
+    print(
+        'PASS capture/export provenance glue: explicit-only owned worker/probe, pending-cache saves, optionalrefs, full legacy resource/pixel context, pointer refusal and deferred cleanup; no texture writes'
+    )
 end
 os.remove(fixture .. '/' .. armor_file)
 os.remove(fixture .. '/' .. filename)

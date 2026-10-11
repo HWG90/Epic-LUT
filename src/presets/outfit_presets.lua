@@ -44,13 +44,13 @@ local function metadata(original)
 end
 local function target(kind, key, version, strict)
     assert(
-        (kind == 'armor' or kind == 'helmet' or (version == 2 and kind == 'cape')) and type(key) == 'string',
+        (kind == 'armor' or kind == 'helmet' or (version >= 2 and kind == 'cape')) and type(key) == 'string',
         'Invalid preset target'
     )
     local pattern = key:sub(1, 2) == 'p:'
     local destination = pattern and key:sub(3) or key
     assert(
-        (not pattern or version == 2) and destination:match(strict and '^%d+:%d+:%d+:%d+$' or '^[%d:]+$'),
+        (not pattern or version >= 2) and destination:match(strict and '^%d+:%d+:%d+:%d+$' or '^[%d:]+$'),
         'Invalid preset target'
     )
     return pattern
@@ -63,16 +63,19 @@ function O.read(m, path, label)
     for line in text:gmatch('[^\r\n]+') do
         lines[#lines + 1] = line
     end
-    local version = lines[1] == 'EPIC-OUTFIT\t1' and 1 or lines[1] == 'EPIC-OUTFIT\t2' and 2
+    local version = lines[1] == 'EPIC-OUTFIT\t1' and 1
+        or lines[1] == 'EPIC-OUTFIT\t2' and 2
+        or lines[1] == 'EPIC-OUTFIT\t3' and 3
     assert(version and #lines > 1 and #lines <= O.MAX_BINDINGS + 1, 'Invalid outfit preset')
     local result = { name = label, armor = {}, helmet = {}, cape = {}, entries = {} }
     local bytes, seen, documents, sidecars, payloads, metadata_payloads = 0, {}, {}, {}, {}, {}
+    local provenance_sidecars = {}
     for i = 2, #lines do
         local fields = {}
         for field in (lines[i] .. '\t'):gmatch('([^\t]*)\t') do
             fields[#fields + 1] = field
         end
-        assert(#fields == (version == 1 and 3 or 7), 'Invalid preset entry')
+        assert(#fields == (version == 1 and 3 or version == 3 and 8 or 7), 'Invalid preset entry')
         local kind, key, file = fields[1], fields[2], fields[3]
         local pattern = target(kind, key, version)
         assert(not seen[kind .. ':' .. key], 'Duplicate preset target')
@@ -93,11 +96,11 @@ function O.read(m, path, label)
         end
         local w, h = document.width, document.height
         assert(
-            (w == 23 and not pattern) or (version == 2 and w == 3 and h == 1 and pattern),
+            (w == 23 and not pattern) or (version >= 2 and w == 3 and h == 1 and pattern),
             'Preset is not a material or Pattern LUT'
         )
         local original
-        if version == 2 and fields[4] ~= '-' then
+        if version >= 2 and fields[4] ~= '-' then
             local sidecar = basename(fields[7], 'patch%-source')
             if not sidecars[sidecar:lower()] then
                 sidecars[sidecar:lower()] = m.file_io.read(folder .. '/' .. sidecar, 357)
@@ -114,10 +117,24 @@ function O.read(m, path, label)
                 height = tonumber(fields[6]),
                 patch_source = sidecars[sidecar:lower()],
             })
-        elseif version == 2 then
+        elseif version >= 2 then
             assert(fields[5] == '-' and fields[6] == '-' and fields[7] == '-', 'Incomplete preset patch metadata')
         end
-        result.entries[#result.entries + 1] = { kind = kind, key = key, document = document, original = original }
+        local provenance
+        if version == 3 and fields[8] ~= '-' then
+            local module = assert(m.binding_provenance, 'Binding provenance reader unavailable')
+            local filename = basename(fields[8], 'assignment')
+            if not provenance_sidecars[filename:lower()] then
+                local text = m.file_io.read(folder .. '/' .. filename, module.MAX_BYTES)
+                bytes = bytes + #text
+                assert(bytes <= O.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
+                provenance_sidecars[filename:lower()] = text
+            end
+            assert(original, 'Binding provenance requires original texture metadata')
+            provenance = module.decode(provenance_sidecars[filename:lower()], kind, key, original)
+        end
+        result.entries[#result.entries + 1] =
+            { kind = kind, key = key, document = document, original = original, binding_provenance = provenance }
         result[kind][#result[kind] + 1] = document
     end
     return result
@@ -152,7 +169,13 @@ function O.new(m, folder)
             count = count + 1
         end
         assert(count == #entries, 'Preset entries must be a dense list')
-        local rows = { 'EPIC-OUTFIT\t2' }
+        local version = 2
+        for _, entry in ipairs(entries) do
+            if entry.binding_provenance ~= nil then
+                version = 3
+            end
+        end
+        local rows = { 'EPIC-OUTFIT\t' .. version }
         local files, pixels, sidecars, encoded, seen, bytes = {}, {}, {}, {}, {}, 0
         local function payload_name(stem, extension, payload)
             local candidate, suffix = stem .. extension, 1
@@ -172,6 +195,7 @@ function O.new(m, folder)
         -- Destination rows remain independent; only identical file bytes are shared.
         for i, e in ipairs(entries) do
             assert(type(e) == 'table' and type(e.document) == 'table', 'Invalid preset entry')
+            assert(e.binding_provenance == nil or type(e.binding_provenance) == 'table', 'Invalid binding provenance')
             local pattern = target(e.kind, e.key, 2, true)
             local identity = e.kind .. ':' .. e.key
             assert(not seen[identity], 'Duplicate preset target')
@@ -209,6 +233,17 @@ function O.new(m, folder)
                 end
                 fields[4], fields[5], fields[6], fields[7] =
                     original.resource:lower(), tostring(original.width), tostring(original.height), sidecar
+            end
+            if version == 3 then
+                fields[8] = '-'
+                if e.binding_provenance then
+                    assert(original, 'Binding provenance requires original texture metadata')
+                    local module = assert(m.binding_provenance, 'Binding provenance writer unavailable')
+                    local text = module.encode(e.binding_provenance, e.kind, e.key, original)
+                    fields[8] = payload_name('outfit-' .. label .. '-' .. e.kind .. '-' .. i, '.assignment', text)
+                    bytes = bytes + #text
+                    assert(bytes <= O.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
+                end
             end
             rows[#rows + 1] = table.concat(fields, '\t')
         end

@@ -30,7 +30,7 @@ end
 function T.new(deps)
     local editor, document = deps.editor, deps.document
     local self = { tab = 'import', docked = true, scroll = 0 }
-    local opened = false
+    local opened, startup_applied = false, false
 
     function self.open(tab)
         assert(tab == nil or labels[tab], 'Unknown editor tools tab')
@@ -38,11 +38,13 @@ function T.new(deps)
             self.scroll = 0
         end
         self.tab, opened = tab or self.tab, true
+        startup_applied = true
         self.raise_pending = true
     end
     function self.close()
         opened = false
-        self.bounds = nil
+        startup_applied = true
+        self.bounds, self.row_preview_bounds = nil, nil
     end
     function self.is_open()
         return opened
@@ -55,6 +57,13 @@ function T.new(deps)
         if preferences and preferences.tools_docked then
             self.docked = preferences.tools_docked() ~= false
             self.bounds = nil
+        end
+        if not startup_applied then
+            startup_applied = true
+            opened = deps.default_open_docked == true and self.docked
+            if opened then
+                self.tab, self.raise_pending = 'import', true
+            end
         end
     end
     function self.set_docked(value)
@@ -94,6 +103,7 @@ function T.new(deps)
         return button * 2 + gap * 3 + 12
     end
     local function draw(ui, x, y, w, ht, docked)
+        self.row_preview_bounds = nil
         local h = editor.handle
         local controls = editor.api.mods[h.id].controls
         local d = document()
@@ -130,10 +140,14 @@ function T.new(deps)
         local step = bh + gap
         local clip_bottom, clip_top = y + 12, body_tab_y - gap
         local offset = docked and self.scroll or 0
+        local scrolling = docked or self.tab == 'rows'
+        if scrolling then
+            offset = self.scroll
+        end
         local lowest = top
         local function visible(py, height)
             lowest = math.min(lowest, py - offset)
-            return not docked or (py >= clip_bottom and py + height <= clip_top)
+            return not scrolling or (py >= clip_bottom and py + height <= clip_top)
         end
         local function label(py, text, color, role)
             local size = ui.text_size and ui.text_size(14, role) or 14
@@ -273,6 +287,9 @@ function T.new(deps)
             return math.min(width, math.max(240, measured + 112))
         end
         local function mapping_actions()
+            if controls.imported_map_gear then
+                return { { 'Map LUTs to Gear', 'imported_map_gear', true } }
+            end
             local entries = {}
             for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
                 if controls['imported_map_' .. kind] then
@@ -355,6 +372,23 @@ function T.new(deps)
                 })
             end
         elseif self.tab == 'rows' then
+            local name = ui.input_value and ui.input_value('row_preset') or h.get('row_preset') or ''
+            name = name:gsub('|$', '')
+            local controls_width = math.min(
+                width,
+                math.max(360, math.min(440, (ui.text_width and ui.text_width(name, 14) or #name * 8) + 240))
+            )
+            local minimum_cell = math.max(14, math.min(22, (ui.text_size and ui.text_size(11, 'hint') or 11) + 2))
+            local preview_minimum = 23 * minimum_cell + 22
+            local pair_width = natural_width('Save selected row') + natural_width('Apply preset to rows') + gap
+            if frame_width >= pair_width + gap + preview_minimum then
+                controls_width = math.min(width, math.max(controls_width, pair_width))
+            end
+            local beside = frame_width - controls_width - gap >= preview_minimum
+            local preview_x = beside and bx + controls_width + gap or bx
+            local preview_width = beside and frame_width - controls_width - gap or frame_width
+            width = controls_width
+            self.content_bounds.w = controls_width
             local selected = editor.selection
             local multiple = d and selected and selected.c1 == 1 and selected.r1 < selected.r2
             local target = multiple and ('Selected rows: ' .. selected.r1 .. '-' .. selected.r2)
@@ -385,6 +419,89 @@ function T.new(deps)
                 { 'Reset cell', 'reset_cell', d ~= nil },
             })
             action(cursor, 'Import Paydex JSON...', 'import_paydex_rows', true)
+            local preview_top = beside and top or cursor - step - gap
+            local preview, hint
+            if editor.row_preset_preview then
+                preview, hint = editor.row_preset_preview(name)
+            else
+                hint = 'Choose a saved row preset to preview.'
+            end
+            local title = 'Saved row: ' .. (name ~= '' and name or 'Choose a preset')
+            local heading = ui.text_metrics and ui.text_metrics(14, title, 'heading')
+                or { min_y = 0, height = heading_size }
+            local heading_y = preview_top + offset
+            if visible(heading_y + heading.min_y, heading.height) then
+                ui.bounded(preview_x, heading_y, title, 14, white, preview_width, 'heading')
+            end
+            local label_size = ui.text_size and ui.text_size(11, 'hint') or 11
+            local labels_height = label_size + gap / 2
+            local cell = math.max(1, math.min(40, (preview_width - 22) / 23))
+            local cells_y = preview_top - gap - labels_height - cell
+            self.row_preview_bounds = {
+                x = preview_x,
+                y = cells_y + offset,
+                w = cell * 23 + 22,
+                h = cell,
+                beside = beside,
+                name = name,
+                document = preview,
+            }
+            if preview then
+                local show_alpha = controls.show_alpha and h.get('show_alpha') == true
+                for column = 1, 23 do
+                    local px, py = preview_x + (column - 1) * (cell + 1), cells_y + offset
+                    local index, color = (column - 1) * 4, {}
+                    if visible(py + cell + gap / 2, label_size) then
+                        ui.bounded(px, py + cell + gap / 2, tostring(column), 11, muted, cell, 'hint')
+                    end
+                    if visible(py, cell) then
+                        for channel = 1, 3 do
+                            color[channel] =
+                                math.floor(math.max(0, math.min(1, preview.data[index + channel - 1])) * 255 + 0.5)
+                        end
+                        local alpha = tonumber(preview.data[index + 3])
+                        ui.rect(px, py, cell, cell, theme.line, nil, 'swatch_border')
+                        if deps.palette and deps.palette.swatch and cell > 2 then
+                            deps.palette.swatch(
+                                ui,
+                                px + 1,
+                                py + 1,
+                                cell - 2,
+                                cell - 2,
+                                color,
+                                alpha,
+                                show_alpha and alpha >= 0 and alpha <= 1
+                            )
+                        else
+                            ui.rect(
+                                px + 1,
+                                py + 1,
+                                math.max(0, cell - 2),
+                                math.max(0, cell - 2),
+                                color,
+                                nil,
+                                'swatch_fill'
+                            )
+                        end
+                        if deps.palette and deps.palette.value_tooltip then
+                            local selected_column = column
+                            ui.hit(px, py, cell, cell, function() end, nil, nil, function()
+                                return deps.palette.value_tooltip(preview, 1, selected_column)
+                            end)
+                        end
+                    end
+                end
+            elseif visible(cells_y + offset, label_size) then
+                ui.bounded(
+                    preview_x,
+                    cells_y + offset,
+                    hint or 'Saved row unavailable.',
+                    12,
+                    muted,
+                    preview_width,
+                    'hint'
+                )
+            end
         elseif self.tab == 'export' then
             label(top, 'Choose what to export. A timestamp is added to each filename.', muted, 'hint')
             local cursor = top - step
@@ -449,7 +566,7 @@ function T.new(deps)
             })
             action(cursor, 'Save applied setup', 'save_setup', true)
         end
-        if docked then
+        if scrolling then
             local viewport = math.max(0, clip_top - clip_bottom)
             local content = math.max(viewport, clip_top - lowest + 12)
             self.maximum = math.max(0, content - viewport)
@@ -459,7 +576,7 @@ function T.new(deps)
             self.scroll_step = math.max(1, math.min(gap * 3, viewport - bh))
             if ui.scrollbar and viewport > 0 then
                 ui.scrollbar(
-                    'editor_tools_docked',
+                    docked and 'editor_tools_docked' or 'editor_tools_rows',
                     x + w - 8,
                     clip_bottom,
                     viewport,

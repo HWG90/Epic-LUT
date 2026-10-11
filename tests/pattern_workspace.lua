@@ -206,8 +206,8 @@ for _, rectangle in ipairs(output.rects) do
     end
 end
 assert(
-    #swatches == 3 and output.labels['Quick Editor: Pattern LUT'],
-    'Quick strip does not show three Pattern swatches'
+    #swatches == 2 and output.labels['Quick Editor: Pattern LUT'],
+    'Quick strip must show only Accent and Material swatches'
 )
 for _, rectangle in ipairs(swatches) do
     assert(rectangle.w == 28 and rectangle.h == 28, 'Quick swatches stretched to fill the pane')
@@ -230,7 +230,7 @@ for _, rectangle in ipairs(sized_output.rects) do
         )
     end
 end
-assert(sized_count == 3 and scans == 0 and uploads == 0)
+assert(sized_count == 2 and scans == 0 and uploads == 0)
 local capped_ui, capped_output = renderer(20)
 pattern.quick(capped_ui, {
     x = quick.x,
@@ -247,7 +247,7 @@ for _, rectangle in ipairs(capped_output.rects) do
         assert(rectangle.w == 40 and rectangle.h == 40, 'Quick painted borders bypassed the40px clamp')
     end
 end
-assert(capped_count == 3 and scans == 0 and uploads == 0)
+assert(capped_count == 2 and scans == 0 and uploads == 0)
 hit(output, 'Quick Editor: Pattern LUT').callback()
 assert(pattern.is_open() and scans == 0, 'Opening workspace bypassed the manual load gate')
 pattern.popup(ui)
@@ -270,6 +270,7 @@ for _, item in ipairs(output.hits) do
         quick_hits[#quick_hits + 1] = item
     end
 end
+assert(#quick_hits == 2, 'Quick strip exposes the hidden Unknown channel')
 quick_hits[2].callback()
 assert(pattern.column == 2 and activations[#activations] == 'pattern_picker')
 assert(
@@ -318,10 +319,20 @@ assert(
     'Returning to LUT Table restored owned Pattern edits'
 )
 pattern.raw = false
-quick_hits[3].callback()
+assert(pattern.show('helmet'))
+ui, output = renderer(12)
+pattern.workspace(ui, { x = 40, y = 50, w = 900, h = 1000 })
+local workspace_swatches = {}
+for _, item in ipairs(output.hits) do
+    if item.help == 'Double-click to edit this Pattern LUT swatch.' then
+        workspace_swatches[#workspace_swatches + 1] = item
+    end
+end
+assert(#workspace_swatches == 3, 'Full workspace lost the stored Unknown channel')
+workspace_swatches[3].callback()
 assert(
     pattern.is_open() and pattern.column == 3 and not controls.pattern_picker.can_open_picker(),
-    'Quick Unknown swatch bypassed Advanced raw protection'
+    'Full workspace Unknown swatch bypassed Advanced raw protection'
 )
 pattern.quick(ui, quick, 'armor')
 assert(

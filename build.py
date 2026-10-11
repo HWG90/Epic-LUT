@@ -65,6 +65,8 @@ parts.append('m.dev_build_id='+repr(args.dev_stamp or 'release')+'\n')
 parts.append('m.debug_lut_dds_hex='+repr((ROOT/'assets/debug-lut.dds').read_bytes().hex())+'\n')
 parts.append('m.original_snapshot_script=' + repr((ROOT/'tools/original_snapshots.ps1').read_bytes().hex()) + '\n')
 parts.append('m.original_snapshot_reader=' + repr((ROOT/'tools/original_snapshots.cs').read_bytes().hex()) + '\n')
+parts.append('m.binding_provenance_script=' + repr((ROOT/'tools/binding_provenance.ps1').read_bytes().hex()) + '\n')
+parts.append('m.binding_provenance_reader=' + repr((ROOT/'tools/binding_provenance_reader.cs').read_bytes().hex()) + '\n')
 parts.append('m.camo_preview_script=' + repr((ROOT/'tools/camo_preview.ps1').read_bytes().hex()) + '\n')
 parts.append('m.camo_preview_reader=' + repr((ROOT/'tools/camo_preview_reader.cs').read_bytes().hex()) + '\n')
 if args.player_preview:
@@ -132,7 +134,7 @@ with zipfile.ZipFile(ROOT/'dist'/args.output,'w',zipfile.ZIP_DEFLATED) as packag
         package.write(ROOT/'docs/MDL-LLL.md','INSTALL-MDL.md')
     for name in ('mod.lua','manifest.json','library.txt',NATIVE_NAME,'LICENSE-CowboyBingus.txt'):
         package.write(OUT/name,'armor_lut_editor/'+name)
-    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','tools/authored_preview.ps1','tools/authored_preview_reader.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/RELEASE-R5.5-RC1.md','docs/RELEASE-R5.5.md','docs/RELEASE-R5.5.1.md','docs/RELEASE-R5.5.2.md','docs/RELEASE-R5.5.3.md','docs/RELEASE-R5.5.4.md','docs/RELEASE-R5.5.5.md','docs/RELEASE-R5.5.6.md','CHANGELOG.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/PREVIEW-RENDER-PATH.md','docs/PREVIEW-ANIMATION.md','docs/SDK-INTEGRATION.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
+    for name in ('README.md','tools/import_zip.ps1','tools/original_snapshots.ps1','tools/original_snapshots.cs','tools/binding_provenance.ps1','tools/binding_provenance_reader.cs','tools/authored_preview.ps1','tools/authored_preview_reader.cs','docs/DIRECT-LUT.md','docs/NEXUS-BBCODE.txt','docs/NEXUS-CHANGELOG.txt','docs/RELEASE-R4.md','docs/RELEASE-R4-RC1.md','docs/RELEASE-R5.md','docs/RELEASE-R5.1.md','docs/RELEASE-R5.2.md','docs/RELEASE-R5.3.md','docs/RELEASE-R5.4.md','docs/RELEASE-R5.5-RC1.md','docs/RELEASE-R5.5.md','docs/RELEASE-R5.5.1.md','docs/RELEASE-R5.5.2.md','docs/RELEASE-R5.5.3.md','docs/RELEASE-R5.5.4.md','docs/RELEASE-R5.5.5.md','docs/RELEASE-R5.5.6.md','CHANGELOG.md','docs/MDL-LLL.md','docs/PATTERN-LUTS.md','docs/PREVIEW-RENDER-PATH.md','docs/PREVIEW-ANIMATION.md','docs/SDK-INTEGRATION.md','docs/BLOOD-PREVIEW-RESEARCH.md','docs/UPSTREAM-MYC-INTEGRATION.md'):
         if not args.player_preview and name.startswith('tools/authored_preview'):
             continue
         package.write(ROOT/name,name)

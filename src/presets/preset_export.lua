@@ -50,8 +50,15 @@ function E.bundle(m, preset, include_capes, include_patterns)
     assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
     assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
     local entries = collection(preset, include_capes, include_patterns)
-    local manifest, files = { 'EPIC-OUTFIT\t2' }, {}
+    local version = 2
+    for _, entry in ipairs(entries) do
+        if entry.binding_provenance then
+            version = 3
+        end
+    end
+    local manifest, files = { 'EPIC-OUTFIT\t' .. version }, {}
     local payloads, sources, payload_count, source_count, bytes = {}, {}, 0, 0, 0
+    local assignments, assignment_count = {}, 0
     for _, entry in ipairs(entries) do
         local encoded = m.dds.encode(entry.document.data, entry.document.width, entry.document.height)
         local file = payloads[encoded]
@@ -79,6 +86,24 @@ function E.bundle(m, preset, include_capes, include_patterns)
             fields[4], fields[5], fields[6], fields[7] =
                 entry.original.resource, tostring(entry.original.width), tostring(entry.original.height), sidecar
         end
+        if version == 3 then
+            fields[8] = '-'
+            if entry.binding_provenance then
+                assert(fields[4] ~= '-', 'Binding provenance requires original texture metadata')
+                local module = assert(m.binding_provenance, 'Binding provenance writer unavailable')
+                local encoded_proof = module.encode(entry.binding_provenance, entry.kind, entry.key, entry.original)
+                local filename = assignments[encoded_proof]
+                if not filename then
+                    bytes = bytes + #encoded_proof
+                    assert(bytes <= E.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
+                    assignment_count = assignment_count + 1
+                    filename = string.format('assignment%03d.assignment', assignment_count)
+                    assignments[encoded_proof] = filename
+                    files[#files + 1] = { filename, encoded_proof }
+                end
+                fields[8] = filename
+            end
+        end
         manifest[#manifest + 1] = table.concat(fields, '\t')
     end
     local text = table.concat(manifest, '\n')
@@ -96,6 +121,9 @@ function E.new(m, paths, options)
         directory_exists = paths.directory_exists,
         mkdir_new = paths.mkdir_new,
         rmdir = paths.rmdir,
+        binding_writer = m.binding_patch_export,
+        provenance = options.binding_provenance,
+        id_available = options.resource_id_available,
     })
     function self.save(name, preset, format, index, naming)
         assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')

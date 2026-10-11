@@ -447,24 +447,7 @@ function B.new(info, select_row, help, select_camo_row)
                 end
             end)
             choice('palette')
-            local source = not state.busy
-            local mapping = {
-                { 'Map LUTs to Armor', 'imported_map_armor', source },
-                { 'Map LUTs to Helmet', 'imported_map_helmet', source },
-                { 'Map LUTs to Cape', 'imported_map_cape', source and state.cape_available == true },
-            }
-            local mapping_width = 0
-            for _, item in ipairs(mapping) do
-                mapping_width = math.max(mapping_width, measure(item[1], 14) + gap * 4)
-            end
-            local columns = math.max(1, math.min(3, math.floor((width + gap) / (mapping_width + gap))))
-            for start = 1, #mapping, columns do
-                local group = {}
-                for index = start, math.min(#mapping, start + columns - 1) do
-                    group[#group + 1] = mapping[index]
-                end
-                buttons(group)
-            end
+            buttons({ { 'Map LUTs to Gear', 'imported_map_gear', not state.busy } })
         end
         divider_row()
         paragraph('Armory Presets', 'heading')

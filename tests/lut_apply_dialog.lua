@@ -527,6 +527,230 @@ click(assert(label('Background Apply', false)))
 assert(background_applies == 0 and menu.lut_apply_dialog == mapping, 'Mapping leaked input to Basic')
 click(assert(label('Close', true)))
 assert(not menu.lut_apply_dialog, 'Mapping Close retained the dialog')
+do
+    local masks, manual = {}, {}
+    local function gear_mapping()
+        local columns = { { title = 'Imported LUTs', items = {} } }
+        for index, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+            columns[index + 1] = {
+                title = kind:sub(1, 1):upper() .. kind:sub(2),
+                kind = kind,
+                enabled = true,
+                checked = true,
+                items = {},
+            }
+        end
+        for ci, count in ipairs({ 73, 41, 29, 17 }) do
+            for index = 1, count do
+                columns[ci].items[index] = {
+                    id = ci .. ':' .. index,
+                    label = (ci == 1 and 'Imported ' or columns[ci].title .. ' LUT ') .. index,
+                    enabled = index ~= 3,
+                }
+            end
+        end
+        return {
+            mode = 'mapping',
+            gear_columns = true,
+            title = 'Map LUTs to Gear',
+            columns = columns,
+            on_map = function(source, target)
+                manual[#manual + 1] = { source, target }
+                return true, 'One gear LUT mapped'
+            end,
+            on_auto_map = function(mask)
+                masks[#masks + 1] = mask
+                return true, 'Selected gear columns auto-mapped'
+            end,
+        }
+    end
+    local function footer_label(column)
+        local b, w = assert(column.auto_bounds), menu.window_bounds
+        local x = w.x + (b.x + 34) * w.scale
+        local bottom, top = w.y + b.y * w.scale, w.y + (b.y + b.h) * w.scale
+        for _, command in ipairs(compose()) do
+            if
+                command.popup
+                and (command.full_text or command.text) == 'Auto-map'
+                and math.abs(command.x - x) < 0.01
+                and command.y >= bottom
+                and command.y < top
+            then
+                return command
+            end
+        end
+        error('Missing gear-column Auto-map checkbox label')
+    end
+    local function contained(commands, d)
+        local b, w = d.bounds, menu.window_bounds
+        local left, bottom = w.x + b.x * w.scale, w.y + b.y * w.scale
+        local right, top = left + b.w * w.scale, bottom + b.h * w.scale
+        for _, command in ipairs(commands) do
+            if command.popup then
+                if command.type == 'rect' then
+                    assert(
+                        command.x >= left - 0.01
+                            and command.y >= bottom - 0.01
+                            and command.x + command.w <= right + 0.01
+                            and command.y + command.h <= top + 0.01,
+                        'Four-column mapping rectangle escaped its frame'
+                    )
+                elseif command.type == 'text' then
+                    local ink = metrics(command.size)
+                    assert(
+                        command.y + ink.min_y >= bottom - 0.01 and command.y + ink.max_y <= top + 0.01,
+                        'Four-column mapping glyph ink escaped its frame'
+                    )
+                end
+                assert(command.paint_plane >= 380, 'Four-column mapping painted under the Basic workspace')
+            end
+        end
+    end
+    menu.text_metrics = metrics
+    for _, font in ipairs({ 12, 20 }) do
+        for _, scale in ipairs({ 0.7, 1.15 }) do
+            for _, size in ipairs({ { 1280, 720 }, { 1920, 1080 } }) do
+                resolution = size
+                menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = font, scale, 1500, 700
+                dialog = open(gear_mapping())
+                local commands = compose()
+                contained(commands, dialog)
+                assert(
+                    dialog.bounds.w == math.min(1140, menu.window_width - 48),
+                    'Unified mapping did not use its bounded four-column width'
+                )
+                for _, title in ipairs({ 'Imported LUTs', 'Armor', 'Helmet', 'Cape' }) do
+                    assert(label(title, true), 'Unified mapping omitted its ' .. title .. ' column')
+                end
+                local maps_before, masks_before = #manual, #masks
+                click(assert(label('Imported 1', true)))
+                assert(
+                    dialog.source_id == '1:1' and #manual == maps_before and #masks == masks_before,
+                    'Selecting a unified source wrote gear'
+                )
+                click(assert(label('Imported 3', true)))
+                assert(dialog.source_id == '1:1', 'Disabled unified source changed the selected import')
+                for ci, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                    local column = dialog.columns[ci + 1]
+                    click(square(compose(), footer_label(column), true))
+                    assert(
+                        column.checked == false
+                            and dialog.source_id == '1:1'
+                            and #manual == maps_before
+                            and #masks == masks_before,
+                        'Gear Auto-map checkbox changed source or applied a LUT'
+                    )
+                    for other = ci + 2, 4 do
+                        assert(dialog.columns[other].checked, 'Gear checkbox affected a different column')
+                    end
+                end
+                click(assert(label('Auto-map', true)))
+                assert(#masks == masks_before, 'Empty gear Auto-map selection invoked a batch')
+                click(square(compose(), footer_label(dialog.columns[3]), false))
+                click(square(compose(), footer_label(dialog.columns[4]), false))
+                click(assert(label('Auto-map', true)))
+                local mask = masks[#masks]
+                assert(
+                    #masks == masks_before + 1 and mask.helmet == true and mask.cape == true and mask.armor == nil,
+                    'Auto-map did not pass exactly the checked gear mask'
+                )
+                for key, value in pairs(mask) do
+                    assert(
+                        (key == 'helmet' or key == 'cape') and value == true,
+                        'Auto-map mask contains a source/target row ID'
+                    )
+                end
+                click(assert(label('Armor LUT 1', true)))
+                assert(
+                    #manual == maps_before + 1
+                        and manual[#manual][1] == '1:1'
+                        and manual[#manual][2] == '2:1'
+                        and dialog.columns[2].checked == false
+                        and menu.lut_apply_dialog == dialog,
+                    'One-click mapping incorrectly depended on the Auto-map gear mask'
+                )
+                menu.key(13)
+                assert(#masks == masks_before + 1, 'Unified mapping Enter auto-applied checked families')
+                for ci, column in ipairs(dialog.columns) do
+                    local b, w = column.scroll_bounds, menu.window_bounds
+                    menu.wheel(-120000, w.x + (b.x + b.w / 2) * w.scale, w.y + (b.y + b.h / 2) * w.scale)
+                    commands = compose()
+                    contained(commands, dialog)
+                    assert(column.scroll == column.maximum, 'Unified mapping column cannot reach its last row')
+                    for other = ci + 1, 4 do
+                        assert(dialog.columns[other].scroll == 0, 'Unified mapping wheel leaked to another column')
+                    end
+                    local count = #column.items
+                    local last = assert(label(column.items[count].label, true), 'Unified mapping final row is hidden')
+                    click(last)
+                    if ci == 1 then
+                        assert(dialog.source_id == '1:73' and #manual == maps_before + 1)
+                    else
+                        assert(
+                            manual[#manual][1] == '1:73' and manual[#manual][2] == ci .. ':' .. count,
+                            'Scrolled unified target hit used the wrong physical column/ID'
+                        )
+                    end
+                end
+                local cape_column = dialog.columns[4]
+                cape_column.enabled = false
+                commands = compose()
+                contained(commands, dialog)
+                click(square(commands, footer_label(cape_column), false))
+                assert(cape_column.checked == true, 'Disabled gear Auto-map checkbox is interactive')
+                local previous = #masks
+                click(assert(label('Auto-map', true)))
+                assert(
+                    #masks == previous + 1
+                        and masks[#masks].helmet
+                        and not masks[#masks].armor
+                        and not masks[#masks].cape,
+                    'Unavailable gear family entered the Auto-map mask'
+                )
+                local w = menu.window_bounds
+                local target = dialog.columns[2]
+                target.scroll = 0
+                commands = compose()
+                local thumb
+                for _, command in ipairs(commands) do
+                    if command.scrollbar == 'lut_apply_column_2' then
+                        thumb = command
+                    end
+                end
+                assert(thumb)
+                local tx, ty = thumb.x + thumb.w / 2, thumb.y + thumb.h / 2
+                input(tx, ty, true)
+                input(tx, w.y + target.scroll_bounds.y * w.scale - 40, true)
+                input(tx, w.y + target.scroll_bounds.y * w.scale - 40, false)
+                compose()
+                assert(
+                    target.scroll == target.maximum and dialog.columns[3].scroll == dialog.columns[3].maximum,
+                    'Unified mapping scrollbar changed an adjacent column'
+                )
+                dialog.on_auto_map = function()
+                    return false, 'Worn gear changed; reopen mapping'
+                end
+                click(assert(label('Auto-map', true)))
+                assert(
+                    menu.lut_apply_dialog == dialog
+                        and dialog.source_id == '1:73'
+                        and dialog.columns[3].checked
+                        and label('Worn gear changed; reopen mapping', true),
+                    'Unified mapping error lost its source/gear selection'
+                )
+                click(assert(label('Close', true)))
+                assert(
+                    not menu.lut_apply_dialog and background_applies == 0,
+                    'Unified mapping Close applied hidden Basic gear'
+                )
+            end
+        end
+    end
+    renderer.release()
+end
+print(
+    'PASS unified gear mapping: four independent columns, native checkboxes, checked-family Auto-map masks, disabled/empty guards, one-click targets and contained fonts/scales/screens'
+)
 print(
     'PASS imported mapping modal: source-only selection, one-click targets, disabled and Enter guards, explicit Auto-map, retained errors and modal ownership'
 )

@@ -642,6 +642,7 @@ function V.new(deps)
         end
         local row, column = h.get('edit_row'), h.get('edit_column')
         local can_identify = mod.controls.identify_region
+        local drawn_grid_bottom
         if not pattern_full then
             local visible_rows = math.max(1, math.min(d.height, math.floor((space + 0.01) / cell)))
             self.grid_max = math.max(0, d.height - visible_rows)
@@ -657,11 +658,13 @@ function V.new(deps)
                 self.grid_selected = selected_grid_row
             end
             local first_row, last_row = self.grid_first, self.grid_first + visible_rows - 1
+            drawn_grid_bottom = grid_top - visible_rows * cell
             self.grid_bounds = { x = ui.x, y = grid_floor, w = left - (portrait_width or 0) - 8, h = space }
+            local navigation_floor = has_quick and drawn_grid_bottom or grid_floor
             if self.grid_max > 0 then
                 ui.bounded(
                     ui.x + 10,
-                    grid_floor - 19,
+                    navigation_floor - 19,
                     'Rows ' .. first_row .. '-' .. last_row .. ' of ' .. d.height .. ' / scroll here',
                     12,
                     muted,
@@ -669,7 +672,7 @@ function V.new(deps)
                     'hint'
                 )
                 local function navigate(x, label, direction)
-                    ui.button(x, grid_floor - 27, 54, 24, label, function()
+                    ui.button(x, navigation_floor - 27, 54, 24, label, function()
                         self.grid_first =
                             math.max(1, math.min(self.grid_max + 1, self.grid_first + direction * visible_rows))
                     end)
@@ -955,6 +958,7 @@ function V.new(deps)
                 self.pattern_workspace_bounds = bounds
                 pattern.workspace(ui, bounds)
             else
+                bounds.y = drawn_grid_bottom - (self.grid_max > 0 and 30 or 0) - 6 * font_scale - quick_height
                 local right_edge = bounds.x + bounds.w
                 bounds.x = ui.x + 82
                 bounds.w = math.max(1, math.min(grid_width * cell, right_edge - bounds.x))

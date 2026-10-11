@@ -45,6 +45,83 @@ assert(
 )
 local zip = P.zip_entries(files)
 assert(zip:sub(1, 4) == 'PK\3\4' and zip:sub(-22, -19) == 'PK\5\6', 'Shared ZIP is invalid')
+local Binding = dofile('src/presets/binding_provenance.lua')
+local proof_entry = {
+    kind = loaded.entries[1].kind,
+    key = loaded.entries[1].key,
+    document = loaded.entries[1].document,
+    original = loaded.entries[1].original,
+}
+proof_entry.binding_provenance = {
+    version = 1,
+    kind = proof_entry.kind,
+    key = proof_entry.key,
+    texture_slot = Binding.LUT,
+    original_texture = proof_entry.original.resource,
+    section = 0xabc12345,
+    kit_override = false,
+    index_stamp = string.rep('a', 64),
+    kit = { id = 21, body = 0, archive = '0123456789abcdef' },
+    unit = {
+        resource = 'abcdef0123456789',
+        archive = '0123456789abcdef',
+        main_sha256 = string.rep('1', 64),
+        main = 'FAKE_PRIVATE_GAME_BYTES',
+    },
+    material = {
+        resource = '1234567890abcdef',
+        archive = '0123456789abcdef',
+        main_sha256 = string.rep('2', 64),
+        main = 'FAKE_PRIVATE_GAME_BYTES',
+    },
+    verified = true,
+}
+local certified_files = E.bundle(
+    { dds = D, binding_provenance = Binding },
+    { entries = { proof_entry, loaded.entries[2] } }
+)
+assert(
+    #certified_files == 6 and certified_files[#certified_files][2]:match('^EPIC%-OUTFIT\t3\n'),
+    'Shareable ZIP lost the v3 assignment references'
+)
+local assignment
+for _, file in ipairs(certified_files) do
+    assert(not file[2]:find('FAKE_PRIVATE_GAME_BYTES', 1, true), 'Shareable preset leaked hydrated game source bytes')
+    if file[1]:match('%.assignment$') then
+        assignment = file[2]
+    end
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+assert(assignment and not assignment:find('verified', 1, true), 'Shareable assignment sidecar persisted trusted status')
+local certified_roundtrip = O.read(
+    { dds = D, file_io = F, binding_provenance = Binding },
+    'tests/tmp/presets/preset.tsv',
+    'Certified Shared Import'
+)
+local refs = certified_roundtrip.entries[1].binding_provenance
+assert(
+    refs
+        and refs.unit.resource == proof_entry.binding_provenance.unit.resource
+        and refs.material.main_sha256 == proof_entry.binding_provenance.material.main_sha256
+        and not refs.verified
+        and not refs.unit.main
+        and not certified_roundtrip.entries[2].binding_provenance,
+    'Shareable v3 round trip lost references or trusted unhydrated game bytes'
+)
+assert(
+    not pcall(E.bundle, { dds = D }, { entries = { proof_entry } }),
+    'v3 metadata silently exported without its validator'
+)
+assert(not pcall(E.bundle, { dds = D, binding_provenance = Binding }, {
+    entries = {
+        {
+            kind = proof_entry.kind,
+            key = proof_entry.key,
+            document = document,
+            binding_provenance = proof_entry.binding_provenance,
+        },
+    },
+}), 'Assignment references exported without certified original texture metadata')
 -- Transmog can bind the same few LUTs to thousands of distinct material targets.
 local many = { entries = {} }
 for i = 1, E.MAX_BINDINGS do
@@ -321,6 +398,64 @@ ffi.copy(cape.data, document.data, 2944)
 cape.data[0] = 0.875
 local cape_entry = { kind = 'cape', key = '0:2:1:0', document = cape, original = original(cape, 'fedcba9876543210') }
 local with_cape = { entries = { loaded.entries[1], loaded.entries[2], cape_entry } }
+-- Saving a source palette on a shorter native Cape preserves both independent
+-- shapes: the manifest certifies the original five rows, while the saved DDS
+-- and replacement GPU record retain all eight applied rows without remapping.
+local five_rows = { width = 23, height = 5, data = ffi.new('float[460]') }
+local resized_cape = {
+    kind = 'cape',
+    key = '0:1:1:0',
+    document = cape,
+    original = original(five_rows, '13e2e070c0dcbd53'),
+}
+local resized_preset = { entries = { loaded.entries[1], loaded.entries[2], resized_cape } }
+local resized_files = E.bundle(m, resized_preset)
+for _, file in ipairs(resized_files) do
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+local resized_roundtrip = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Resized Cape Roundtrip')
+assert(
+    resized_roundtrip.entries[3].document.height == 8 and resized_roundtrip.entries[3].original.height == 5,
+    'Preset bundle/read forced applied dimensions to match original metadata'
+)
+local resized_patch = P.encode_set(D, resized_roundtrip.entries)
+assert(resized_patch.count == 3, 'Mixed material, Pattern and resized Cape patch omitted a texture')
+local function uint(bytes, offset)
+    local a, b, c, d = bytes:byte(offset + 1, offset + 4)
+    return a + b * 256 + c * 65536 + d * 16777216
+end
+local by_resource = {}
+for _, entry in ipairs(resized_roundtrip.entries) do
+    by_resource[entry.original.resource] = entry
+end
+for index = 1, resized_patch.count do
+    local at = 104 + (index - 1) * 80
+    local resource = ''
+    for byte = 8, 1, -1 do
+        resource = resource .. string.format('%02x', resized_patch.main:byte(at + byte))
+    end
+    local body, gpu, bytes =
+        uint(resized_patch.main, at + 16), uint(resized_patch.main, at + 32), uint(resized_patch.main, at + 64)
+    local source = assert(by_resource[resource]).document
+    local pixels, width, height =
+        D.decode(resized_patch.main:sub(body + 193, body + 340) .. resized_patch.gpu:sub(gpu + 1, gpu + bytes))
+    assert(
+        width == source.width
+            and height == source.height
+            and bytes == width * height * 16
+            and ffi.string(pixels, bytes) == ffi.string(source.data, bytes),
+        'Mixed saved-preset patch changed source float bytes or serialized dimensions'
+    )
+end
+export.save('Resized Cape Pair', resized_roundtrip, 2, 3)
+assert(
+    calls[#calls][2] == resized_roundtrip.entries[3].document and calls[#calls][3].height == 5,
+    'Selected resized Cape export discarded its exact destination metadata'
+)
+assert(
+    #resized_preset.entries == 3 and cape.height == 8 and resized_cape.original.height == 5,
+    'Resized export rewrote the stored preset or original snapshot'
+)
 assert(E.lut_choices(with_cape)[3]:find('Cape LUT 1', 1, true), 'Cape export choice mislabeled')
 local cape_bundle = E.bundle(m, with_cape)
 for _, file in ipairs(cape_bundle) do

@@ -40,6 +40,27 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         presets,
         { dds = m.dds, read = m.file_io.read, row_names = m.windows and m.windows.row_presets }
     )
+    local row_preview_cache, row_preview_order = {}, {}
+    function self.row_preset_preview(name)
+        if type(name) ~= 'string' or name == '' then
+            return nil, 'Choose a saved row preset to preview.'
+        end
+        local cached = row_preview_cache[name]
+        if not cached then
+            local ok, data, width, height = pcall(preset_files.load_row, name)
+            if ok and data and (width == nil or width == 23) and (height == nil or height == 1) then
+                cached = { document = { data = data, width = 23, height = 1, read_only = true, source = name } }
+            else
+                cached = { hint = 'Saved row not found. Save this name to create it.' }
+            end
+            row_preview_cache[name] = cached
+            row_preview_order[#row_preview_order + 1] = name
+            if #row_preview_order > 64 then
+                row_preview_cache[table.remove(row_preview_order, 1)] = nil
+            end
+        end
+        return cached.document, cached.hint
+    end
     local color_columns = { 1, 3, 6, 7, 13, 15, 17, 18, 19, 20 }
     local color_labels = {}
     for _, column in ipairs(color_columns) do
@@ -49,6 +70,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         if not self.handle then
             return
         end
+        row_preview_cache, row_preview_order = {}, {}
         self.preset_names = preset_files.row_names()
         local choices = { 'New preset...' }
         for _, name in ipairs(self.preset_names) do
@@ -211,10 +233,16 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         return note('Scratch HEX pasted. Paint a selection to apply it.')
     end
     function self.key(code, ctrl, shift, context)
+        context = context or {}
+        if code == 46 and not ctrl then
+            if context.floating or context.control or not self.grid_bounds then
+                return false
+            end
+            return true, self.reset_selection()
+        end
         if not ctrl then
             return false
         end
-        context = context or {}
         self.clipboard = context.clipboard or self.api.clipboard or self.clipboard
         if context.floating == 'editor_scratch' then
             if code == 67 then
@@ -554,6 +582,10 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         if self.pattern_editor and self.pattern_editor.wheel and self.pattern_editor.wheel(x, y, delta) then
             return true
         end
+        local quick = self.pattern_quick_bounds
+        if quick and x >= quick.x and x <= quick.x + quick.w and y >= quick.y and y <= quick.y + quick.h then
+            return false
+        end
         local b = self.grid_bounds
         if b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
             self.grid_first = math.max(1, math.min((self.grid_max or 0) + 1, (self.grid_first or 1) - delta / 120 * 3))
@@ -697,6 +729,40 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             'Reset row ' .. row .. (full_row and ' (all columns)' or ', column ' .. column) .. ' to its loaded values'
         )
     end
+    function self.reset_selection()
+        local d = assert(document(), 'Load a LUT first')
+        assert(self.document == d, 'Editor target changed; load or select the current LUT first')
+        assert(d.data and not d.read_only and not d.stale, 'Load an editable current LUT first')
+        assert(d.original, 'Original table unavailable')
+        local selected = self.selection
+            or {
+                r1 = self.handle.get('edit_row'),
+                r2 = self.handle.get('edit_row'),
+                c1 = self.handle.get('edit_column'),
+                c2 = self.handle.get('edit_column'),
+            }
+        m.semantics.index(selected.r1, selected.c1, 1, d.width, d.height)
+        m.semantics.index(selected.r2, selected.c2, 4, d.width, d.height)
+        assert(selected.r1 <= selected.r2 and selected.c1 <= selected.c2, 'Invalid selection bounds')
+        local width, changed = selected.c2 - selected.c1 + 1, false
+        for row = selected.r1, selected.r2 do
+            local at = m.semantics.index(row, selected.c1, 1, d.width, d.height)
+            if ffi.string(d.data + at, width * 16) ~= ffi.string(d.original + at, width * 16) then
+                changed = true
+                break
+            end
+        end
+        if not changed then
+            return note('Selected cells already match their loaded values.')
+        end
+        d = remember()
+        for row = selected.r1, selected.r2 do
+            local at = m.semantics.index(row, selected.c1, 1, d.width, d.height)
+            ffi.copy(d.data + at, d.original + at, width * 16)
+        end
+        self.sync()
+        return note('Reset selected cells to their loaded values (full RGBA).')
+    end
     function self.is_dirty()
         local d = document()
         if not d or not d.original then
@@ -807,6 +873,8 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             document = document,
             note = note,
             ui_core = m.ui_core,
+            palette = m.palette,
+            default_open_docked = true,
         })
     self.scratch_tool = m.scratch_tool
         and m.scratch_tool.new({

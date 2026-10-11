@@ -78,9 +78,9 @@ end
 function pattern.quick(ui, bounds, kind)
     quick_bounds, quick_kind = bounds, kind
     local gap = ui.spacing and ui.spacing(6) or 6
-    local width = math.min(40, bounds.cell_width, (bounds.w - gap * 2) / 3)
+    local width = math.min(40, bounds.cell_width, (bounds.w - gap) / 2)
     ui.bounded(bounds.x, bounds.y + bounds.h - 18, 'Quick Pattern Host', 13, ui.theme.white, bounds.w, 'heading')
-    for column = 1, 3 do
+    for column = 1, 2 do
         ui.rect(
             bounds.x + (column - 1) * (width + gap),
             bounds.y + 2,
@@ -275,6 +275,13 @@ local function borders(commands)
     end
     return count, bottom
 end
+local function quick_gap(commands, scrolling)
+    local _, bottom = borders(commands)
+    local top = select(2, point(quick_bounds.x, quick_bounds.y + quick_bounds.h))
+    local measured = (bottom - top) / menu.window_bounds.scale
+    local expected = (scrolling and 30 or 0) + 6 * (menu.font_size or 12) / 12
+    assert(math.abs(measured - expected) < 0.01, 'Quick Pattern is detached from the last rendered LUT row')
+end
 compose()
 editor.focus_cell(3, 1)
 assert(handle.set('cell_r', 0.271))
@@ -310,13 +317,14 @@ assert(
     bottom >= select(2, point(quick_bounds.x, quick_bounds.y + quick_bounds.h)),
     'Quick Pattern overlaps the material grid'
 )
+quick_gap(commands, false)
 local swatches = 0
 for _, c in ipairs(commands) do
     if c.ui_role == 'pattern_quick_swatch' then
         swatches = swatches + 1
     end
 end
-assert(swatches == 3 and quick_kind == 'armor')
+assert(swatches == 2 and quick_kind == 'armor')
 assert(quick_bounds.x == editor.grid_bounds.x + 82, 'Quick Pattern does not align with the first material cell')
 assert(
     math.abs(quick_bounds.w - quick_bounds.cell_width * 23) < 0.01,
@@ -331,6 +339,7 @@ menu.font_size, menu.ui_scale, menu.window_height = 20, 0.65, 1300
 commands = compose()
 contained(quick_bounds)
 assert(borders(commands) == 23 * 8 and editor.grid_max == 0, 'Roomy large-font host lost an ordinary material row')
+quick_gap(commands, false)
 unchanged()
 menu.font_size, menu.ui_scale, menu.window_height = 12, 0.8, 1200
 commands = tap('Pattern LUT Editor')
@@ -387,11 +396,29 @@ tap('Helmet LUT')
 assert(not pattern.opened and editor.gear == 'helmet' and quick_kind == 'helmet' and document == documents.helmet)
 assert(loads.helmet == 1, 'Helmet navigation did not load its independent material table')
 assert(restores == 0 and writes == 0, 'Helmet navigation restored Pattern/native gear')
+-- A short table must not leave its Quick strip anchored at the viewport floor.
+local previous = document
+document = { width = 23, height = 3, data = ffi.new('float[276]'), source = 'three-rows.dds' }
+editor.sync()
+for _, ratio in ipairs({ 0.2, 0.6, 0.85 }) do
+    editor.tools.split_ratio = ratio
+    commands = compose()
+    contained(quick_bounds)
+    local visible_rows = document.height - editor.grid_max
+    assert(borders(commands) == 23 * visible_rows and visible_rows >= 2, 'Quick strip hid readable short-table rows')
+    quick_gap(commands, editor.grid_max > 0)
+end
+editor.tools.split_ratio, document = nil, previous
+editor.sync()
 -- A long material table keeps its own row wheel; the quick strip is not a row viewport.
 documents.helmet = { width = 23, height = 64, data = ffi.new('float[?]', 23 * 64 * 4), source = 'helmet-64.dds' }
 document = documents.helmet
 editor.sync()
-compose()
+commands = compose()
+quick_gap(commands, true)
+local hint = assert(label(commands, 'Rows 1-' .. (document.height - editor.grid_max) .. ' of 64 / scroll here'))
+local quick_top = select(2, point(quick_bounds.x, quick_bounds.y + quick_bounds.h))
+assert(hint.y >= quick_top and hint.y + hint.size <= select(2, borders(commands)), 'Row hint overlaps Quick Pattern')
 old_pattern, old_tools = pattern.scroll, editor.tools.scroll
 wheel(assert(editor.grid_bounds), -120)
 assert(

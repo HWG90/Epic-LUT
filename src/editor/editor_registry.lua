@@ -37,6 +37,7 @@ local required = {
     'global_redo_activate',
     'global_undo_activate',
     'identify_region_activate',
+    'imported_map_gear_activate',
     'imported_map_armor_activate',
     'imported_map_helmet_activate',
     'imported_map_cape_activate',
@@ -450,6 +451,12 @@ function R.pages(callbacks, defaults)
                     type = 'button',
                     label = 'Apply to Armor',
                     on_activate = callbacks.apply_file_armor_activate,
+                },
+                {
+                    id = 'imported_map_gear',
+                    type = 'button',
+                    label = 'Map LUTs to Gear',
+                    on_activate = callbacks.imported_map_gear_activate,
                 },
                 {
                     id = 'imported_map_armor',

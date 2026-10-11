@@ -230,6 +230,24 @@ function M.picker_allowed(control, mode)
     end
     return true
 end
+local function preset_completion(dialog, draft)
+    if not dialog or type(dialog.names) ~= 'table' or type(draft) ~= 'string' or draft == '' then
+        return nil
+    end
+    local prefix, best, best_folded = draft:lower()
+    for _, name in ipairs(dialog.names) do
+        if type(name) == 'string' and #name > 0 and #name <= 48 then
+            local folded = name:lower()
+            if
+                folded:sub(1, #prefix) == prefix
+                and (not best or folded < best_folded or folded == best_folded and name < best)
+            then
+                best, best_folded = name, folded
+            end
+        end
+    end
+    return best ~= draft and best or nil
+end
 local function picker_channel_allowed(control, channel, mode)
     if not control.picker_channel_enabled then
         return true
@@ -927,7 +945,10 @@ function M.new(api, measure, Text)
 
         local called, ok, err
         if p.control.picker_commit then
-            called, ok, err = pcall(p.control.picker_commit, p.rgb, p.alpha or p.control.picker_alpha())
+            called, ok, err = pcall(function()
+                local alpha = p.alpha or (p.control.picker_alpha and p.control.picker_alpha()) or 1
+                return p.control.picker_commit(p.rgb, alpha)
+            end)
         else
             called, ok, err = pcall(p.mod.handle.edit or p.mod.handle.set, p.control.id, p.rgb)
         end
@@ -1008,6 +1029,27 @@ function M.new(api, measure, Text)
 
         if self.text_edit then
             local e = self.text_edit
+            if
+                code == 9
+                and not ctrl
+                and not (shift == nil and self.shift or shift)
+                and self.outfit_dialog
+                and self.outfit_dialog.phase == 'name'
+                and e.control == self.outfit_dialog.control
+                and type(self.outfit_dialog.names) == 'table'
+            then
+                local name = preset_completion(self.outfit_dialog, e.text)
+                if name then
+                    if Text then
+                        Text.all(e)
+                        Text.insert(e, name, 48)
+                    else
+                        e.text, e.cursor, e.anchor, e.replace = name, #name, #name, false
+                    end
+                end
+                text_repeat = nil
+                return
+            end
             if Text then
                 Text.ensure(e)
                 if code == 27 then
@@ -4741,7 +4783,12 @@ function M.new(api, measure, Text)
                     if not enabled then
                         return
                     end
-                    self.text_edit = { color_channel = field.key, text = tostring(field.value), replace = true }
+                    -- Click-away finalizes the previous field before this
+                    -- callback runs; read its newly updated RGB/HEX value.
+                    local value = field.key == 'hex' and api.color_hex(p.rgb)
+                        or field.key == 'alpha' and p.alpha
+                        or p.rgb[field.key]
+                    self.text_edit = { color_channel = field.key, text = tostring(value), replace = true }
                 end)
             end
 
@@ -4941,6 +4988,11 @@ function M.new(api, measure, Text)
                         }
                     end
                 end)
+                local suggestion = editing and preset_completion(dialog, self.text_edit.text)
+                if suggestion then
+                    local hint = 'Tab: ' .. suggestion
+                    bounded(px + 22, text_y(py + 55, 30, 12, hint, 'hint'), hint, 12, muted, 396, 'hint')
+                end
                 rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Save Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
@@ -4961,8 +5013,10 @@ function M.new(api, measure, Text)
         if self.lut_apply_dialog then
             local dialog = self.lut_apply_dialog
             local mapping = dialog.mode == 'mapping'
+            local gear_columns = mapping and dialog.gear_columns == true
+            local column_count = gear_columns and 4 or 2
             local pad = 14
-            local dw, dh = math.min(800, ww - 48), math.min(580, wh - 64)
+            local dw, dh = math.min(gear_columns and 1140 or 800, ww - 48), math.min(580, wh - 64)
             local px, py = (ww - dw) / 2, (wh - dh) / 2
             local bh = math.max(30, text_metrics(14).height + 10)
             local hint_height = text_metrics(12, nil, 'hint').height + 6
@@ -5044,13 +5098,36 @@ function M.new(api, measure, Text)
                     end
                 end
             end
+            local function auto_mask()
+                local mask, any = {}, false
+                for ci, column in ipairs(dialog.columns or {}) do
+                    if
+                        ci > 1
+                        and column.enabled ~= false
+                        and column.checked == true
+                        and (column.kind == 'armor' or column.kind == 'helmet' or column.kind == 'cape')
+                    then
+                        mask[column.kind], any = true, true
+                    end
+                end
+                return mask, any
+            end
             if mapping then
+                local _, any = auto_mask()
+                local enabled = type(dialog.on_auto_map) == 'function' and (not gear_columns or any)
                 drawing.button(px + pad, toolbar_y, 140, bh, 'Auto-map', function()
-                    map_call(dialog.on_auto_map)
+                    if gear_columns then
+                        local mask, checked = auto_mask()
+                        if checked then
+                            map_call(dialog.on_auto_map, mask)
+                        end
+                    else
+                        map_call(dialog.on_auto_map)
+                    end
                 end, {
-                    enabled = type(dialog.on_auto_map) == 'function',
-                    accent = accent,
-                    ink = T.background,
+                    enabled = enabled,
+                    accent = enabled and accent,
+                    ink = enabled and T.background,
                 })
             else
                 drawing.button(px + pad, toolbar_y, 140, bh, 'Select All', function()
@@ -5064,8 +5141,8 @@ function M.new(api, measure, Text)
             bounded(
                 px + pad,
                 caption_y,
-                mapping
-                        and 'Choose an imported LUT, then click its destination. Auto-map repeats imports in slot order.'
+                gear_columns and 'Choose an imported LUT, then its destination. Auto-map uses the checked gear columns.'
+                    or mapping and 'Choose an imported LUT, then click its destination. Auto-map repeats imports in slot order.'
                     or 'Matching Pattern LUTs are always included.',
                 12,
                 muted,
@@ -5074,10 +5151,11 @@ function M.new(api, measure, Text)
             )
             local column_top = caption_y - hint_height - 4
             local body_top = column_top - bh
-            local body_bottom = py + bh + hint_height + pad * 2
+            local toggle_y = py + bh + hint_height + pad * 2
+            local body_bottom = toggle_y + (gear_columns and bh + 8 or 0)
             local viewport = math.max(1, body_top - body_bottom)
             local gap = 16
-            local column_width = (dw - pad * 2 - gap) / 2
+            local column_width = (dw - pad * 2 - gap * (column_count - 1)) / column_count
             for ci, column in ipairs(dialog.columns or {}) do
                 local cx = px + pad + (ci - 1) * (column_width + gap)
                 bounded(
@@ -5097,7 +5175,7 @@ function M.new(api, measure, Text)
                     local y = body_top + column.scroll - index * row_height
                     if y >= body_bottom - 0.01 and y + bh <= body_top + 0.01 then
                         local enabled = item.enabled ~= false
-                        if mapping and ci == 2 then
+                        if mapping and ci > 1 then
                             rect(cx, y, column_width - 10, bh, T.header)
                         else
                             drawing.checkbox(
@@ -5113,7 +5191,7 @@ function M.new(api, measure, Text)
                                 enabled
                             )
                         end
-                        local label_offset = mapping and ci == 2 and 8 or 34
+                        local label_offset = mapping and ci > 1 and 8 or 34
                         local detail_width = item.detail
                                 and math.min(
                                     column_width * 0.4,
@@ -5168,6 +5246,35 @@ function M.new(api, measure, Text)
                         function(value)
                             column.scroll = value <= 1 and 0 or value >= column.maximum - 1 and column.maximum or value
                         end
+                    )
+                end
+                column.auto_bounds = nil
+                if gear_columns and ci > 1 then
+                    local enabled = column.enabled ~= false
+                    local checked = enabled and column.checked == true
+                    column.auto_bounds = { x = cx, y = toggle_y, w = column_width - 10, h = bh }
+                    drawing.checkbox(cx, toggle_y, 28, bh, checked, enabled)
+                    bounded(
+                        cx + 34,
+                        text_y(toggle_y, bh, 14, 'Auto-map'),
+                        'Auto-map',
+                        14,
+                        enabled and white or muted,
+                        column_width - 44
+                    )
+                    hit(
+                        cx,
+                        toggle_y,
+                        column_width - 10,
+                        bh,
+                        function()
+                            if enabled then
+                                column.checked = not checked
+                            end
+                        end,
+                        nil,
+                        nil,
+                        'Include ' .. (column.title or column.kind or 'this gear') .. ' when Auto-map is pressed.'
                     )
                 end
             end

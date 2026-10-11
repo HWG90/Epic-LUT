@@ -24,7 +24,9 @@ No Python or MCM installation required. Windows PowerShell/.NET handles file pic
 
 **Shared Lobby LUT is in testing.** Share Armor, Helmet and Pattern LUTs with compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
 
-**LUT Editor** includes a three-swatch **Quick Editor: Pattern LUT** beneath the material grid. **Load Current Gear** prepares its current values; click a swatch to edit it. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
+**LUT Editor** includes a two-swatch **Quick Editor: Pattern LUT** directly beneath the material grid. **Load Current Gear** prepares its current values; click a swatch to edit it. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
+
+The **Rows** tools preview the selected saved row preset beside their controls. Narrow windows place the preview below the controls with scrolling. Previewing leaves the editor unchanged; use **Apply preset to row** when ready.
 
 ## Roomier LUT Editor
 
@@ -66,7 +68,7 @@ Press **F9**, then **Load Current Gear**. Choose the LUT above either column, th
 1. Choose **Import DDS / ZIP / RAR**. Expand archive folders and choose a gold variant folder containing LUTs. Import loads colors without installing archive content.
 2. Choose the imported table: `lut001.dds` is LUT 1. Its swatch strip previews the primary colors.
 3. In Basic, choose the destination LUT above either gear column, then use **Apply Imported Texture** immediately below it. The main button shows the source filename; its arrow changes the source.
-4. Use **Map LUTs to Armor**, **Map LUTs to Helmet** or **Map LUTs to Cape** in Basic or Import / Apply. Choose an imported table on the left, then click a current gear slot on the right to apply it. **Auto-map** orders numbered imports numerically: `lut000` goes to slot 1, `lut001` to slot 2, and imports repeat from the beginning when there are more destination slots. Pattern tables stay outside this material cycle; verified accompanying Pattern data is applied with its matching material. Each mapping action supports Undo.
+4. Use **Map LUTs to Gear** in Basic or Import / Apply. Choose an imported table, then click a slot in the Armor, Helmet or Cape column to apply it. Check the gear columns that **Auto-map** should affect. It orders numbered imports numerically: `lut000` goes to slot 1, `lut001` to slot 2, and imports repeat from the beginning when there are more destination slots. Each checked gear column starts from the first import. Pattern tables stay outside this material cycle; verified accompanying Pattern data is applied with its matching material. Each mapping action supports Undo.
 5. **Apply Matching LUTs** maps patch tables by resource ID to your worn gear. Unmatched, unidentified and duplicate-ID entries stay untouched.
 
 Press **F10**, then **Import / Apply** for full table previews. Every loaded Armor and Helmet LUT appears in its own scrollable column. Click a table's title or texture hash to select it; selecting a title leaves its colors unchanged. **Send to LUT Editor** copies the selected imported table into the editor.
@@ -100,7 +102,9 @@ Click the texture ID beside the LUT dropdown to give it a custom name. Names are
 
 Use **Tools → Rows → Import Paydex JSON...** to choose a Paydex row-presets JSON file. Imported rows appear immediately in the preset selector. Choose a destination row and press **Apply preset to row** separately. The importer preserves full RGBA/material values, reuses identical existing presets, and gives conflicting names a suffix instead of overwriting them.
 
-Tools initially opens docked below the swatches, then remembers your last **Dock / Undock** choice across reloads. Drag the horizontal divider between the table and Tools up or down to adjust their space; the split is retained when resizing or redocking. The docked Tools body scrolls independently when space is limited.
+Tools remembers your last **Dock / Undock** choice across reloads. It starts open on **Import** when docked; saved undocked Tools start closed. Manual visibility is retained while the editor stays loaded. Drag the horizontal divider between the table and Tools up or down to adjust their space; the split is retained when resizing or redocking. The docked Tools body scrolls independently when space is limited.
+
+Press **Delete** in the material grid to reset the selected cells or rows to the loaded original values as one undoable edit. With no range selected, it resets the focused cell. Delete inside a text field still edits its text.
 
 Select multiple rows through their row labels, or select their first-column cells, then **Apply preset to selected rows** to fill every selected row with the preset as one undoable edit. Use the **X** beside a saved row, palette or Armory preset to remove it from the library. Removed files remain recoverable; the applied appearance is preserved.
 
@@ -133,6 +137,8 @@ Preview uses the game's lighter **Game Default UI pipeline**, with an independen
 Select a preset to preview it. Name-selector swatches give a quick glance. Compact Armor, Helmet, Cape and Pattern lanes each have independent wheel and scrollbar controls. Identical tables within the same gear family share one preview with a count; every saved binding remains available for application and export. Choose which parts to apply to mix and match. Type labels show included gear. **Rename Preset** changes its name; **Delete Preset** asks before removing it from the library.
 
 **The Armory** provides independent **Armor**, **Helmet** and **Cape** checkboxes above one **Apply Preset** button. Parts available in the selected preset start checked; unavailable parts are disabled. Apply changes only the checked parts as one undoable action. Older presets with Armor-labelled Cape entries remain usable when their destination keys match the current Cape exactly.
+
+When naming a saved preset, start typing an existing name and press **Tab** to complete its suggested match. Completion changes the draft; **Save Preset** or Enter saves it.
 
 Basic mode uses one **Apply Preset...** button to open a two-column LUT chooser. Select individual Armor, Cape and Helmet LUTs or use **Select All**. Matching Pattern LUTs are included with the selected material LUTs.
 

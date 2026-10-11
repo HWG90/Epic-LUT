@@ -22,14 +22,17 @@ with zipfile.ZipFile(candidate)as z:
     if direct:
         assert not any(name.lower().endswith(('.py','.exe','.pyd','.zip','.whl'))for name in z.namelist())
         authored=b'm.player_authored_source=(function()'in body
-        ps1=['tools/import_zip.ps1','tools/original_snapshots.ps1']
-        cs=['tools/original_snapshots.cs']
+        ps1=['tools/import_zip.ps1','tools/original_snapshots.ps1','tools/binding_provenance.ps1']
+        cs=['tools/original_snapshots.cs','tools/binding_provenance_reader.cs']
         if authored:
             ps1.append('tools/authored_preview.ps1');cs.append('tools/authored_preview_reader.cs')
             model=z.read('armor_lut_editor/mod.lua')
             for field,path in [('authored_preview_script','tools/authored_preview.ps1'),('authored_preview_reader','tools/authored_preview_reader.cs')]:
                 value=re.search(rb'm\.'+field.encode()+rb"='([0-9a-f]+)'",model)
                 assert value and bytes.fromhex(value[1].decode())==z.read(path)==(root/path).read_bytes(),'Authored helper source differs'
+        for field,path in [('binding_provenance_script','tools/binding_provenance.ps1'),('binding_provenance_reader','tools/binding_provenance_reader.cs')]:
+            value=re.search(rb'm\.'+field.encode()+rb"='([0-9a-f]+)'",body)
+            assert value and bytes.fromhex(value[1].decode())==z.read(path)==(root/path).read_bytes(),'Binding helper source differs'
         assert [name for name in z.namelist()if name.endswith('.ps1')]==ps1
         assert [name for name in z.namelist()if name.endswith('.cs')]==cs
         assert not any(name.endswith(('.bin','.animation','.bones','.unit'))for name in z.namelist()),'Game animation resources entered package'

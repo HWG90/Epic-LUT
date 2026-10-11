@@ -958,6 +958,13 @@ local function populate_worn()
             ctx.log('Material LUTs loaded; Pattern quick editor not ready: ' .. tostring(ok and why or ready))
         end
     end
+    if manual_request and operations.request_binding_sources then
+        local ok, ready, why = pcall(operations.request_binding_sources)
+        local reason = ok and why or ready
+        if (not ok or ready == false) and reason and ctx.log then
+            ctx.log('Binding source request: ' .. tostring(reason))
+        end
+    end
     return true
 end
 local function mark_current_load()
@@ -1479,6 +1486,12 @@ local function apply_basic_camo(container, choice, mode, color)
     edit.preview_document, edit.preview_revision = document, document.revision
     if palette_editor then
         palette_editor.sync()
+    end
+    if mode == 'color' then
+        -- The selector follows the committed checked-region RGB immediately.
+        -- State synchronization suppresses callbacks, preserving the custom
+        -- recipe instead of applying the old named colorway again.
+        import_state()
     end
     if frontend.menu then
         frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
@@ -2358,6 +2371,241 @@ local function refresh_outfits()
         armory_collection.refresh()
     end
 end
+function operations.provenance_unit_resource(unit)
+    local sr = rawget(_G, 'stingray')
+    local U = sr and sr.Unit
+    assert(U and U.resource_name and native.alive(unit) ~= 0, 'Stable live unit resource API unavailable')
+    local value = tostring(U.resource_name(unit))
+    local hash = value:match('#ID%[(%x+)%]')
+    assert(hash and #hash == 16, 'Stable live unit resource ID unavailable')
+    return hash:lower()
+end
+function operations.provenance_read(address, size)
+    assert(
+        type(address) == 'number'
+            and address >= 65536
+            and address < 2 ^ 47
+            and type(size) == 'number'
+            and size >= 1
+            and size <= 96,
+        'Invalid kit snapshot read'
+    )
+    local buffer = ffi.new('uint8_t[?]', size)
+    return memory.read_into(ffi.cast('const uint8_t *', address), size, buffer) and ffi.string(buffer, size) or nil
+end
+function operations.ensure_binding_provenance()
+    if operations.provenance_resolver then
+        return operations.provenance_resolver
+    end
+    if
+        not (
+            m.binding_provenance
+            and m.binding_source_cache
+            and m.binding_provenance_script
+            and m.binding_provenance_reader
+        )
+    then
+        return nil
+    end
+    local cache = m.binding_source_cache.new(m, { paths = paths, log = ctx.log })
+    local resolver = m.binding_provenance.new({
+        native = native,
+        engine = m.engine,
+        present = present,
+        binding = binding,
+        unit_source = cache.unit,
+        material_source = cache.material,
+        unit_resource = operations.provenance_unit_resource,
+        kit_override = function(b, hash, slot)
+            local identity = assert(m.avatar.resolve(memory, game, appearance_read), 'Current kit identity unavailable')
+            return m.binding_provenance.kit_override(operations.provenance_read, game, identity, b, hash, slot)
+        end,
+    })
+    operations.provenance_cache, operations.provenance_resolver = cache, resolver
+    return resolver
+end
+function operations.request_binding_sources()
+    local resolver = operations.ensure_binding_provenance()
+    if not resolver then
+        return false
+    end
+    local identity = assert(m.avatar.resolve(memory, game, appearance_read), 'Current kit identity unavailable')
+    local units, seen, refused = {}, {}, nil
+    for _, group in ipairs(groups) do
+        for _, b in ipairs(group.bindings) do
+            if not seen[b.unit] then
+                seen[b.unit] = true
+                local ok, value = pcall(function()
+                    local hash = operations.provenance_unit_resource(b.unit)
+                    local _, kit = m.binding_provenance.kit_override(
+                        operations.provenance_read,
+                        game,
+                        identity,
+                        b,
+                        hash,
+                        m.engine.LUT_SLOT
+                    )
+                    return { resource = hash, archive = kit.archive }
+                end)
+                if ok then
+                    units[#units + 1] = value
+                else
+                    refused = refused or tostring(value)
+                end
+            end
+        end
+    end
+    if #units == 0 then
+        return false, refused or 'No current units have a unique kit source proof'
+    end
+    if refused and ctx.log then
+        ctx.log('Binding source request omitted unproven units: ' .. refused:sub(1, 512))
+    end
+    local ok, why = operations.provenance_cache.start(units, true)
+    if ok then
+        operations.provenance_probe_requested = true
+    end
+    return ok, why
+end
+function operations.probe_binding_sources()
+    local cache = operations.provenance_cache
+    if not operations.provenance_probe_requested or not cache or cache.state ~= 'ready' then
+        return
+    end
+    operations.provenance_probe_requested = nil
+    local counts = { targets = 0, matched = 0, unmatched = 0, ambiguous = 0, kit_override = 0, unready = 0 }
+    local reasons = {}
+    -- Explicit-request completion is read-only: do not refresh/discover, stop
+    -- flashes, mutate documents or bind anything while collecting evidence.
+    for _, pool in ipairs({
+        { targets = groups, pattern = false },
+        { targets = pattern_editor and pattern_editor.all_groups or {}, pattern = true },
+    }) do
+        for _, group in ipairs(pool.targets) do
+            for _, b in ipairs(group.bindings) do
+                local original = original_luts and original_luts.get(b.original)
+                counts.targets = counts.targets + 1
+                local ok, why = pcall(operations.provenance_resolver.capture, b, {
+                    kind = m.gear_catalog.kind(b),
+                    key = (pool.pattern and 'p:' or '') .. b.save_key,
+                    original = original,
+                })
+                if ok then
+                    counts.matched = counts.matched + 1
+                else
+                    why = tostring(why)
+                    local category = why:find('Active kit texture override', 1, true) and 'kit_override'
+                        or why:find('matches=0', 1, true) and 'unmatched'
+                        or why:find('pointer proof', 1, true) and 'ambiguous'
+                        or 'unready'
+                    counts[category] = counts[category] + 1
+                    if #reasons < 3 then
+                        reasons[#reasons + 1] = why:sub(1, 256)
+                    end
+                end
+            end
+        end
+    end
+    if ctx.log then
+        ctx.log(
+            'BINDING_PROVENANCE_PROBE index='
+                .. cache.index_stamp
+                .. ' targets='
+                .. counts.targets
+                .. ' matched='
+                .. counts.matched
+                .. ' unmatched='
+                .. counts.unmatched
+                .. ' ambiguous='
+                .. counts.ambiguous
+                .. ' kit_overrides='
+                .. counts.kit_override
+                .. ' unready='
+                .. counts.unready
+                .. (#reasons > 0 and ' reasons=' .. table.concat(reasons, ' | ') or '')
+        )
+    end
+end
+function operations.binding_export_provider(preset)
+    local hydrated, matches = {}
+    local function prepare()
+        local resolver = assert(operations.ensure_binding_provenance(), 'Binding provenance resolver unavailable')
+        if operations.provenance_cache.state ~= 'ready' or not operations.provenance_cache.validate_scope() then
+            operations.request_binding_sources()
+            error('Reading exact binding sources; retry Export after the background cache is ready', 0)
+        end
+        assert(stop_identification(), 'Highlight restoration pending')
+        if pattern_editor then
+            assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
+        end
+        refresh(true)
+        if pattern_editor then
+            pattern_editor.scan()
+        end
+        local current = {}
+        for _, pool in ipairs({
+            { targets = groups, pattern = false },
+            { targets = pattern_editor and pattern_editor.all_groups or {}, pattern = true },
+        }) do
+            for _, group in ipairs(pool.targets) do
+                for _, b in ipairs(group.bindings) do
+                    local key = m.gear_catalog.kind(b) .. ':' .. (pool.pattern and 'p:' or '') .. b.save_key
+                    current[key] = current[key] or {}
+                    current[key][#current[key] + 1] = b
+                end
+            end
+        end
+        local found = {}
+        -- Legacy manifests have no stable asset IDs. Require the complete
+        -- saved target set and original texture metadata to match current gear
+        -- before the independent pointer/SectionID proof can hydrate anything.
+        for _, entry in ipairs(preset.entries) do
+            local candidates = current[entry.kind .. ':' .. entry.key]
+            local b = candidates and #candidates == 1 and candidates[1]
+            local original = b and original_luts and original_luts.get(b.original)
+            assert(
+                b
+                    and original
+                    and entry.original
+                    and original.resource == entry.original.resource
+                    and original.width == entry.original.width
+                    and original.height == entry.original.height,
+                'Saved preset does not uniquely match the complete current gear; binding assignments were not retargeted'
+            )
+            assert(present(b) and binding(b) == b.current, 'Current binding changed before export')
+            found[entry] = { binding = b, original = original }
+        end
+        matches = found
+        return resolver
+    end
+    return function(entry)
+        local resolver = matches and operations.provenance_resolver or prepare()
+        local target = assert(matches[entry], 'Export entry is not in the verified preset')
+        if not hydrated[entry] then
+            if not entry.binding_provenance then
+                local current = applied_document(target.binding) or target.original
+                assert(
+                    current
+                        and current.width == entry.document.width
+                        and current.height == entry.document.height
+                        and ffi.string(current.data, current.width * current.height * 16)
+                            == ffi.string(entry.document.data, entry.document.width * entry.document.height * 16),
+                    'Apply this legacy preset to the current gear first; its assigned colors do not match the active binding context'
+                )
+            end
+            local source, refs =
+                resolver.capture(target.binding, { kind = entry.kind, key = entry.key, original = target.original })
+            if entry.binding_provenance then
+                assert(
+                    m.binding_provenance.encode(refs) == m.binding_provenance.encode(entry.binding_provenance),
+                    'Saved binding provenance differs from current pristine assets/kit; no assignments guessed'
+                )
+            end
+            hydrated[entry] = source
+        end
+        return hydrated[entry]
+    end
+end
 local function keep_outfit(name, save_kind)
     assert(outfits, 'Outfit storage unavailable')
     local explicit = type(save_kind) == 'table'
@@ -2397,6 +2645,11 @@ local function keep_outfit(name, save_kind)
     local entries, seen = {}, {}
     local counts = { armor = 0, helmet = 0, cape = 0 }
     local material_counts = { armor = 0, helmet = 0, cape = 0 }
+    local resolver = operations.ensure_binding_provenance()
+    if resolver and operations.provenance_cache.state == 'ready' then
+        operations.provenance_cache.validate_scope()
+    end
+    local provenance_count, provenance_error = 0, nil
     local function collect(targets, pattern)
         for _, group in ipairs(targets) do
             for _, b in ipairs(group.bindings) do
@@ -2408,7 +2661,29 @@ local function keep_outfit(name, save_kind)
                     local source = applied_document(b) or original
                     if not pattern or (source and source.width == 3 and source.height == 1) then
                         assert(source, 'Current ' .. kind .. ' LUT unavailable; load current gear before saving')
-                        entries[#entries + 1] = { kind = kind, key = saved_key, document = source, original = original }
+                        local provenance
+                        if
+                            resolver
+                            and original
+                            and original.patch_source
+                            and operations.provenance_cache.state == 'ready'
+                        then
+                            local ok, _, refs =
+                                pcall(resolver.capture, b, { kind = kind, key = saved_key, original = original })
+                            if ok then
+                                provenance = refs
+                                provenance_count = provenance_count + 1
+                            else
+                                provenance_error = provenance_error or tostring(_)
+                            end
+                        end
+                        entries[#entries + 1] = {
+                            kind = kind,
+                            key = saved_key,
+                            document = source,
+                            original = original,
+                            binding_provenance = provenance,
+                        }
                         counts[kind] = counts[kind] + 1
                         if not pattern then
                             material_counts[kind] = material_counts[kind] + 1
@@ -2458,6 +2733,17 @@ local function keep_outfit(name, save_kind)
         )
     end
     armory_collection.save(name, entries)
+    if resolver and ctx.log then
+        ctx.log(
+            'ARMORY_PROVENANCE captured='
+                .. provenance_count
+                .. ' total='
+                .. #entries
+                .. ' cache='
+                .. operations.provenance_cache.state
+                .. (provenance_error and ' reason=' .. provenance_error:sub(1, 512) or '')
+        )
+    end
     if api.mods[handle.id].controls.armory_search then
         assert(handle.set('armory_search', ''))
     end
@@ -3039,7 +3325,7 @@ function operations.choose_outfit_luts()
     return message('Choose current LUTs to apply. Associated Pattern LUTs are always included.')
 end
 function operations.open_import_map(kind, prepared)
-    assert(kind == 'armor' or kind == 'helmet' or kind == 'cape', 'Choose Armor, Helmet or Cape to map')
+    assert(kind == 'gear' or kind == 'armor' or kind == 'helmet' or kind == 'cape', 'Choose gear to map')
     assert(frontend.menu and #palettes > 0, 'Import a LUT file first')
     assert(not pending, 'Wait for the current import to finish')
     local missing = false
@@ -3063,10 +3349,18 @@ function operations.open_import_map(kind, prepared)
     end
     local proof = assert(appearance_proof(), 'Current gear identity unavailable; load current gear again')
     local catalog = palettes
-    local columns = {
-        { title = 'Imported LUTs', items = {} },
-        { title = 'Current ' .. (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)) .. ' LUTs', items = {} },
-    }
+    local kinds = kind == 'gear' and { 'armor', 'helmet', 'cape' } or { kind }
+    local columns = { { title = 'Imported LUTs', items = {} } }
+    for _, k in ipairs(kinds) do
+        local label = k == 'cape' and 'Cape' or m.gear_catalog.label(k)
+        columns[#columns + 1] = {
+            title = kind == 'gear' and label or 'Current ' .. label .. ' LUTs',
+            kind = k,
+            items = {},
+            enabled = false,
+            checked = false,
+        }
+    end
     local sources, source_order, resources = {}, {}, {}
     local function pixels(d)
         return d and ffi.string(d.data, d.width * d.height * 16)
@@ -3098,7 +3392,7 @@ function operations.open_import_map(kind, prepared)
         end
         columns[1].items[#columns[1].items + 1] = {
             id = id,
-            label = 'Imported LUT ' .. index .. ' / ' .. name,
+            label = (kind == 'gear' and 'LUT ' or 'Imported LUT ') .. index .. ' / ' .. name,
             enabled = r.enabled,
             detail = d and d.width ~= 23 and 'Pattern LUT' or not d and 'Unavailable LUT' or nil,
         }
@@ -3138,44 +3432,54 @@ function operations.open_import_map(kind, prepared)
         )
     end
     local targets, target_order = {}, {}
-    local container = kind == 'helmet' and 'helmet' or 'armor'
-    for _, choice in ipairs(current_choices(container)) do
-        if choice.kind == kind then
-            local target = { target = import_target(kind, choice.group), members = {}, patterns = {} }
-            local enabled, why = pcall(function()
-                assert(proof[kind], 'Current gear identity unavailable')
-                for _, b in ipairs(groups[choice.group].bindings) do
-                    if m.gear_catalog.kind(b) == kind then
-                        local r = receipt(b)
-                        validate_receipt(r)
-                        assert(r.width == 23, 'Current material LUT is not ready')
-                        target.members[#target.members + 1] = r
-                        for _, group in ipairs(pattern_editor and pattern_editor.all_groups or {}) do
-                            for _, p in ipairs(group.bindings) do
-                                if m.gear_catalog.kind(p) == kind and material_key(p) == material_key(b) then
-                                    target.patterns[material_key(b)] = receipt(p)
+    for column_index, target_kind in ipairs(kinds) do
+        local column = columns[column_index + 1]
+        local container = target_kind == 'helmet' and 'helmet' or 'armor'
+        for _, choice in ipairs(current_choices(container)) do
+            if choice.kind == target_kind then
+                local target = { target = import_target(target_kind, choice.group), members = {}, patterns = {} }
+                local enabled, why = pcall(function()
+                    assert(proof[target_kind], 'Current gear identity unavailable')
+                    for _, b in ipairs(groups[choice.group].bindings) do
+                        if m.gear_catalog.kind(b) == target_kind then
+                            local r = receipt(b)
+                            validate_receipt(r)
+                            assert(r.width == 23, 'Current material LUT is not ready')
+                            target.members[#target.members + 1] = r
+                            for _, group in ipairs(pattern_editor and pattern_editor.all_groups or {}) do
+                                for _, p in ipairs(group.bindings) do
+                                    if m.gear_catalog.kind(p) == target_kind and material_key(p) == material_key(b) then
+                                        target.patterns[material_key(b)] = receipt(p)
+                                    end
                                 end
                             end
                         end
                     end
-                end
-                assert(#target.members > 0, 'Current LUT has no material bindings')
-            end)
-            target.enabled = enabled
-            target.item = {
-                id = choice.key,
-                label = (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)) .. ' LUT ' .. choice.ordinal,
-                enabled = enabled,
-                detail = not enabled and tostring(why):gsub('^.-%.lua:%d+:%s*', '') or nil,
-            }
-            targets[choice.key], target_order[#target_order + 1] = target, target
-            columns[2].items[#columns[2].items + 1] = target.item
+                    assert(#target.members > 0, 'Current LUT has no material bindings')
+                end)
+                target.enabled = enabled
+                target.item = {
+                    id = choice.key,
+                    label = kind == 'gear' and ('LUT ' .. choice.ordinal)
+                        or (target_kind == 'cape' and 'Cape' or m.gear_catalog.label(target_kind))
+                            .. ' LUT '
+                            .. choice.ordinal,
+                    enabled = enabled,
+                    detail = not enabled and tostring(why):gsub('^.-%.lua:%d+:%s*', '') or nil,
+                }
+                targets[choice.key], target_order[#target_order + 1] = target, target
+                column.items[#column.items + 1] = target.item
+                column.enabled = column.enabled or enabled
+                column.checked = column.enabled
+            end
         end
     end
     local dialog = {
         mode = 'mapping',
-        title = 'Map LUTs to ' .. (kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)),
+        title = 'Map LUTs to '
+            .. (kind == 'gear' and 'Gear' or kind == 'cape' and 'Cape' or m.gear_catalog.label(kind)),
         columns = columns,
+        gear_columns = kind == 'gear',
     }
     local current_source = catalog[handle.get('palette')]
     dialog.source_id = current_source and sources['source:' .. current_source].enabled and 'source:' .. current_source
@@ -3236,11 +3540,12 @@ function operations.open_import_map(kind, prepared)
         local plans, included = {}, {}
         for _, assignment in ipairs(assignments) do
             local source, target = assignment.source, assignment.target
+            local target_kind = target.target.kind
             local actual, members = {}, {}
             for _, group in ipairs(groups) do
                 if group.object == target.target.object then
                     for _, b in ipairs(group.bindings) do
-                        if m.gear_catalog.kind(b) == kind then
+                        if m.gear_catalog.kind(b) == target_kind then
                             actual[material_key(b) .. ':' .. tostring(b.slot or m.engine.LUT_SLOT)] = b.save_key
                             members[#members + 1] = b
                         end
@@ -3284,7 +3589,7 @@ function operations.open_import_map(kind, prepared)
                         for _, group in ipairs(pattern_editor.all_groups or {}) do
                             for _, current in ipairs(group.bindings) do
                                 if
-                                    m.gear_catalog.kind(current) == kind
+                                    m.gear_catalog.kind(current) == target_kind
                                     and material_key(current) == material_key(b)
                                 then
                                     fresh = current
@@ -3310,10 +3615,16 @@ function operations.open_import_map(kind, prepared)
         end
         local before = assert(history, 'Mapping history is unavailable; reopen Epic LUT').capture()
         local previous_proofs, previous_cape = operations.lut_apply_proofs, operations.armory_cape_proof
-        operations.lut_apply_proofs, operations.armory_cape_proof = proof, kind == 'cape' and proof.cape or nil
+        local applied_kinds = {}
+        for _, assignment in ipairs(assignments) do
+            applied_kinds[assignment.target.target.kind] = true
+        end
+        operations.lut_apply_proofs, operations.armory_cape_proof = proof, applied_kinds.cape and proof.cape or nil
         local ok, count = pcall(function()
             local applied = 0
-            set_default(kind, nil)
+            for k in pairs(applied_kinds) do
+                set_default(k, nil)
+            end
             for _, plan in ipairs(plans) do
                 if plan.pattern then
                     applied = applied
@@ -3325,7 +3636,7 @@ function operations.open_import_map(kind, prepared)
                 else
                     applied = applied + apply_bindings(plan.document, plan.targets)
                     for _, b in ipairs(plan.targets) do
-                        basic_documents[kind .. ':' .. tostring(b.original)] =
+                        basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] =
                             m.basic_state.clone(plan.document, plan.document.source)
                     end
                 end
@@ -3390,7 +3701,26 @@ function operations.open_import_map(kind, prepared)
         assert(source and target, 'Mapping choices changed; reopen Map LUTs')
         return run({ { source = source, target = target } })
     end
-    dialog.on_auto_map = function()
+    dialog.on_auto_map = function(gear_mask)
+        local selected_kinds = {}
+        if kind == 'gear' then
+            assert(type(gear_mask) == 'table', 'Choose Armor, Helmet and/or Cape to auto-map')
+            for k, checked in pairs(gear_mask) do
+                assert(
+                    (k == 'armor' or k == 'helmet' or k == 'cape') and type(checked) == 'boolean',
+                    'Invalid auto-map gear selection'
+                )
+            end
+            for column_index, k in ipairs(kinds) do
+                if gear_mask[k] then
+                    assert(columns[column_index + 1].enabled, 'Selected auto-map gear is not ready')
+                    selected_kinds[k] = true
+                end
+            end
+            assert(next(selected_kinds), 'Choose Armor, Helmet and/or Cape to auto-map')
+        else
+            selected_kinds[kind] = true
+        end
         local cycle = {}
         for _, source in ipairs(source_order) do
             if source.enabled then
@@ -3408,8 +3738,13 @@ function operations.open_import_map(kind, prepared)
         end)
         assert(#cycle > 0, 'No material LUTs available to auto-map')
         local assignments = {}
-        for index, target in ipairs(target_order) do
-            assignments[#assignments + 1] = { source = cycle[(index - 1) % #cycle + 1], target = target }
+        local ordinals = {}
+        for _, target in ipairs(target_order) do
+            local k = target.target.kind
+            if selected_kinds[k] then
+                ordinals[k] = (ordinals[k] or 0) + 1
+                assignments[#assignments + 1] = { source = cycle[(ordinals[k] - 1) % #cycle + 1], target = target }
+            end
         end
         return run(assignments)
     end
@@ -3757,6 +4092,13 @@ local function register(current)
                         return operations.include_capes_in_exports()
                     end,
                     include_patterns = operations.include_patterns_in_exports,
+                    binding_provenance = operations.binding_export_provider(preset),
+                    resource_id_available = function(kind, id)
+                        return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
+                            kind,
+                            id
+                        )
+                    end,
                 })
                 local output, description, sharefile = exporter.save(
                     handle.get('armory_export_name'),
@@ -3795,6 +4137,10 @@ local function register(current)
         end,
         outfit_choose_luts_activate = function()
             local ok, value = pcall(operations.choose_outfit_luts)
+            return ok and value or message(tostring(value))
+        end,
+        imported_map_gear_activate = function()
+            local ok, value = pcall(operations.open_import_map, 'gear')
             return ok and value or message(tostring(value))
         end,
         imported_map_armor_activate = function()
@@ -4135,6 +4481,7 @@ local function register(current)
                 save_kind = { armor = true, helmet = true, cape = true },
                 mod = api.mods[handle.id],
                 control = api.mods[handle.id].controls.outfit_name,
+                names = outfits.names(),
                 on_save = keep_outfit,
             }
             return message('Choose Armor, Helmet and Cape LUTs to keep as a named preset.')
@@ -4567,6 +4914,9 @@ local function close()
     if operations.camo_source and not operations.camo_source.close() then
         return false
     end
+    if operations.provenance_cache and not operations.provenance_cache.close() then
+        return false
+    end
     if armory_mirror and not armory_mirror.close() then
         return false
     end
@@ -4676,6 +5026,12 @@ local function reset_transient_state()
         choose_outfit_luts = operations.choose_outfit_luts,
         open_import_map = operations.open_import_map,
         sync_armory_cape = operations.sync_armory_cape,
+        provenance_unit_resource = operations.provenance_unit_resource,
+        provenance_read = operations.provenance_read,
+        ensure_binding_provenance = operations.ensure_binding_provenance,
+        request_binding_sources = operations.request_binding_sources,
+        binding_export_provider = operations.binding_export_provider,
+        probe_binding_sources = operations.probe_binding_sources,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
@@ -5354,6 +5710,13 @@ return {
         end
         if updates then
             pcall(updates.tick, dt)
+        end
+        if operations.provenance_cache then
+            pcall(operations.provenance_cache.tick)
+            local ok, why = pcall(operations.probe_binding_sources)
+            if not ok and ctx.log then
+                ctx.log('Binding provenance probe unavailable: ' .. tostring(why):sub(1, 512))
+            end
         end
         if original_luts then
             local ok, why = pcall(original_luts.tick)

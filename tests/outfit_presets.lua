@@ -320,3 +320,73 @@ assert(
     'Preset accepted row-65 original metadata'
 )
 store.delete('Tall Metadata')
+-- v3 adds metadata-only assignment references without changing older presets
+-- or confusing exact pixel aliases with separate target assignments.
+do
+    modules.binding_provenance = dofile('src/presets/binding_provenance.lua')
+    local original = original_for('000000000000001a', 8, patch_a)
+    local refs = {
+        version = 1,
+        kind = 'armor',
+        key = '0:2:2:0',
+        texture_slot = modules.binding_provenance.LUT,
+        original_texture = original.resource,
+        section = 0xabc12345,
+        kit_override = false,
+        index_stamp = ('b'):rep(64),
+        unit = {
+            resource = '0000000000000111',
+            archive = '1234567890abcdef',
+            main_sha256 = ('a'):rep(64),
+            main = 'GAME BYTES MUST NOT PERSIST',
+        },
+        material = { resource = '0000000000000222', archive = '1234567890abcdef', main_sha256 = ('c'):rep(64) },
+        kit = { id = 7, body = 0, archive = '1234567890abcdef' },
+        verified = true,
+    }
+    local entries = {
+        { kind = 'armor', key = refs.key, document = positive, original = original, binding_provenance = refs },
+        { kind = 'helmet', key = '0:0:1:0', document = positive, original = original },
+    }
+    assert(store.save('Assignment Metadata', entries))
+    local manifest = modules.file_io.read('tests/tmp/presets/outfit-Assignment Metadata.tsv', 65536)
+    assert(manifest:match('^EPIC%-OUTFIT\t3\n') and manifest:match('%.assignment\n') and manifest:match('\t%-$'))
+    local preset = store.load('Assignment Metadata')
+    assert(preset.entries[1].document == preset.entries[2].document and not preset.entries[2].binding_provenance)
+    local saved = preset.entries[1].binding_provenance
+    assert(
+        saved.unit.resource == refs.unit.resource
+            and saved.material.resource == refs.material.resource
+            and saved.section == refs.section
+    )
+    assert(
+        not saved.unit.main and not saved.verified,
+        'Assignment metadata shipped raw game bytes or trusted a verified flag'
+    )
+    local sidecar = manifest:match('\t([^\t\n]+%.assignment)')
+    local source = modules.file_io.read('tests/tmp/presets/' .. sidecar, 4096)
+    assert(not source:find('GAME BYTES', 1, true))
+    local write, calls = modules.file_io.write, 0
+    modules.file_io.write = function(...)
+        calls = calls + 1
+        return write(...)
+    end
+    refs.key = '0:2:3:0'
+    assert(not pcall(store.save, 'Assignment Metadata', entries) and calls == 0)
+    assert(
+        modules.file_io.read('tests/tmp/presets/outfit-Assignment Metadata.tsv', 65536) == manifest,
+        'Invalid assignment capture replaced the existing preset'
+    )
+    refs.key = entries[1].key
+    modules.file_io.write = write
+    modules.file_io.write('tests/tmp/presets/invalid-assignment.tsv', manifest:gsub('0:2:2:0', '0:2:3:0'))
+    assert(not pcall(module.read, modules, 'tests/tmp/presets/invalid-assignment.tsv', 'Invalid'))
+    local pattern = sidecar:gsub('([^%w])', '%%%1')
+    modules.file_io.write('tests/tmp/presets/invalid-assignment.tsv', manifest:gsub(pattern, '../' .. sidecar, 1))
+    assert(not pcall(module.read, modules, 'tests/tmp/presets/invalid-assignment.tsv', 'Invalid'))
+    assert(store.load('Roundtrip Outfit').entries[1].binding_provenance == nil, 'v2 compatibility changed')
+    store.delete('Assignment Metadata')
+    print(
+        'PASS v3 outfit provenance: metadata-only stable refs, mixed v2-style rows, exact pixel aliases, untrusted flag stripping, destination/path rejection and atomic invalid-save protection'
+    )
+end

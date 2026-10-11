@@ -14,6 +14,8 @@ SCRIPTS = (
     'tools/import_zip.ps1',
     'tools/original_snapshots.ps1',
     'tools/original_snapshots.cs',
+    'tools/binding_provenance.ps1',
+    'tools/binding_provenance_reader.cs',
     'tools/authored_preview.ps1',
     'tools/authored_preview_reader.cs',
 )

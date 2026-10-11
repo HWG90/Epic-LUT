@@ -35,6 +35,8 @@ PATCH = 'data/9ba626afa44a3aa3.patch_0'
 HELPERS = {'debug_lut_dds_hex': 'assets/debug-lut.dds',
            'original_snapshot_script': 'tools/original_snapshots.ps1',
            'original_snapshot_reader': 'tools/original_snapshots.cs',
+           'binding_provenance_script': 'tools/binding_provenance.ps1',
+           'binding_provenance_reader': 'tools/binding_provenance_reader.cs',
            'camo_preview_script': 'tools/camo_preview.ps1',
            'camo_preview_reader': 'tools/camo_preview_reader.cs',
            'authored_preview_script': 'tools/authored_preview.ps1',

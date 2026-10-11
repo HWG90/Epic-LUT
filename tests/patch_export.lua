@@ -45,7 +45,14 @@ assert(main:sub(13, 192) == string.rep('\0', 180), 'Stale stream/mip offsets ret
 local pixels, w, h = D.decode(main:sub(193) .. p.gpu)
 assert(w == 23 and h == 2 and ffi.string(pixels, #p.gpu) == ffi.string(document.data, #p.gpu))
 assert(not pcall(P.encode, D, document, { width = 23, height = 2, resource = original.resource }))
-assert(not pcall(P.encode, D, { width = 23, height = 1, data = document.data }, original))
+local shorter = P.encode(D, { width = 23, height = 1, data = document.data }, original)
+local shorter_pixels, shorter_width, shorter_height = D.decode(shorter.main:sub(377) .. shorter.gpu)
+assert(
+    shorter_width == 23
+        and shorter_height == 1
+        and ffi.string(shorter_pixels, 23 * 16) == ffi.string(document.data, 23 * 16),
+    'Material replacement was remapped to the original row count'
+)
 -- Multi-LUT palette: one TOC, exact IDs, independently aligned GPU ranges, all channels retained.
 local items = {}
 for i = 1, 10 do
@@ -213,7 +220,7 @@ os.remove(zip_path)
 rmdir(destination)
 rmdir(root)
 print(
-    'PASS patch export: 4096 bindings, 129 unique exact IDs, ZIP8193-member boundary, native wrapper, full-float bytes, complete triplet and rollback'
+    'PASS patch export: 4096 bindings, 129 unique exact IDs, ZIP12289-member v3 boundary, native wrapper, full-float bytes, complete triplet and rollback'
 )
 
 local custom_pixels = ffi.new('float[?]', 23 * 64 * 4)
@@ -227,3 +234,65 @@ local custom_source = {
 local custom_patch = P.encode(D, { width = 23, height = 64, data = custom_pixels }, custom_source)
 local custom_data, cw, ch = D.decode(custom_patch.main:sub(377) .. custom_patch.gpu)
 assert(cw == 23 and ch == 64 and custom_data[63 * 23 * 4] == 0.75, 'Patch export truncated custom row count')
+-- Applied imports replace a whole material texture; a five-row Cape can carry
+-- an eight-row palette, and one/64-row tables can replace ordinary materials.
+-- Both DDS dimensions and GPU byte count must describe the saved source.
+for _, shapes in ipairs({ { 5, 8 }, { 8, 5 }, { 8, 1 }, { 1, 64 }, { 64, 2 } }) do
+    local old_height, height = shapes[1], shapes[2]
+    local data = ffi.new('float[?]', 23 * height * 4)
+    for index = 0, 23 * height * 4 - 1 do
+        data[index] = index / 23 - 12.5
+    end
+    local source = {
+        width = 23,
+        height = old_height,
+        resource = '13e2e070c0dcbd53',
+        patch_source = '0123456789abcdef\n'
+            .. string.rep('\0', 192)
+            .. D.encode(ffi.new('float[?]', 23 * old_height * 4), 23, old_height):sub(1, 148),
+    }
+    local saved = { width = 23, height = height, data = data }
+    local encoded = P.encode(D, saved, source)
+    local decoded, width, rows = D.decode(encoded.main:sub(377) .. encoded.gpu)
+    assert(
+        width == 23
+            and rows == height
+            and #encoded.gpu == 23 * height * 16
+            and u(encoded.main, 168) == #encoded.gpu
+            and ffi.string(decoded, #encoded.gpu) == ffi.string(data, #encoded.gpu),
+        'Resized material patch changed saved dimensions, GPU length or full floats'
+    )
+    assert(
+        saved.height == height and source.height == old_height,
+        'Material patch export changed saved or original dimensions'
+    )
+    local stale = {}
+    for key, value in pairs(source) do
+        stale[key] = value
+    end
+    stale.height = old_height == 64 and 63 or old_height + 1
+    local ok, why = pcall(P.encode, D, saved, stale)
+    assert(
+        not ok and tostring(why):find('native texture header', 1, true),
+        'Stale original dimensions bypassed native metadata verification'
+    )
+end
+for _, bad in ipairs({
+    { width = 3, height = 2, data = ffi.new('float[24]') },
+    { width = 23, height = 1, data = ffi.new('float[92]') },
+}) do
+    assert(not pcall(P.encode, D, bad, pattern_original), 'Material or non-3x1 source replaced a Pattern resource')
+end
+assert(
+    not pcall(P.encode, D, { width = 3, height = 1, data = pattern_data }, original),
+    'Pattern source replaced a material resource'
+)
+for _, height in ipairs({ 0, 65, 1.5 }) do
+    assert(
+        not pcall(P.encode, D, { width = 23, height = height, data = custom_pixels }, custom_source),
+        'Unbounded or fractional material replacement dimensions were serialized'
+    )
+end
+print(
+    'PASS patch resized materials: verified original headers, exact saved1..64-row DDS/GPU bytes and strict3x1 Pattern family guards'
+)

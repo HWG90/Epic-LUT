@@ -1,7 +1,8 @@
 -- Internal, texture-only Stingray patch writer. No converter or subprocess.
 -- Layout reference: HD2SDK Community Edition, TocEntry/StreamToc and StingrayTexture.
--- A preset can contain one DDS and one metadata sidecar per binding, plus its manifest.
-local P = { MAX_BINDINGS = 4096, ZIP_MAX_MEMBERS = 8193 }
+-- A preset can contain DDS, texture metadata and assignment references per
+-- binding, plus its manifest. The optional v3 references contain no game bytes.
+local P = { MAX_BINDINGS = 4096, ZIP_MAX_MEMBERS = 12289 }
 -- The original LUT can occur in unrelated tutorial/prop archives. Its source
 -- archive is provenance, not a reliable loaded patch destination. Match the
 -- SDK's PatchBaseArchiveOnly default so one resource replacement is global.
@@ -42,14 +43,25 @@ function P.encode(dds, document, original)
         uint(template, 324) == 3 and uint(template, 328) == 0 and uint(template, 332) == 1,
         'Only single-layer 2D LUT textures can be exported'
     )
+    -- The snapshot certifies the resource and native texture kind. Its DDS
+    -- dimensions must agree with its metadata, even when the applied material
+    -- uses a different row count. The replacement header/GPU payload comes
+    -- entirely from the saved DDS, matching the live texture replacement.
     assert(
-        document.width == original.width
-            and (document.height == original.height or (document.width == 23 and document.height > 8 and document.height >= original.height))
+        (original.width == 23 or original.width == 3)
+            and type(original.height) == 'number'
+            and original.height >= 1
+            and original.height <= 64
+            and original.height % 1 == 0
+            and (original.width ~= 3 or original.height == 1)
             and uint(template, 208) == original.width
             and uint(template, 204) == original.height,
-        'Editor LUT dimensions differ from selected destination'
+        'Original patch metadata dimensions differ from its native texture header'
     )
-    assert(document.width == 23 or (document.width == 3 and document.height == 1), 'Unsupported patch LUT layout')
+    assert(
+        document.width == original.width and (document.width == 23 or (document.width == 3 and document.height == 1)),
+        'Editor LUT columns or texture kind differ from selected destination'
+    )
     local encoded = dds.encode(document.data, document.width, document.height)
     -- SDK writer preserves UnkID, disables streaming and clears all 15 mip descriptors.
     -- Export one unfiltered RGBA32F level: LUT rows are discrete material parameters.
@@ -87,24 +99,35 @@ function P.encode(dds, document, original)
         stream = '',
     }
 end
-function P.encode_set(dds, documents)
+function P.encode_set(dds, documents, options)
     assert(
         type(documents) == 'table' and #documents > 0 and #documents <= P.MAX_BINDINGS,
         'No complete palette to export or too many LUTs'
     )
-    local unique, ordered = {}, {}
+    local unique, ordered, patches, conflict = {}, {}, {}, nil
     for _, item in ipairs(documents) do
         local patch = P.encode(dds, item.document, item.original)
+        patches[#patches + 1] = patch
         local previous = unique[patch.resource]
         if previous then
-            assert(
-                previous.main == patch.main and previous.gpu == patch.gpu,
-                'Shared texture has conflicting applied palettes: ' .. patch.resource
-            )
+            if previous.main ~= patch.main or previous.gpu ~= patch.gpu then
+                conflict = conflict or patch.resource
+            end
         else
             unique[patch.resource] = patch
             ordered[#ordered + 1] = patch
         end
+    end
+    if conflict then
+        if options and options.binding_writer then
+            return options.binding_writer.encode(P.BASE_ARCHIVE, documents, patches, options)
+        end
+        error(
+            'Shared texture has conflicting applied palettes: '
+                .. conflict
+                .. '. Verified material/unit assignment provenance is required to preserve every binding.',
+            0
+        )
     end
     table.sort(ordered, function(a, b)
         return a.resource < b.resource
@@ -175,7 +198,7 @@ function P.new(folder, deps)
                 and not name:upper():match('^LPT%d$'),
             'Reserved export name'
         )
-        local patch = original and P.encode(deps.dds, document, original) or P.encode_set(deps.dds, document)
+        local patch = original and P.encode(deps.dds, document, original) or P.encode_set(deps.dds, document, deps)
         local zip = P.zip(patch)
         name = assert(deps.available_name, 'Export naming service unavailable')(name, function(candidate)
             return deps.directory_exists(folder .. '/' .. candidate)

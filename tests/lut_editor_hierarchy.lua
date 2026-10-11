@@ -346,18 +346,18 @@ for _, width in ipairs({ 860, 1100, 1600 }) do
             tap(tools)
             assert(editor.tools.is_open(), 'Tools button does not open the menu')
             commands = compose()
-            local all_armor = label(commands, 'Map LUTs to Armor', true)
+            local all_armor = label(commands, 'Map LUTs to Gear', true)
             local selected_apply = label(commands, 'Apply to Cape LUT 1', true)
             assert(
                 all_armor.y < selected_apply.y or all_armor.x > selected_apply.x,
                 'Mapping overlaps the selected-LUT action'
             )
             tap({ x = all_armor.x, y = all_armor.y, w = all_armor.text_width, h = all_armor.size })
-            assert(calls.imported_map_armor_activate, 'Armor mapping routes to the wrong callback')
+            assert(calls.imported_map_gear_activate, 'Mapping routes to the wrong shared Gear callback')
             editor.gear = 'helmet'
-            local all_helmet = label(compose(), 'Map LUTs to Helmet', true)
+            local all_helmet = label(compose(), 'Map LUTs to Gear', true)
             tap({ x = all_helmet.x, y = all_helmet.y, w = all_helmet.text_width, h = all_helmet.size })
-            assert(calls.imported_map_helmet_activate, 'Helmet mapping routes to the wrong callback')
+            assert(calls.imported_map_gear_activate > 1, 'Gear chooser changed its callback with selected Helmet gear')
             editor.gear = 'armor'
             tap_label('Scratch')
             assert(

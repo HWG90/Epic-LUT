@@ -30,7 +30,7 @@ local state = {
 }
 local picked
 local pick_calls = 0
-local cape_actions = 0
+local mapping_actions = 0
 local view = dofile('src/editor/import_view.lua').new(
     function()
         return state
@@ -60,6 +60,7 @@ for _, id in ipairs({
     'apply_matching',
     'global_undo',
     'global_redo',
+    'imported_map_gear',
     'imported_map_armor',
     'imported_map_helmet',
     'imported_map_cape',
@@ -86,8 +87,8 @@ for _, id in ipairs({
         on_activate = function()
             if id == 'populate_worn' then
                 load_actions = load_actions + 1
-            elseif id == 'imported_map_cape' then
-                cape_actions = cape_actions + 1
+            elseif id == 'imported_map_gear' then
+                mapping_actions = mapping_actions + 1
             end
             return true
         end,
@@ -136,10 +137,12 @@ assert(
     'Import layout did not complete'
 )
 assert(
-    texts['Map LUTs to Armor'] and texts['Map LUTs to Helmet'],
-    'Multi-LUT selected-source broadcast controls missing'
+    texts['Map LUTs to Gear']
+        and not texts['Map LUTs to Armor']
+        and not texts['Map LUTs to Helmet']
+        and not texts['Map LUTs to Cape'],
+    'Import workspace did not expose one shared Gear mapping chooser'
 )
-assert(texts['Map LUTs to Cape'], 'Imported palette Cape action missing')
 assert(
     texts.Armor and texts.Helmet and texts['Armor LUT 1'] and texts['Helmet LUT 2'],
     'Target color previews were not grouped'
@@ -236,8 +239,8 @@ for _, font in ipairs({ 12, 20 }) do
     end
 end
 assert(compact and stacked, 'Header layout did not adapt to available label space')
--- The added action remains in the scrollable action frame and only accepts
--- input when both an imported palette and worn Cape targets are available.
+-- The single chooser remains within the scrollable action frame and accepts
+-- an imported source even when no Cape is available; target guards are modal.
 menu.window_width, menu.window_height, menu.ui_scale = 1800, 1100, 1
 state.loaded, state.palette_count, state.busy = saved_document, 1, false
 view.action_scroll = 0
@@ -245,25 +248,178 @@ for _, font in ipairs({ 12, 20 }) do
     menu.font_size = font
     state.cape_available = false
     local commands = menu.compose(1920, 1200)
-    local cape_button = button_rectangle(commands, 'Map LUTs to Cape')
-    local armor_button = button_rectangle(commands, 'Map LUTs to Armor')
-    local helmet_button = button_rectangle(commands, 'Map LUTs to Helmet')
+    local mapping_button = button_rectangle(commands, 'Map LUTs to Gear')
     local preserve = button_rectangle(commands, '[   ] Preserve Original Emissives')
-    assert(
-        not overlap(cape_button, armor_button)
-            and not overlap(cape_button, helmet_button)
-            and not overlap(cape_button, preserve),
-        'Cape action overlaps existing import controls'
-    )
-    local before = cape_actions
-    tap(cape_button.x + cape_button.w / 2, cape_button.y + cape_button.h / 2)
-    assert(cape_actions == before, 'Missing Cape accepted an Apply click')
-    state.cape_available = true
+    assert(not overlap(mapping_button, preserve), 'Gear mapping action overlaps existing import controls')
+    local before = mapping_actions
+    tap(mapping_button.x + mapping_button.w / 2, mapping_button.y + mapping_button.h / 2)
+    assert(mapping_actions == before + 1, 'Missing Cape blocked the shared Gear chooser')
+    state.busy = true
     commands = menu.compose(1920, 1200)
-    cape_button = button_rectangle(commands, 'Map LUTs to Cape')
-    tap(cape_button.x + cape_button.w / 2, cape_button.y + cape_button.h / 2)
-    assert(cape_actions == before + 1, 'Visible Cape action lost its callback')
+    mapping_button = button_rectangle(commands, 'Map LUTs to Gear')
+    tap(mapping_button.x + mapping_button.w / 2, mapping_button.y + mapping_button.h / 2)
+    assert(mapping_actions == before + 1, 'Busy import accepted a Gear mapping click')
+    state.busy, state.loaded = false, nil
+    commands = menu.compose(1920, 1200)
+    mapping_button = button_rectangle(commands, 'Map LUTs to Gear')
+    tap(mapping_button.x + mapping_button.w / 2, mapping_button.y + mapping_button.h / 2)
+    assert(mapping_actions == before + 1, 'Unloaded import accepted a Gear mapping click')
+    state.loaded, state.cape_available = saved_document, true
 end
+-- Native glyph metrics determine the busy header's bands. Long source captions
+-- and a waiting picker must never share the spinner or the Send separator.
+local NativeView = dofile('vendor/menu/view.lua')
+local native_items, native_id = {}, 0
+local function metrics(size)
+    return { min_y = -0.2 * size, max_y = 0.85 * size, height = 1.05 * size }
+end
+local function allocate(item)
+    native_id = native_id + 1
+    item.order = native_id
+    native_items[native_id] = item
+    return native_id
+end
+local world = {}
+local renderer = NativeView.new({
+    Application = {
+        worlds = function()
+            return { world }
+        end,
+        main_world = function()
+            return world
+        end,
+    },
+    World = {
+        create_screen_gui = function()
+            return {}
+        end,
+        destroy_gui = function() end,
+    },
+    Vector2 = function(x, y)
+        return { x = x, y = y }
+    end,
+    Vector3 = function(x, y, z)
+        return { x = x, y = y, z = z }
+    end,
+    Color = function(a, r, g, b)
+        return { a = a, r = r, g = g, b = b }
+    end,
+    Gui = {
+        rect = function(_, p, size, color)
+            return allocate({ x = p.x, y = p.y, w = size.x, h = size.y, z = p.z, color = color })
+        end,
+        text = function(_, value, _, size, _, p, color)
+            local ink = metrics(size)
+            return allocate({
+                x = p.x,
+                y = p.y + ink.min_y,
+                w = #value * size * 0.5,
+                h = ink.height,
+                z = p.z,
+                color = color,
+                text = value,
+            })
+        end,
+        destroy_rect = function(_, id)
+            native_items[id] = nil
+        end,
+        destroy_text = function(_, id)
+            native_items[id] = nil
+        end,
+    },
+}, true)
+local function pixel(x, y)
+    local winner
+    for _, item in pairs(native_items) do
+        if
+            x >= item.x
+            and x < item.x + item.w
+            and y >= item.y
+            and y < item.y + item.h
+            and (not winner or item.z > winner.z or item.z == winner.z and item.order > winner.order)
+        then
+            winner = item
+        end
+    end
+    return assert(winner, 'Missing Import / Apply native pixel')
+end
+menu.text_metrics = metrics
+local original_description, original_detail = state.import_description, state.import_detail
+state.import_description =
+    'C:/Users/david/Downloads/Many imported textures with a very long palette collection filename.zip'
+state.import_detail, state.waiting = 'Waiting for file selection...', true
+for _, font in ipairs({ 12, 20 }) do
+    for _, scale in ipairs({ 0.85, 1.3 }) do
+        for _, width in ipairs({ 1100, 1800 }) do
+            menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = font, scale, width, 1100
+            state.busy, state.loaded = true, saved_document
+            local commands = menu.compose(1920, 1200)
+            local header, window = view.import_header, menu.window_bounds
+            assert(
+                header.status.y + header.status.h < header.source.y
+                    and header.spinner.y >= header.status.y
+                    and header.spinner.y + header.spinner.h <= header.status.y + header.status.h
+                    and header.spinner.x + header.spinner.w < header.status.x,
+                'Import spinner/status band collides with a wrapped source caption'
+            )
+            assert(
+                header.divider_y > header.send.y + header.send.h
+                    and header.guidance.y + header.guidance.h < header.send.y,
+                'Import divider or explanatory text crosses the Send button'
+            )
+            local send = button_rectangle(commands, 'Send to LUT Editor')
+            assert(
+                send.y >= window.y and send.y + send.h <= window.y + window.h,
+                'Measured Send button escapes the parent window'
+            )
+            renderer.draw(commands)
+            local source_rows = 0
+            for _, c in ipairs(commands) do
+                if c.type == 'text' then
+                    local ink = metrics(c.size)
+                    for _, band in ipairs({ header.source, header.status, header.guidance }) do
+                        local bx, by = window.x + band.x * window.scale, window.y + band.y * window.scale
+                        if math.abs(c.x - bx) < 0.01 and c.y >= by and c.y <= by + band.h * window.scale then
+                            assert(
+                                c.y + ink.min_y >= by - 0.01 and c.y + ink.max_y <= by + band.h * window.scale + 0.01,
+                                'Native imported source/status/help ink escaped its measured band'
+                            )
+                            assert(
+                                pixel(c.x + c.size * 0.1, c.y + c.size * 0.3).text == c.text,
+                                'Native source/status glyphs were obscured by the spinner or separator'
+                            )
+                            if band == header.source then
+                                source_rows = source_rows + 1
+                            end
+                        end
+                    end
+                    if c.full_text == 'Send to LUT Editor' then
+                        assert(
+                            pixel(c.x + c.size * 0.1, c.y + c.size * 0.3).text == c.text,
+                            'Native Send caption is obscured by the divider'
+                        )
+                    end
+                elseif c.ui_role == 'control_accent' then
+                    local spinner = header.spinner
+                    local sx, sy = window.x + spinner.x * window.scale, window.y + spinner.y * window.scale
+                    if c.x >= sx and c.x < sx + spinner.w * window.scale then
+                        assert(
+                            c.y >= sy and c.y + c.h <= sy + spinner.h * window.scale,
+                            'Native busy throbber escaped its dedicated band'
+                        )
+                    end
+                end
+            end
+            assert(source_rows >= 1 and source_rows <= 2, 'Imported source caption uses an unbounded number of rows')
+        end
+    end
+end
+renderer.release()
+state.import_description, state.import_detail, state.waiting = original_description, original_detail, false
+state.busy = false
+print(
+    'PASS Import header: measured busy/waiting/source bands, bounded wrapping, spinner clearance, Send divider/glyph containment across fonts/scales/widths'
+)
 -- The persistent preview/highlight actions belong inside the frame, with a
 -- reserved band below both scrollable gear lists and the import guidance.
 local prior_portrait = package.loaded['epic.player_preview.v1']

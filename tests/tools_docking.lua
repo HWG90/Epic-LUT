@@ -78,6 +78,7 @@ for _, control in ipairs({
     button('editor_load_helmet'),
     button('editor_apply_armor'),
     button('editor_all_armor'),
+    button('imported_map_gear'),
     button('imported_map_armor'),
     button('imported_map_helmet'),
     button('imported_map_cape'),
@@ -123,6 +124,7 @@ local mount_writes = writes
 preferences.mount(api)
 editor.tools.mount_preferences(preferences)
 assert(preferences.tools_docked() and writes == mount_writes, 'Default Tools layout read/mount wrote preferences')
+assert(editor.tools.is_open() and editor.tools.tab == 'import', 'Docked Tools did not start open on Import')
 local function restored_layout(expected)
     local count = writes
     local restored_preferences = dofile('src/platform/preferences.lua').new()
@@ -132,14 +134,53 @@ local function restored_layout(expected)
         document = function()
             return document
         end,
+        default_open_docked = true,
     })
     restored_tools.mount_preferences(restored_preferences)
+    assert(
+        restored_tools.is_open() == expected and restored_tools.tab == 'import',
+        'Startup Tools visibility did not follow the saved Dock preference'
+    )
+    restored_tools.close()
+    restored_tools.mount_preferences(restored_preferences)
+    assert(not restored_tools.is_open(), 'Preference remount reopened manually closed Tools')
     restored_tools.open('rows')
+    restored_tools.mount_preferences(restored_preferences)
+    assert(restored_tools.is_open() and restored_tools.tab == 'rows', 'Preference remount reset an active Tools tab')
     assert(
         restored_preferences.tools_docked() == expected and restored_tools.is_docked() == expected,
         'Tools layout did not survive a new preferences/controller instance'
     )
     assert(writes == count, 'Reading/restoring Tools layout wrote or replaced the saved choice')
+end
+do
+    local utility = modules.editor_tools.new({
+        editor = editor,
+        document = function()
+            return document
+        end,
+    })
+    utility.mount_preferences(preferences)
+    assert(not utility.is_open(), 'Generic Tools utility unexpectedly opted into editor startup visibility')
+    local restored = modules.editor_tools.new({
+        editor = editor,
+        document = function()
+            return document
+        end,
+        default_open_docked = true,
+    })
+    restored.mount_preferences({
+        tools_docked = function()
+            return false
+        end,
+    })
+    assert(not restored.is_open() and not restored.is_docked(), 'Saved Undock auto-opened a floating window')
+    restored.set_docked(true)
+    assert(not restored.is_open(), 'Redocking reopened closed Tools without an explicit open action')
+    restored.open('rows')
+    restored.close()
+    restored.mount_preferences(preferences)
+    assert(not restored.is_open(), 'Later preference attachment lost the session close choice')
 end
 local mod = api.mods[handle.id]
 import_control = mod.controls.import_paydex_rows
@@ -273,6 +314,11 @@ local function click_icon(popup, mode)
     assert(not position or position.x == old_x and position.y == old_y, 'Docking icon moved the floating window')
 end
 local initial_pixels = ffi.string(document.data, document.width * document.height * 16)
+local startup_commands = compose()
+assert(editor.tools.bounds and label(startup_commands, 'Import', false), 'Startup dock did not render its Import tab')
+for _, window in ipairs(menu.floating_windows or {}) do
+    assert(window.id ~= 'editor_tools', 'Startup dock created a floating Tools window')
+end
 editor.tools.open('rows')
 assert(editor.tools.is_docked(), 'Tools did not start docked by default')
 compose()
@@ -369,7 +415,18 @@ local function contained()
             and command.x >= wb.x + b.x * scale
             and command.x < wb.x + (b.x + b.w) * scale
         then
-            assert(command.y >= wb.y + (b.y + b.h) * scale, 'An actual swatch renders through docked Tools')
+            local preview = editor.tools.row_preview_bounds
+            local in_preview = preview
+                and preview.document
+                and preview.document.read_only
+                and command.x >= wb.x + preview.x * scale
+                and command.x + command.w <= wb.x + (preview.x + preview.w) * scale + 0.01
+                and command.y >= wb.y + preview.y * scale
+                and command.y + command.h <= wb.y + (preview.y + preview.h) * scale + 0.01
+            assert(
+                in_preview or command.y >= wb.y + (b.y + b.h) * scale,
+                'An actual swatch renders through docked Tools'
+            )
         end
     end
 end
@@ -575,6 +632,14 @@ assert(
     'Closing Tools removed persistent footer actions'
 )
 assert(not editor.tools.bounds, 'Closed Tools retained dock wheel ownership')
+local original_pages = mod.pages
+mod.pages = { original_pages[1], { id = 'other', name = 'Other', controls = {}, pending = {}, actions = {} } }
+menu.page = 2
+compose()
+menu.page = 1
+compose()
+mod.pages = original_pages
+assert(not editor.tools.is_open(), 'Returning to LUT Editor reopened manually closed Tools')
 -- Wide Tools retain their frame space, but navigation and individual controls
 -- use bounded/content-sized widths. Efficient action groups share a row.
 local palette_control = mod.controls.palette
@@ -587,10 +652,8 @@ local mapped = {}
 mod.controls.browse.on_activate = function()
     browse_hits = browse_hits + 1
 end
-for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-    mod.controls['imported_map_' .. kind].on_activate = function()
-        mapped[#mapped + 1] = kind
-    end
+mod.controls.imported_map_gear.on_activate = function()
+    mapped[#mapped + 1] = 'gear'
 end
 assert(handle.set('value_editor_visible', false))
 editor.tools.split_ratio = 0.75
@@ -667,15 +730,16 @@ for _, font in ipairs({ 12, 20 }) do
                     )
                     assert(menu.dropdown.width <= 760, 'Tools source popup restored an unbounded width')
                     menu.key(27)
-                    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-                        local text = 'Map LUTs to ' .. kind:sub(1, 1):upper() .. kind:sub(2)
-                        local target = assert(body_label(text), 'Tools imported-LUT mapping target is missing')
-                        local before = #mapped
-                        tap(target.x + 2, target.y + 2)
-                        assert(
-                            #mapped == before + 1 and mapped[#mapped] == kind,
-                            'Tools mapping hit selected the wrong gear kind'
-                        )
+                    local target =
+                        assert(body_label('Map LUTs to Gear'), 'Tools shared Gear mapping chooser is missing')
+                    local before = #mapped
+                    tap(target.x + 2, target.y + 2)
+                    assert(
+                        #mapped == before + 1 and mapped[#mapped] == 'gear',
+                        'Tools mapping hit bypassed the shared Gear chooser'
+                    )
+                    for _, old in ipairs({ 'Map LUTs to Armor', 'Map LUTs to Helmet', 'Map LUTs to Cape' }) do
+                        assert(not body_label(old), 'Tools still exposes duplicate per-kind mapping actions')
                     end
                 end
             elseif tab == 'rows' and canvas_width == 2200 then
@@ -685,6 +749,17 @@ for _, font in ipairs({ 12, 20 }) do
                     math.abs(save.y - apply.y) < 0.01 and save.x + #save.text * save.size * 0.5 < apply.x,
                     'Wide Tools row-preset actions did not share a readable row'
                 )
+            elseif tab == 'options' then
+                local target = assert(body_label('Map LUTs to Gear'), 'Tools Options lost the shared Gear chooser')
+                local before = #mapped
+                tap(target.x + 2, target.y + 2)
+                assert(
+                    #mapped == before + 1 and mapped[#mapped] == 'gear',
+                    'Tools Options mapping routes through a different callback'
+                )
+                for _, old in ipairs({ 'Map LUTs to Armor', 'Map LUTs to Helmet', 'Map LUTs to Cape' }) do
+                    assert(not body_label(old), 'Tools Options retained duplicate per-kind mapping actions')
+                end
             end
         end
     end

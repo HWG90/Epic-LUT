@@ -811,7 +811,7 @@ function P.new(deps)
     end
     local function quick_cells(ui, bounds, heading)
         local gap = ui.spacing and ui.spacing(6) or 6
-        local available = math.max(1, (bounds.w - gap * 2) / 3)
+        local available = math.max(1, (bounds.w - gap) / 2)
         local width =
             math.max(1, math.min(40, tonumber(bounds.cell_width) or tonumber(bounds.row_height) or 28, available))
         local height =
@@ -838,7 +838,7 @@ function P.new(deps)
                 bounds.w,
                 'heading'
             )
-            for column = 1, 3 do
+            for column = 1, 2 do
                 ui.rect(
                     bounds.x + (column - 1) * (width + gap),
                     bounds.y + gap,
@@ -884,7 +884,7 @@ function P.new(deps)
             self.show(kind)
         end, nil, nil, 'Open the Pattern LUT workspace.')
         local bottom = bounds.y + gap
-        for column = 1, 3 do
+        for column = 1, 2 do
             local x = bounds.x + (column - 1) * (width + gap)
             swatch(ui, x, bottom, width, height, column, true)
         end

@@ -30,7 +30,7 @@ local selected, selected_kind
 local selected_calls, identify_calls = 0, 0
 local camo_toggles = {}
 local export_hits = 0
-local mapping_hits = { armor = 0, helmet = 0, cape = 0 }
+local mapping_hits = { gear = 0, armor = 0, helmet = 0, cape = 0 }
 local Basic = dofile('src/editor/basic_view.lua')
 local view = Basic.new(
     function()
@@ -134,6 +134,7 @@ end
 for _, id in ipairs({
     'apply_import_armor',
     'apply_import_helmet',
+    'imported_map_gear',
     'imported_map_armor',
     'imported_map_helmet',
     'imported_map_cape',
@@ -268,7 +269,7 @@ for _, c in ipairs(commands) do
     end
 end
 assert(
-    not apply_labels['Map LUTs to Armor']
+    not apply_labels['Map LUTs to Gear']
         and not apply_labels['Restore Imported']
         and not apply_labels['Apply Imported Texture'],
     'Unused import controls should be hidden'
@@ -281,9 +282,11 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(
-    imported_labels['Map LUTs to Armor']
-        and imported_labels['Map LUTs to Helmet']
-        and imported_labels['Apply Imported Texture'],
+    imported_labels['Map LUTs to Gear']
+        and imported_labels['Apply Imported Texture']
+        and not imported_labels['Map LUTs to Armor']
+        and not imported_labels['Map LUTs to Helmet']
+        and not imported_labels['Map LUTs to Cape'],
     'Loaded import controls missing'
 )
 assert(regions == 16 and row8, 'Basic did not show all eight regions in both gear columns: ' .. regions)
@@ -445,19 +448,18 @@ local function tap_label(value)
 end
 state.loaded, state.cape_available, state.busy = saved_editor, true, false
 view.action_scroll = 0
-for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-    tap_label('Map LUTs to ' .. kind:gsub('^%l', string.upper))
-    assert(mapping_hits[kind] == 1, 'Basic mapping button lost its shared controller callback: ' .. kind)
-end
+tap_label('Map LUTs to Gear')
+assert(mapping_hits.gear == 1, 'Basic mapping button lost its shared controller callback')
 state.busy = true
-for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-    tap_label('Map LUTs to ' .. kind:gsub('^%l', string.upper))
-    assert(mapping_hits[kind] == 1, 'Basic mapping remained active during import: ' .. kind)
-end
+tap_label('Map LUTs to Gear')
+assert(mapping_hits.gear == 1, 'Basic mapping remained active during import')
 state.busy, state.cape_available = false, false
-tap_label('Map LUTs to Cape')
-assert(mapping_hits.cape == 1, 'Basic mapping exposed an unavailable Cape')
-print('PASS Basic imported mapping: shared Armor/Helmet/Cape controller IDs and busy/unavailable guards')
+tap_label('Map LUTs to Gear')
+assert(
+    mapping_hits.gear == 2 and mapping_hits.armor == 0 and mapping_hits.helmet == 0 and mapping_hits.cape == 0,
+    'Basic Gear chooser was gated by an unavailable Cape or dispatched a per-kind action'
+)
+print('PASS Basic imported mapping: one shared Gear chooser, busy guard and no Cape availability dependency')
 for _, format in ipairs({ 1, 2, 3, 4 }) do
     assert(handle.set('export_format', format))
     menu.compose(1920, 1080)
