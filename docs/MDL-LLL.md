@@ -35,4 +35,4 @@ From the canonical Epic-LUT checkout:
 python build.py --loader mdl
 ```
 
-Output: `dist/Epic-LUT-R5.7.1-MDL.zip`. The former `--loader loose` option remains an alias for MDL and now uses the MDL filename by default. To build LLL R30's modular package, use `tools/build_lll.py` instead. MDL is an **Optional File** on Nexus, alongside the optional LLL package; BSL is the Main File.
+Output: `dist/Epic-LUT-R5.7.1-MDL.zip`. The former `--loader loose` option remains an alias for MDL and now uses the MDL filename by default. To build LLL R30's modular package, use `tools/build_lll.py` instead. MDL is an **Optional File** on Nexus; BSL is the Main File. The modular LLL package is available on **GitHub only**.

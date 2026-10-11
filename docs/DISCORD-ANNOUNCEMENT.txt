@@ -20,4 +20,4 @@ Massive thanks to **Scarpheon** for testing, patch help and all 26 bump maps. Th
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
-**BSL Main; LLL + MDL Optional.** Enable one copy. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.
+**Nexus: BSL Main, MDL Optional. LLL: GitHub only.** Enable one copy. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.

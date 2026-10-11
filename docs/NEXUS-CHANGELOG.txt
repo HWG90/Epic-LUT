@@ -16,7 +16,7 @@
 - Value fields apply typed numbers on click-away. Delete resets selected cells or rows with Undo.
 - Improved fonts, caret alignment, dropdown targets, clipping and import-progress spacing. Safer binding rollback, bounded texture retention and cleanup across reloads.
 - Held Player Preview poses retain Idle by default. Shared Lobby LUT remains in testing.
-- BSL is the Nexus Main File. LLL and MDL are Optional Files. GitHub provides all three packages from the same source snapshot.
+- BSL is the Nexus Main File; MDL is an Optional File. LLL is available on GitHub only. GitHub provides all three packages from the same source snapshot.
 
 ---
 

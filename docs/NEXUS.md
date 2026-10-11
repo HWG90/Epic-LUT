@@ -16,10 +16,10 @@ Cape material LUTs are excluded from lobby sharing in this build. Unmodified gam
 
 ## Choose one package
 
-| Nexus category | Package | Loader and entrypoint |
+| Download location | Package | Loader and entrypoint |
 | --- | --- | --- |
 | Main File | `Epic-LUT-R5.7.1-BSL.zip` | Arsenal/HD2MM with Bingus Shared Loader v15+; enable its startup option |
-| Optional File | `Epic-LUT-R5.7.1-LLL.zip` | Live Lua Loader R30+; modular `armor_lut_editor/main.lua` |
+| GitHub only | `Epic-LUT-R5.7.1-LLL.zip` | Live Lua Loader R30+; modular `armor_lut_editor/main.lua` |
 | Optional File | `Epic-LUT-R5.7.1-MDL.zip` | Compatible MDL API-2 loader; bundled `armor_lut_editor/mod.lua` |
 
 For LLL, extract the complete folder into `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. For MDL, use the loader's configured Mods directory. Keep the package's native DLL and scripts together. Enable one Epic LUT entrypoint and disable the separate old `epic_player_preview` test addon; preview is included. MDL cannot load the modular LLL package. See [README](../README.md), [LLL installation](LLL-MODULAR.md) and [MDL installation](MDL-LLL.md).

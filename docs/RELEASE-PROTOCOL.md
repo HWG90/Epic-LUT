@@ -26,10 +26,10 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 ## 4. Nexus
 
 - Update the existing [Epic LUT page](https://www.nexusmods.com/helldivers2/mods/17039): current description, major features, version, changelog and installation instructions. Keep historical per-file/per-version revision blocks out of the main description; history belongs in the changelog and retained older downloads.
-- Upload the exact same files used for GitHub:
+- Upload the exact same BSL and MDL files used for GitHub:
   - **BSL: Main File.**
-  - **LLL: Optional File.**
   - **MDL: Optional File, never Main File.**
+- **LLL is GitHub only. Never upload the LLL package to Nexus.** Keep its GitHub download linked in the installation choices.
 - Keep the three entrypoints clearly labeled and explain that users enable one copy. Retain older downloads for rollback rather than deleting history.
 - Verify public rendering, version/file IDs, categories, download availability and file identity where available. Record the Nexus scan state separately: pending, completed or failed. Upload success does not prove the scan finished or the public download is available.
 
@@ -42,5 +42,7 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 ## 6. Record and report
 
 Store a scoped publication receipt with the source commit, tag/release URL, asset names and SHA-256 hashes, Nexus file IDs/categories/scan state, Discord thread/message links, checks performed, and any pending item. Keep private runtime evidence outside public packages and source.
+
+For documentation corrections after publication, preserve the tagged source snapshot and uploaded ZIPs. Commit the correction separately, update the public copy, and record the follow-up documentation commit without replacing release assets or moving the tag.
 
 Report the version and published links, concise validation, and any unresolved publication or scan limitation. Distinguish candidate, uploaded, publicly downloadable and live-proven states. A blocked surface does not prevent finishing authorized work on the other surfaces; never claim a failed or pending publication succeeded.

@@ -11,7 +11,7 @@ Paint your Helldiver in-game. Match your helmet to your armor, build a color sch
 Choose one package:
 
 - **BSL (Nexus Main File):** import `Epic-LUT-R5.7.1-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL (Nexus Optional File):** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.7.1-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
+- **LLL (GitHub only):** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.7.1-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
 - **MDL (Nexus Optional File):** use `Epic-LUT-R5.7.1-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
 
 The modular LLL package uses `main.lua` and requires LLL R30+. LLL can also load the MDL-compatible bundled package. MDL needs the bundled package; it cannot use the modular LLL package.

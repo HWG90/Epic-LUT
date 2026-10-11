@@ -49,7 +49,7 @@ R5.7.1 expands **Shared LUT** appearances, adds checked-region camo and one-clic
 All three packages use the same source snapshot and include Player Preview:
 
 - **BSL — Nexus Main File:** `Epic-LUT-R5.7.1-BSL.zip`, for Arsenal/HD2MM with Bingus Shared Loader v15+.
-- **LLL — Nexus Optional File:** `Epic-LUT-R5.7.1-LLL.zip`, modular `main.lua`, for Live Lua Loader R30+.
+- **LLL — GitHub only:** `Epic-LUT-R5.7.1-LLL.zip`, modular `main.lua`, for Live Lua Loader R30+.
 - **MDL — Nexus Optional File:** `Epic-LUT-R5.7.1-MDL.zip`, bundled API-2 `mod.lua`, for compatible MDL loaders.
 
 Enable one Epic LUT entrypoint. No Python or MCM installation is required. RAR import requires installed 7-Zip. Turn Match Your Colors matching Off before editing the same gear.

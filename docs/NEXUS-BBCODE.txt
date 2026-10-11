@@ -29,7 +29,7 @@ Rebind menu controls in the Configuration Menu.
 [*][b]Patterns, right here.[/b] Two quick swatches initialize below the LUT table. The full Pattern editor replaces that table, retaining raw channels, import/export, flash and Undo/Redo.[/*]
 [*][b]A tidier Armory.[/b] Save and apply Armor, Helmet and Cape with checkboxes. Basic adds individual LUT checks and Select All with associated Patterns. Compact preview lanes show all gear and Patterns with scrollbars.[/*]
 [*][b]Small fixes that matter.[/b] Values commit on click-away. Delete resets selected cells with Undo. Preset names complete with Tab; Cancel works before typing. Row previews and Paydex JSON import are in Tools.[/*]
-[*][b]Three loader choices.[/b] BSL is the Main File. LLL and MDL are Optional Files. All three come from the same source snapshot and include Player Preview.[/*]
+[*][b]Three loader choices.[/b] Nexus has BSL as the Main File and MDL as an Optional File. LLL is available on GitHub only. All three come from the same source snapshot and include Player Preview.[/*]
 [/list]
 
 [size=4][b]YOUR FIELD KIT[/b][/size]
@@ -60,7 +60,7 @@ Updates wait for a stable squad lobby and settled edits. A received look applies
 [list]
 [*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.7.1-BSL.zip[/b] and enable its BSL startup option.[/*]
 [*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
-[*][b]Optional File - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
+[*][b]GitHub only - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].[/*]
 [/list]
 [center][b]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/b]
@@ -88,7 +88,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Download BSL / LLL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1]GitHub downloads[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Nexus BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1]GitHub BSL / LLL / MDL[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]
