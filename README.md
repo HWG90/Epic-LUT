@@ -56,6 +56,7 @@ Press **F9**, then **Load Current Armor & Helmet**. Choose the LUT above either 
 
 - Click a **Region** label to flash it magenta on your character. **Stop Highlight** ends it immediately.
 - **Copy Helmet / Copy Armor** transfers the selected table to the opposite gear. **Copy Helmet to All** transfers it to every worn Armor LUT.
+- After importing, use the arrow on either **Single LUT Import** button to choose the source texture. Press the main part to apply it to that column's selected LUT. Choosing a texture updates both buttons without applying it.
 - Development builds add **Camo** beneath each column. **Off / Pattern 0–5** changes the selected LUT as one undoable edit, initializing dormant camo controls and supplying colors when all four are black. Choose a generated **Jungle, Desert, Urban or Arctic** colorway to apply a complete camo setup using verified weapon pattern controls. It keeps an existing active pattern. The four swatches edit individual camo colors when Apply is pressed in the picker. Armor affects every region; Helmet excludes Region 8, and its pattern action keeps that region Off. Base colors, shader mode and emission remain intact. Neutral thumbnails use the actual game masks; the selected material's shader still determines how camo appears.
 - **Advanced Mode** in the header opens the full editor; **Basic Mode** brings you back.
 - Hover for guidance. Extra import controls appear only after loading a file.

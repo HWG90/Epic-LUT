@@ -73,10 +73,10 @@ function B.new(info, select_row, help)
         local control_height = ui.control_height and ui.control_height(14, 4, 28) or 28
         local color_label_height = ui.control_height and ui.control_height(12, 1, 14) or 14
         local color_height = math.max(22, control_height - gap)
-        local color_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
-        local colorway_y = color_y + color_height + color_label_height + gap * 2
+        local colorway_y = ui.y + (state.loaded and math.max(102, 80 + heading_size) or 38) + gap
         local camo_y = colorway_y + control_height + gap
-        local camo_heading_y = camo_y + control_height + gap
+        local color_y = camo_y + control_height + gap
+        local camo_heading_y = color_y + color_height + color_label_height + gap * 3
         local cliptop, clipbottom = top - 142, camo_heading_y + math.max(heading_size, hint_size) + gap
         local region_height = math.max(0, cliptop - clipbottom)
         local half = (left - 26) / 2
@@ -202,10 +202,11 @@ function B.new(info, select_row, help)
                 local number = panel and panel.label and panel.label:match('LUT (%d+)')
                 -- The per-target selection is exposed separately from the imported source.
                 number = number or (kind == 'armor' and state.armor_lut or state.helmet_lut) or 1
+                local arrow_width = math.min(half / 3, math.max(control_height, ui.spacing and ui.spacing(44) or 44))
                 button(
                     x,
                     ui.y + 48,
-                    half,
+                    half - arrow_width,
                     'Import '
                         .. filename
                         .. ' into '
@@ -215,6 +216,14 @@ function B.new(info, select_row, help)
                     'apply_import_' .. kind,
                     state.loaded ~= nil and panel ~= nil and panel.group ~= nil and not state.busy
                 )
+                ui.choice('palette', x + half - arrow_width, ui.y + 48, arrow_width, nil, {
+                    button = true,
+                    height = 28,
+                    enabled = not state.busy,
+                    anchor_x = x,
+                    anchor_width = half,
+                    help = 'Choose the imported texture. Press the main button to apply it to this LUT.',
+                })
             end
             if kind == 'armor' then
                 button(x, ui.y + 10, (half - 6) * 0.43, 'Copy Helmet', 'basic_copy_helmet')

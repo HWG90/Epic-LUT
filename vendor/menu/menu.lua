@@ -740,6 +740,9 @@ function M.new(api, measure, Text)
         elseif c.type == 'choice' and direction == 0 and c.presentation ~= 'selector' then
             local anchor = choice_bounds[c]
                 or { x = self.sidebar_width + 50, top = (self.window_height or 820) - 205, width = 280 }
+            if anchor.enabled == false then
+                return
+            end
             if anchor.prepare then
                 anchor.prepare()
             end
@@ -3338,8 +3341,11 @@ function M.new(api, measure, Text)
                                 change(choice, 1)
                             end)
                         end,
-                        choice = function(id, x, y, width, prepare)
+                        choice = function(id, x, y, width, prepare, display)
                             local control = assert(mod.controls[id], 'Editor control missing: ' .. id)
+                            display = display or {}
+                            local anchor_x = display.anchor_x or x
+                            local anchor_width = math.max(display.anchor_width or width, control.dropdown_width or 0)
                             local owner = floating_context
                             local key = tostring(owner and owner.id or 'main') .. ':' .. id
                             choice_widgets[key] = (choice_widgets[key] or 0) + 1
@@ -3350,17 +3356,21 @@ function M.new(api, measure, Text)
                                 and self.dropdown.mod == mod
                                 and self.dropdown.widget == widget
                             then
-                                self.dropdown.x, self.dropdown.top = x, y - 4
-                                self.dropdown.width, self.dropdown.owner =
-                                    math.max(width, control.dropdown_width or 0), owner
+                                if display.enabled == false or control.disabled or control.read_only then
+                                    self.dropdown = nil
+                                else
+                                    self.dropdown.x, self.dropdown.top = anchor_x, y - 4
+                                    self.dropdown.width, self.dropdown.owner = anchor_width, owner
+                                end
                             end
                             local anchor = {
-                                x = x,
+                                x = anchor_x,
                                 top = y - 4,
-                                width = math.max(width, control.dropdown_width or 0),
+                                width = anchor_width,
                                 owner = owner,
                                 widget = widget,
                                 prepare = prepare,
+                                enabled = display.enabled,
                             }
                             if
                                 not choice_bounds[control]
@@ -3371,12 +3381,10 @@ function M.new(api, measure, Text)
                                 choice_bounds[control] = anchor
                             end
                             local value = mod.handle.get(id)
-                            M.choice(primitives, control, value, x, y, width, function(direction)
-                                if prepare then
-                                    prepare()
+                            local function open()
+                                if control.disabled or control.read_only or display.enabled == false then
+                                    return
                                 end
-                                change(control, direction)
-                            end, function()
                                 select_control(control)
                                 self.choice_focus = { control = control, widget = widget }
                                 if prepare then
@@ -3390,11 +3398,28 @@ function M.new(api, measure, Text)
                                     control = control,
                                     selected = value,
                                     scroll = math.max(0, math.min(math.max(0, #control.choices - 8), value - 4)),
-                                    x = x,
+                                    x = anchor_x,
                                     top = y - 4,
-                                    width = math.max(width, control.dropdown_width or 0),
+                                    width = anchor_width,
                                 })
-                            end)
+                            end
+                            if display.button then
+                                M.custom_ui(primitives).button(x, y, width, display.height or 28, 'v', open, {
+                                    enabled = not control.disabled
+                                        and not control.read_only
+                                        and display.enabled ~= false,
+                                    padding = width * 0.35,
+                                    size = 16,
+                                    help = display.help or control.description,
+                                })
+                            else
+                                M.choice(primitives, control, value, x, y, width, function(direction)
+                                    if prepare then
+                                        prepare()
+                                    end
+                                    change(control, direction)
+                                end, open)
+                            end
                         end,
                     })
                 )

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Choose imported textures from a dropdown attached to each Basic Single LUT Import button; press its main segment to apply. Keep both source labels synchronized and move camo swatches above the pattern/colorway selectors.
 - Initialize dormant Basic camo using the complete recipe copied by Match Your Colors: color alpha, fade, mask sharpness/bias/UV scale and roughness blending. Generated colorways now activate camo; keep authored working patterns and independent tint edits.
 - Exclude Helmet Region 8 from Basic camo color changes and keep its pattern Off when changing masks.
 - Reserve a measured Basic action footer so scrolling content and clip masks cannot cover Player Preview or Stop Highlight.

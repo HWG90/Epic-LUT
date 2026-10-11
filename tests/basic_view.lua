@@ -794,6 +794,41 @@ for _, font in ipairs({ 12, 20 }) do
                         'Native content mask erased the upper footer button border'
                     )
                 end
+                for _, kind in ipairs({ 'armor', 'helmet' }) do
+                    local registry = api.mods.basic_test.controls
+                    local pattern_value =
+                        registry['basic_' .. kind .. '_camo'].choices[handle.get('basic_' .. kind .. '_camo')]
+                    local pattern = assert(column_label(commands, kind, pattern_value))
+                    local colorway = assert(column_label(commands, kind, 'Current / custom'))
+                    assert(
+                        pattern.y - 0.2 * pattern.size > colorway.y + 0.85 * colorway.size,
+                        'Basic Camo pattern/colorway selectors overlap after reordering'
+                    )
+                    for color = 1, 4 do
+                        local number = assert(column_label(commands, kind, tostring(color)))
+                        local swatch
+                        for _, c in ipairs(commands) do
+                            if
+                                c.type == 'rect'
+                                and math.abs(c.x - number.x) < 0.01
+                                and c.y < number.y
+                                and c.c[1] == math.floor(color / 5 * 255 + 0.5)
+                                and c.c[2] == 77
+                                and c.c[3] == 102
+                            then
+                                swatch = c
+                            end
+                        end
+                        assert(
+                            swatch and swatch.y > pattern.y + 0.85 * pattern.size,
+                            'Basic Camo RGB swatches are not above the pattern/colorway selectors'
+                        )
+                        assert(
+                            number.y - 0.2 * number.size > swatch.y + swatch.h,
+                            'Basic Camo number labels overlap their reordered RGB swatches'
+                        )
+                    end
+                end
                 if position == 1 then
                     local preview_before, stop_before = preview_clicks, stop_clicks
                     tap({ x = footer.x + 3 * window.scale - 2, y = footer.y + footer.h - 2 * window.scale - 2 })
@@ -810,8 +845,160 @@ for _, font in ipairs({ 12, 20 }) do
         end
     end
 end
+-- A Single LUT Import split chooses one shared source at the arrow; only its
+-- main segment applies that source, to the gear column that was clicked.
+local sources = {
+    { data = data, width = 23, height = 8, source = 'C:/imported/Alpha.dds' },
+    { data = camo_data, width = 23, height = 64, source = 'C:/imported/Beta.dds' },
+}
+local palette_control = api.mods.basic_test.controls.palette
+palette_control.choices = { 'Alpha.dds', 'Beta.dds' }
+palette_control.disabled = false
+palette_control.on_change = function(value)
+    state.loaded, state.palette_index = sources[value], value
+end
+local import_actions = {}
+for _, kind in ipairs({ 'armor', 'helmet' }) do
+    state.raw.basic[kind].kind = kind
+    state.raw.basic[kind].group = {}
+    state.raw.basic[kind].resource = kind == 'armor' and '[armor-target]' or '[helmet-target]'
+    api.mods.basic_test.controls['apply_import_' .. kind].on_activate = function()
+        import_actions[#import_actions + 1] = { kind = kind, source = state.loaded.source }
+    end
+end
+local function split_label(commands, kind, filename)
+    local b, window = view.region_bounds[kind], menu.window_bounds
+    local lower, upper = window.x + b.x * window.scale, window.x + (b.x + b.w) * window.scale
+    for _, c in ipairs(commands) do
+        if
+            c.full_text
+            and c.full_text:sub(1, 7) == 'Import '
+            and c.full_text:find(filename, 1, true)
+            and c.x >= lower
+            and c.x < upper
+        then
+            return c
+        end
+    end
+end
+local function split_arrow(commands, kind, filename)
+    local c = assert(split_label(commands, kind, filename), 'Single LUT Import filename not shown for ' .. kind)
+    local b, window = view.region_bounds[kind], menu.window_bounds
+    return { x = window.x + (b.x + b.w - 8) * window.scale - 2, y = c.y + c.size * 0.3 - 2 }
+end
+for _, font in ipairs({ 12, 20 }) do
+    for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+        menu.font_size, menu.ui_scale = font, scale
+        for _, kind in ipairs({ 'armor', 'helmet' }) do
+            state.busy, state.loaded, state.palette_index = false, sources[1], 1
+            assert(handle.set('palette', 1))
+            local commands = menu.compose(1280, 720)
+            local prior = #import_actions
+            tap(split_arrow(commands, kind, 'Alpha.dds'))
+            assert(
+                menu.dropdown and menu.dropdown.control.id == 'palette' and #import_actions == prior,
+                'Single LUT Import arrow applied instead of choosing its source'
+            )
+            local anchor_x, anchor_top, anchor_width = menu.dropdown.x, menu.dropdown.top, menu.dropdown.width
+            commands = menu.compose(1280, 720)
+            assert(
+                menu.dropdown.x == anchor_x and menu.dropdown.top == anchor_top and menu.dropdown.width == anchor_width,
+                'Shared palette widgets stole the split popup anchor after composition'
+            )
+            assert(
+                math.abs(anchor_x - view.region_bounds[kind].x) < 0.01,
+                'Split popup opened at the other gear column or action pane'
+            )
+            local option
+            for _, c in ipairs(commands) do
+                if c.popup and (c.full_text or c.text) == 'Beta.dds' then
+                    option = c
+                    assert(c.paint_plane >= 300, 'Imported-source popup fell behind Basic content clipping')
+                end
+            end
+            assert(option, 'Single LUT Import source options did not render')
+            native.draw(commands)
+            assert(
+                native_pixel(option.x + option.size * 0.1, option.y + option.size * 0.3).text == 'Beta.dds',
+                'Imported-source popup was covered by Basic native primitives'
+            )
+            menu.key(40)
+            menu.key(13)
+            assert(
+                not menu.dropdown
+                    and state.loaded == sources[2]
+                    and handle.get('palette') == 2
+                    and #import_actions == prior,
+                'Choosing an imported source applied it immediately'
+            )
+            commands = menu.compose(1280, 720)
+            for _, target in ipairs({ 'armor', 'helmet' }) do
+                local label = assert(
+                    split_label(commands, target, 'Beta.dds'),
+                    'Shared imported-source filename did not synchronize'
+                )
+                local window, bounds = menu.window_bounds, view.region_bounds[target]
+                assert(
+                    label.x + #label.text * label.size * 0.5 <= window.x + (bounds.x + bounds.w) * window.scale,
+                    'Single LUT Import main text escaped its gear column'
+                )
+            end
+            tap(assert(split_label(commands, kind, 'Beta.dds')))
+            assert(
+                #import_actions == prior + 1
+                    and import_actions[#import_actions].kind == kind
+                    and import_actions[#import_actions].source == sources[2].source
+                    and not menu.dropdown,
+                'Single LUT Import main segment applied the wrong gear/source or opened the chooser'
+            )
+            tap(split_arrow(menu.compose(1280, 720), kind, 'Beta.dds'))
+            assert(
+                menu.dropdown and menu.choice_focus.control.id == 'palette',
+                'Split source arrow did not establish its keyboard focus'
+            )
+            menu.key(27)
+            state.busy = true
+            commands = menu.compose(1280, 720)
+            local busy_before = #import_actions
+            menu.key(13)
+            assert(
+                not menu.dropdown and #import_actions == busy_before,
+                'Focused Single LUT Import keyboard chooser ignored busy state'
+            )
+            tap(assert(split_label(commands, kind, 'Beta.dds')))
+            tap(split_arrow(menu.compose(1280, 720), kind, 'Beta.dds'))
+            assert(not menu.dropdown and #import_actions == busy_before, 'Busy Single LUT Import remained editable')
+            state.busy = false
+            commands = menu.compose(1280, 720)
+            tap(split_arrow(commands, kind, 'Beta.dds'))
+            assert(menu.dropdown, 'Split source chooser did not recover after busy state')
+            state.busy = true
+            menu.compose(1280, 720)
+            assert(
+                not menu.dropdown and #import_actions == busy_before,
+                'Open Single LUT Import popup survived becoming busy'
+            )
+            state.busy = false
+            local group = state.raw.basic[kind].group
+            state.raw.basic[kind].group = nil
+            commands = menu.compose(1280, 720)
+            tap(assert(split_label(commands, kind, 'Beta.dds')))
+            assert(#import_actions == busy_before, 'Unavailable gear destination allowed Single LUT Import')
+            tap(split_arrow(menu.compose(1280, 720), kind, 'Beta.dds'))
+            assert(
+                menu.dropdown and menu.dropdown.control.id == 'palette',
+                'Unavailable target prevented choosing a reusable imported source'
+            )
+            menu.key(27)
+            state.raw.basic[kind].group = group
+        end
+    end
+end
 package.loaded['epic.player_preview.v1'] = original_portrait
 native.release()
+print(
+    'PASS Basic split import: independent apply/arrow hits, shared source and filename synchronization, stable/native popup anchors, busy mouse/keyboard/cancellation and unavailable targets'
+)
 print(
     'PASS Basic Camo: per-gear pattern/colorway choices and RGB pickers, unsupported Cape guard, independent 64-row scrolling, native font clearance and disabled behavior'
 )
