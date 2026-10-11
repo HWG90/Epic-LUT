@@ -2,7 +2,7 @@
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.7.1 adds compact mapping and preset controls, checked-region camo, an embedded Pattern editor, and patch exports that preserve verified gear assignments. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups. [What's new](docs/RELEASE-R5.7.1.md).
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.7.1 expands **Shared LUT** appearances for compatible squadmates and adds checked-region camo, one-click gear mapping, an embedded Pattern editor and patch exports that preserve verified assignments. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups. [What's new](docs/RELEASE-R5.7.1.md).
 
 [Download R5.7.1](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
@@ -20,9 +20,15 @@ Enable one Epic LUT entrypoint. Disable the separate **epic_player_preview** tes
 
 No Python or MCM installation required. Windows PowerShell/.NET handles file picking and archive reads. **RAR requires installed 7-Zip.** Turn **Match Your Colors matching Off** before editing the same gear.
 
-## Sharing and Pattern LUTs
+## Shared LUT — your look, visible to your squad
 
-**Shared Lobby LUT is in testing.** Share Armor, Helmet and Pattern LUTs with compatible Epic LUT users. Both players need this version, with **Share full LUT appearance with Epic LUT users** enabled in Configuration. Updates wait for a stable squad lobby and settled edits. Appearances that exceed the lobby packet limit remain local. [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
+**Shared Lobby LUT** shares your currently applied Armor, Helmet and associated Pattern edits with compatible Epic LUT squadmates. Apply a saved Armory preset to share that look. Supported tables retain their exact RGBA, material, camo and emissive channels. Improved lossless compression and table/value deduplication fit larger appearances, with support for up to 4,096 bindings within the lobby budget.
+
+Both players need R5.7.1, with **Configuration > Share full LUT appearance with Epic LUT users** enabled. Its current default is On; the same toggle controls sending and receiving. Turning it Off removes your advertisement and restores received appearances still owned by Epic LUT. Updates wait for a stable squad lobby and settled edits, then apply only to the sender's matching body, Armor and Helmet kits. Your own outfit can be different from theirs.
+
+Cape material LUTs are excluded from sharing in this build. Unmodified games and Match Your Colors-only clients do not interpret the packets. Oversized appearances stay local with a visible status while receiving remains available. **Shared Lobby LUT remains in testing; two-player visual confirmation is still required for this build.** [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
+
+## Pattern LUTs and row tools
 
 **LUT Editor** includes a two-swatch **Quick Editor: Pattern LUT** directly beneath the material grid. **Load Current Gear** prepares its current values; click a swatch to edit it. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
 

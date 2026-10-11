@@ -2,6 +2,7 @@
 
 ## R5.7.1 - 2026-10-11
 
+- Expand Shared Lobby LUT with complete exact-value Armor, Helmet and Pattern appearances, including applied Armory looks. Deduplicated tables, shared float dictionaries and improved lossless compression support up to 4,096 destinations within the existing lobby budget. One Configuration toggle controls send/receive and currently defaults On; remote application requires matching sender kits. Cape materials remain excluded, oversized looks remain local, and two-player visual confirmation is still pending for this build.
 - Initialize the two quick Pattern swatches from current gear without opening the full Pattern workspace; preserve existing edits and history while refreshing their source.
 - Replace separate imported-target actions with one Map LUTs to Gear dialog in Basic and Advanced. Map imported tables to Armor, Helmet and Cape columns; Auto-map uses numeric source order, restarts for each checked gear family and cycles when destinations outnumber imports.
 - Preserve distinct palettes sharing one texture ID through verified Texture, Material and Unit mesh-slot replacements. Retain kit-fixed original IDs, original unselected mesh/LOD palettes and authentic raw resource bytes; refuse incompatible fixed assignments before staging.

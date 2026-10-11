@@ -1,6 +1,16 @@
-# Epic LUT R5.7.1 — Compact Editor & Gear Export Fix
+# Epic LUT R5.7.1 — Shared LUT, Camo & Compact Editing
 
-R5.7.1 makes more of the editor visible, brings camo and Pattern edits into the main workflow, and fixes exported patches losing distinct palettes on shared gear resources.
+R5.7.1 expands **Shared LUT** appearances, adds checked-region camo and one-click gear mapping, brings Pattern editing into the main workspace, and makes more of the editor visible. Patch exports now preserve verified assignments when gear uses different palettes on shared resources.
+
+## Shared LUT — your look, visible to your squad
+
+**Shared Lobby LUT** lets compatible Epic LUT squadmates see your currently applied Armor, Helmet and associated Pattern edits. Apply a saved Armory preset to share that look, or share the colors you are editing now. It transfers complete supported tables, including color alpha, material, camo and emissive channels, with exact float values rather than reducing the appearance to a few RGB swatches.
+
+- Both players need R5.7.1 and **Configuration > Share full LUT appearance with Epic LUT users** enabled. The current default is On; that one setting controls both sending and receiving. Turn it Off to stop advertising your appearance and restore received looks owned by Epic LUT.
+- Updates wait for a stable squad lobby and settled edits. They apply to the sender's matching body, Armor and Helmet kits on the receiving client; the receiver can wear a different outfit.
+- Larger appearances use deduplicated tables, exact-value dictionaries and improved lossless compression. Up to 4,096 bindings can be represented, subject to the lobby budget. An oversized look stays local with an explanatory status, and receiving remains available.
+- Cape material LUTs are excluded from lobby sharing in this build. Unmodified games and Match Your Colors-only clients do not interpret Epic LUT appearance packets.
+- **Shared Lobby LUT remains in testing.** Codec and ownership checks pass offline; two-player visual confirmation is still required for this build.
 
 ## Basic, mapping and presets
 
@@ -33,7 +43,6 @@ R5.7.1 makes more of the editor visible, brings camo and Pattern edits into the 
 - Large loose GPU patches are fingerprinted in bounded chunks, including files over 512 MiB. Cache failures report their actual reason; **Load Current Gear** explicitly retries instead of silently restarting a failed read.
 - MASTER OF CEREMONY and MASTER-CRAFTED-ARMOR exported successfully in-game. Their actual patch contents passed separate archive, pixel and assignment checks; the installed exported patch was confirmed working in-game. This verifies those tested gear assignments, not every possible game resource.
 - Material and Pattern actions preflight and restore together through Undo/Redo. Cleanup finishes before render services close; eligible owned textures retire only after binding checks and render fences. Continuous edits coalesce live uploads while the final value applies immediately.
-- Shared Lobby LUT packets use exact-value dictionaries and the smaller successful XPRESS/legacy encoding, retaining up to 4,096 bindings within the existing lobby size limit. **Shared Lobby LUT remains in testing.**
 
 ## Downloads
 

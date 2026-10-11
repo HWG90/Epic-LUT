@@ -1,23 +1,23 @@
 # EPIC LUT R5.7.1 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
-**F9** for Basic; **F10** for the full editor. **Load Current Gear** covers Armor, Helmet and Cape.
+**SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
+Share applied **Armor, Helmet and Pattern** edits with compatible squadmates: exact color, alpha, material, camo and emissive values. Apply an Armory preset to share it. Improved lossless compression fits larger looks; oversized looks stay local.
 
-**COMPACT EDITOR & GEAR EXPORT FIX**
-- Fixed the export crash and large-patch cache errors. Patches preserve verified material, mesh and kit assignments, including distinct palettes sharing a texture ID. Tested exports and the installed patch work in-game.
-- Basic prioritizes all 8 regions. Buttons, grids and previews stay compact; docked Tools starts open.
-- **Camo checkboxes** start unchecked. Apply patterns/colorways only to checked regions; custom tints switch to **Current / custom**.
-- One **Map LUTs to Gear** dialog in Basic and Advanced. **Auto-map** follows numbered imports and repeats them across checked Armor, Helmet and Cape columns.
-- Two quick **Pattern** swatches initialize below the table. The full Pattern editor opens in that same workspace with import/export and Undo/Redo.
-- Armory Save/Apply uses gear checkboxes; Basic adds individual LUT checks and **Select All**. Compact gear/Pattern previews have scrollbars.
-- Values commit on click-away. **Delete** resets selected cells with Undo. Preset names complete with **Tab**; Cancel works with empty names.
+Both players need R5.7.1. **Configuration > Share full LUT appearance with Epic LUT users** is On by default and controls sending/receiving. Updates wait for settled edits and matching sender kits. Cape materials are excluded. **Shared Lobby LUT remains in testing.**
 
-**Shared Lobby LUT is in testing.**
+**MORE COLOR. LESS CLUTTER.**
+- **Camo boxes** start unchecked: patterns/colorways/tints affect checked regions. Custom tints switch to **Current / custom**.
+- **Map LUTs to Gear** in Basic and Advanced; **Auto-map** follows numbered imports and cycles across checked Armor, Helmet and Cape columns.
+- Two quick **Pattern** swatches initialize below the table; the full editor replaces it with channels, import/export and Undo/Redo.
+- 8-region layout, scrolling Armory gear/Pattern previews, checkbox Save/Apply and **Select All**; docked Tools opens.
+- Values commit on click-away; **Delete** resets cells with Undo. **Tab** completes preset names. Paydex row import and held Preview poses.
+- Fixed export crashes/cache errors; patches retain verified shared-resource assignments. Tested exports work in-game.
 
-A massive thank you to **Scarpheon** for continued testing, Export to Patch help and mapping all 26 bump maps. Thanks to **Arkturus425**, **CowboyBingus**, **Plain Furniture**, **Lytatroan**, **Shikami**, **Kaiser & Amiba**, the modding community and **Paydex LUT Editor**.
+Massive thanks to **Scarpheon** for testing, patch help and all 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex LUT Editor and the modding community.
 
 **Downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
-**BSL = Main File. LLL + MDL = Optional Files.** Enable one copy. Turn Match Your Colors matching off. RAR needs 7-Zip.
+**BSL Main; LLL + MDL Optional.** Enable one copy. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.

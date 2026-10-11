@@ -1,5 +1,7 @@
 # Epic LUT R5.7.1
 
+- Expanded Shared LUT appearances for compatible squadmates: currently applied Armor, Helmet and associated Patterns retain exact RGBA, material, camo and emissive values. Apply an Armory preset to share it.
+- Improved lossless sharing compression and deduplication fit larger appearances, with up to 4,096 bindings within the lobby limit. Both clients need R5.7.1; one Configuration setting, currently On by default, controls sending and receiving. Cape materials stay excluded and two-player visual confirmation is still pending for this build.
 - Fixed patch exports losing distinct palettes on shared gear resources; keep verified material, mesh and kit assignments, with exact original values for unselected slots.
 - Fixed the export crash and background cache validation for large GPU patches. Export errors now report their actual cause; Load Current Gear retries failed reads.
 - MASTER OF CEREMONY and MASTER-CRAFTED-ARMOR exports passed actual-output checks; the installed exported patch was confirmed working in-game.
@@ -13,7 +15,7 @@
 - Preset names complete with Tab; Cancel works with empty names. Added recoverable preset removal, row previews and Paydex JSON row import.
 - Value fields apply typed numbers on click-away. Delete resets selected cells or rows with Undo.
 - Improved fonts, caret alignment, dropdown targets, clipping and import-progress spacing. Safer binding rollback, bounded texture retention and cleanup across reloads.
-- Held Player Preview poses retain Idle by default. Improved lossless sharing compression and larger binding counts within the same lobby limit; Shared Lobby LUT remains in testing.
+- Held Player Preview poses retain Idle by default. Shared Lobby LUT remains in testing.
 - BSL is the Nexus Main File. LLL and MDL are Optional Files. GitHub provides all three packages from the same source snapshot.
 
 ---

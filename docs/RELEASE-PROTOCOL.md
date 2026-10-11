@@ -11,7 +11,7 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 
 ## 2. Prepare one public snapshot
 
-- Update VERSION, README, CHANGELOG, `docs/RELEASE-<version>.md`, Nexus BBCode/changelog and the Discord announcement. Document actual changes and any remaining limits. Preserve credits, discovery attribution and vendor/LICENSE.
+- Update VERSION, README, CHANGELOG, `docs/RELEASE-<version>.md`, Nexus BBCode/changelog and the Discord announcement. Explain major new features and how to use them, not only the latest fix. Check feature scope, defaults and consent controls against current source; distinguish tested capabilities from live confirmation still pending. Preserve credits, discovery attribution and vendor/LICENSE.
 - Commit and push all relevant public Epic-LUT changes. Exclude game assets and binaries, saved presets/settings, screenshots, logs, private cache/evidence, unrelated work and private research. Check staged paths and the diff before committing.
 - Build **BSL**, **modular LLL R30+ (`main.lua`)**, and **bundled API-2 MDL (`mod.lua`)** from the same committed source snapshot. Shared changes require parity across all three. Use standard idle-preview packages; continuous-animation candidates remain separate unless explicitly requested.
 - Use versioned filenames under dist or an explicitly named release directory. Never overwrite earlier published artifacts. Include the current release note in the package documentation.
@@ -25,7 +25,7 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 
 ## 4. Nexus
 
-- Update the existing [Epic LUT page](https://www.nexusmods.com/helldivers2/mods/17039): current description, version, changelog and installation instructions.
+- Update the existing [Epic LUT page](https://www.nexusmods.com/helldivers2/mods/17039): current description, major features, version, changelog and installation instructions. Keep historical per-file/per-version revision blocks out of the main description; history belongs in the changelog and retained older downloads.
 - Upload the exact same files used for GitHub:
   - **BSL: Main File.**
   - **LLL: Optional File.**

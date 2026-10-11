@@ -51,7 +51,7 @@ def package(path, mode, loader, extra='', stamp=None):
     return path
 
 
-def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', defaults=None):
+def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', defaults=None, extra=None):
     animated = mode == 'animation'
     name = 'Epic LUT R5.5.4'+(' Preview Animation Test' if animated else '')
     main = ('local m={}\nmod.scope.m=m\n'+
@@ -66,7 +66,7 @@ def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', de
                 'lll': {'entry': 'main.lua', 'defaults': 'config/defaults.cfg', 'modules': sorted(modules)}}
     files = {'main.lua': main, 'manifest.json': json.dumps(manifest).encode(), dev.NATIVE: DLL,
              'library.txt': dev.NATIVE.encode(), 'config/defaults.cfg': defaults if defaults is not None else b'{"preferences":{}}\n',
-             'LICENSE-CowboyBingus.txt': b'license', 'INSTALL.txt': b'LLL R30 instructions', **modules, **HELPER_BYTES}
+             'LICENSE-CowboyBingus.txt': b'license', 'INSTALL.txt': b'LLL R30 instructions', **modules, **HELPER_BYTES, **(extra or {})}
     files['FILES-SHA256.txt'] = ''.join(dev.sha(data)+'  '+name+'\n' for name, data in sorted(files.items())).encode()
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, 'w') as archive:
@@ -311,8 +311,8 @@ class ManagedDevelopment(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'baseline changed'):
             dev.select_package(self.root, 'rollback')
 
-    def install_modular_fixture(self, module=b'old shared module\n', defaults=None):
-        path = modular_package(self.root/'initial-modular.zip', 'static', module=module, defaults=defaults)
+    def install_modular_fixture(self, module=b'old shared module\n', defaults=None, extra=None):
+        path = modular_package(self.root/'initial-modular.zip', 'static', module=module, defaults=defaults, extra=extra)
         package_data = dev.read_package(path)
         (self.target/'mod.lua').unlink(missing_ok=True)
         for name, data in package_data['files'].items():
@@ -390,6 +390,66 @@ class ManagedDevelopment(unittest.TestCase):
             dev.replace_pair(self.target, desired, before, self.root/'modular-backup', replace=fail_main, entry='main.lua')
         self.assertEqual(dev.installed_files(self.target), before)
         self.assertFalse((self.target/'mod.lua').exists())
+
+    def test_public_modular_document_additions_updates_and_inventory(self):
+        before = self.install_modular_fixture()
+        docs = {'README.md': b'public readme', 'CHANGELOG.md': b'public changelog',
+                'docs/RELEASE-R5.5.4.md': b'current release notes'}
+        settings = self.target/'config/settings.cfg'
+        settings.write_bytes(b'preserved saved settings')
+        candidate = dev.read_package(modular_package(self.root/'public-docs.zip', 'static', '1'*32, extra=docs))
+        preflight = dev.deploy(self.root, candidate, 'static', target=self.target)
+        self.assertTrue(docs.keys() <= set(preflight['changed_files']))
+        self.assertEqual(dev.installed_files(self.target), before)
+        receipt = dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        for name, data in docs.items():
+            self.assertEqual((self.target/name).read_bytes(), data)
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+        updated = {name: data+b' updated' for name, data in docs.items()}
+        candidate = dev.read_package(modular_package(self.root/'updated-public-docs.zip', 'static', '2'*32, extra=updated))
+        receipt = dev.deploy(self.root, candidate, 'static', install=True, target=self.target)
+        for name, data in updated.items():
+            self.assertEqual((self.target/name).read_bytes(), data)
+            self.assertEqual((Path(receipt['backup'])/name).read_bytes(), docs[name])
+        self.assertNotIn(dev.NATIVE, receipt['changed_files'])
+        self.assertNotIn('library.txt', receipt['changed_files'])
+        self.assertNotIn('config/defaults.cfg', receipt['changed_files'])
+        self.assertNotIn('config/settings.cfg', receipt['changed_files'])
+        self.assertEqual(settings.read_bytes(), b'preserved saved settings')
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+
+    def test_public_modular_docs_do_not_authorize_other_noncode_payloads(self):
+        before = self.install_modular_fixture()
+        for index, name in enumerate(('README.txt', 'readme.md', 'docs/README.md', 'docs/RELEASE-R5.5.5.md',
+                                      'config/settings.cfg', 'private.md', 'LICENSE-CowboyBingus.txt', 'INSTALL.txt')):
+            with self.subTest(name=name):
+                candidate = dev.read_package(modular_package(self.root/f'noncode-{index}.zip', 'static',
+                    extra={'README.md': b'allowed docs', name: b'unapproved payload'}))
+                with self.assertRaisesRegex(RuntimeError, 'Non-code modular payload differs'):
+                    dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+                self.assertEqual(dev.installed_files(self.target), before)
+                self.assertFalse((self.root/'dist/deployment/active.json').exists())
+
+    def test_public_modular_docs_partial_failure_restores_updates_and_removes_additions(self):
+        before = self.install_modular_fixture(extra={'README.md': b'old readme'})
+        docs = {'README.md': b'updated readme', 'CHANGELOG.md': b'new changelog',
+                'docs/RELEASE-R5.5.4.md': b'new release notes'}
+        candidate = dev.read_package(modular_package(self.root/'failed-public-docs.zip', 'static', '3'*32, extra=docs))
+        original_replace = dev.replace_pair
+        def replacing(*args, **kwargs):
+            def fail_main(source, target):
+                if target.name == 'main.lua':
+                    raise OSError('Public documentation main failure')
+                os.replace(source, target)
+            return original_replace(*args, **kwargs, replace=fail_main)
+        with patch.object(dev, 'replace_pair', side_effect=replacing):
+            with self.assertRaisesRegex(RuntimeError, 'Public documentation main failure'):
+                dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        self.assertEqual(dev.installed_files(self.target), before)
+        self.assertEqual((self.target/'README.md').read_bytes(), b'old readme')
+        self.assertFalse((self.target/'CHANGELOG.md').exists())
+        self.assertFalse((self.target/'docs/RELEASE-R5.5.4.md').exists())
+        self.assertFalse((self.root/'dist/deployment/active.json').exists())
 
     def test_authorized_pattern_default_migration_backs_up_and_preserves_settings(self):
         old_defaults = b'{"preferences":{"menu_key":121,"include_capes_in_armor_exports":true},"other":{"keep":[false,1,"x"]}}\n'

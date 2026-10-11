@@ -2,9 +2,17 @@
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Edit worn Armor, Helmet, Cape and Pattern LUTs in-game. Use Basic for region colors and checked-region camo, or Advanced for the full material grid. Save looks in The Armory, map imported palettes to gear, and export DDS, shareable presets or verified game patches.
+Edit worn Armor, Helmet, Cape and Pattern LUTs in-game. Use Basic for region colors and checked-region camo, or Advanced for the full material grid. Save looks in The Armory, map imported palettes to gear, share your applied Armor/Helmet appearance with compatible squadmates through **Shared LUT**, and export DDS, shareable presets or verified game patches.
 
-The current Nexus description source is [NEXUS-BBCODE.txt](NEXUS-BBCODE.txt); version history is [NEXUS-CHANGELOG.txt](NEXUS-CHANGELOG.txt). [R5.7.1 changes](RELEASE-R5.7.1.md) cover the compact editor, mapping, embedded Pattern workspace and gear-assignment export fixes.
+The current Nexus description source is [NEXUS-BBCODE.txt](NEXUS-BBCODE.txt); older revision notes belong in [NEXUS-CHANGELOG.txt](NEXUS-CHANGELOG.txt), not the main description. [R5.7.1 changes](RELEASE-R5.7.1.md) cover Shared LUT, checked-region camo, mapping, the compact editor, embedded Pattern workspace and gear-assignment export fixes.
+
+## Shared LUT — your look, visible to your squad
+
+Compatible Epic LUT squadmates can see your currently applied **Armor, Helmet and associated Pattern** edits, including exact RGBA, material, camo and emissive channels. Apply a saved Armory preset to share that look. Larger appearances benefit from improved lossless compression and deduplication; oversized looks stay local with an explanatory status while receiving remains available.
+
+Both players need R5.7.1 and **Configuration > Share full LUT appearance with Epic LUT users** enabled. It currently defaults On and controls both sending and receiving. Turning it Off removes your advertisement and restores received appearances still owned by Epic LUT. Updates wait for a stable lobby and settled edits, then apply only while the sender's visible body/Armor/Helmet kits match; the receiver's own outfit can be different.
+
+Cape material LUTs are excluded from lobby sharing in this build. Unmodified games and Match Your Colors-only clients do not interpret these appearances. **Shared Lobby LUT remains in testing; two-player visual confirmation is still required for this build.** [Sharing details](UPSTREAM-MYC-INTEGRATION.md).
 
 ## Choose one package
 
@@ -26,7 +34,7 @@ Use **Map LUTs to Gear** for manual assignment or numbered Auto-map across check
 
 Patch export retains verified material and mesh assignments, including different material-bound palettes sharing a texture ID. Kit-fixed IDs keep their required original resource. Unproved or incompatible fixed assignments report an error before publishing files. For an older preset, load and apply its matching gear before binding-aware export. DDS and shareable presets remain available. Exports do not install game patches.
 
-Data stays under `%LOCALAPPDATA%/Epic LUT`. Releases exclude settings, saved presets, logs, cache, game textures and animation assets. **Shared Lobby LUT remains in testing**; both players need a compatible version and sharing enabled. Oversized appearances remain local.
+Data stays under `%LOCALAPPDATA%/Epic LUT`. Releases exclude settings, saved presets, logs, cache, game textures and animation assets.
 
 ## Links and credits
 
