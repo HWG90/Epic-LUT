@@ -3,6 +3,9 @@
 local P = { MAX_BYTES = 4096, MAX_PART = 8 * 1024 * 1024 }
 P.UNIT, P.MATERIAL = 'e0a48d0be9a7453f', 'eac0b497876adedf'
 P.LUT, P.PATTERN = 0x7e662968, 0x81d4c49d
+-- Metadata-only sentinel for an absent stock role on a fixed assignment.
+-- The raw Material receipt/digests retain its exact table and slot presence.
+P.NO_MATERIAL_TEXTURE = '0000000000000000'
 -- SHA256 uses the Windows BCrypt API already used by bingus_memory.
 -- These OS calls neither operate on game objects nor allocate game resources.
 function P.digest(bytes, expected_bytes)
@@ -295,7 +298,7 @@ end
 local function texture(record, wanted)
     assert(#record.main >= 136, 'Truncated material source')
     local count = uint(record.main, 64)
-    assert(count >= 1 and count <= 64 and 136 + count * 12 <= #record.main, 'Material texture table exceeds its bounds')
+    assert(count <= 64 and 136 + count * 12 <= #record.main, 'Material texture table exceeds its bounds')
     local result, seen
     seen = {}
     for i = 0, count - 1 do
@@ -448,8 +451,11 @@ function P.new(deps)
             'Named material identity differs from pristine Unit table'
         )
         match.material = source(deps.material_source(proof.material), proof.material, P.MATERIAL)
-        local material_texture =
-            assert(texture(match.material, slot), 'Pristine named material texture slot unavailable')
+        local material_texture = texture(match.material, slot)
+        if not material_texture then
+            assert(fixed, 'Pristine named material texture slot unavailable')
+            material_texture = P.NO_MATERIAL_TEXTURE
+        end
         assert(
             fixed or material_texture == original.resource:lower(),
             'Pristine named material texture differs from live original'

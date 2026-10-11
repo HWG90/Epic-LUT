@@ -375,6 +375,83 @@ assert(fixed_source.kit_override and fixed_source.fixed_texture and fixed_source
 assert(fixed_refs.version == 3 and fixed_refs.material_texture == '1111111111111111')
 local fixed_encoded = P.encode(fixed_refs)
 assert(P.matches(fixed_refs, P.decode(fixed_encoded)))
+-- Valid shadow/no-role materials remain certified fixed ID replacements;
+-- they never provide an editable stock-material texture offset.
+local zero_table = string.rep('\0', 160)
+local missing_role = replace(string.rep('\0', 136), 64, word(1)) .. word(P.LUT) .. hash('1111111111111111')
+local prior_absent_refs
+for _, bytes in ipairs({ zero_table, missing_role }) do
+    mat = record(mat_id, P.MATERIAL, bytes)
+    mat.main_sha256 = P.digest(bytes)
+    local absent_source, absent_refs = resolver.capture(binding, context)
+    assert(
+        absent_source.fixed_texture
+            and absent_source.kit_override
+            and absent_source.material_texture == P.NO_MATERIAL_TEXTURE
+            and absent_refs.version == 3
+            and absent_refs.material_texture == P.NO_MATERIAL_TEXTURE
+            and absent_refs.material.main_sha256 == mat.main_sha256,
+        'Fixed no-role capture lost its stock-table sentinel or raw Material receipt'
+    )
+    local absent_encoded = P.encode(absent_refs)
+    assert(P.matches(absent_refs, P.decode(absent_encoded)), 'Fixed no-slot sentinel failed v3 roundtrip')
+    if prior_absent_refs then
+        assert(not P.matches(prior_absent_refs, absent_refs), 'No-slot sentinel collapsed different raw stock tables')
+    end
+    prior_absent_refs = absent_refs
+    absent_refs.fixed_texture = false
+    refused(function()
+        P.encode(absent_refs)
+    end, 'Fixed binding provenance required')
+    absent_refs.fixed_texture = true
+    refused(function()
+        P.decode((absent_encoded:gsub('\n' .. P.NO_MATERIAL_TEXTURE .. '\n', '\nmissing\n')))
+    end, 'stock material texture')
+    deps.kit_override = guard
+    refused(function()
+        resolver.capture(binding, context)
+    end, 'Pristine named material texture slot unavailable')
+    deps.kit_override = function()
+        return false, { id = kit.id, body = kit.body, archive = kit.archive, matches = 0 }
+    end
+    local unknown_absent, unknown_absent_refs = resolver.capture(binding, context)
+    assert(
+        unknown_absent.fixed_texture
+            and not unknown_absent.kit_override
+            and unknown_absent_refs.material_texture == P.NO_MATERIAL_TEXTURE
+            and P.matches(unknown_absent_refs, P.decode(P.encode(unknown_absent_refs))),
+        'Conservative zero-match no-role capture failed strict roundtrip'
+    )
+    deps.kit_override = function()
+        return true, fixed_kit
+    end
+end
+mat = record(mat_id, P.MATERIAL, zero_table)
+local no_role_calls = 0
+deps.kit_override = function()
+    no_role_calls = no_role_calls + 1
+    return true,
+        {
+            id = kit.id,
+            body = kit.body,
+            archive = kit.archive,
+            matches = 1,
+            override_texture = no_role_calls == 1 and tex or '3333333333333333',
+            piece_body = 0,
+        }
+end
+refused(function()
+    resolver.capture(binding, context)
+end, 'kit changed')
+deps.kit_override = function()
+    return true, fixed_kit
+end
+mutate_binding = true
+refused(function()
+    resolver.capture(binding, context)
+end, 'binding changed during capture')
+foreign, mutate_binding = false, false
+mat = record(mat_id, P.MATERIAL, replace(mat_main, 136 + 2 * 4 + 8, hash('1111111111111111')))
 refused(function()
     P.decode((fixed_encoded:gsub('\n1\n1\n1\n' .. tex, '\n0\n1\n1\n' .. tex)))
 end, 'must retain')

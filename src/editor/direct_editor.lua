@@ -2509,10 +2509,11 @@ function operations.probe_binding_sources()
         for _, group in ipairs(pool.targets) do
             for _, b in ipairs(group.bindings) do
                 local original = original_luts and original_luts.get(b.original)
+                local kind, key = m.gear_catalog.kind(b), (pool.pattern and 'p:' or '') .. b.save_key
                 counts.targets = counts.targets + 1
                 local ok, why = pcall(operations.provenance_resolver.capture, b, {
-                    kind = m.gear_catalog.kind(b),
-                    key = (pool.pattern and 'p:' or '') .. b.save_key,
+                    kind = kind,
+                    key = key,
                     original = original,
                 })
                 if ok then
@@ -2527,7 +2528,9 @@ function operations.probe_binding_sources()
                     local distinct = category .. ':' .. why:gsub('^.-:%d+: ', '')
                     if #reasons < 8 and not seen_reasons[distinct] then
                         seen_reasons[distinct] = true
-                        reasons[#reasons + 1] = why:sub(1, 256)
+                        reasons[#reasons + 1] = (kind .. ':' .. key .. ' texture=' .. tostring(
+                            original and original.resource or '-'
+                        ) .. ' ' .. why):sub(1, 384)
                     end
                 end
             end
