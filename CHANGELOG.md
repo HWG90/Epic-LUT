@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Begin controller refactoring by separating file-picker requests, retries, progress and worker polling into `import_picker`; preserve result acceptance and native ownership in the editor.
 - Resize docked Tools vertically with a draggable divider; retain the split across window resizing and redocking without changing LUT data.
 - Keep partially visible Value Editor text rendering at both scroll edges, with clipped controls and fixed chrome above the scrolling content.
 - Align Value Editor labels and numeric fields to measured font bounds; add thumb/track dragging and finer scrolling without clipping beneath its header.

@@ -125,6 +125,7 @@ local m = {
     ui_core = core,
     table_index = dofile('src/imports/table_index.lua'),
     import_job = dofile('src/imports/import_job.lua'),
+    import_picker = dofile('src/imports/import_picker.lua'),
     import_protocol = dofile('src/imports/import_protocol.lua'),
     file_io = {
         read = function(path)

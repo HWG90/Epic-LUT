@@ -77,6 +77,7 @@ local m = {
     ui_core = Core,
     table_index = dofile('src/imports/table_index.lua'),
     import_job = dofile('src/imports/import_job.lua'),
+    import_picker = dofile('src/imports/import_picker.lua'),
     import_protocol = dofile('src/imports/import_protocol.lua'),
     file_io = dofile('src/core/file_io.lua'),
     action_history = dofile('src/core/action_history.lua'),

@@ -224,76 +224,10 @@ local function load_dds(path)
     return message('DDS imported (' .. w .. ' x ' .. h .. '). Send to LUT Editor to edit; Apply LUT sends it to gear.')
 end
 local function load(pick, rows_mode)
-    assert(not pending, 'ZIP import is still pending')
-    operations.last_import_rows_mode = rows_mode
-    if not rows_mode then
-        resume_done = true
-        resume_job = nil
-    end
-    local name
-    if not pick then
-        name = handle.get('file')
-        assert(
-            type(name) == 'string' and #name > 0 and #name <= 48 and name:match('^[%w _-]+$'),
-            'Enter the filename without its extension'
-        )
-        if handle.get('format') == 1 then
-            palettes = { paths.files .. '/' .. name .. '.dds' }
-            palette_choices({ name })
-            return load_dds(palettes[1])
-        end
-    end
-    local _, kernel = m.native_import.verify_interface()
-    assert(not paths.files:find('"', 1, true) and not paths.cache:find('"', 1, true), 'Invalid import path')
-    local script = paths.cache .. '/import-zip.ps1'
-    local f = assert(io.open(script, 'wb'))
-    assert(f:write((m.zip_import_script:gsub('%x%x', function(pair)
-        return string.char(tonumber(pair, 16))
-    end))))
-    assert(f:close())
-    import_counter.value = import_counter.value + 1
-    local pid = tonumber(kernel.epic_native_pid())
-    local base = paths.cache .. '/zip-' .. pid .. '-' .. os.time() .. '-' .. import_counter.value
-    local extension = handle.get('format') == 3 and '.rar' or '.zip'
-    local input = pick and ' -Pick' or ' -Package "' .. paths.files .. '/' .. name .. extension .. '"'
-    local args = '-NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "'
-        .. script
-        .. '"'
-        .. input
-        .. (rows_mode and ' -RowPresets' or ' -Navigate')
-        .. ' -Output "'
-        .. base
-        .. '" -Result "'
-        .. base
-        .. '.txt" -OwnerPID '
-        .. pid
-    local worker = m.native_import.launch_worker(args, paths.cache)
-    pending = import_jobs.start({
-        base = base,
-        pick = pick,
-        rows_mode = rows_mode,
-        worker = worker,
-        menu_visible = frontend.menu and frontend.menu.visible,
-        menu_page = frontend.menu and frontend.menu.page,
-    })
-    return message(
-        rows_mode and 'Choose a Paydex row-presets JSON file.'
-            or (
-                pick and 'Choose a DDS or ZIP in the Windows file picker.'
-                or 'Extracting ZIP palettes. No Python is used.'
-            )
-    )
+    return operations.import_picker.load(pick, rows_mode)
 end
 local function cancel_import(retry)
-    if not import_jobs.cancel(retry) then
-        if retry then
-            return load(true, operations.last_import_rows_mode)
-        end
-        return message('No import is running.')
-    end
-    return message(
-        retry and 'Closing the previous picker before retrying...' or 'Canceling import; current palettes stay active.'
-    )
+    return operations.import_picker.cancel(retry)
 end
 local function accept_import(text, job)
     return action(function()
@@ -373,19 +307,40 @@ local function accept_import(text, job)
         return status
     end)
 end
-local function poll_job()
-    local event = import_jobs.poll()
-    pending = import_jobs.job
-    if not event then
-        return
-    end
-    if event.kind == 'result' then
-        return accept_import(event.text, event.job)
-    end
-    if event.kind == 'retry' then
-        return load(true, event.job and event.job.rows_mode)
-    end
-    return message(event.message)
+local function initialize_import_picker()
+    import_jobs = m.import_job.new(m.import_protocol)
+    operations.import_picker = m.import_picker.new({
+        jobs = import_jobs,
+        paths = paths,
+        counter = import_counter,
+        get = function(id)
+            return handle.get(id)
+        end,
+        get_native_import = function()
+            return m.native_import
+        end,
+        get_script_hex = function()
+            return m.zip_import_script
+        end,
+        get_menu = function()
+            return frontend and frontend.menu
+        end,
+        before_load = function(rows_mode)
+            if not rows_mode then
+                resume_done, resume_job = true, nil
+            end
+        end,
+        load_direct = function(name)
+            palettes = { paths.files .. '/' .. name .. '.dds' }
+            palette_choices({ name })
+            return load_dds(palettes[1])
+        end,
+        accept = accept_import,
+        message = message,
+        on_job = function(job)
+            pending = job
+        end,
+    })
 end
 appearance_proof = function()
     if not m.avatar.resolve then
@@ -1220,13 +1175,7 @@ import_state = function()
         end
         raw[container], raw.pending_luts[container] = entries, #choices - #entries
     end
-    local phase = pending and pending.phase or ''
-    local labels = {
-        starting = 'Opening file picker...',
-        picker = 'Waiting for file selection...',
-        reading = 'Reading archive...',
-        extracting = 'Extracting LUTs...',
-    }
+    local picker = operations.import_picker.info()
     local dirty = edit.loaded
             and edit.loaded.original
             and ffi.string(edit.loaded.data, edit.loaded.width * edit.loaded.height * 16) ~= (edit.loaded.saved_pixels or ffi.string(
@@ -1254,20 +1203,17 @@ import_state = function()
         cape_available = #m.gear_catalog.targets(groups, 5, nil, 'cape') > 0,
         loaded = edit.imported,
         import_description = m.import_description,
-        import_detail = pending and pending.detail,
+        import_detail = picker.detail,
         status = populate_request
                 and ('Loading worn colors: ' .. (original_luts and original_luts.status or 'snapshot unavailable'))
             or original_luts and not original_luts.loaded and original_luts.status
             or status,
-        busy = pending ~= nil or index_job ~= nil,
-        phase = index_job and 'Comparing imported tables...'
-            or pending and pending.canceling and 'Canceling...'
-            or labels[phase]
-            or phase,
-        progress = pending and pending.percent or 0,
-        waiting = pending and (pending.phase == 'picker' or pending.phase == 'starting'),
+        busy = picker.busy or index_job ~= nil,
+        phase = index_job and 'Comparing imported tables...' or picker.phase,
+        progress = picker.progress,
+        waiting = picker.waiting,
         time = memory.time and memory.time() or os.clock(),
-        elapsed = pending and (os.time() - pending.started) or 0,
+        elapsed = picker.elapsed,
         armor_checked = handle.get('target_armor'),
         helmet_checked = handle.get('target_helmet'),
         palette_name = handle.get('palette_name'),
@@ -3349,8 +3295,7 @@ local function close()
     if sharing and not sharing.close() then
         return false
     end
-    if import_jobs and not import_jobs.close() then
-        pending = import_jobs.job
+    if operations.import_picker and not operations.import_picker.close() then
         return false
     end
     pending = nil
@@ -3615,7 +3560,7 @@ return {
                 ctx.log('Appearance sharing unavailable: ' .. tostring(value))
             end
         end
-        import_jobs = m.import_job.new(m.import_protocol)
+        initialize_import_picker()
         table_index = m.table_index.new({ read = m.file_io.read, decode = m.dds.decode, max_bytes = m.dds.MAX_BYTES })
         operations.apply_matching = apply_matching
         operations.load_debug_lut = load_debug_lut
@@ -4070,14 +4015,7 @@ return {
                     refresh_needed = not pcall(refresh, true)
                 end
             end
-            local import_ok, import_error = pcall(poll_job)
-            if not import_ok then
-                if import_jobs then
-                    pcall(import_jobs.abort)
-                    pending = import_jobs.job
-                end
-                message('Import stopped safely; editor remains available: ' .. tostring(import_error))
-            end
+            operations.import_picker.poll()
             if api.mods[handle.id].controls.import_paydex_rows then
                 api.mods[handle.id].controls.import_paydex_rows.disabled = pending ~= nil
             end

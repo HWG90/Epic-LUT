@@ -63,6 +63,7 @@ local m = {
     lut_editor_controls = dofile('src/editor/lut_editor_controls.lua'),
     lut_editor_view = dofile('src/editor/lut_editor_view.lua'),
     import_job = dofile('src/imports/import_job.lua'),
+    import_picker = dofile('src/imports/import_picker.lua'),
     armory_collection = dofile('src/presets/armory_collection.lua'),
     configuration = dofile('src/editor/configuration.lua'),
     binding_session = dofile('src/gear/binding_session.lua'),
