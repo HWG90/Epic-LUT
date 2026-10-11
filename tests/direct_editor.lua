@@ -1345,6 +1345,28 @@ assert(
     creates == before_export_creates and bound[3] == before_export_material and pattern_bound[3] == 900,
     'Paired exports applied textures or changed the worn appearance'
 )
+-- Current palette export retains destination rows before the asset writer
+-- deduplicates payloads. Shared original IDs must not discard a gear binding.
+do
+    local previous_resource = pattern_originals[901].resource
+    pattern_originals[901].resource = pattern_originals[900].resource
+    patch_saved = nil
+    assert(mixed_handle.set('export_format', 3) and mixed_handle.activate('export_selected'))
+    assert(patch_saved and not patch_saved.original and type(patch_saved.document) == 'table')
+    local destinations, shared = {}, 0
+    for _, entry in ipairs(patch_saved.document) do
+        assert(entry.kind and entry.key, 'Current palette omitted a destination identity')
+        local key = entry.kind .. ':' .. entry.key
+        assert(not destinations[key], 'Current palette duplicated a destination')
+        destinations[key] = true
+        if entry.original.resource == pattern_originals[900].resource then
+            shared = shared + 1
+        end
+    end
+    assert(shared >= 2, 'Current palette collapsed separate bindings sharing an original texture ID')
+    pattern_originals[901].resource = previous_resource
+    assert(mixed_handle.set('export_format', 1))
+end
 missing_pattern = 900
 bulk_entries = nil
 local export_ok, export_error = mixed_handle.activate('save_dds')

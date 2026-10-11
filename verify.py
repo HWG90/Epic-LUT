@@ -18,6 +18,7 @@ os.environ.setdefault('MCM_SOURCE_DIR',str(ROOT.parent/'DBF-MCM'))
 from tools.lua_runner import LuaRunner
 
 TESTS = (
+    'unit_identity', 'material_identity', 'binding_unit_layout',
     'sdk_catalog', 'resource_labels', 'armory_dropdown_hover', 'ui_styling', 'typography', 'window_frames', 'player_authored_clip', 'player_authored_source', 'player_animation',
     'tooltip_wrapping', 'lut_editor_hierarchy', 'editor_surface_typography', 'floating_windows', 'window_render_order', 'picker_permissions', 'editor_clipboard', 'lut_drag_selection', 'lut_row_selection', 'row_clipboard', 'render_order', 'integer_layers', 'clipboard', 'menu_clipboard_drag', 'text_editing', 'native_text_metrics', 'ui_font', 'ui_font_render', 'font_padding', 'custom_layout_space', 'value_editor_scroll', 'viewport_clipping', 'tools_splitter', 'camo_region_indicator',
     'contracts', 'float_lut', 'provider_menu', 'full_editor', 'native_ipc', 'pattern_workspace', 'pattern_workspace_layout', 'lut_apply_dialog', 'value_field_commit', 'control_width_caps', 'rgb_only_picker', 'preset_name_completion', 'row_preset_preview', 'delete_selection', 'binding_patch_export', 'binding_provenance', 'binding_source_cache',
@@ -36,4 +37,5 @@ for name in TESTS:
 subprocess.run([sys.executable, str(ROOT/'tests/test_paydex_worker.py')], cwd=ROOT, check=True)
 subprocess.run([sys.executable, str(ROOT/'tests/test_camo_preview.py')], cwd=ROOT, check=True)
 subprocess.run([sys.executable, str(ROOT/'tests/test_binding_provenance.py')], cwd=ROOT, check=True)
+subprocess.run([sys.executable, str(ROOT/'tests/test_binding_names.py')], cwd=ROOT, check=True)
 print('PASS: source and bundled LuaJIT syntax; isolated editor contracts')

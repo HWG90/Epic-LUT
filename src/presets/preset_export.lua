@@ -124,6 +124,8 @@ function E.new(m, paths, options)
         binding_writer = m.binding_patch_export,
         provenance = options.binding_provenance,
         id_available = options.resource_id_available,
+        original_patch = options.original_patch,
+        unit_layout = options.unit_layout or m.binding_unit_layout,
     })
     function self.save(name, preset, format, index, naming)
         assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')

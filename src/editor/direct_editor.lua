@@ -2371,14 +2371,10 @@ local function refresh_outfits()
         armory_collection.refresh()
     end
 end
-function operations.provenance_unit_resource(unit)
-    local sr = rawget(_G, 'stingray')
-    local U = sr and sr.Unit
-    assert(U and U.resource_name and native.alive(unit) ~= 0, 'Stable live unit resource API unavailable')
-    local value = tostring(U.resource_name(unit))
-    local hash = value:match('#ID%[(%x+)%]')
-    assert(hash and #hash == 16, 'Stable live unit resource ID unavailable')
-    return hash:lower()
+function operations.provenance_unit_resource(unit, identity)
+    local helper = assert(operations.provenance_unit_identity, 'Verified Lua Unit identity unavailable')
+    identity = identity or assert(m.avatar.resolve(memory, game, appearance_read), 'Current local avatar unavailable')
+    return helper.resource(unit, identity)
 end
 function operations.provenance_read(address, size)
     assert(
@@ -2394,12 +2390,6 @@ function operations.provenance_read(address, size)
     return memory.read_into(ffi.cast('const uint8_t *', address), size, buffer) and ffi.string(buffer, size) or nil
 end
 function operations.ensure_binding_provenance()
-    -- Material ResourceManager signatures and object ownership are not live
-    -- certified. Production packages supply no callback, so this refuses
-    -- before unit APIs, kit reads, worker launches or material lookups.
-    if type(m.certified_material_lookup) ~= 'function' then
-        return nil
-    end
     if operations.provenance_resolver then
         return operations.provenance_resolver
     end
@@ -2409,9 +2399,27 @@ function operations.ensure_binding_provenance()
             and m.binding_source_cache
             and m.binding_provenance_script
             and m.binding_provenance_reader
+            and m.unit_identity
+            and m.material_identity
+            and m.binding_unit_layout
+            and m.binding_names
         )
     then
-        return nil
+        return nil, 'Verified named Lua binding identity unavailable'
+    end
+    local ready, unit_identity, material_identity = pcall(function()
+        local E = assert(rawget(_G, 'stingray'), 'Lua Unit APIs unavailable')
+        local units =
+            m.unit_identity.new(E, { avatar = m.avatar, memory = memory, game = game, read = appearance_read })
+        local materials = m.material_identity.new(E, {
+            unit_identity = units,
+            section_name = m.binding_names.section,
+            mesh_name = m.binding_names.mesh,
+        })
+        return units, materials
+    end)
+    if not ready then
+        return nil, tostring(unit_identity)
     end
     local cache = m.binding_source_cache.new(m, { paths = paths, log = ctx.log })
     local resolver = m.binding_provenance.new({
@@ -2421,19 +2429,24 @@ function operations.ensure_binding_provenance()
         unit_source = cache.unit,
         material_source = cache.material,
         unit_resource = operations.provenance_unit_resource,
+        identity = function()
+            return m.avatar.resolve(memory, game, appearance_read)
+        end,
         kit_override = function(b, hash, slot)
             local identity = assert(m.avatar.resolve(memory, game, appearance_read), 'Current kit identity unavailable')
             return m.binding_provenance.kit_override(operations.provenance_read, game, identity, b, hash, slot)
         end,
-        material_lookup = m.certified_material_lookup,
+        material_identity = material_identity,
+        layout = m.binding_unit_layout.parse,
     })
-    operations.provenance_cache, operations.provenance_resolver = cache, resolver
+    operations.provenance_cache, operations.provenance_resolver, operations.provenance_unit_identity =
+        cache, resolver, unit_identity
     return resolver
 end
 function operations.request_binding_sources()
-    local resolver = operations.ensure_binding_provenance()
+    local resolver, why = operations.ensure_binding_provenance()
     if not resolver then
-        return false
+        return false, why
     end
     local identity = assert(m.avatar.resolve(memory, game, appearance_read), 'Current kit identity unavailable')
     local units, seen, refused = {}, {}, nil
@@ -2442,7 +2455,7 @@ function operations.request_binding_sources()
             if not seen[b.unit] then
                 seen[b.unit] = true
                 local ok, value = pcall(function()
-                    local hash = operations.provenance_unit_resource(b.unit)
+                    local hash = operations.provenance_unit_resource(b.unit, identity)
                     local _, kit = m.binding_provenance.kit_override(
                         operations.provenance_read,
                         game,
@@ -2474,10 +2487,6 @@ function operations.request_binding_sources()
     return ok, why
 end
 function operations.probe_binding_sources()
-    if type(m.certified_material_lookup) ~= 'function' then
-        operations.provenance_probe_requested = nil
-        return
-    end
     local cache = operations.provenance_cache
     if not operations.provenance_probe_requested or not cache or cache.state ~= 'ready' then
         return
@@ -2539,13 +2548,8 @@ end
 function operations.binding_export_provider(preset)
     local hydrated, matches = {}
     local function prepare()
-        if type(m.certified_material_lookup) ~= 'function' then
-            error(
-                'Binding-aware patch export is temporarily disabled after a crash. Export a Shareable Preset ZIP to retain every LUT assignment.',
-                0
-            )
-        end
-        local resolver = assert(operations.ensure_binding_provenance(), 'Binding provenance resolver unavailable')
+        local resolver, why = operations.ensure_binding_provenance()
+        assert(resolver, why or 'Verified named Lua binding identity unavailable')
         if operations.provenance_cache.state ~= 'ready' or not operations.provenance_cache.validate_scope() then
             operations.request_binding_sources()
             error('Reading exact binding sources; retry Export after the background cache is ready', 0)
@@ -2613,7 +2617,7 @@ function operations.binding_export_provider(preset)
                 resolver.capture(target.binding, { kind = entry.kind, key = entry.key, original = target.original })
             if entry.binding_provenance then
                 assert(
-                    m.binding_provenance.encode(refs) == m.binding_provenance.encode(entry.binding_provenance),
+                    m.binding_provenance.matches(entry.binding_provenance, refs),
                     'Saved binding provenance differs from current pristine assets/kit; no assignments guessed'
                 )
             end
@@ -3823,6 +3827,20 @@ function operations.selected_export_bindings(required)
     assert(#targets > 0, 'Selected LUT has no live export destination')
     return targets
 end
+function operations.export_original_patch(entry)
+    local original = assert(entry.original, 'Original texture metadata unavailable')
+    local baseline = original.data and original or original_luts and original_luts.get_resource(original.resource)
+    assert(
+        baseline
+            and baseline.data
+            and baseline.resource == original.resource
+            and baseline.width == original.width
+            and baseline.height == original.height,
+        'Original texture palette is not ready; load current gear before exporting'
+    )
+    return m.patch_export.encode(m.dds, baseline, original)
+end
+
 function operations.export_pattern_entries(targets, pattern_groups)
     if
         not operations.include_patterns_in_exports()
@@ -3849,7 +3867,13 @@ function operations.export_pattern_entries(targets, pattern_groups)
         assert(document.width == 3 and document.height == 1, 'Matching Pattern snapshot is not a 3x1 LUT')
         local kind = m.gear_catalog.kind(b)
         counts[kind] = (counts[kind] or 0) + 1
-        entries[#entries + 1] = { document = document, original = original, kind = kind, ordinal = counts[kind] }
+        entries[#entries + 1] = {
+            document = document,
+            original = original,
+            kind = kind,
+            ordinal = counts[kind],
+            key = 'p:' .. b.save_key,
+        }
     end
     return entries, matched
 end
@@ -4109,6 +4133,8 @@ local function register(current)
                     end,
                     include_patterns = operations.include_patterns_in_exports,
                     binding_provenance = operations.binding_export_provider(preset),
+                    original_patch = operations.export_original_patch,
+                    unit_layout = m.binding_unit_layout,
                     resource_id_available = function(kind, id)
                         return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
                             kind,
@@ -5597,8 +5623,8 @@ return {
                                 assert(pattern_editor.stop_flash(), 'Pattern highlight restoration pending')
                             end
                             refresh(true)
-                            local documents, resources = {}, {}
-                            local function collect(group)
+                            local documents = {}
+                            local function collect(group, pattern)
                                 for _, b in ipairs(group.bindings) do
                                     if not b.cape or include_capes_in_exports() then
                                         assert(
@@ -5615,30 +5641,17 @@ return {
                                             document,
                                             'Applied LUT data unavailable; cannot export the entire palette'
                                         )
-                                        local previous = resources[original.resource]
-                                        if previous then
-                                            assert(
-                                                previous.width == document.width
-                                                    and previous.height == document.height
-                                                    and ffi.string(
-                                                            previous.data,
-                                                            previous.width * previous.height * 16
-                                                        )
-                                                        == ffi.string(
-                                                            document.data,
-                                                            document.width * document.height * 16
-                                                        ),
-                                                'Shared LUT has different applied values; cannot represent both in one patch'
-                                            )
-                                        else
-                                            resources[original.resource] = document
-                                            documents[#documents + 1] = { document = document, original = original }
-                                        end
+                                        documents[#documents + 1] = {
+                                            document = document,
+                                            original = original,
+                                            kind = m.gear_catalog.kind(b),
+                                            key = (pattern and 'p:' or '') .. b.save_key,
+                                        }
                                     end
                                 end
                             end
                             for _, group in ipairs(groups) do
-                                collect(group)
+                                collect(group, false)
                             end
                             if pattern_editor and operations.include_patterns_in_exports() then
                                 local patterns_found = pattern_editor.scan()
@@ -5646,7 +5659,7 @@ return {
                                     pattern_editor.load()
                                 end
                                 for _, group in ipairs(pattern_editor.all_groups or {}) do
-                                    collect(group)
+                                    collect(group, true)
                                 end
                             end
                             local exporter = m.patch_export.new(paths.exports, {
@@ -5655,6 +5668,16 @@ return {
                                 directory_exists = paths.directory_exists,
                                 mkdir_new = paths.mkdir_new,
                                 rmdir = paths.rmdir,
+                                binding_writer = m.binding_patch_export,
+                                provenance = operations.binding_export_provider({ entries = documents }),
+                                original_patch = operations.export_original_patch,
+                                unit_layout = m.binding_unit_layout,
+                                id_available = function(kind, id)
+                                    return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
+                                        kind,
+                                        id
+                                    )
+                                end,
                             })
                             local output, count, zip = exporter.save(name, documents)
                             return message('Exported entire worn palette: ' .. count .. ' to ' .. (zip or output))
@@ -5683,10 +5706,35 @@ return {
                         })
                         local companions = operations.export_pattern_entries(targets)
                         if #companions > 0 then
-                            local documents = { { document = edit.loaded, original = original } }
+                            local first = assert(targets[1], 'Current material destination unavailable')
+                            local documents = {
+                                {
+                                    document = edit.loaded,
+                                    original = original,
+                                    kind = m.gear_catalog.kind(first),
+                                    key = first.save_key,
+                                },
+                            }
                             for _, entry in ipairs(companions) do
                                 documents[#documents + 1] = entry
                             end
+                            exporter = m.patch_export.new(paths.exports, {
+                                available_name = m.lut_files.available_name,
+                                dds = m.dds,
+                                directory_exists = paths.directory_exists,
+                                mkdir_new = paths.mkdir_new,
+                                rmdir = paths.rmdir,
+                                binding_writer = m.binding_patch_export,
+                                provenance = operations.binding_export_provider({ entries = documents }),
+                                original_patch = operations.export_original_patch,
+                                unit_layout = m.binding_unit_layout,
+                                id_available = function(kind, id)
+                                    return assert(operations.provenance_cache, 'Binding collision catalog unavailable').id_available(
+                                        kind,
+                                        id
+                                    )
+                                end,
+                            })
                             local output, count, zip = exporter.save(name, documents)
                             return message('Exported LUT and matching Patterns: ' .. count .. ' to ' .. (zip or output))
                         end

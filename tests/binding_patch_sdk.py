@@ -54,6 +54,9 @@ class Stream:
     def uint64(self, value):
         return self.scalar(value, '<Q')
 
+    def int32(self, value):
+        return self.scalar(value, '<i')
+
     def float32(self, value):
         return self.scalar(value, '<f')
 
@@ -100,15 +103,76 @@ block = ast.FunctionDef(name='material_table', args=ast.arguments(posonlyargs=[]
 namespace = {}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[block], type_ignores=[])),
              str(SDK / 'stingray/unit.py'), 'exec'), namespace)
-unit_bytes = (ROOT / 'tests/tmp/binding-unit-proof.bin').read_bytes()
-unit = types.SimpleNamespace(MaterialsOffset=struct.unpack_from('<I', unit_bytes, 112)[0],
-                             SectionsIDs=[], MaterialIDs=[])
-namespace['material_table'](unit, Stream(unit_bytes))
-assert unit.SectionsIDs == [101, 102, 103]
-assert len(set(unit.MaterialIDs)) == 3
-assert unit.MaterialIDs[2] == int('1234567890abcdef', 16)
-output = Stream(unit_bytes, writing=True)
-output.seek(unit.MaterialsOffset)
-namespace['material_table'](unit, output)
-assert bytes(output.Data) == unit_bytes
-print('PASS pinned SDK cross-check: full material serializer and exact unit SectionID/MaterialIDs field block round-trip synthetic patched records without geometry changes')
+# Execute exact mesh serializers too: a SectionID is selected by its local
+# material index, and the global table supplies that SectionID's material ID.
+mesh_classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
+                and node.name in ('MeshInfo', 'MeshSectionInfo')]
+namespace['MemoryStream'] = Stream
+exec(compile(ast.Module(body=mesh_classes, type_ignores=[]), str(SDK / 'stingray/unit.py'), 'exec'), namespace)
+
+
+def tables(data):
+    unit = types.SimpleNamespace(MaterialsOffset=struct.unpack_from('<I', data, 112)[0],
+                                 SectionsIDs=[], MaterialIDs=[])
+    namespace['material_table'](unit, Stream(data))
+    mesh_at = struct.unpack_from('<I', data, 100)[0]
+    count = struct.unpack_from('<I', data, mesh_at)[0]
+    meshes = []
+    for index in range(count):
+        at = mesh_at + struct.unpack_from('<I', data, mesh_at + 4 + index * 4)[0]
+        reader = Stream(data)
+        reader.seek(at)
+        meshes.append((at, namespace['MeshInfo']().Serialize(reader)))
+    return unit, meshes
+
+
+old_material = int('1234567890abcdef', 16)
+for stem, baseline_section in [('binding-unit', 103), ('binding-unit-shared', 101)]:
+    unit_bytes = (ROOT / f'tests/tmp/{stem}-proof.bin').read_bytes()
+    pristine = (ROOT / f'tests/tmp/{stem}-original-proof.bin').read_bytes()
+    original, old_meshes = tables(pristine)
+    unit, meshes = tables(unit_bytes)
+    assert original.SectionsIDs == [101, 102, 103]
+    assert unit.SectionsIDs[:3] == original.SectionsIDs
+    assert unit.MaterialIDs[:3] == original.MaterialIDs == [old_material] * 3
+    assert len(unit.SectionsIDs) == 5 and len(set(unit.SectionsIDs)) == 5
+    assert len(set(unit.MaterialIDs)) == 3
+    lookup = dict(zip(unit.SectionsIDs, unit.MaterialIDs))
+    selected = [mesh.MaterialIDs[0] for _, mesh in meshes[:2]]
+    assert selected[0] != selected[1]
+    assert all(section not in original.SectionsIDs for section in selected)
+    assert lookup[selected[0]] != lookup[selected[1]]
+    assert meshes[2][1].MaterialIDs == [baseline_section]
+    assert lookup[baseline_section] == old_material
+    expected_prefix = bytearray(pristine)
+    ending = struct.unpack_from('<I', unit_bytes, 96)[0]
+    original_ending = struct.unpack_from('<I', pristine, 96)[0]
+    struct.pack_into('<I', expected_prefix, 96, ending)
+    struct.pack_into('<I', expected_prefix, 112, unit.MaterialsOffset)
+    for index, section in enumerate(selected):
+        struct.pack_into('<I', expected_prefix, meshes[index][0] + 128, section)
+    assert unit_bytes[:len(pristine)] == expected_prefix
+    assert unit.MaterialsOffset >= len(pristine)
+    table_end = unit.MaterialsOffset + 4 + 12 * len(unit.SectionsIDs)
+    original_table_end = original.MaterialsOffset + 4 + 12 * len(original.SectionsIDs)
+    assert unit_bytes[table_end:] == pristine[original_table_end:]
+    assert ending == table_end + original_ending - original_table_end
+    for (_, before), (_, after) in zip(old_meshes, meshes):
+        assert before.MeshID == after.MeshID
+        assert before.NumMaterials == after.NumMaterials == 1
+        assert before.NumSections == after.NumSections == 1
+        assert [(section.MaterialIndex, section.VertexOffset, section.NumVertices,
+                 section.IndexOffset, section.NumIndices, section.GroupIndex)
+                for section in before.Sections] == [
+                    (section.MaterialIndex, section.VertexOffset, section.NumVertices,
+                     section.IndexOffset, section.NumIndices, section.GroupIndex)
+                    for section in after.Sections]
+        assert after.Sections[0].ID == after.MaterialIDs[0]
+    output = Stream(unit_bytes, writing=True)
+    output.seek(unit.MaterialsOffset)
+    namespace['material_table'](unit, output)
+    for at, mesh in meshes:
+        output.seek(at)
+        mesh.Serialize(output)
+    assert bytes(output.Data) == unit_bytes
+print('PASS pinned SDK cross-check: full material and exact mesh/global section serializers round-trip isolated synthetic forks; original table, unselected/baseline slots and geometry metadata remain unchanged')

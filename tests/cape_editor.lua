@@ -2655,7 +2655,10 @@ do
     local old_sr, old_log = rawget(_G, 'stingray'), ctx.log
     local old_provenance, old_cache, old_export = m.binding_provenance, m.binding_source_cache, m.preset_export
     local old_script, old_reader = m.binding_provenance_script, m.binding_provenance_reader
-    local old_lookup, old_can_get, old_get = m.certified_material_lookup, native.can_get, native.get
+    local old_can_get, old_get = native.can_get, native.get
+    local old_units, old_materials, old_names, old_layout =
+        m.unit_identity, m.material_identity, m.binding_names, m.binding_unit_layout
+    local old_resolve, old_resolve_live, old_avatar_units = m.avatar.resolve, m.avatar.resolve_live, m.avatar.units
     local cache, starts, captures, closed, ready, close_ready, fail = nil, 0, 0, 0, false, false, false
     local unit_lookups, kit_reads, material_lookups, worker_creates, resolver_creates = 0, 0, 0, 0, 0
     local logs = {}
@@ -2663,13 +2666,68 @@ do
         logs[#logs + 1] = text
     end
     _G.stingray = {
+        Application = {
+            worlds = function()
+                return { 'game' }
+            end,
+        },
+        World = {
+            units = function()
+                local handles = {}
+                for _, entry in ipairs(units) do
+                    handles[#handles + 1] = ffi.cast('void *', entry.unit * 4)
+                end
+                return handles
+            end,
+        },
         Unit = {
             resource_name = function(unit)
                 unit_lookups = unit_lookups + 1
-                return '#ID[' .. string.format('%016x', unit) .. ']'
+                assert(type(unit) == 'cdata', 'Native reference reached Unit.resource_name during Load/save/export')
+                local ref = tonumber(ffi.cast('uintptr_t', unit)) / 4
+                assert(live[ref])
+                return '#ID[' .. string.format('%016x', ref) .. ']'
+            end,
+            alive = function(unit)
+                assert(type(unit) == 'cdata', 'Native reference reached Unit.alive')
+                return live[tonumber(ffi.cast('uintptr_t', unit)) / 4] == true
+            end,
+            num_meshes = function()
+                return 1
+            end,
+            mesh = function()
+                error('Synthetic capture unexpectedly enumerated meshes', 0)
+            end,
+        },
+        Mesh = {
+            has_material = function()
+                error('Synthetic capture unexpectedly queried materials', 0)
+            end,
+            material = function()
+                error('Synthetic capture unexpectedly queried materials', 0)
             end,
         },
     }
+    m.avatar.resolve_live = function()
+        return { player = 1, unit = 1001, avatar = 1, avatar_index = 0, units_at = 65536 }
+    end
+    m.avatar.resolve = function()
+        if not proof_ready then
+            return nil
+        end
+        local identity = m.avatar.resolve_live()
+        for key, value in pairs(kits) do
+            identity[key] = value
+        end
+        return identity
+    end
+    m.avatar.units = function(...)
+        local list = {}
+        for _, entry in ipairs(old_avatar_units(...)) do
+            list[#list + 1] = { unit = entry.unit, type = entry.type, slot = entry.slot, preview = false }
+        end
+        return list
+    end
     m.binding_provenance = {
         kit_override = function(_, _, identity)
             kit_reads = kit_reads + 1
@@ -2678,8 +2736,12 @@ do
         encode = function(refs)
             return refs.kind .. ':' .. refs.key
         end,
+        matches = function(saved, current)
+            return saved.kind == current.kind and saved.key == current.key
+        end,
         new = function(deps)
             resolver_creates = resolver_creates + 1
+            assert(deps.material_identity and deps.layout and deps.identity and not deps.material_lookup)
             return {
                 capture = function(b, context)
                     captures = captures + 1
@@ -2739,7 +2801,7 @@ do
         end,
     }
     m.binding_provenance_script, m.binding_provenance_reader = '61', '62'
-    m.certified_material_lookup = nil
+    m.unit_identity, m.material_identity, m.binding_names, m.binding_unit_layout = nil, nil, nil, nil
     native.can_get, native.get =
         function()
             material_lookups = material_lookups + 1
@@ -2786,7 +2848,10 @@ do
     local registered, menu, history_count = api.mods[h.id], frontend.menu, #action_history.undo
     assert(h.set('armory_export_format', 3))
     local why = api.mods[h.id].controls.armory_export.on_activate()
-    assert(why:find('temporarily disabled after a crash', 1, true), 'Conflicting export did not refuse clearly')
+    assert(
+        why:find('Verified named Lua binding identity unavailable', 1, true),
+        'Unsupported export did not refuse clearly'
+    )
     assert(h.set('armory_export_format', 1))
     activate('armory_export')
     runtime.on_update(ctx, 0)
@@ -2811,11 +2876,21 @@ do
             and bound[helmet][1] == native_before[3],
         'Controlled export refusal changed native colors, history or the menu'
     )
-    -- Only this synthetic test supplies the independently certified callback.
-    -- Production packages do not register or infer one from can_get/get.
-    m.certified_material_lookup = function()
-        return 1
-    end
+    m.unit_identity = dofile('src/gear/unit_identity.lua')
+    m.material_identity = dofile('src/gear/material_identity.lua')
+    m.binding_names = {
+        section = function()
+            return 'm_jacket'
+        end,
+        mesh = function()
+            return 'mesh_jacket'
+        end,
+    }
+    m.binding_unit_layout = {
+        parse = function()
+            error('Synthetic capture unexpectedly parsed a Unit', 0)
+        end,
+    }
     activate('populate_worn')
     assert(starts == 1 and cache.state == 'loading')
     activate('save_setup')
@@ -2879,9 +2954,12 @@ do
     _G.stingray, ctx.log = old_sr, old_log
     m.binding_provenance, m.binding_source_cache, m.preset_export = old_provenance, old_cache, old_export
     m.binding_provenance_script, m.binding_provenance_reader = old_script, old_reader
-    m.certified_material_lookup, native.can_get, native.get = old_lookup, old_can_get, old_get
+    native.can_get, native.get = old_can_get, old_get
+    m.unit_identity, m.material_identity, m.binding_names, m.binding_unit_layout =
+        old_units, old_materials, old_names, old_layout
+    m.avatar.resolve, m.avatar.resolve_live, m.avatar.units = old_resolve, old_resolve_live, old_avatar_units
     print(
-        'PASS capture/export provenance glue: default runtime refusal before native lookup/worker, controlled export status, ordinary saves, test-only certified callback, full legacy context and deferred cleanup; no texture writes'
+        'PASS capture/export provenance glue: unsupported API refusal, actual Lua Unit handle arguments, zero ResourceManager lookup, explicit-only cache warmup, ordinary saves, full legacy context and deferred cleanup; no texture writes'
     )
 end
 os.remove(fixture .. '/' .. armor_file)

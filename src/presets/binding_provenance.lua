@@ -114,7 +114,7 @@ local function ref(record)
 end
 function P.validate(value, kind, key, original)
     assert(
-        type(value) == 'table' and value.version == 1 and value.kit_override == false,
+        type(value) == 'table' and (value.version == 1 or value.version == 2) and value.kit_override == false,
         'Unsupported binding provenance'
     )
     kind, key = kind or value.kind, key or value.key
@@ -123,8 +123,8 @@ function P.validate(value, kind, key, original)
     local texture = hex(value.original_texture, 16, 'original texture')
     assert(not original or texture == original.resource:lower(), 'Provenance original texture differs')
     local kit = assert(value.kit, 'Missing kit override proof')
-    return {
-        version = 1,
+    local result = {
+        version = value.version,
         kind = kind,
         key = key,
         texture_slot = value.texture_slot,
@@ -140,11 +140,19 @@ function P.validate(value, kind, key, original)
             archive = hex(kit.archive, 16, 'kit archive'),
         },
     }
+    if value.version == 2 then
+        result.mesh_id = integer(value.mesh_id, 'MeshName ID')
+        result.material_slot = integer(value.material_slot, 'mesh material slot')
+        assert(result.material_slot < 64, 'Mesh material slot exceeds its limit')
+    else
+        assert(value.mesh_id == nil and value.material_slot == nil, 'Mesh assignment requires provenance version2')
+    end
+    return result
 end
 function P.encode(value, kind, key, original)
     local v = P.validate(value, kind, key, original)
     local out = {
-        'EPIC-BINDING\t1',
+        'EPIC-BINDING\t' .. v.version,
         v.kind,
         v.key,
         tostring(v.texture_slot),
@@ -160,6 +168,9 @@ function P.encode(value, kind, key, original)
             out[#out + 1] = r[k] or '-'
         end
     end
+    if v.version == 2 then
+        out[#out + 1], out[#out + 2] = tostring(v.mesh_id), tostring(v.material_slot)
+    end
     local text = table.concat(out, '\n')
     assert(#text <= P.MAX_BYTES, 'Binding provenance exceeds its limit')
     return text
@@ -173,7 +184,8 @@ function P.decode(text, kind, key, original)
     for line in (text .. '\n'):gmatch('(.-)\n') do
         rows[#rows + 1] = line
     end
-    assert(#rows == 20 and rows[1] == 'EPIC-BINDING\t1', 'Invalid binding provenance schema')
+    local version = rows[1] == 'EPIC-BINDING\t1' and 1 or rows[1] == 'EPIC-BINDING\t2' and 2
+    assert(version and #rows == (version == 1 and 20 or 22), 'Invalid binding provenance schema')
     local function record(at)
         return {
             resource = rows[at],
@@ -184,7 +196,7 @@ function P.decode(text, kind, key, original)
         }
     end
     return P.validate({
-        version = 1,
+        version = version,
         kind = rows[2],
         key = rows[3],
         texture_slot = tonumber(rows[4]),
@@ -195,7 +207,16 @@ function P.decode(text, kind, key, original)
         kit = { id = tonumber(rows[8]), body = tonumber(rows[9]), archive = rows[10] },
         unit = record(11),
         material = record(16),
+        mesh_id = version == 2 and tonumber(rows[21]) or nil,
+        material_slot = version == 2 and tonumber(rows[22]) or nil,
     }, kind, key, original)
+end
+function P.matches(saved, current)
+    saved, current = P.validate(saved), P.validate(current)
+    if saved.version == 1 and current.version == 2 then
+        current.version, current.mesh_id, current.material_slot = 1, nil, nil
+    end
+    return P.encode(saved) == P.encode(current)
 end
 local function source(record, resource, kind)
     assert(
@@ -213,21 +234,6 @@ local function source(record, resource, kind)
     assert(#record.main > 0, 'Binding source main record unavailable')
     ref(record)
     return record
-end
-local function sections(record)
-    assert(#record.main >= 116, 'Truncated unit source')
-    local at = uint(record.main, 112)
-    assert(at >= 116, 'Unsupported unit material table')
-    local count = uint(record.main, at)
-    assert(count >= 1 and count <= 64 and at + 4 + count * 12 <= #record.main, 'Unit material table exceeds its bounds')
-    local out, seen = {}, {}
-    for i = 0, count - 1 do
-        local section = uint(record.main, at + 4 + i * 4)
-        assert(not seen[section], 'Ambiguous repeated unit SectionID')
-        seen[section] = true
-        out[#out + 1] = { section = section, material = id_at(record.main, at + 4 + count * 4 + i * 8) }
-    end
-    return out
 end
 local function texture(record, wanted)
     assert(#record.main >= 136, 'Truncated material source')
@@ -315,8 +321,11 @@ function P.new(deps)
     local self = {}
     function self.capture(binding, context)
         assert(
-            type(deps.material_lookup) == 'function',
-            'Native material source lookup is disabled pending an independently certified binding API'
+            deps.material_identity
+                and type(deps.material_identity.resolve) == 'function'
+                and type(deps.layout) == 'function'
+                and type(deps.identity) == 'function',
+            'Verified named Lua binding identity APIs unavailable'
         )
         local kind, key, original = context.kind, context.key, context.original
         assert(original and original.resource, 'Original live texture metadata unavailable')
@@ -329,28 +338,48 @@ function P.new(deps)
         assert(key == (slot == P.PATTERN and 'p:' or '') .. binding.save_key, 'Live provenance key changed')
         local object = binding.current
         assert(deps.present(binding) and deps.binding(binding) == object, 'Live provenance binding changed')
-        local unit_hash = hex(deps.unit_resource(binding.unit), 16, 'live unit resource')
+        local identity = assert(deps.identity(), 'Current local avatar identity unavailable')
+        local unit_hash = hex(deps.unit_resource(binding.unit, identity), 16, 'live unit resource')
         local unit = source(deps.unit_source(unit_hash), unit_hash, P.UNIT)
         local kit_override, kit = deps.kit_override(binding, unit_hash, slot)
         assert(kit_override == false, 'Active kit texture override requires kit-aware export')
-        local matches = {}
-        for _, candidate in ipairs(sections(unit)) do
-            local pointer = tonumber(deps.material_lookup(candidate.material))
-            if pointer and pointer == binding.material then
-                local material = source(deps.material_source(candidate.material), candidate.material, P.MATERIAL)
-                if texture(material, slot) == original.resource:lower() then
-                    matches[#matches + 1] = { section = candidate.section, material = material }
-                end
+        local layout = deps.layout(unit.main)
+        local _, _, mesh_index = fields(binding.save_key)
+        assert(
+            binding.mesh_index == nil or binding.mesh_index == mesh_index,
+            'Runtime mesh index differs from binding key'
+        )
+        local runtime_binding = {}
+        for name, value in pairs(binding) do
+            runtime_binding[name] = value
+        end
+        runtime_binding.mesh_index = mesh_index
+        local proof = deps.material_identity.resolve(
+            runtime_binding,
+            layout.sections,
+            identity,
+            layout.supported and layout.meshes or nil
+        )
+        local match = { section = integer(proof.section, 'named SectionID') }
+        local candidate
+        for _, entry in ipairs(layout.sections) do
+            if entry.section == match.section then
+                candidate = entry
             end
         end
         assert(
-            #matches == 1,
-            'No unique loaded material/SectionID pointer proof (matches=' .. #matches .. '); ordinal mapping refused'
+            candidate and candidate.material == proof.material,
+            'Named material identity differs from pristine Unit table'
+        )
+        match.material = source(deps.material_source(proof.material), proof.material, P.MATERIAL)
+        assert(
+            texture(match.material, slot) == original.resource:lower(),
+            'Pristine named material texture differs from live original'
         )
         assert(
             deps.present(binding)
                 and deps.binding(binding) == object
-                and hex(deps.unit_resource(binding.unit), 16, 'live unit resource') == unit_hash,
+                and hex(deps.unit_resource(binding.unit, identity), 16, 'live unit resource') == unit_hash,
             'Live provenance binding changed during capture'
         )
         local check, kit_after = deps.kit_override(binding, unit_hash, slot)
@@ -361,7 +390,6 @@ function P.new(deps)
                 and kit_after.archive == kit.archive,
             'Worn kit changed during provenance capture'
         )
-        local match = matches[1]
         local hydrated = {
             version = 1,
             kind = kind,
@@ -373,9 +401,14 @@ function P.new(deps)
             unit = unit,
             material = match.material,
             kit_override = false,
+            mesh_verified = proof.mesh_verified == true,
         }
+        if proof.mesh_verified then
+            hydrated.mesh_id, hydrated.material_slot = proof.mesh_id, proof.material_slot
+            hydrated.material_slot_offset = proof.material_slot_offset
+        end
         local refs = P.validate({
-            version = 1,
+            version = proof.mesh_verified and 2 or 1,
             kind = kind,
             key = key,
             texture_slot = slot,
@@ -386,6 +419,8 @@ function P.new(deps)
             kit_override = false,
             index_stamp = unit.index_stamp,
             kit = kit,
+            mesh_id = hydrated.mesh_id,
+            material_slot = hydrated.material_slot,
         }, kind, key, original)
         return hydrated, refs
     end
