@@ -157,8 +157,8 @@ S.hints = {
     [19] = 'Third camo color. Alpha also participates in the fifth bump mask.',
     [20] = 'Fourth camo color; its use depends on pattern type. Alpha also affects the fifth mask.',
     [21] = 'Alpha changes fifth-mask inversion; RGB behavior is unconfirmed.',
-    [22] = 'Camo strength, scale and pattern. Large scalar values can be valid. A selects pattern -1 (off) through 5.',
-    [23] = 'Bump-map scaling and matte/gloss controls. Some effects depend on overlapping masks.',
+    [22] = 'R: camo mask sharpness. G: mask bias. B: camo UV scale. A: pattern -1 (off) through 5. Large values can be valid.',
+    [23] = 'R: detail UV scale. A: camo roughness blending; zero is valid. Other effects depend on overlapping masks.',
 }
 function S.index(row, column, channel, width, height)
     assert(

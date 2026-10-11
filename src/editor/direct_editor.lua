@@ -1193,9 +1193,9 @@ import_state = function()
             }
             if m.basic_camo then
                 local prefix = 'basic_' .. container .. '_camo'
-                local values = { [prefix] = m.basic_camo.selection(doc) }
+                local values = { [prefix] = m.basic_camo.selection(doc, container) }
                 if m.basic_camo.colorway_selection then
-                    values[prefix .. '_colorway'] = m.basic_camo.colorway_selection(doc)
+                    values[prefix .. '_colorway'] = m.basic_camo.colorway_selection(doc, container)
                     for color = 1, 4 do
                         values[prefix .. '_color_' .. color] = m.basic_camo.color(doc, color)
                     end
@@ -1410,7 +1410,7 @@ local function apply_basic_camo(container, choice, mode, color)
     end
     assert(#targets > 0, 'Selected LUT has no current material bindings')
     local document = m.basic_state.copier().copy(panel.document)
-    local rows, label = m.basic_camo.apply(document, choice, mode, color)
+    local rows, label = m.basic_camo.apply(document, choice, mode, color, panel.kind)
     local previous = operations.camo_write_target
     operations.camo_write_target = target
     local ok, count = pcall(apply_bindings, document, targets)
@@ -1434,13 +1434,14 @@ local function apply_basic_camo(container, choice, mode, color)
     return message(
         'Applied '
             .. (label or m.basic_camo.CHOICES[choice])
-            .. ' to all '
+            .. ' to '
             .. rows
             .. ' regions in this '
             .. m.gear_catalog.label(panel.kind)
             .. ' LUT ('
             .. count
             .. ' bindings).'
+            .. (panel.kind == 'helmet' and document.height >= 8 and ' Region 8 excluded.' or '')
     )
 end
 operations.apply_basic_camo = apply_basic_camo

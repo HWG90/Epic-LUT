@@ -952,6 +952,14 @@ end
 do
     actor(6)
     armor, cape, helmet = current()
+    local helmet_stock = m.basic_state.clone(stock)
+    for column = 17, 20 do
+        local at = (7 * 23 + column - 1) * 4
+        helmet_stock.data[at], helmet_stock.data[at + 1] = 1.625, -0.875
+        helmet_stock.data[at + 2], helmet_stock.data[at + 3] = 2.25, 3.75
+    end
+    helmet_stock.data[(7 * 23 + 21) * 4 + 3] = 3
+    originals[6002] = helmet_stock
     local other, same = armor + 20, armor + 30
     materials[units[1].unit][2] = { mesh = other + 10, material = other, mesh_index = 0, material_index = 1 }
     materials[units[1].unit][3] = { mesh = same + 10, material = same, mesh_index = 0, material_index = 2 }
@@ -1005,22 +1013,45 @@ do
     assert(h.set('basic_armor_lut', 1) and h.set('edit_row', 7))
     local initial = basic_info().raw.basic.armor.document
     local before = ffi.string(initial.data, initial.width * initial.height * 16)
+    local function recipe_bytes(source, index, mask, helmet_kind, pattern)
+        local palette = m.basic_camo.COLORWAYS[index]
+        local values = ffi.new('float[736]')
+        ffi.copy(values, source, #source)
+        for row = 1, 8 do
+            local offset = (row - 1) * 23 * 4
+            if not helmet_kind or row ~= 8 then
+                for color, hex in ipairs(palette.colors) do
+                    for channel = 0, 2 do
+                        values[offset + (15 + color) * 4 + channel] = tonumber(
+                            hex:sub(channel * 2 + 1, channel * 2 + 2),
+                            16
+                        ) / 255
+                    end
+                    values[offset + (15 + color) * 4 + 3] = ({ 0.52978515625, 2, -1, 4 })[color]
+                end
+                values[offset + 20 * 4 + 3] = 0.8896484375
+                for channel = 0, 2 do
+                    values[offset + 21 * 4 + channel] = palette.mask[channel + 1]
+                end
+                values[offset + 21 * 4 + 3] = mask
+                values[offset + 22 * 4 + 3] = palette.blend
+            elseif pattern then
+                values[offset + 21 * 4 + 3] = -1
+            end
+        end
+        return ffi.string(values, #source)
+    end
     local count = #action_history.undo
     assert(h.set('basic_armor_camo', 7))
     local applied = basic_info().raw.basic.armor.document
-    local expected = ffi.new('float[736]')
-    ffi.copy(expected, before, #before)
-    for row = 1, 8 do
-        expected[((row - 1) * 23 + 21) * 4 + 3] = 4
-    end
-    local bytes = ffi.string(expected, #before)
+    local bytes = recipe_bytes(before, 1, 4)
     local armor_camo = bound[armor][1]
     assert(
         applied ~= initial
             and ffi.string(initial.data, #before) == before
             and ffi.string(applied.data, #before) == bytes
             and uploads[armor_camo] == bytes,
-        'Basic camo changed the old draft or fields outside all-row column 22 alpha'
+        'Basic camo did not activate zeroed controls with one complete upload or changed the old draft'
     )
     assert(
         bound[same][1] == armor_camo
@@ -1045,34 +1076,69 @@ do
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == bytes,
         'Basic camo Redo lost the full table'
     )
+    local helmet_before = ffi.string(basic_info().raw.basic.helmet.document.data, #before)
     assert(h.set('basic_helmet_camo', 4))
     local helmet_doc = basic_info().raw.basic.helmet.document
-    for row = 1, 8 do
-        assert(helmet_doc.data[((row - 1) * 23 + 21) * 4 + 3] == 1, 'Helmet camo requires a row selection')
-    end
+    local helmet_pattern_bytes = recipe_bytes(helmet_before, 1, 1, true, true)
+    local helmet_pattern_object = bound[helmet][1]
+    assert(uploads[helmet_pattern_object] == helmet_pattern_bytes, 'Helmet pattern did not isolate visor Region 8')
     assert(
         bound[armor][1] == armor_camo and bound[cape][1] == 6001 and bound[other][1] == 6003,
         'Helmet camo changed Armor/Cape/other resource'
     )
-    local function tinted(source, palette)
+    activate('global_undo')
+    assert(
+        bound[helmet][1] == 6002 and ffi.string(basic_info().raw.basic.helmet.document.data, #before) == helmet_before,
+        'Helmet pattern Undo lost original visor HDR fields'
+    )
+    activate('global_redo')
+    assert(bound[helmet][1] == helmet_pattern_object and uploads[bound[helmet][1]] == helmet_pattern_bytes)
+    local function tinted(source, palette, helmet_kind)
         local values = ffi.new('float[736]')
         ffi.copy(values, source, #source)
         for color, hex in pairs(palette) do
             for row = 1, 8 do
-                for channel = 0, 2 do
-                    values[((row - 1) * 23 + 15 + color) * 4 + channel] = tonumber(
-                        hex:sub(channel * 2 + 1, channel * 2 + 2),
-                        16
-                    ) / 255
+                if not helmet_kind or row ~= 8 then
+                    for channel = 0, 2 do
+                        values[((row - 1) * 23 + 15 + color) * 4 + channel] = tonumber(
+                            hex:sub(channel * 2 + 1, channel * 2 + 2),
+                            16
+                        ) / 255
+                    end
                 end
             end
         end
         return ffi.string(values, #source)
     end
+    do
+        local color_count = #action_history.undo
+        assert(h.set('basic_helmet_camo_colorway', 4))
+        local colorway_bytes = recipe_bytes(helmet_pattern_bytes, 3, 1, true)
+        local colorway_object = bound[helmet][1]
+        basic_info()
+        assert(
+            uploads[colorway_object] == colorway_bytes
+                and #action_history.undo == color_count + 1
+                and h.get('basic_helmet_camo_colorway') == 4
+                and bound[armor][1] == armor_camo,
+            'Helmet colorway changed visor RGB/alpha, Armor or selector recognition'
+        )
+        activate('global_undo')
+        assert(bound[helmet][1] == helmet_pattern_object)
+        activate('global_redo')
+        assert(bound[helmet][1] == colorway_object)
+        assert(h.set('basic_helmet_camo_color_2', '#40A020'))
+        assert(
+            uploads[bound[helmet][1]] == tinted(colorway_bytes, { [2] = '40A020' }, true)
+                and bound[armor][1] == armor_camo
+                and bound[cape][1] == 6001,
+            'Helmet tint changed Region 8 visor bytes or another gear kind'
+        )
+    end
     local helmet_object, color_history = bound[helmet][1], #action_history.undo
     assert(h.set('basic_armor_camo_colorway', 3))
     local colorway_object = bound[armor][1]
-    local colorway_bytes = tinted(bytes, m.basic_camo.COLORWAYS[2].colors)
+    local colorway_bytes = recipe_bytes(bytes, 2, 4)
     assert(
         uploads[colorway_object] == colorway_bytes
             and ffi.string(basic_info().raw.basic.armor.document.data, #before) == colorway_bytes
@@ -1081,7 +1147,7 @@ do
             and bound[other][1] == 6003
             and bound[cape][1] == 6001
             and bound[helmet][1] == helmet_object,
-        'Basic colorway escaped its selected resource/kind or changed pattern/alpha/material bytes'
+        'Basic colorway escaped its selected resource/kind or missed its complete camo recipe'
     )
     assert(#action_history.undo == color_history + 1, 'Whole-table colorway split its history action')
     activate('global_undo')
@@ -1180,14 +1246,14 @@ do
     local old = basic_info().raw.basic.armor.document
     local old_bytes, old_object, old_history = ffi.string(old.data, #before), bound[armor][1], #action_history.undo
     fail_next = true
-    assert(h.set('basic_armor_camo', 8))
+    assert(h.set('basic_armor_camo_colorway', 5))
     assert(
         basic_info().raw.basic.armor.document == old
             and ffi.string(old.data, #before) == old_bytes
             and bound[armor][1] == old_object
             and bound[same][1] == old_object
             and #action_history.undo == old_history,
-        'Failed camo application committed a changed local draft/history/live table'
+        'Failed complete colorway recipe committed a changed local draft/history/live table'
     )
     runtime.on_disable(ctx)
     actor(7)

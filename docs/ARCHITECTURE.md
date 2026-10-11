@@ -15,7 +15,7 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `armory_collection.lua`: named collection previews, selection, save, rename and confirmation dialogs; native application stays in the controller.
 - `import_protocol.lua`: validates bounded worker progress/results and constructs result/progress/cancel paths. It does not mutate session state or call native APIs.
 - `basic_state.lua`: independent editor documents and history copies. History copying preserves resource metadata and original pixels, deduplicates shared documents, and accounts for both pixel buffers.
-- `basic_camo.lua`: whole-LUT pattern selection and bounded neutral thumbnails. It changes only column 22 A on supported material documents; the controller clones, validates the selected kit/slot, applies through the owned binding session and records history.
+- `basic_camo.lua`: whole-LUT camo recipes, individual RGB tints and bounded neutral thumbnails. Pattern selection repairs dormant controls; colorways supply the complete camo recipe while preserving an existing active mask. Helmet Region 8 is excluded. The controller clones, validates the selected kit/slot, applies through the owned binding session and records one history action.
 - `camo_patterns.lua`: lazily owns a cancellable background worker and validates six exact mask-cache files. The bounded worker reads only the locally installed game atlas mip; render callbacks never read game archives. Masks are cached locally and excluded from packages.
 - `editor_registry.lua`: stable editor control IDs and presentation schema; requires named session callbacks and performs no gear writes.
 - `lut_files.lua`: validated DDS names, row-preset offsets and full-document exports shared by editor and controller.

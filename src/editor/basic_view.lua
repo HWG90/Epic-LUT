@@ -154,7 +154,7 @@ function B.new(info, select_row, help)
             ui.bounded(
                 x + label_width + gap * 2,
                 camo_heading_y,
-                'All regions in this LUT',
+                (panel and panel.kind or kind) == 'helmet' and 'All except region 8' or 'All regions in this LUT',
                 12,
                 muted,
                 math.max(0, half - label_width - gap * 2),
@@ -229,15 +229,21 @@ function B.new(info, select_row, help)
                 button(x, ui.y + 10, half, 'Copy Armor', 'basic_copy_armor')
             end
         end
-        button(right + width - 150, ui.y - 24, 150, 'Stop Highlight', 'stop_identify')
-        local portrait = package.loaded['epic.player_preview.v1']
-        if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
-            ui.button(right, ui.y - 24, 150, 28, 'Player Preview', portrait.toggle)
-        end
         -- Lay out the action column from its measured content. Status and dirty
         -- guidance belong to the same scroll range as the controls they describe.
         -- A fixed footer notice used to paint over Open Export Location.
-        local clip_top, clip_bottom = top - 30, ui.y + 12
+        local footer_y, footer_top = ui.y + gap, ui.y + gap + control_height
+        local footer_width = math.min(
+            (width - gap) / 2,
+            math.max(150, (ui.text_width and ui.text_width('Stop Highlight', 14) or hint_size * 9) + gap * 5)
+        )
+        local mask_height = math.max(
+            control_height - gap * 2,
+            ui.control_height and ui.control_height(14, 1, 0, 'heading') or heading_size + gap
+        )
+        local mask_bottom = footer_top + gap
+        local clip_top, clip_bottom = top - 30, mask_bottom + mask_height
+        self.footer_bounds = { x = right, y = footer_y, w = width, h = control_height, button_width = footer_width }
         local viewport = math.max(1, clip_top - clip_bottom)
         local rows, depth = {}, 0
         local function add(height, draw, after)
@@ -434,7 +440,7 @@ function B.new(info, select_row, help)
             end
         end
         if ui.viewport then
-            ui.viewport(self.action_bounds, draw_actions, { top = top, bottom = ui.y, color = theme.background })
+            ui.viewport(self.action_bounds, draw_actions, { top = top, bottom = mask_bottom, color = theme.background })
         else
             draw_actions()
         end
@@ -451,6 +457,26 @@ function B.new(info, select_row, help)
                     self.action_scroll = value
                 end
             )
+        end
+        -- Fixed chrome occupies a measured row below the content masks. Keep
+        -- its complete border and native glyph ink above the scrolling plane.
+        local finish = ui.surface and ui.surface(130)
+        button(
+            right + width - footer_width,
+            footer_y,
+            footer_width,
+            'Stop Highlight',
+            'stop_identify',
+            nil,
+            ui,
+            control_height
+        )
+        local portrait = package.loaded['epic.player_preview.v1']
+        if portrait and portrait.toggle and (not portrait.is_enabled or portrait.is_enabled()) then
+            ui.button(right, footer_y, footer_width, control_height, 'Player Preview', portrait.toggle)
+        end
+        if finish then
+            finish()
         end
     end
     return self

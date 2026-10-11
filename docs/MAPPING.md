@@ -6,13 +6,24 @@ Material field numbering follows research on 23-column LUTs. Base Color is colum
 
 ## Basic camo masks
 
-Basic's selectors change column 22 A (-1 off, 0–5 pattern) across every row of the selected 23-column LUT. They preserve the existing camo tints, sharpness, strength, scale and shader modes. Choosing a pattern cannot enable dormant colors or scale automatically.
+Basic's selectors change column 22 A (-1 off, 0–5 pattern) across the selected 23-column LUT. Armor affects every row; Helmet excludes Region 8, forcing that row's pattern Off when selecting a mask and retaining its bytes during color edits. Off retains all other fields. A mask with finite, nonzero column 22 R/B and nonblack camo colors keeps its authored settings. Otherwise the pattern action seeds a complete Jungle camo recipe, keeping nonblack colors and supplying the generated Jungle palette only when all twelve camo RGB channels are zero. Dormant controls or all-black colors display Current / mixed so reselecting a mask can initialize them.
 
 The current game's ArmorTemplate binds `CustomizationCamoTilerArray` (slot `0f5ff78d`) to texture `eecf271273d7090c`, a 256×256 RGBA8 array with six slices and nine mips. The preview worker reads mip 4: 16×16, 1,024 bytes per slice, at offset 348,160 within each 349,524-byte slice. The six neutral mask thumbnails are not a full shader render; the source RGB channels contain packed masks and its alpha is zero. Slice 5 duplicates slice 0 in this atlas.
 
-SDK inspection at commit `5a886256e54db52b5d228335eae20ce796f87fc0` also finds weapon `PaintSchemeArctic`, `PaintSchemeArcticCamo`, `PaintSchemeDesert`, `PaintSchemeDesertCamo`, `PaintSchemeForest`, `PaintSchemeForestCamo`, `PaintSchemeUrban` and `PaintSchemeUrbanCamo` shader variables. Their palettes and mappings to Armor mask indices are unverified, so the selector keeps numeric pattern names.
+SDK inspection at commit `5a886256e54db52b5d228335eae20ce796f87fc0` finds weapon `PaintSchemeArctic`, `PaintSchemeArcticCamo`, `PaintSchemeDesert`, `PaintSchemeDesertCamo`, `PaintSchemeForest`, `PaintSchemeForestCamo`, `PaintSchemeUrban` and `PaintSchemeUrbanCamo` shader variables. Numeric pattern names remain because each named colorway combines colors and scalar controls, rather than uniquely naming a mask.
 
-Basic's Jungle, Desert, Urban and Arctic colorways are generated, weapon-inspired RGB palettes, not extracted PaintScheme values. They change only columns 17–20 RGB across the selected LUT's rows, using the same normalized raw RGB convention as existing color controls. All alpha, the chosen mask and scale remain intact. Individual swatches edit one of those RGB columns across all rows; a mixed table displays the first row's color until it is applied. Picker changes commit once when Apply is pressed, rather than uploading a texture for every drag frame.
+Basic's Jungle, Desert, Urban and Arctic RGB palettes are generated, not extracted game colors. Their supporting controls were verified against the corresponding weapon LUTs. Like [Match Your Colors' camo copy](https://github.com/CowboyBingus/MatchYourColors/blob/5a7c4298d1046923c49406f50c7ab2e953aebf49/src/recolor.lua#L48), a colorway supplies columns 17–20 RGBA, column 21 A, column 22 RGBA and column 23 A. It retains the prior mask only when its index is valid and its R/B controls are nonzero; otherwise it uses the profile's mask. Base/detail colors, Base alpha/shader mode, emission, column 21 RGB and column 23 RGB remain byte-exact.
+
+Column 22 R controls mask sharpness, G its bias, B camo UV scale, and A its array layer. Column 23 A controls camo roughness blending; it is not spatial scale and zero is valid. Column 23 R scales detail UVs. These meanings follow the [pinned Filediver shader](https://github.com/xypwn/filediver/blob/9f92623133cde32b1167e13f05ce6c4825805ccf/cmd/filediver-gui/widgets/previews/shaders/lut.frag#L219).
+
+| Colorway | C22 R | C22 G | C22 B | Default C22 A | C23 A |
+| --- | --- | --- | --- | --- | --- |
+| Jungle | 216.625 | -0.98974609375 | 2 | 3 | 0.82958984375 |
+| Desert | 216.625 | -0.98974609375 | 3.5 | 1 | 0 |
+| Urban | 216.625 | -1 | 1.19921875 | 1 | 0.82958984375 |
+| Arctic | 216.625 | -0.98974609375 | 5 | 3 | 0.82958984375 |
+
+All profiles use camo color alpha values `0.52978515625, 2, -1, 4` and column 21 A `0.8896484375`. Individual swatches change only one camo RGB column across the eligible rows; a mixed table displays the first row's color until it is applied. Picker changes commit once when Apply is pressed, rather than uploading a texture for every drag frame.
 
 ## Emission
 

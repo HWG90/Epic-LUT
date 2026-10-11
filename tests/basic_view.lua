@@ -456,7 +456,9 @@ for _, loaded in ipairs({ false, true }) do
             for _, kind in ipairs({ 'armor', 'helmet' }) do
                 local b = view.region_bounds[kind]
                 local heading = assert(column_label(before, kind, 'Camo'))
-                assert(column_label(before, kind, 'All regions in this LUT'))
+                assert(
+                    column_label(before, kind, kind == 'helmet' and 'All except region 8' or 'All regions in this LUT')
+                )
                 local field = assert(column_label(before, kind, 'Off'))
                 local footer_label = loaded and 'Single LUT Import'
                     or (kind == 'armor' and 'Copy Helmet' or 'Copy Armor')
@@ -645,9 +647,174 @@ for _, loaded in ipairs({ false, true }) do
     end
 end
 state.dirty, state.status = false, 'Ready'
+-- Render the actual viewport masks and footer chrome through the retained
+-- native GUI mock. Checking only text baselines missed the previous bug: the
+-- lower mask covered the upper four pixels of both fixed button borders.
+local NativeView = dofile('vendor/menu/view.lua')
+local native_items, native_id, native_order = {}, 0, 0
+local function native_allocate(item)
+    native_id, native_order = native_id + 1, native_order + 1
+    item.order = native_order
+    assert(item.z == math.floor(item.z), 'Basic footer emitted a fractional native layer')
+    native_items[native_id] = item
+    return native_id
+end
+local function ink(size)
+    return { min_y = -0.2 * size, max_y = 0.85 * size, height = 1.05 * size }
+end
+local world = {}
+local native = NativeView.new({
+    Application = {
+        worlds = function()
+            return { world }
+        end,
+        main_world = function()
+            return world
+        end,
+    },
+    World = {
+        create_screen_gui = function()
+            return {}
+        end,
+        destroy_gui = function() end,
+    },
+    Vector2 = function(x, y)
+        return { x = x, y = y }
+    end,
+    Vector3 = function(x, y, z)
+        return { x = x, y = y, z = z }
+    end,
+    Color = function(a, r, g, b)
+        return { a = a, r = r, g = g, b = b }
+    end,
+    Gui = {
+        rect = function(_, p, size, color)
+            return native_allocate({ x = p.x, y = p.y, w = size.x, h = size.y, z = p.z, color = color })
+        end,
+        text = function(_, value, _, size, _, p, color)
+            local metric = ink(size)
+            return native_allocate({
+                x = p.x,
+                y = p.y + metric.min_y,
+                w = #value * size * 0.5,
+                h = metric.height,
+                z = p.z,
+                color = color,
+                text = value,
+            })
+        end,
+        destroy_rect = function(_, id)
+            native_items[id] = nil
+        end,
+        destroy_text = function(_, id)
+            native_items[id] = nil
+        end,
+    },
+}, true)
+local function native_pixel(x, y)
+    local winner
+    for _, item in pairs(native_items) do
+        if
+            x >= item.x
+            and x < item.x + item.w
+            and y >= item.y
+            and y < item.y + item.h
+            and (not winner or item.z > winner.z or item.z == winner.z and item.order > winner.order)
+        then
+            winner = item
+        end
+    end
+    return assert(winner, 'Missing Basic footer native pixel')
+end
+local original_portrait = package.loaded['epic.player_preview.v1']
+local preview_clicks, stop_clicks = 0, 0
+package.loaded['epic.player_preview.v1'] = {
+    toggle = function()
+        preview_clicks = preview_clicks + 1
+    end,
+    is_enabled = function()
+        return true
+    end,
+}
+api.mods.basic_test.controls.stop_identify.on_activate = function()
+    stop_clicks = stop_clicks + 1
+end
+for _, font in ipairs({ 12, 20 }) do
+    for _, resolution in ipairs({ { 1280, 720 }, { 1920, 1080 } }) do
+        for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+            menu.font_size, menu.ui_scale, menu.font_bold = font, scale, true
+            state.loaded, state.dirty = saved_editor, true
+            menu.compose(unpack(resolution))
+            for _, position in ipairs({ 0, 0.5, 1 }) do
+                view.action_scroll = view.action_maximum * position
+                local commands = menu.compose(unpack(resolution))
+                native.draw(commands)
+                local window, logical = menu.window_bounds, view.footer_bounds
+                local footer = {
+                    x = window.x + logical.x * window.scale,
+                    y = window.y + logical.y * window.scale,
+                    w = logical.w * window.scale,
+                    h = logical.h * window.scale,
+                    button_width = logical.button_width * window.scale,
+                }
+                local labels = {}
+                for _, c in ipairs(commands) do
+                    if c.full_text == 'Player Preview' or c.full_text == 'Stop Highlight' then
+                        labels[c.full_text] = c
+                        assert(
+                            not c.viewport and c.paint_plane >= 130,
+                            'Fixed Basic footer retained scrolling-plane clipping'
+                        )
+                    end
+                    if c.ui_role == 'viewport_mask' then
+                        assert(
+                            c.y >= footer.y + footer.h
+                                or c.y + c.h <= footer.y
+                                or c.x >= footer.x + footer.w
+                                or c.x + c.w <= footer.x,
+                            'Basic content mask intersects fixed footer chrome'
+                        )
+                    end
+                end
+                for _, label in ipairs({ 'Player Preview', 'Stop Highlight' }) do
+                    local c = assert(labels[label], 'Fixed Basic footer label disappeared')
+                    local metric = ink(c.size)
+                    assert(
+                        c.y + metric.min_y > footer.y and c.y + metric.max_y < footer.y + footer.h,
+                        'Native footer ink does not fit the measured button row'
+                    )
+                    assert(
+                        native_pixel(c.x + c.size * 0.1, c.y + metric.max_y - 0.25).text == label,
+                        'Native viewport mask erased the upper footer glyph ink'
+                    )
+                    local bx = label == 'Player Preview' and footer.x or footer.x + footer.w - footer.button_width
+                    local upper = native_pixel(bx + footer.button_width / 2, footer.y + footer.h - 0.5)
+                    assert(
+                        not upper.text and upper.z >= 130,
+                        'Native content mask erased the upper footer button border'
+                    )
+                end
+                if position == 1 then
+                    local preview_before, stop_before = preview_clicks, stop_clicks
+                    tap({ x = footer.x + 3 * window.scale - 2, y = footer.y + footer.h - 2 * window.scale - 2 })
+                    tap({
+                        x = footer.x + footer.w - footer.button_width + 3 * window.scale - 2,
+                        y = footer.y + footer.h - 2 * window.scale - 2,
+                    })
+                    assert(
+                        preview_clicks == preview_before + 1 and stop_clicks == stop_before + 1,
+                        'Fixed footer upper edges lost their hit targets to the scroll pane'
+                    )
+                end
+            end
+        end
+    end
+end
+package.loaded['epic.player_preview.v1'] = original_portrait
+native.release()
 print(
     'PASS Basic Camo: per-gear pattern/colorway choices and RGB pickers, unsupported Cape guard, independent 64-row scrolling, native font clearance and disabled behavior'
 )
 print(
-    'PASS Basic: primary color pickers, measured wrapped action content, dirty-notice separation, draggable scrolling and compact/scaled footer containment'
+    'PASS Basic: primary color pickers, measured/wrapped actions, dirty-notice separation, draggable scrolling and native footer border/ink/hit containment'
 )
