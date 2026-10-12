@@ -217,3 +217,181 @@ local idle_again = selectable.create('world', static_plan)
 assert(hierarchy_reads == before_capture + 9 and not idle_again.pieces[1].animation_bind)
 selectable.destroy(idle_again)
 print('PASS gated owned hierarchy capture, immutable bind poses and static fallback for missing/cyclic animation data')
+
+-- Exact named gore meshes are suppressed after native material copies, using
+-- verified indexed handles only. Other geometry and borrowed sources survive.
+do
+    local ffi = require('ffi')
+    local Names = dofile('src/gear/binding_names.lua')
+    for hash, name in pairs({
+        [0xfb311215] = 'g_gore',
+        [0xf2a082c1] = 'g_gore_LOD1',
+        [0x4dcf0af2] = 'g_gore_LOD2',
+        [0x2647a6f7] = 'g_gore_LOD3',
+    }) do
+        assert(Names.mesh(hash) == name, 'Preview gore filter no longer agrees with the mesh-name catalog')
+    end
+    local old_mesh, old_count, old_has, old_set = U.mesh, U.num_meshes, U.has_mesh, U.set_mesh_visibility
+    local old_spawn, old_visibility = W.spawn_unit, E.Mesh.visibility
+    local names = {
+        'g_clothes',
+        'g_gore',
+        'g_gore_LOD1',
+        'g_gore_LOD2',
+        'g_gore_LOD3',
+        'g_cap',
+        'g_left_arm',
+        'g_gore_unknown',
+        'g_gore_shadow',
+    }
+    local handles, source_visibility, events, notes = {}, {}, {}, {}
+    local mode, named_error, unmapped, ambiguous, setter_error
+    local function unit_handles(unit)
+        if not handles[unit] then
+            handles[unit] = {}
+            local seed = unit == 'armor' and 1 or tonumber(unit:match('%d+$')) + 10
+            for index = 1, #names do
+                local number = seed * 100 + index
+                handles[unit][index] = mode == 'numeric' and number
+                    or mode == 'pointer' and ffi.cast('void *', number)
+                    or unit .. ':' .. index
+            end
+            if ambiguous then
+                handles[unit][3] = handles[unit][2]
+            end
+        end
+        return handles[unit]
+    end
+    U.num_meshes = function()
+        return #names
+    end
+    U.has_mesh = function(unit, name)
+        assert(unit ~= 'armor' and unit ~= 'helmet', 'Named gore filter queried the borrowed garment')
+        for _, expected in ipairs(names) do
+            if expected == name then
+                return true
+            end
+        end
+        return false
+    end
+    local has_mesh = U.has_mesh
+    U.mesh = function(unit, index)
+        local h = unit_handles(unit)
+        if type(index) == 'number' then
+            return h[index]
+        end
+        assert(unit ~= 'armor' and unit ~= 'helmet', 'Named gore filter resolved a borrowed mesh')
+        if named_error then
+            error('Named mesh overload unavailable')
+        end
+        for at, name in ipairs(names) do
+            if index == name then
+                if unmapped then
+                    return at -- An index is not the actual Mesh handle.
+                end
+                if mode == 'pointer' then
+                    return ffi.cast('void *', h[at]) -- Equal native handle, fresh Lua cdata object.
+                end
+                return h[at]
+            end
+        end
+    end
+    E.Mesh.visibility = function(mesh)
+        return source_visibility[mesh]
+    end
+    U.set_mesh_visibility = function(unit, index, value)
+        assert(unit ~= 'armor' and unit ~= 'helmet' and value == false, 'Gore filter modified source visibility')
+        if setter_error and index ~= 6 then
+            error('Visibility setter unavailable')
+        end
+        events[#events + 1] = index
+        units[unit].visible[index] = false
+    end
+    W.spawn_unit = function(world, resource, pose)
+        local unit = old_spawn(world, resource, pose)
+        units[unit].visible = {}
+        for index = 1, #names do
+            units[unit].visible[index] = index ~= 6
+        end
+        unit_handles(unit)
+        return unit
+    end
+    local model_service = M.new(E, {
+        copy_materials = function(piece)
+            assert(units[piece.unit].visible[6] == false, 'Source-hidden cap was lost before material setup')
+            events[#events + 1] = 'materials'
+            for index = 2, 5 do
+                units[piece.unit].visible[index] = true -- Simulate a native material commit revealing gore.
+            end
+        end,
+        retain_failed = function()
+            error('Unexpected gore cleanup failure')
+        end,
+        note = function(text)
+            notes[#notes + 1] = text
+        end,
+    })
+    local function create()
+        handles, source_visibility, events, notes = {}, {}, {}, {}
+        local source = unit_handles('armor')
+        for index, mesh in ipairs(source) do
+            source_visibility[mesh] = index ~= 6
+        end
+        local captured = model_service.capture('world', 'root', { { unit = 'armor', kind = 'armor' } })
+        assert(captured.pieces[1].visible[6] == false)
+        return model_service.create('world', captured)
+    end
+    local function check_other_geometry(copy)
+        for _, index in ipairs({ 1, 7, 8, 9 }) do
+            assert(units[copy].visible[index] == true, 'Gore filter hid clothes, limbs, unknown or shadow meshes')
+        end
+        assert(units[copy].visible[6] == false, 'Gore filter force-enabled a source-hidden cap')
+        assert(units.armor.alive and units.helmet.alive, 'Gore filter damaged the borrowed garments')
+    end
+    for _, handle_type in ipairs({ 'string', 'numeric', 'pointer' }) do
+        mode = handle_type
+        local owned = create()
+        local copy = owned.pieces[1].unit
+        assert(
+            table.concat(events, ',') == '6,materials,2,3,4,5',
+            'Gore writes preceded material copying or used names as indexes'
+        )
+        for index = 2, 5 do
+            assert(units[copy].visible[index] == false, 'Exact catalog gore mesh remained visible')
+        end
+        check_other_geometry(copy)
+        assert(notes[#notes]:find('gore meshes hidden=4', 1, true), 'Named gore diagnostic lost its verified count')
+        model_service.destroy(owned)
+    end
+    mode = 'string'
+    for _, unavailable in ipairs({ 'missing', 'has-error', 'named-error', 'unmapped', 'setter-error' }) do
+        if unavailable == 'missing' then
+            U.has_mesh = nil
+        elseif unavailable == 'has-error' then
+            U.has_mesh = function()
+                error('Named mesh availability unavailable')
+            end
+        else
+            U.has_mesh = has_mesh
+        end
+        named_error, unmapped, setter_error =
+            unavailable == 'named-error', unavailable == 'unmapped', unavailable == 'setter-error'
+        local owned = create()
+        local copy = owned.pieces[1].unit
+        assert(table.concat(events, ',') == '6,materials', 'Unavailable/unmapped optional gore API hid a guessed index')
+        check_other_geometry(copy)
+        assert(notes[#notes]:find('gore meshes hidden=0', 1, true), 'Skipped gore filter reported an unverified hide')
+        model_service.destroy(owned)
+    end
+    U.has_mesh, named_error, unmapped, setter_error, ambiguous = has_mesh, nil, nil, nil, true
+    local owned = create()
+    assert(table.concat(events, ',') == '6,materials,4,5', 'Ambiguous indexed handles selected a guessed gore mesh')
+    check_other_geometry(owned.pieces[1].unit)
+    assert(notes[#notes]:find('ambiguous handle', 1, true), 'Ambiguous gore handles lost their diagnostic')
+    model_service.destroy(owned)
+    U.mesh, U.num_meshes, U.has_mesh, U.set_mesh_visibility = old_mesh, old_count, old_has, old_set
+    W.spawn_unit, E.Mesh.visibility = old_spawn, old_visibility
+end
+print(
+    'PASS exact copied gore mesh suppression after materials, handle proofs, cap/limb preservation and optional API fallback'
+)

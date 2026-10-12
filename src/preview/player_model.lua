@@ -1,9 +1,60 @@
 -- Independent visual copy of equipped garment units. No avatar/network entity is
 -- registered and no player, Armory actor or thumbnail scheduler is modified.
 local Model = {}
+-- Exact garment mesh names from the maintained binding-name catalog. Caps,
+-- shadows, limbs and similarly named meshes are not inferred from these names.
+local gore_meshes = { 'g_gore', 'g_gore_LOD1', 'g_gore_LOD2', 'g_gore_LOD3' }
 function Model.new(E, host)
     local A, W, U, X = E.Application, E.World, E.Unit, E.Matrix4x4
     local self = {}
+    local function hide_gore_meshes(unit, count)
+        local hidden, skipped = {}, {}
+        if
+            type(U.has_mesh) ~= 'function'
+            or type(U.mesh) ~= 'function'
+            or type(U.set_mesh_visibility) ~= 'function'
+        then
+            return hidden, 'named mesh APIs unavailable'
+        end
+        local indexed = {}
+        for index = 1, count do
+            local ok, mesh = pcall(U.mesh, unit, index)
+            if ok then
+                indexed[index] = mesh
+            end
+        end
+        local written = {}
+        for _, name in ipairs(gore_meshes) do
+            local ok, exists = pcall(U.has_mesh, unit, name)
+            if not ok then
+                skipped[#skipped + 1] = name .. ':name lookup unavailable'
+            elseif exists == true or exists == 1 then
+                local got, mesh = pcall(U.mesh, unit, name)
+                local match, matches = nil, 0
+                if got and mesh and mesh ~= 0 then
+                    for index = 1, count do
+                        if indexed[index] == mesh then
+                            match, matches = index, matches + 1
+                        end
+                    end
+                end
+                if matches == 1 then
+                    if not written[match] then
+                        local changed, result = pcall(U.set_mesh_visibility, unit, match, false)
+                        if changed and result ~= false then
+                            written[match] = true
+                            hidden[#hidden + 1] = name
+                        else
+                            skipped[#skipped + 1] = name .. ':visibility unavailable'
+                        end
+                    end
+                else
+                    skipped[#skipped + 1] = name .. (matches == 0 and ':unmapped handle' or ':ambiguous handle')
+                end
+            end
+        end
+        return hidden, #skipped > 0 and table.concat(skipped, ',') or nil
+    end
     local function capture_animation_bind(unit, spec)
         assert(type(U.scene_graph_parent) == 'function', 'Preview animation hierarchy API unavailable')
         local bind = { parents = { [1] = 0 }, poses = {}, node_count = spec.node_count }
@@ -178,6 +229,18 @@ function Model.new(E, host)
                 -- Host copies material bindings only after proving source and
                 -- destination materials are distinct instances.
                 host.copy_materials(piece)
+                -- Native material commits can reveal damage meshes. Resolve
+                -- catalog names on this owned copy only after those commits.
+                local hidden_meshes, reason = hide_gore_meshes(unit, #spec.visible)
+                if host.note then
+                    host.note(
+                        'preview: gore meshes hidden='
+                            .. #hidden_meshes
+                            .. ' meshes='
+                            .. table.concat(hidden_meshes, ',')
+                            .. (reason and ' skipped=' .. reason or '')
+                    )
+                end
             end
         end)
         if not ok then

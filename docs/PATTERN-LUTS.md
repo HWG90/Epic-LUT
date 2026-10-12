@@ -2,7 +2,7 @@
 
 Open **LUT Editor > Pattern LUT Editor** to replace the material table with the full Pattern workspace, then use **Load Current Patterns** if values are not ready. Armor and Helmet stay gray until current or imported pattern data is available. Choose either gear and a table. The workspace refreshes loaded values when equipment changes; use the gold Load button to retry a missing snapshot. The optional automatic-population setting also enables loading on first open.
 
-Below the ordinary material table, **Quick Editor: Pattern LUT** provides Accent and Material swatches. As current material data loads, the update pass initializes them from cached Pattern snapshots for the selected gear and material slot, without opening the workspace or resetting edited values and history. Drawing the strip never discovers or loads gear. Missing snapshots show muted placeholders until ready; use **Load Current Gear** or the workspace's **Load Current Patterns** to retry. The unknown third column remains stored and available in the full advanced editor. Click a quick swatch to edit it; the full editor retains the advanced gates for unknown channels. Selecting Armor or Helmet closes the full Pattern workspace without restoring its edited bindings. Quick editing is disabled while a Cape material LUT is selected.
+Below the ordinary material table, **Quick Editor: Pattern LUT** provides three swatches with **Color**, **Mat/Opac** and **Roughness** labels above them. Labels shorten when space is limited; swatches keep the material grid's cell size. As current material data loads, the update pass initializes them from cached Pattern snapshots for the selected gear and material slot, without opening the workspace or resetting edited values and history. Drawing the strip never discovers or loads gear. Missing snapshots show muted placeholders until ready; use **Load Current Gear** or the workspace's **Load Current Patterns** to retry. Click a quick swatch to edit it. Roughness editing changes the third column's Alpha and preserves its unmapped RGB values; Advanced still exposes those raw RGB channels. Selecting Armor or Helmet closes the full Pattern workspace without restoring its edited bindings. Quick editing is disabled while a Cape material LUT is selected.
 
 The quick swatches align with the material grid and use its cell size, capped at 40 logical pixels. The layout reserves space for them together with the material rows and keeps a gap before Player Preview. Wider windows keep controls compact; the full Pattern workspace packs channel fields into two columns when space permits.
 
@@ -10,13 +10,13 @@ Pattern LUTs contain **3 columns and 1 row**, bound through a separate pattern t
 
 - **Column 1 RGB:** accent color. Alpha is unknown.
 - **Column 2 RGB:** metallic controls, normally edited between 0 and 1. Alpha is pattern opacity. These mappings are provisional; their effect depends on the material.
-- **Column 3 RGBA:** unknown. Values stay intact until explicitly edited.
+- **Column 3 Alpha:** roughness. The RGB channels remain unmapped and stay intact during ordinary roughness edits.
 
-Click a swatch to select its controls. Double-click to open the color picker. Color and alpha preview live; **Use Color** keeps the edit and **Cancel** restores the values from when the picker opened. For exact numbers, use the channel fields. **Advanced** exposes the unknown channels without assigning them invented meanings.
+Click a swatch to select its controls. Double-click to open the picker. Color and alpha preview live; **Use Color** keeps the edit and **Cancel** restores the values from when the picker opened. The Roughness picker enables Alpha; RGB stays protected until Advanced is enabled. For exact roughness values, use the **Roughness A** number field, available without Advanced. **Advanced** exposes the remaining unknown channels without assigning them invented meanings.
 
 **Undo** and **Redo** apply to the selected table. History follows that table when switching Armor and Helmet. **Restore All Patterns** restores the original bindings for every pattern table edited in this session.
 
-**Show Alpha** is shared with the LUT Editor. It draws a checkerboard as alpha approaches zero. Display values are clamped to 0-1; stored floats are preserved. Shader alpha is not always transparency.
+**Show Alpha** is shared with the LUT Editor. It draws a checkerboard as alpha approaches zero for color/material swatches. Roughness is shown as an opaque grayscale swatch derived from Alpha, rather than as transparency. Display values are clamped to 0-1; stored floats are preserved.
 
 To import a pattern, choose **Import** and select a 3x1 DDS. Preview its three swatches, choose a loaded destination, then **Apply Imported DDS to Selected Pattern LUT**. Importing a file alone does not change the model. An unavailable destination must finish loading before an import can be applied.
 

@@ -3,6 +3,8 @@ local Native = {}
 -- The game's Armory model uses ui_3d's forward layers. The default viewport
 -- includes the gameplay temporal pipeline and writes shared output_target.
 Native.VIEWPORT = 'ui_3d'
+-- Exact section names from the maintained binding-name catalog.
+local GIB_SLOTS = { 'm_gibs', 'm_gibs1', 'm_gibs2', 'm_gibs3', 'm_gibs4', 'm_gibs5', 'm_gibs6' }
 function Native.new(E, m, host)
     local ffi = require('ffi')
     local A, W, U, G, R, V = E.Application, E.World, E.Unit, E.Gui, E.Renderer, E.Viewport
@@ -57,11 +59,18 @@ function Native.new(E, m, host)
         local sources = m.engine.unit_materials(native, token(piece.source))
         local copies = m.engine.unit_materials(native, token(piece.unit))
         assert(#sources == #copies, 'Preview material layout differs')
+        local source_set = {}
+        for _, source in ipairs(sources) do
+            source_set[source.material] = true
+        end
+        local function borrowed(material)
+            return source_set[material] or source_materials[material]
+        end
         piece.materials = {}
         for i, source in ipairs(sources) do
             local dest = copies[i]
             assert(
-                source.material ~= dest.material and not source_materials[dest.material],
+                source.material ~= dest.material and not borrowed(dest.material),
                 'Preview materials are shared; source will not be changed'
             )
             assert(
@@ -83,58 +92,113 @@ function Native.new(E, m, host)
             end
             native.commit(dest.mesh)
         end
-        -- The base garments carry m_gibs as a separate material section within
-        -- the same skinned mesh as the pants/jacket. Use the authored shadow-only
-        -- transparent material for that slot on the copy (nil produces a pink error surface),
-        -- rather than hiding the complete limb or changing its texture masks.
+        -- Gore can be a named section within the same mesh as clothing. Mask
+        -- every cataloged gib slot on the copy without hiding the whole mesh.
         if
             type(U.set_material) == 'function'
             and E.Mesh
             and type(E.Mesh.has_material) == 'function'
             and type(E.Mesh.material) == 'function'
         then
-            local removed = {}
-            for _, material in ipairs(piece.materials) do
-                local mesh = U.mesh(piece.unit, material.mesh_index + 1)
-                if E.Mesh.has_material(mesh, 'm_gibs') then
-                    local handle = E.Mesh.material(mesh, 'm_gibs')
-                    if handle and address(handle) == material.material then
-                        assert(
-                            material.material ~= material.source and not source_materials[material.material],
-                            'Shared gore material refused'
-                        )
-                        removed[material.material] = true
-                    end
-                end
+            local function location(material)
+                return material.mesh_index .. ':' .. material.material_index
             end
-            if next(removed) then
-                local transparent = 'content/ui/shared/material/gui_diffuse_map'
-                assert(A.can_get('material', transparent), 'Preview transparent material unavailable')
-                U.set_material(piece.unit, 'm_gibs', transparent)
-                local copies = m.engine.unit_materials(native, token(piece.unit))
-                local hidden = 0
-                for _, material in ipairs(copies) do
-                    local mesh = U.mesh(piece.unit, material.mesh_index + 1)
-                    if E.Mesh.has_material(mesh, 'm_gibs') then
-                        local handle = E.Mesh.material(mesh, 'm_gibs')
-                        if handle and address(handle) == material.material then
-                            assert(not source_materials[material.material], 'Shared transparent material refused')
-                            m.engine.bind(native, material.material, 0x3aa8b87e, transparent_mask())
-                            native.commit(material.mesh)
-                            hidden = hidden + 1
+            local records = piece.materials
+            for _, slot in ipairs(GIB_SLOTS) do
+                local targets, checked = {}, {}
+                for _, material in ipairs(records) do
+                    local index = material.mesh_index
+                    if not checked[index] then
+                        checked[index] = true
+                        local mesh = U.mesh(piece.unit, index + 1)
+                        if E.Mesh.has_material(mesh, slot) then
+                            local named = E.Mesh.material(mesh, slot)
+                            local matched
+                            for _, candidate in ipairs(records) do
+                                if named and candidate.mesh_index == index and address(named) == candidate.material then
+                                    assert(not matched, 'Ambiguous copied gore material')
+                                    matched = candidate
+                                end
+                            end
+                            assert(matched, 'Named gore material has no owned preview binding')
+                            assert(
+                                matched.material ~= matched.source and not borrowed(matched.material),
+                                'Shared gore material refused'
+                            )
+                            if not matched.gore_slot then
+                                targets[location(matched)] = matched
+                            end
                         end
                     end
                 end
-                assert(hidden > 0, 'Preview transparent gib material did not resolve')
-                local kept = {}
-                for _, material in ipairs(piece.materials) do
-                    if not removed[material.material] then
-                        kept[#kept + 1] = material
+                if next(targets) then
+                    local transparent = 'content/ui/shared/material/gui_diffuse_map'
+                    assert(A.can_get('material', transparent), 'Preview transparent material unavailable')
+                    U.set_material(piece.unit, slot, transparent)
+                    -- set_material may recreate other copied handles too. Resolve
+                    -- every surviving receipt before the next slot or LUT sync.
+                    local fresh = {}
+                    for _, material in ipairs(m.engine.unit_materials(native, token(piece.unit))) do
+                        local key = location(material)
+                        assert(not fresh[key], 'Ambiguous preview material layout after gore replacement')
+                        fresh[key] = material
                     end
+                    for _, material in pairs(targets) do
+                        material.gore_slot = slot
+                    end
+                    local rebound, pointer_roles = {}, {}
+                    -- Preflight all replacement handles before any texture write.
+                    for _, material in ipairs(records) do
+                        local key = location(material)
+                        local dest = assert(fresh[key], 'Preview material layout changed after gore replacement')
+                        assert(
+                            dest.material ~= material.source and not borrowed(dest.material),
+                            material.gore_slot and 'Shared transparent material refused'
+                                or 'Shared preview material after gore replacement'
+                        )
+                        local gore = material.gore_slot ~= nil
+                        local previous = pointer_roles[dest.material]
+                        assert(previous == nil or previous == gore, 'Copied gore material aliases clothing')
+                        pointer_roles[dest.material] = gore
+                        rebound[material] = dest.material ~= material.material or dest.mesh ~= material.mesh
+                        material.material, material.mesh = dest.material, dest.mesh
+                    end
+                    for _, material in ipairs(records) do
+                        if material.gore_slot then
+                            local mesh = U.mesh(piece.unit, material.mesh_index + 1)
+                            local name = material.gore_slot
+                            local named = E.Mesh.has_material(mesh, name) and E.Mesh.material(mesh, name)
+                            assert(
+                                named and address(named) == material.material,
+                                'Preview transparent gib material did not resolve'
+                            )
+                            -- A later slot replacement can recreate earlier masks.
+                            m.engine.bind(native, material.material, 0x3aa8b87e, transparent_mask())
+                            native.commit(material.mesh)
+                        elseif rebound[material] then
+                            material.objects = {}
+                            for _, resource in ipairs(bindings(material.source)) do
+                                m.engine.bind(native, material.material, resource.slot, resource.object)
+                                material.objects[resource.slot] = resource.object
+                            end
+                            native.commit(material.mesh)
+                        end
+                    end
+                    host.log(
+                        'preview: transparent owned '
+                            .. slot
+                            .. ' slot resource='
+                            .. tostring(U.resource_name(piece.unit))
+                    )
                 end
-                piece.materials = kept
-                host.log('preview: transparent owned m_gibs slot resource=' .. tostring(U.resource_name(piece.unit)))
             end
+            local kept = {}
+            for _, material in ipairs(records) do
+                if not material.gore_slot then
+                    kept[#kept + 1] = material
+                end
+            end
+            piece.materials = kept
         end
         if
             m.limb_caps

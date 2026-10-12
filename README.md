@@ -30,7 +30,7 @@ Cape material LUTs are excluded from sharing in this build. Unmodified games and
 
 ## Pattern LUTs and row tools
 
-**LUT Editor** includes a two-swatch **Quick Editor: Pattern LUT** directly beneath the material grid. **Load Current Gear** prepares its current values; click a swatch to edit it. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
+**LUT Editor** includes three **Quick Editor: Pattern LUT** swatches directly beneath the material grid, labeled **Color**, **Mat/Opac** and **Roughness** above their selectors. **Load Current Gear** prepares their current values; click a swatch to edit it. The third column's **Alpha controls roughness**; its ordinary picker edits Alpha while retaining the unmapped RGB values. Choose **Pattern LUT Editor** to replace the table with the full Pattern workspace, including raw channels, undo/redo, import, DDS export and Pattern Patch ZIP export. Armor or Helmet returns to the material table without discarding Pattern edits. **Show Alpha** is shared. [Pattern controls](docs/PATTERN-LUTS.md).
 
 The **Rows** tools preview the selected saved row preset beside their controls. Narrow windows place the preview below the controls with scrolling. Previewing leaves the editor unchanged; use **Apply preset to row** when ready.
 

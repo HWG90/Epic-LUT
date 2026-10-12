@@ -4,7 +4,17 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 
 ## Ownership boundaries
 
-- `direct_editor.lua`: coordinates the active edit session, gear selection, UI actions and background jobs. This is still the principal extraction target.
+- `direct_editor.lua`: coordinates the active edit session, gear selection, UI actions and background jobs. It composes the services below through explicit callbacks while retaining session transitions and cleanup order.
+- `editor_composition.lua`: assembles registered pages, mounts custom views and connects picker presentation. Registration lifecycle and session mutations remain explicit controller callbacks; live document and selection getters prevent stale picker state.
+- `editor_actions.lua`: defines registry action callbacks, dialog drafts, source selection and document copies. It retains action/history boundaries and delegates activation mutations through semantic callbacks, with live getters for current services and selections.
+- `import_summary.lua`: assembles current source, gear and Basic view data from one synchronous session frame. It preserves exact document buffers, missing-snapshot diagnostics and registered choice metadata; suppressed Camo changes stay controller callbacks.
+- `gear_edit.lua`: plans current-gear selection, load/apply/copy operations and checked-region Camo edits. It validates live kit, resource and binding receipts before writes; native application, scheduling and active document commits remain controller callbacks.
+- `import_mapping.lua`: builds imported-to-gear mapping dialogs, numeric auto-mapping and frozen source/target receipts. Indexing and owned material/Pattern writes remain controller callbacks; getters resolve current tables after refresh and rollback.
+- `armory_apply.lua`: plans saved gear application and per-LUT preset selection, including associated Patterns, exact destinations and stale chooser checks. The controller supplies scoped writes, history, persistence and Basic document updates.
+- `session_history.lua`: captures immutable, deduplicated action snapshots and restores material/Pattern binding receipts transactionally. It retains failed rollback ownership and checks Cape identity; the controller commits restored UI and persistence state only after native restoration succeeds.
+- `export_provenance.lua`: owns one activation's named binding resolver, background source cache, read-only probe and lazy exact preset hydration. It preserves bounded reads, explicit retry and pending cleanup without exposing mutable cache state to the controller.
+- `gear_export.lua`: prepares selected/current gear export entries, associated Pattern entries and Armory export choices. It preserves inclusion settings and exact original palettes; existing exporters own encoding and transactional filesystem writes.
+- `outfit_capture.lua`: captures assigned material and Pattern documents for named Armory presets, including independent Cape scope and optional provenance. Persistence consumes borrowed session buffers synchronously before marking their exact bytes saved.
 - `gear_catalog.lua`: discovers local material groups, preserves original identities for owned writes, and filters selected/gear-wide application scopes without UI mutations.
 - `binding_session.lua`: owns Epic LUT binding writes, immutable retained texture buffers, per-operation rollback and restoration. It never guesses foreign ownership. The controller supplies native callbacks; tests can supply ordinary Lua tables.
 - `texture_lifetime.lua`: retires one activation's certified owned textures after complete preview/session cleanup, drains queued work, destroys owned handles and drains destruction before releasing data/cache references. Legacy or uncertain allocations remain quarantined.
@@ -30,11 +40,14 @@ Epic LUT targets LuaJIT's Lua 5.1 ABI. Modules return a table; dependencies are 
 - `outfit_targets.lua`: exact preset destinations plus conservative extra-mesh matching. Fallback requires identical saved family palettes, an exact live anchor, and the same current resource/dimensions; it never infers a global mesh-index offset or a Cape from an Armor family.
 - `player_preview_input.lua`: owns mouse/wheel wrappers and restores only wrappers it still owns.
 - `player_preview*.lua`: preview model, controls, rendering and lifecycle. It owns copied garments and its render resources, not the borrowed game world's simulation.
+- Preview gore filtering recognizes the cataloged `m_gibs` and `m_gibs1` through `m_gibs6` sections on owned copies. Material replacement refreshes every copied receipt and reapplies earlier transparent masks before exposing the model. Independently named `g_gore`/LOD meshes are hidden only when named and indexed handles agree uniquely, after material setup. Unmapped meshes, clothing and equipped sources are preserved.
 - `player_animation.lua`: samples selected authored emote poses on existing independently owned garments, using captured hierarchies and immutable poses. It creates no avatar or simulation world.
 
 ## Working conventions
 
 Use module-local state for a service instance. Keep dependency injection at construction boundaries. Avoid runtime filesystem module loading and new globals. `package.loaded` entries are reserved for deliberate cross-addon services and retained native-resource lifetime.
+
+Controller services are created lazily for the current activation and discarded only after cleanup succeeds. Explicit getters resolve replaceable documents, groups and session services after refresh, Undo/Redo and reactivation. The view summary uses a finite synchronous frame; no service receives the complete controller context or a proxy for it.
 
 Native writes must validate liveness and ownership first. Roll back only writes owned by the operation. Never free queued texture buffers or borrowed worlds to reduce memory usage. Treat callback failures as actionable errors; keep retry state when cleanup cannot safely fiDo nish.
 

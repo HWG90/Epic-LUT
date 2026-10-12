@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Extend Player Preview gore filtering to cataloged numbered gib sections and separate named gore/LOD meshes. Preserve copied clothing and live LUT sync when material replacement recreates handles; reject replacements that alias equipped source materials.
+- Identify Pattern LUT column 3 Alpha as roughness. Restore the third quick swatch with Color, Mat/Opac and Roughness labels above the selectors, retaining compact grid-sized cells and abbreviated labels when needed.
+- Expose Roughness A without Advanced. Ordinary roughness picker edits preserve every other channel exactly, including unmapped RGB, with live preview, Cancel and Undo/Redo.
+- Fix Armory's Apply Preset caption clipping at larger fonts by reserving both scaled padding margins. Wrap gear checkboxes and place Apply on another row when their complete labels cannot fit together.
+
 ## R5.7.1 - 2026-10-11
 
 - Expand Shared Lobby LUT with complete exact-value Armor, Helmet and Pattern appearances, including applied Armory looks. Deduplicated tables, shared float dictionaries and improved lossless compression support up to 4,096 destinations within the existing lobby budget. One Configuration toggle controls send/receive and currently defaults On; remote application requires matching sender kits. Cape materials remain excluded, oversized looks remain local, and two-player visual confirmation is still pending for this build.

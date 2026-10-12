@@ -201,17 +201,34 @@ function A.new(info, preview)
         }
         local any = false
         local y, visible = position()
-        local apply_width = math.max(90, (ui.text_width and ui.text_width('Apply Preset', 14) or 90) + 16)
-        local label_width = ui.text_width and ui.text_width('Helmet', 14) or 60
-        local inline_apply = left - 24 >= (label_width + 38) * 3 + apply_width + 8
-        local target_width = (left - 24 - (inline_apply and apply_width + 8 or 0)) / 3
-        for i, option in ipairs({ { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }) do
+        local font = ui.text_size and ui.text_size(14) or 14
+        local padding = ui.spacing and ui.spacing(8) or 8
+        local apply_width = math.max(
+            90,
+            math.ceil(
+                (ui.text_width and ui.text_width('Apply Preset', 14) or #'Apply Preset' * font * 0.62) + padding * 2
+            )
+        )
+        local options = { { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }
+        local label_width = 0
+        for _, option in ipairs(options) do
+            label_width =
+                math.max(label_width, ui.text_width and ui.text_width(option[2], 14) or #option[2] * font * 0.62)
+        end
+        local target_minimum = label_width + 38
+        local target_columns = math.max(1, math.min(3, math.floor((left - 24) / target_minimum)))
+        local inline_apply = target_columns == 3 and left - 24 >= target_minimum * 3 + apply_width + 8
+        local target_width = (left - 24 - (inline_apply and apply_width + 8 or 0)) / target_columns
+        for i, option in ipairs(options) do
+            if i > 1 and (i - 1) % target_columns == 0 then
+                y, visible = position()
+            end
             local kind, label = option[1], option[2]
             local enabled = available[kind]
             local checked = enabled and targets[kind] ~= false
             any = any or checked
             if visible then
-                local x = ui.x + 12 + (i - 1) * target_width
+                local x = ui.x + 12 + ((i - 1) % target_columns) * target_width
                 ui.checkbox(x, y, 28, bh, checked, enabled)
                 ui.bounded(
                     x + 34,
