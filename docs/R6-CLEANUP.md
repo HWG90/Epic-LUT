@@ -10,6 +10,8 @@ Weapon LUT editing is the headline feature for R6. The proposed starting scope i
 
 The first milestone is read-only weapon discovery: prove the owning player, equipped slot, live Unit, material section, texture resource and supported LUT dimensions. Check held and holstered representations, weapon switches, dropped/replaced weapons, death and respawn before enabling writes. The current avatar collector enumerates garment arrays; weapon discovery needs its own verified path.
 
+The initial Adjudicator probe now has live binding and original-table evidence. See [WEAPON-LUTS.md](WEAPON-LUTS.md) for the verified mappings and remaining validation.
+
 Release work then connects verified weapon targets to:
 
 - Live color, material and compatible camo controls, with weapon-specific labels confirmed from their tables.

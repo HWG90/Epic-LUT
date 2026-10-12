@@ -1,0 +1,19 @@
+{
+  "id": "epic_lut_primary_probe_r6",
+  "name": "Epic LUT R6 primary LUT read-only probe",
+  "author": "Goose",
+  "version": "0.1.1-diagnostic",
+  "lll": {
+    "entry": "main.lua",
+    "modules": [
+      "vendor/bingus_runtime.lua",
+      "vendor/bingus_memory.lua",
+      "vendor/engine.lua",
+      "src/weapons/primary_identity.lua",
+      "src/weapons/lut_catalog_match.lua",
+      "src/gear/binding_names.lua"
+    ],
+    "restart_only": false,
+    "retain_until_exit": false
+  }
+}
