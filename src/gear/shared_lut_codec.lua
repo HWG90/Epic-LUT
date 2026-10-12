@@ -1,18 +1,24 @@
--- Full RGBA32F tables and stable garment/material destinations. No lossy color conversion.
+-- Full RGBA32F tables and stable gear/material destinations. No lossy color conversion.
 local C = { MAX_RAW = 65536, MAX_TEXT = 3600, MAX_DOCS = 32, MAX_BINDINGS = 4096, LEGACY_BINDINGS = 128 }
 local ffi = require('ffi')
 local bit = require('bit')
 local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 local digits = {}
-for i = 1, #alphabet do digits[alphabet:sub(i, i)] = i - 1 end
+for i = 1, #alphabet do
+    digits[alphabet:sub(i, i)] = i - 1
+end
 local function base64(bytes)
     local out = {}
     for i = 1, #bytes, 3 do
         local a, b, c = bytes:byte(i, i + 2)
         local n = a * 65536 + (b or 0) * 256 + (c or 0)
-        local function char(v) return alphabet:sub(v + 1, v + 1) end
-        out[#out + 1] = char(math.floor(n / 262144)) .. char(math.floor(n / 4096) % 64)
-            .. (b and char(math.floor(n / 64) % 64) or '=') .. (c and char(n % 64) or '=')
+        local function char(v)
+            return alphabet:sub(v + 1, v + 1)
+        end
+        out[#out + 1] = char(math.floor(n / 262144))
+            .. char(math.floor(n / 4096) % 64)
+            .. (b and char(math.floor(n / 64) % 64) or '=')
+            .. (c and char(n % 64) or '=')
     end
     return table.concat(out)
 end
@@ -20,28 +26,41 @@ local function unbase64(text)
     assert(#text % 4 == 0 and not text:find('[^%w+/=]'), 'Invalid shared LUT encoding')
     local out = {}
     for i = 1, #text, 4 do
-        local a, b, c, d = text:sub(i,i), text:sub(i+1,i+1), text:sub(i+2,i+2), text:sub(i+3,i+3)
-        assert(digits[a] and digits[b] and (digits[c] or c == '=') and (digits[d] or d == '='), 'Invalid shared LUT encoding')
+        local a, b, c, d = text:sub(i, i), text:sub(i + 1, i + 1), text:sub(i + 2, i + 2), text:sub(i + 3, i + 3)
+        assert(
+            digits[a] and digits[b] and (digits[c] or c == '=') and (digits[d] or d == '='),
+            'Invalid shared LUT encoding'
+        )
         assert((c ~= '=' or d == '=') and (c ~= '=' and d ~= '=' or i + 3 == #text), 'Invalid shared LUT padding')
         local n = digits[a] * 262144 + digits[b] * 4096 + (digits[c] or 0) * 64 + (digits[d] or 0)
-        out[#out + 1] = string.char(math.floor(n / 65536), math.floor(n / 256) % 256, n % 256):sub(1, c == '=' and 1 or d == '=' and 2 or 3)
+        out[#out + 1] = string
+            .char(math.floor(n / 65536), math.floor(n / 256) % 256, n % 256)
+            :sub(1, c == '=' and 1 or d == '=' and 2 or 3)
     end
     return table.concat(out)
 end
 function C.compression(native)
-    pcall(ffi.cdef, [[
+    pcall(
+        ffi.cdef,
+        [[
         int32_t EpicLutWorkspace(uint16_t, uint32_t *, uint32_t *) __asm__("RtlGetCompressionWorkSpaceSize");
         int32_t EpicLutCompress(uint16_t, const uint8_t *, uint32_t, uint8_t *, uint32_t, uint32_t, uint32_t *, void *) __asm__("RtlCompressBuffer");
         int32_t EpicLutDecompress(uint16_t, uint8_t *, uint32_t, const uint8_t *, uint32_t, uint32_t *) __asm__("RtlDecompressBuffer");
-    ]])
+    ]]
+    )
     local dll = native or ffi.load('ntdll')
     local workspace_size, fragment = ffi.new('uint32_t[1]'), ffi.new('uint32_t[1]')
-    assert(dll.EpicLutWorkspace(2, workspace_size, fragment) == 0 and workspace_size[0] > 0 and workspace_size[0] <= 1024 * 1024, 'LUT compression unavailable')
+    assert(
+        dll.EpicLutWorkspace(2, workspace_size, fragment) == 0
+            and workspace_size[0] > 0
+            and workspace_size[0] <= 1024 * 1024,
+        'LUT compression unavailable'
+    )
     local workspace = ffi.new('uint8_t[?]', workspace_size[0])
     local xpress_workspace, xpress_format
     -- Optional native improvement: MAXIMUM first, STANDARD second. Keep the
     -- legacy backend available and every workspace bounded to one MiB.
-    for _, format in ipairs({259, 3}) do
+    for _, format in ipairs({ 259, 3 }) do
         local ok, status = pcall(dll.EpicLutWorkspace, format, workspace_size, fragment)
         if ok and status == 0 and workspace_size[0] > 0 and workspace_size[0] <= 1024 * 1024 then
             xpress_workspace, xpress_format = ffi.new('uint8_t[?]', workspace_size[0]), format
@@ -50,22 +69,37 @@ function C.compression(native)
     end
     local output, final = ffi.new('uint8_t[?]', C.MAX_RAW + 4096), ffi.new('uint32_t[1]')
     return {
-        formats = xpress_workspace and {'', 'x'} or {''},
+        formats = xpress_workspace and { '', 'x' } or { '' },
         xpress_format = xpress_format,
         compress = function(bytes, tag)
-            assert(type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_RAW,'Invalid LUT compression input')
+            assert(type(bytes) == 'string' and #bytes > 0 and #bytes <= C.MAX_RAW, 'Invalid LUT compression input')
             assert(not tag or tag == '' or tag == 'x', 'Unsupported LUT compression format')
             assert(tag ~= 'x' or xpress_workspace, 'XPRESS compression unavailable')
             local format, work = tag == 'x' and xpress_format or 2, tag == 'x' and xpress_workspace or workspace
-            assert(dll.EpicLutCompress(format, bytes, #bytes, output, C.MAX_RAW + 4096, 4096, final, work) == 0, 'LUT compression failed')
+            assert(
+                dll.EpicLutCompress(format, bytes, #bytes, output, C.MAX_RAW + 4096, 4096, final, work) == 0,
+                'LUT compression failed'
+            )
             assert(final[0] > 0 and final[0] <= C.MAX_RAW + 4096)
             return ffi.string(output, final[0])
         end,
         decompress = function(bytes, size, tag)
-            assert(type(size)=='number' and size>0 and size<=C.MAX_RAW and size%1==0
-                and type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_TEXT,'Invalid LUT decompression bounds')
+            assert(
+                type(size) == 'number'
+                    and size > 0
+                    and size <= C.MAX_RAW
+                    and size % 1 == 0
+                    and type(bytes) == 'string'
+                    and #bytes > 0
+                    and #bytes <= C.MAX_TEXT,
+                'Invalid LUT decompression bounds'
+            )
             assert(not tag or tag == '' or tag == 'x', 'Unsupported LUT compression format')
-            assert(dll.EpicLutDecompress(tag == 'x' and 3 or 2, output, size, bytes, #bytes, final) == 0 and final[0] == size, 'Invalid compressed LUT appearance')
+            assert(
+                dll.EpicLutDecompress(tag == 'x' and 3 or 2, output, size, bytes, #bytes, final) == 0
+                    and final[0] == size,
+                'Invalid compressed LUT appearance'
+            )
             return ffi.string(output, size)
         end,
     }
@@ -77,7 +111,11 @@ function C.new(compression, original)
         return ffi.string(ffi.new('uint32_t[1]', n), 4)
     end
     local function finite(doc)
-        assert(((doc.width == 23 and doc.height >= 1 and doc.height <= 64) or (doc.width == 3 and doc.height == 1)) and doc.height % 1 == 0, 'Unsupported shared table shape')
+        assert(
+            ((doc.width == 23 and doc.height >= 1 and doc.height <= 64) or (doc.width == 3 and doc.height == 1))
+                and doc.height % 1 == 0,
+            'Unsupported shared table shape'
+        )
         for i = 0, doc.width * doc.height * 4 - 1 do
             local n = tonumber(doc.data[i])
             assert(n == n and math.abs(n) <= 1e10, 'Invalid shared LUT float')
@@ -85,20 +123,76 @@ function C.new(compression, original)
     end
     local function checksum(bytes)
         local a, b = 1, 0
-        for i = 1, #bytes do a = (a + bytes:byte(i)) % 65521; b = (b + a) % 65521 end
+        for i = 1, #bytes do
+            a = (a + bytes:byte(i)) % 65521
+            b = (b + a) % 65521
+        end
         return string.format('%08x', b * 65536 + a)
     end
-    local function short(n) return string.char(n % 256, math.floor(n / 256)) end
+    local function short(n)
+        return string.char(n % 256, math.floor(n / 256))
+    end
     local self = {}
     function self.encode(identity, entries)
+        assert(type(identity) == 'table' and type(entries) == 'table', 'Invalid shared appearance')
+        assert(
+            #entries <= C.MAX_BINDINGS,
+            'Too many LUT bindings to share; limit is ' .. C.MAX_BINDINGS .. '; local edits are kept'
+        )
+        local count = 0
+        for index in pairs(entries) do
+            assert(
+                type(index) == 'number' and index % 1 == 0 and index >= 1 and index <= #entries,
+                'Shared entries must be a dense list'
+            )
+            count = count + 1
+        end
+        assert(count == #entries, 'Shared entries must be a dense list')
+        local weapons, weapon_header, with_weapons = {}, {}, false
+        assert(identity.weapons == nil or type(identity.weapons) == 'table', 'Invalid shared weapon identities')
+        for slot, value in pairs(identity.weapons or {}) do
+            assert(type(slot) == 'number' and slot % 1 == 0 and slot >= 1 and slot <= 3, 'Invalid shared weapon slot')
+            assert(
+                type(value) == 'string' and #value == 16 and value:match('^%x+$') and value ~= string.rep('0', 16),
+                'Invalid shared weapon resource ID'
+            )
+            weapons[slot] = value:lower()
+        end
+        for slot = 1, 3 do
+            weapon_header[slot] = weapons[slot] or string.rep('0', 16)
+        end
+        weapon_header = table.concat(weapon_header)
         local docs, delta_docs, xor_docs, lookup, bindings, seen = {}, {}, {}, {}, {}, {}
         local decoded_bytes = 0
         for _, entry in ipairs(entries) do
-            local pattern = entry.key:sub(1,2) == 'p:'
+            local pattern = entry.key:sub(1, 2) == 'p:'
             local destination = pattern and entry.key:sub(3) or entry.key
             local t, slot, mesh, material = destination:match('^(%d+):(%d+):(%d+):(%d+)$')
             t, slot, mesh, material = tonumber(t), tonumber(slot), tonumber(mesh), tonumber(material)
-            assert(t and slot and mesh and material and t <= 2 and slot <= 9 and mesh <= 63 and material <= 63, 'Invalid shared destination')
+            assert(
+                t and slot and mesh and material and t <= 3 and slot <= 9 and mesh <= 63 and material <= 63,
+                'Invalid shared destination'
+            )
+            if t == 3 then
+                with_weapons = true
+                assert(slot >= 1 and slot <= 3 and weapons[slot], 'Shared weapon destination has no weapon identity')
+                assert(
+                    entry.weapon_slot == nil or entry.weapon_slot == slot,
+                    'Shared weapon slot disagrees with destination'
+                )
+                assert(
+                    type(entry.weapon_resource) == 'string'
+                        and #entry.weapon_resource == 16
+                        and entry.weapon_resource:lower() == weapons[slot],
+                    'Shared weapon identity disagrees with destination'
+                )
+                assert(entry.kind == nil or entry.kind == 'weapon', 'Shared weapon kind disagrees with destination')
+            else
+                assert(
+                    entry.kind ~= 'weapon' and entry.weapon_resource == nil and entry.weapon_slot == nil,
+                    'Weapon identity on a shared garment destination'
+                )
+            end
             local key = (pattern and 'p:' or '') .. t .. ':' .. slot .. ':' .. mesh .. ':' .. material
             local d = entry.document
             finite(d)
@@ -107,18 +201,35 @@ function C.new(compression, original)
             local signature = string.char(d.width, d.height) .. pixels
             assert(not seen[key] or seen[key] == signature, 'Conflicting shared destination')
             if not seen[key] then
-                assert(#bindings < C.MAX_BINDINGS, 'Too many LUT bindings to share; limit is ' .. C.MAX_BINDINGS .. '; local edits are kept')
+                assert(
+                    #bindings < C.MAX_BINDINGS,
+                    'Too many LUT bindings to share; limit is ' .. C.MAX_BINDINGS .. '; local edits are kept'
+                )
                 local index = lookup[signature]
                 if not index then
-                    assert(#docs < C.MAX_DOCS, 'Too many unique LUT tables to share; limit is ' .. C.MAX_DOCS .. '; local edits are kept')
+                    assert(
+                        #docs < C.MAX_DOCS,
+                        'Too many unique LUT tables to share; limit is ' .. C.MAX_DOCS .. '; local edits are kept'
+                    )
                     decoded_bytes = decoded_bytes + #pixels
-                    assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget; local edits are kept')
-                    docs[#docs + 1] = signature; index = #docs; lookup[signature] = index
+                    assert(
+                        decoded_bytes <= C.MAX_RAW,
+                        'Reconstructed shared appearance exceeds budget; local edits are kept'
+                    )
+                    docs[#docs + 1] = signature
+                    index = #docs
+                    lookup[signature] = index
                     local encoded = string.char(0) .. signature
                     xor_docs[index] = encoded
                     local base = entry.original
-                    if base and base.resource and base.resource:match('^%x+$') and #base.resource == 16
-                        and base.width == d.width and base.height == d.height then
+                    if
+                        base
+                        and base.resource
+                        and base.resource:match('^%x+$')
+                        and #base.resource == 16
+                        and base.width == d.width
+                        and base.height == d.height
+                    then
                         finite(base)
                         local bytes = ffi.string(base.data, #pixels)
                         -- Four byte planes retain every IEEE-754 bit; XOR makes
@@ -131,30 +242,46 @@ function C.new(compression, original)
                             end
                             planes[#planes + 1] = table.concat(plane)
                         end
-                        xor_docs[index] = string.char(2,d.width,d.height) .. base.resource:lower()
-                            .. checksum(bytes) .. table.concat(planes)
+                        xor_docs[index] = string.char(2, d.width, d.height)
+                            .. base.resource:lower()
+                            .. checksum(bytes)
+                            .. table.concat(planes)
                         local changes = {}
                         for at = 1, #pixels, 4 do
                             if pixels:sub(at, at + 3) ~= bytes:sub(at, at + 3) then
                                 changes[#changes + 1] = short((at - 1) / 4) .. pixels:sub(at, at + 3)
                             end
                         end
-                        local delta = string.char(1,d.width,d.height) .. base.resource:lower()
-                            .. checksum(bytes) .. short(#changes) .. table.concat(changes)
-                        if #delta < #encoded then encoded = delta end
+                        local delta = string.char(1, d.width, d.height)
+                            .. base.resource:lower()
+                            .. checksum(bytes)
+                            .. short(#changes)
+                            .. table.concat(changes)
+                        if #delta < #encoded then
+                            encoded = delta
+                        end
                     end
                     delta_docs[index] = encoded
                 end
-                bindings[#bindings + 1] = {t = t, pattern = pattern, slot = slot, mesh = mesh, material = material, index = index}
+                bindings[#bindings + 1] =
+                    { t = t, pattern = pattern, slot = slot, mesh = mesh, material = material, index = index }
                 seen[key] = signature
             end
         end
-        local legacy = #bindings <= C.LEGACY_BINDINGS
-        local header = word(identity.body or 0) .. word(identity.armor or 0) .. word(identity.helmet or 0)
-            .. string.char(#docs) .. (legacy and string.char(#bindings) or short(#bindings))
+        local legacy = not with_weapons and #bindings <= C.LEGACY_BINDINGS
+        local header = word(identity.body or 0)
+            .. word(identity.armor or 0)
+            .. word(identity.helmet or 0)
+            .. (with_weapons and weapon_header or '')
+            .. string.char(#docs)
+            .. (legacy and string.char(#bindings) or short(#bindings))
         local encoded_bindings, packed_bindings, full_docs = {}, {}, {}
         for i, b in ipairs(bindings) do
-            local packed = b.index - 1 + b.material * 32 + b.mesh * 2048 + b.slot * 131072
+            local packed = b.index
+                - 1
+                + b.material * 32
+                + b.mesh * 2048
+                + b.slot * 131072
                 + (b.t + (b.pattern and 4 or 0)) * 2097152
             packed_bindings[i] = string.char(packed % 256, math.floor(packed / 256) % 256, math.floor(packed / 65536))
             if legacy then
@@ -166,26 +293,39 @@ function C.new(compression, original)
                 encoded_bindings[i] = packed_bindings[i]
             end
         end
-        for i, doc in ipairs(docs) do full_docs[i] = (legacy and '' or string.char(0)) .. doc end
+        for i, doc in ipairs(docs) do
+            full_docs[i] = (legacy and '' or string.char(0)) .. doc
+        end
         local tail, text = table.concat(encoded_bindings), nil
         self.packet_sizes = {}
         local function packed_candidate(version, name, raw)
             if #raw <= C.MAX_RAW then
-                for _,tag in ipairs(compression.formats or {''}) do
+                for _, tag in ipairs(compression.formats or { '' }) do
                     assert(tag == '' or tag == 'x', 'Unsupported LUT compression format')
-                    local ok,bytes=pcall(compression.compress,raw,tag)
-                    if not ok and tag == '' then error(bytes,0) end
+                    local ok, bytes = pcall(compression.compress, raw, tag)
+                    if not ok and tag == '' then
+                        error(bytes, 0)
+                    end
                     if ok then
-                        assert(type(bytes)=='string' and #bytes>0 and #bytes<=C.MAX_RAW+4096,'Invalid compressed LUT output')
+                        assert(
+                            type(bytes) == 'string' and #bytes > 0 and #bytes <= C.MAX_RAW + 4096,
+                            'Invalid compressed LUT output'
+                        )
                         local packed = version .. tag .. '|' .. #raw .. '|' .. base64(bytes)
-                        self.packet_sizes[name] = math.min(self.packet_sizes[name] or math.huge,#packed)
-                        if not text or #packed < #text then text = packed end
+                        self.packet_sizes[name] = math.min(self.packet_sizes[name] or math.huge, #packed)
+                        if not text or #packed < #text then
+                            text = packed
+                        end
                     end
                 end
             end
         end
         local function candidate(version, name, representation)
-            packed_candidate(version,name,'EL' .. version .. header .. table.concat(representation) .. tail)
+            if with_weapons then
+                packed_candidate('6', name, 'EL6' .. header .. string.char(0) .. table.concat(representation) .. tail)
+            else
+                packed_candidate(version, name, 'EL' .. version .. header .. table.concat(representation) .. tail)
+            end
         end
         candidate(legacy and '1' or '4', 'full', full_docs)
         candidate(legacy and '2' or '4', 'sparse', delta_docs)
@@ -193,166 +333,263 @@ function C.new(compression, original)
         -- Original-independent exact F32 words shared across every document.
         -- Treat each four-byte word as opaque bytes, including signed zero.
         local words, word_ids, shapes = {}, {}, {}
-        for i,doc in ipairs(docs)do
-            shapes[i]=doc:sub(1,2)
-            for at=3,#doc,4 do
-                local value=doc:sub(at,at+3)
-                local index=word_ids[value]
-                if not index then words[#words+1]=value;index=#words;word_ids[value]=index end
+        for i, doc in ipairs(docs) do
+            shapes[i] = doc:sub(1, 2)
+            for at = 3, #doc, 4 do
+                local value = doc:sub(at, at + 3)
+                local index = word_ids[value]
+                if not index then
+                    words[#words + 1] = value
+                    index = #words
+                    word_ids[value] = index
+                end
             end
         end
-        local word_count=#words
-        assert(word_count<=decoded_bytes/4,'Shared word dictionary exceeds reconstructed budget')
+        local word_count = #words
+        assert(word_count <= decoded_bytes / 4, 'Shared word dictionary exceeds reconstructed budget')
         table.sort(words) -- Opaque four-byte strings, never numeric float order.
-        for i,value in ipairs(words)do word_ids[value]=i-1 end
-        local word_planes={}
-        for lane=1,4 do
-            local plane={}
-            for i,value in ipairs(words)do plane[i]=value:sub(lane,lane)end
-            word_planes[lane]=table.concat(plane)
+        for i, value in ipairs(words) do
+            word_ids[value] = i - 1
         end
-        local low,high={},{}
-        for _,doc in ipairs(docs)do
-            for at=3,#doc,4 do
-                local index=word_ids[doc:sub(at,at+3)]
-                low[#low+1]=string.char(index%256)
-                if word_count>256 then high[#high+1]=string.char(math.floor(index/256))end
+        local word_planes = {}
+        for lane = 1, 4 do
+            local plane = {}
+            for i, value in ipairs(words) do
+                plane[i] = value:sub(lane, lane)
+            end
+            word_planes[lane] = table.concat(plane)
+        end
+        local low, high = {}, {}
+        for _, doc in ipairs(docs) do
+            for at = 3, #doc, 4 do
+                local index = word_ids[doc:sub(at, at + 3)]
+                low[#low + 1] = string.char(index % 256)
+                if word_count > 256 then
+                    high[#high + 1] = string.char(math.floor(index / 256))
+                end
             end
         end
-        local dictionary_header=word(identity.body or 0)..word(identity.armor or 0)..word(identity.helmet or 0)
-            ..string.char(#docs)..short(#bindings)..short(word_count)
-        packed_candidate('5','dictionary','EL5'..dictionary_header..table.concat(shapes)..table.concat(word_planes)
-            ..table.concat(low)..table.concat(high)..table.concat(packed_bindings))
+        local dictionary_header = word(identity.body or 0)
+            .. word(identity.armor or 0)
+            .. word(identity.helmet or 0)
+            .. (with_weapons and weapon_header or '')
+            .. string.char(#docs)
+            .. short(#bindings)
+            .. (with_weapons and string.char(1) or '')
+            .. short(word_count)
+        packed_candidate(
+            with_weapons and '6' or '5',
+            'dictionary',
+            (with_weapons and 'EL6' or 'EL5')
+                .. dictionary_header
+                .. table.concat(shapes)
+                .. table.concat(word_planes)
+                .. table.concat(low)
+                .. table.concat(high)
+                .. table.concat(packed_bindings)
+        )
         assert(text, 'Shared LUT raw budget exceeded; local edits are kept')
-        assert(#text <= C.MAX_TEXT, 'Full LUT appearance needs ' .. #text .. ' bytes; lobby budget is ' .. C.MAX_TEXT .. '; local edits are kept')
+        assert(
+            #text <= C.MAX_TEXT,
+            'Full LUT appearance needs '
+                .. #text
+                .. ' bytes; lobby budget is '
+                .. C.MAX_TEXT
+                .. '; local edits are kept'
+        )
         return text
     end
     function self.decode(text)
         assert(type(text) == 'string' and #text <= C.MAX_TEXT, 'Invalid shared LUT packet size')
-        local version, tag, size, encoded = text:match('^([12345])(x?)|(%d+)|(.+)$')
+        local version, tag, size, encoded = text:match('^([123456])(x?)|(%d+)|(.+)$')
         size = tonumber(size)
-        assert(size and size >= (version == '5' and 20 or version == '4' and 18 or 17) and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
+        assert(
+            size
+                and size >= (version == '6' and 67 or version == '5' and 20 or version == '4' and 18 or 17)
+                and size <= C.MAX_RAW,
+            'Unsupported shared LUT packet'
+        )
         local raw = compression.decompress(unbase64(encoded), size, tag)
-        assert(#raw == size and raw:sub(1,3) == 'EL' .. version, 'Invalid shared LUT header')
+        assert(#raw == size and raw:sub(1, 3) == 'EL' .. version, 'Invalid shared LUT header')
         local at = 4
         local function take(n)
             assert(at + n - 1 <= #raw, 'Truncated shared appearance')
-            local s = raw:sub(at, at + n - 1); at = at + n; return s
+            local s = raw:sub(at, at + n - 1)
+            at = at + n
+            return s
         end
         local function readword()
-            local data = ffi.new('uint32_t[1]'); ffi.copy(data, take(4), 4); return tonumber(data[0])
+            local data = ffi.new('uint32_t[1]')
+            ffi.copy(data, take(4), 4)
+            return tonumber(data[0])
         end
-        local result = {body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {}}
-        local docs, bindings = take(1):byte(), take(1):byte()
-        local packed_bindings=version=='4' or version=='5'
-        if packed_bindings then bindings = bindings + take(1):byte() * 256 end
-        local decoded_bytes = 0
-        assert(docs <= C.MAX_DOCS and bindings <= (packed_bindings and C.MAX_BINDINGS or C.LEGACY_BINDINGS), 'Shared appearance count exceeds budget')
-        if version=='5' then
-            local lo,hi=take(2):byte(1,2)
-            local count=lo+hi*256
-            local shapes={}
-            for i=1,docs do
-                local width,height=take(2):byte(1,2)
-                assert((width==23 and height>=1 and height<=64)or(width==3 and height==1),'Invalid shared LUT shape')
-                decoded_bytes=decoded_bytes+width*height*16
-                assert(decoded_bytes<=C.MAX_RAW,'Reconstructed shared appearance exceeds budget')
-                shapes[i]={width=width,height=height}
-            end
-            assert(count<=decoded_bytes/4 and (count>0 or decoded_bytes==0),'Invalid shared word dictionary size')
-            local planes=take(count*4)
-            local dictionary=ffi.new('uint8_t[?]',math.max(1,count*4))
-            for lane=0,3 do
-                for i=0,count-1 do dictionary[i*4+lane]=planes:byte(lane*count+i+1)end
-            end
-            local values=ffi.cast('const float *',dictionary)
-            for i=0,count-1 do
-                local value=tonumber(values[i])
-                assert(value==value and math.abs(value)<=1e10,'Invalid shared LUT float')
-            end
-            local floats=decoded_bytes/4
-            local indexes=take(floats*(count>256 and 2 or 1))
-            local flat_index=0
-            for i,shape in ipairs(shapes)do
-                local document_floats=shape.width*shape.height*4
-                local data=ffi.new('float[?]',document_floats)
-                for at=0,document_floats-1 do
-                    local index=indexes:byte(flat_index+1)
-                    if count>256 then index=index+indexes:byte(floats+flat_index+1)*256 end
-                    assert(index<count,'Invalid shared word dictionary index')
-                    ffi.copy(data+at,dictionary+index*4,4)
-                    flat_index=flat_index+1
+        local result = { body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {} }
+        if version == '6' then
+            result.weapons = {}
+            for slot = 1, 3 do
+                local resource = take(16)
+                assert(resource:match('^%x+$'), 'Invalid shared weapon resource ID')
+                if resource ~= string.rep('0', 16) then
+                    result.weapons[slot] = resource:lower()
                 end
-                local document={width=shape.width,height=shape.height,data=data}
-                finite(document);result.documents[i]=document
+            end
+        end
+        local docs, bindings = take(1):byte(), take(1):byte()
+        local packed_bindings = version == '4' or version == '5' or version == '6'
+        if packed_bindings then
+            bindings = bindings + take(1):byte() * 256
+        end
+        local representation = version == '6' and take(1):byte() or nil
+        assert(
+            representation == nil or representation == 0 or representation == 1,
+            'Invalid shared gear representation'
+        )
+        local decoded_bytes = 0
+        assert(
+            docs <= C.MAX_DOCS and bindings <= (packed_bindings and C.MAX_BINDINGS or C.LEGACY_BINDINGS),
+            'Shared appearance count exceeds budget'
+        )
+        if version == '5' or representation == 1 then
+            local lo, hi = take(2):byte(1, 2)
+            local count = lo + hi * 256
+            local shapes = {}
+            for i = 1, docs do
+                local width, height = take(2):byte(1, 2)
+                assert(
+                    (width == 23 and height >= 1 and height <= 64) or (width == 3 and height == 1),
+                    'Invalid shared LUT shape'
+                )
+                decoded_bytes = decoded_bytes + width * height * 16
+                assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
+                shapes[i] = { width = width, height = height }
+            end
+            assert(
+                count <= decoded_bytes / 4 and (count > 0 or decoded_bytes == 0),
+                'Invalid shared word dictionary size'
+            )
+            local planes = take(count * 4)
+            local dictionary = ffi.new('uint8_t[?]', math.max(1, count * 4))
+            for lane = 0, 3 do
+                for i = 0, count - 1 do
+                    dictionary[i * 4 + lane] = planes:byte(lane * count + i + 1)
+                end
+            end
+            local values = ffi.cast('const float *', dictionary)
+            for i = 0, count - 1 do
+                local value = tonumber(values[i])
+                assert(value == value and math.abs(value) <= 1e10, 'Invalid shared LUT float')
+            end
+            local floats = decoded_bytes / 4
+            local indexes = take(floats * (count > 256 and 2 or 1))
+            local flat_index = 0
+            for i, shape in ipairs(shapes) do
+                local document_floats = shape.width * shape.height * 4
+                local data = ffi.new('float[?]', document_floats)
+                for at = 0, document_floats - 1 do
+                    local index = indexes:byte(flat_index + 1)
+                    if count > 256 then
+                        index = index + indexes:byte(floats + flat_index + 1) * 256
+                    end
+                    assert(index < count, 'Invalid shared word dictionary index')
+                    ffi.copy(data + at, dictionary + index * 4, 4)
+                    flat_index = flat_index + 1
+                end
+                local document = { width = shape.width, height = shape.height, data = data }
+                finite(document)
+                result.documents[i] = document
             end
         else
-        for i = 1, docs do
-            local mode = version ~= '1' and take(1):byte() or 0
-            assert(mode == 0 or mode == 1 or ((version == '3' or version == '4') and mode == 2), 'Invalid shared LUT representation')
-            local width, height = take(2):byte(1,2)
-            assert((width == 23 and height >= 1 and height <= 64) or (width == 3 and height == 1), 'Invalid shared LUT shape')
-            decoded_bytes = decoded_bytes + width * height * 16
-            assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
-            local data = ffi.new('float[?]', width * height * 4)
-            if mode == 0 then
-                ffi.copy(data, take(width * height * 16), width * height * 16)
-            else
-                local resource, expected = take(16), take(8)
-                assert(resource:match('^%x+$') and expected:match('^%x+$'), 'Invalid shared baseline identity')
-                local base = original and original(resource)
-                assert(base, 'Sharing: waiting for original LUT ' .. resource)
-                assert(base.width == width and base.height == height, 'Shared baseline dimensions disagree')
-                local bytes = ffi.string(base.data, width * height * 16)
-                assert(checksum(bytes) == expected, 'Sharing: original LUT differs from sender ' .. resource)
-                ffi.copy(data, bytes, #bytes)
-                if mode == 2 then
-                    local planes = take(#bytes)
-                    local target = ffi.cast('uint8_t *',data)
-                    local count = width * height * 4
-                    for lane = 0, 3 do
-                        for i = 0, count - 1 do
-                            local at = i * 4 + lane
-                            target[at] = bit.bxor(bytes:byte(at + 1), planes:byte(lane * count + i + 1))
+            for i = 1, docs do
+                local mode = version ~= '1' and take(1):byte() or 0
+                assert(
+                    mode == 0 or mode == 1 or ((version == '3' or version == '4' or version == '6') and mode == 2),
+                    'Invalid shared LUT representation'
+                )
+                local width, height = take(2):byte(1, 2)
+                assert(
+                    (width == 23 and height >= 1 and height <= 64) or (width == 3 and height == 1),
+                    'Invalid shared LUT shape'
+                )
+                decoded_bytes = decoded_bytes + width * height * 16
+                assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
+                local data = ffi.new('float[?]', width * height * 4)
+                if mode == 0 then
+                    ffi.copy(data, take(width * height * 16), width * height * 16)
+                else
+                    local resource, expected = take(16), take(8)
+                    assert(resource:match('^%x+$') and expected:match('^%x+$'), 'Invalid shared baseline identity')
+                    local base = original and original(resource)
+                    assert(base, 'Sharing: waiting for original LUT ' .. resource)
+                    assert(base.width == width and base.height == height, 'Shared baseline dimensions disagree')
+                    local bytes = ffi.string(base.data, width * height * 16)
+                    assert(checksum(bytes) == expected, 'Sharing: original LUT differs from sender ' .. resource)
+                    ffi.copy(data, bytes, #bytes)
+                    if mode == 2 then
+                        local planes = take(#bytes)
+                        local target = ffi.cast('uint8_t *', data)
+                        local count = width * height * 4
+                        for lane = 0, 3 do
+                            for i = 0, count - 1 do
+                                local at = i * 4 + lane
+                                target[at] = bit.bxor(bytes:byte(at + 1), planes:byte(lane * count + i + 1))
+                            end
+                        end
+                    else
+                        local lo, hi = take(2):byte(1, 2)
+                        local count, prior = lo + hi * 256, -1
+                        assert(count <= width * height * 4, 'Too many shared changes')
+                        for _ = 1, count do
+                            lo, hi = take(2):byte(1, 2)
+                            local index = lo + hi * 256
+                            assert(index > prior and index < width * height * 4, 'Invalid shared change index')
+                            ffi.copy(data + index, take(4), 4)
+                            prior = index
                         end
                     end
-                else
-                local lo, hi = take(2):byte(1,2)
-                local count, prior = lo + hi * 256, -1
-                assert(count <= width * height * 4, 'Too many shared changes')
-                for _ = 1, count do
-                    lo, hi = take(2):byte(1,2)
-                    local index = lo + hi * 256
-                    assert(index > prior and index < width * height * 4, 'Invalid shared change index')
-                    ffi.copy(data + index, take(4), 4)
-                    prior = index
                 end
-                end
+                local doc = { width = width, height = height, data = data }
+                finite(doc)
+                result.documents[i] = doc
             end
-            local doc = {width = width, height = height, data = data}
-            finite(doc); result.documents[i] = doc
-        end
         end
         local seen = {}
         for i = 1, bindings do
             local t, slot, mesh, material, index, pattern
             if packed_bindings then
-                local a, b, c = take(3):byte(1,3)
+                local a, b, c = take(3):byte(1, 3)
                 local packed = a + b * 256 + c * 65536
                 local kind = math.floor(packed / 2097152)
                 t, pattern = kind % 4, kind >= 4
                 slot, mesh = math.floor(packed / 131072) % 16, math.floor(packed / 2048) % 64
                 material, index = math.floor(packed / 32) % 64, packed % 32 + 1
             else
-                t, slot, mesh, material, index = take(5):byte(1,5)
+                t, slot, mesh, material, index = take(5):byte(1, 5)
                 pattern = t >= 128
-                if pattern then t = t - 128 end
+                if pattern then
+                    t = t - 128
+                end
             end
-            assert(t <= 2 and slot <= 9 and mesh <= 63 and material <= 63 and result.documents[index], 'Invalid shared binding')
+            assert(
+                t <= (version == '6' and 3 or 2)
+                    and slot <= 9
+                    and mesh <= 63
+                    and material <= 63
+                    and result.documents[index],
+                'Invalid shared binding'
+            )
+            if t == 3 then
+                assert(slot >= 1 and slot <= 3 and result.weapons[slot], 'Shared weapon binding has no identity')
+            end
             local key = (pattern and 'p:' or '') .. t .. ':' .. slot .. ':' .. mesh .. ':' .. material
-            assert(not seen[key], 'Duplicate shared binding'); seen[key] = true
+            assert(not seen[key], 'Duplicate shared binding')
+            seen[key] = true
             assert(result.documents[index].width == (pattern and 3 or 23), 'Binding slot and table shape disagree')
-            result.entries[key] = {document = result.documents[index], helmet = slot == 0, pattern = pattern}
+            result.entries[key] = { document = result.documents[index], helmet = slot == 0, pattern = pattern }
+            if t == 3 then
+                result.entries[key].kind = 'weapon'
+                result.entries[key].weapon_slot = slot
+                result.entries[key].weapon_resource = result.weapons[slot]
+            end
         end
         assert(at == #raw + 1, 'Trailing shared LUT bytes')
         return result

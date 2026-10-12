@@ -2,7 +2,8 @@
 local ffi = require('ffi')
 local A = {}
 local categories = { 'armor', 'helmet', 'cape', 'pattern' }
-local titles = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', pattern = 'Patterns' }
+local titles = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', pattern = 'Patterns', weapon = 'Weapons' }
+local weapon_titles = { 'Primary', 'Secondary', 'Support' }
 local function preview_entries(outfit, visit)
     if outfit.entries and #outfit.entries > 0 then
         for index, entry in ipairs(outfit.entries) do
@@ -10,7 +11,8 @@ local function preview_entries(outfit, visit)
                 entry.kind,
                 entry.document,
                 entry.original and entry.original.resource or entry.document.resource,
-                index
+                index,
+                entry
             )
         end
     else
@@ -21,7 +23,27 @@ local function preview_entries(outfit, visit)
         end
     end
 end
-local function same_input(old, kind, document, resource)
+local function preview_categories(outfit)
+    local present, weapon = {}, false
+    for _, entry in ipairs(outfit and outfit.entries or {}) do
+        if entry.kind == 'weapon' then
+            present.weapon, weapon = true, true
+        else
+            present[entry.document.width == 3 and entry.document.height == 1 and 'pattern' or entry.kind] = true
+        end
+    end
+    if not weapon then
+        return categories
+    end
+    local result = {}
+    for _, category in ipairs({ 'armor', 'helmet', 'cape', 'pattern', 'weapon' }) do
+        if present[category] then
+            result[#result + 1] = category
+        end
+    end
+    return result
+end
+local function same_input(old, kind, document, resource, entry)
     return old
         and old.kind == kind
         and old.document == document
@@ -31,22 +53,25 @@ local function same_input(old, kind, document, resource)
         and old.revision == document.revision
         and old.resource == resource
         and old.source == document.source
+        and old.weapon_slot == (entry and entry.weapon_slot)
+        and old.weapon_resource == (entry and entry.weapon_resource)
+        and old.key == (entry and entry.key)
 end
 local function update_preview(self, outfit)
     local inputs = self.preview_inputs or {}
     local count, changed = 0, self.preview_outfit ~= outfit
-    preview_entries(outfit, function(kind, document, resource)
+    preview_entries(outfit, function(kind, document, resource, _, entry)
         count = count + 1
-        changed = changed or not same_input(inputs[count], kind, document, resource)
+        changed = changed or not same_input(inputs[count], kind, document, resource, entry)
     end)
     if not changed and count == #inputs then
         return
     end
     local plan, fingerprints, snapshots = {}, {}, {}
-    for _, category in ipairs(categories) do
+    for _, category in ipairs(preview_categories(outfit)) do
         plan[category] = { items = {}, lookup = {}, bindings = 0 }
     end
-    preview_entries(outfit, function(kind, document, resource, index)
+    preview_entries(outfit, function(kind, document, resource, index, entry)
         snapshots[#snapshots + 1] = {
             kind = kind,
             document = document,
@@ -56,9 +81,12 @@ local function update_preview(self, outfit)
             revision = document.revision,
             resource = resource,
             source = document.source,
+            weapon_slot = entry and entry.weapon_slot,
+            weapon_resource = entry and entry.weapon_resource,
+            key = entry and entry.key,
         }
         local pattern = document.width == 3 and document.height == 1
-        local category = pattern and 'pattern' or kind
+        local category = kind == 'weapon' and 'weapon' or pattern and 'pattern' or kind
         local lane = plan[category]
         if not lane then
             return
@@ -87,6 +115,13 @@ local function update_preview(self, outfit)
             fingerprints[document] = bytes
         end
         local key = kind .. ':' .. document.width .. ':' .. document.height .. ':' .. bytes.pixels
+        if kind == 'weapon' then
+            key = key
+                .. ':'
+                .. tostring(entry and entry.weapon_slot or index)
+                .. ':'
+                .. tostring(entry and entry.weapon_resource or index)
+        end
         local item = lane.lookup[key]
         if not item then
             item = {
@@ -96,6 +131,8 @@ local function update_preview(self, outfit)
                 count = 0,
                 resources = {},
                 resource_set = {},
+                weapon_slot = entry and entry.weapon_slot,
+                weapon_resource = entry and entry.weapon_resource,
             }
             lane.items[#lane.items + 1], lane.lookup[key] = item, item
         end
@@ -191,13 +228,15 @@ function A.new(info, preview)
         label('Saved outfit swatches: Armor / Cape | Helmet')
         button('Save Current Gear Preset', 'save_setup')
         local outfit = state.raw and state.raw.outfit
-        local armor_count = outfit and #outfit.armor or 0
+        local armor_count = outfit and #(outfit.armor or {}) or 0
         local cape_count = outfit and #(outfit.cape or {}) or 0
+        local weapon_count = outfit and #(outfit.weapon or {}) or 0
         local targets = state.armory_targets or {}
         local available = {
             armor = armor_count > 0,
-            helmet = outfit ~= nil and #outfit.helmet > 0,
+            helmet = outfit ~= nil and #(outfit.helmet or {}) > 0,
             cape = outfit ~= nil and state.armory_cape_available == true,
+            weapon = weapon_count > 0,
         }
         local any = false
         local y, visible = position()
@@ -210,6 +249,9 @@ function A.new(info, preview)
             )
         )
         local options = { { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }
+        if weapon_count > 0 then
+            options[#options + 1] = { 'weapon', 'Weapons' }
+        end
         local label_width = 0
         for _, option in ipairs(options) do
             label_width =
@@ -217,7 +259,7 @@ function A.new(info, preview)
         end
         local target_minimum = label_width + 38
         local target_columns = math.max(1, math.min(3, math.floor((left - 24) / target_minimum)))
-        local inline_apply = target_columns == 3 and left - 24 >= target_minimum * 3 + apply_width + 8
+        local inline_apply = #options == 3 and target_columns == 3 and left - 24 >= target_minimum * 3 + apply_width + 8
         local target_width = (left - 24 - (inline_apply and apply_width + 8 or 0)) / target_columns
         for i, option in ipairs(options) do
             if i > 1 and (i - 1) % target_columns == 0 then
@@ -225,7 +267,8 @@ function A.new(info, preview)
             end
             local kind, label = option[1], option[2]
             local enabled = available[kind]
-            local checked = enabled and targets[kind] ~= false
+            local checked = enabled
+                and (kind == 'weapon' and targets[kind] == true or kind ~= 'weapon' and targets[kind] ~= false)
             any = any or checked
             if visible then
                 local x = ui.x + 12 + ((i - 1) % target_columns) * target_width
@@ -259,7 +302,12 @@ function A.new(info, preview)
         button('Delete Preset', 'outfit_delete', outfit ~= nil)
         if outfit then
             local scopes = {}
-            for _, entry in ipairs({ { 'Armor', armor_count }, { 'Cape', cape_count }, { 'Helmet', #outfit.helmet } }) do
+            for _, entry in ipairs({
+                { 'Armor', armor_count },
+                { 'Cape', cape_count },
+                { 'Helmet', #(outfit.helmet or {}) },
+                { 'Weapons', weapon_count },
+            }) do
                 if entry[2] > 0 then
                     scopes[#scopes + 1] = entry[1]
                 end
@@ -267,7 +315,7 @@ function A.new(info, preview)
             label(
                 (#scopes == 0 and 'Empty preset' or table.concat(scopes, ' + ') .. (#scopes == 1 and ' Only' or ''))
                     .. ' / '
-                    .. (armor_count + cape_count + #outfit.helmet)
+                    .. (armor_count + cape_count + #(outfit.helmet or {}) + weapon_count)
                     .. ' LUTs'
             )
         end
@@ -301,8 +349,9 @@ function A.new(info, preview)
         ui.bounded(x, top - heading + 8, 'Palette Preview', 18, white, width, 'heading')
         local area_top, area_bottom = top - heading - 14, ui.y + 8
         local lane_gap = 12
-        local columns = width >= 744 and 4 or 2
-        local lane_rows = columns == 4 and 1 or 2
+        local active_categories = preview_categories(outfit)
+        local columns = math.min(#active_categories, width >= 744 and (#active_categories == 4 and 4 or 3) or 2)
+        local lane_rows = math.ceil(#active_categories / columns)
         local lane_width = (width - lane_gap * (columns - 1)) / columns
         local lane_height = (area_top - area_bottom - lane_gap * (lane_rows - 1)) / lane_rows
         local heading_h = ui.control_height and ui.control_height(14, 2, 20, 'heading') or heading_font + 4
@@ -315,7 +364,7 @@ function A.new(info, preview)
         else
             self.preview_outfit, self.preview_inputs, self.preview_fingerprints, self.preview_plan = nil, nil, nil, nil
         end
-        for position, category in ipairs(categories) do
+        for position, category in ipairs(active_categories) do
             local col, row = (position - 1) % columns, math.floor((position - 1) / columns)
             local lx = x + col * (lane_width + lane_gap)
             local ly = area_top - (row + 1) * lane_height - row * lane_gap
@@ -329,7 +378,7 @@ function A.new(info, preview)
                 local doc = item.document
                 local pattern = doc.width == 3 and doc.height == 1
                 local selected_columns = pattern and { 1, 2, 3 } or { 1, 3, 6, 7, 13, 15, 17, 18, 19, 20 }
-                local compact_labels = pattern and { 'A', 'M', '?' }
+                local compact_labels = pattern and { 'C', 'M/O', 'R' }
                     or { 'B', 'D', 'In', 'Out', 'Cv', 'T', '1', '2', '3', '4' }
                 local valid_columns, column_labels = {}, {}
                 for index, column in ipairs(selected_columns) do
@@ -345,7 +394,10 @@ function A.new(info, preview)
                     samples[index] = doc.height <= 8 and index
                         or math.floor(1 + (index - 1) * (doc.height - 1) / 7 + 0.5)
                 end
-                local caption_h = heading_h + hint_h + (item.resources[1] and hint_h or 0)
+                local caption_h = heading_h
+                    + hint_h
+                    + (item.resources[1] and hint_h or 0)
+                    + (item.weapon_resource and hint_h or 0)
                 local row_pitch = math.max(cell, hint_h + 2)
                 local card_h = caption_h + hint_h + sample_count * row_pitch + (doc.height > 8 and hint_h or 0) + 12
                 cards[#cards + 1] = {
@@ -389,7 +441,9 @@ function A.new(info, preview)
                     local item, doc = card.item, card.item.document
                     local cy = body_top + scroll - card.depth
                     if cy > body.y and cy - card.h < body_top then
-                        local name = titles[item.kind]
+                        local name = (
+                            item.kind == 'weapon' and (weapon_titles[item.weapon_slot] or 'Weapon') or titles[item.kind]
+                        )
                             .. (doc.width == 3 and doc.height == 1 and ' Pattern LUT ' or ' LUT ')
                             .. item.index
                         ui.bounded(
@@ -412,6 +466,18 @@ function A.new(info, preview)
                             'hint'
                         )
                         cy = cy - hint_h
+                        if item.weapon_resource then
+                            ui.bounded(
+                                body.x + 3,
+                                cy - hint_h + 2,
+                                'Weapon [' .. item.weapon_resource .. ']',
+                                12,
+                                muted,
+                                body.w - 6,
+                                'hint'
+                            )
+                            cy = cy - hint_h
+                        end
                         if item.resources[1] then
                             local source = '['
                                 .. item.resources[1]
@@ -449,8 +515,17 @@ function A.new(info, preview)
                                 local at = ((actual - 1) * doc.width + column - 1) * 4
                                 local color = {}
                                 for channel = 0, 2 do
-                                    color[channel + 1] =
-                                        math.floor(math.max(0, math.min(1, doc.data[at + channel])) * 255 + 0.5)
+                                    color[channel + 1] = math.floor(
+                                        math.max(
+                                            0,
+                                            math.min(
+                                                1,
+                                                doc.data[at + (doc.width == 3 and doc.height == 1 and column == 3 and 3 or channel)]
+                                            )
+                                        )
+                                                * 255
+                                            + 0.5
+                                    )
                                 end
                                 ui.rect(
                                     body.x + 26 + (index - 1) * card.cell,

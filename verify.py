@@ -18,6 +18,10 @@ os.environ.setdefault('MCM_SOURCE_DIR',str(ROOT.parent/'DBF-MCM'))
 from tools.lua_runner import LuaRunner
 
 TESTS = (
+    'primary_weapon_identity', 'weapon_lut_probe', 'weapon_lut_catalog_match', 'weapon_discovery',
+    'remote_weapon_discovery', 'weapon_runtime', 'weapon_controller', 'weapon_view', 'weapon_bridge',
+    'weapon_mapping', 'weapon_presets', 'weapon_workflow', 'outfit_capture', 'armory_apply',
+    'shared_weapon_authorization', 'weapon_shared', 'weapon_provenance', 'weapon_editor_integration',
     'export_provenance', 'import_mapping', 'session_history', 'import_summary',
     'unit_identity', 'material_identity', 'binding_unit_layout',
     'sdk_catalog', 'resource_labels', 'armory_dropdown_hover', 'ui_styling', 'typography', 'window_frames', 'player_authored_clip', 'player_authored_source', 'player_animation',

@@ -76,6 +76,9 @@ local function fixture(empty)
         state = function()
             return f.state
         end,
+        weapon_runtime = function()
+            return f.weapon_runtime
+        end,
         material_session = function()
             return f.material
         end,
@@ -302,4 +305,198 @@ assert(f.service.capture().owned[1].current == 600)
 
 print(
     'PASS session history: exact aliased RGBA snapshots, stable signatures, material/Pattern undo-redo, Cape/ownership guards, rollback receipts and activation getters'
+)
+local function weapon_fixture()
+    local scenario = fixture()
+    local d = Basic.copier().copy(scenario.document)
+    d.kind, d.family, d.weapon_slot, d.weapon_resource, d.weapon_resource64 =
+        'weapon', 'material', 1, '5fecab819f96a3e8', '5fecab819f96a3e8'
+    d.mixed, d.source_resource = true, '1111111111111111'
+    local variant = Basic.clone(d)
+    variant.data[0] = 0.125
+    d.binding_documents = { ['3:1:0:0'] = d, ['3:1:1:0'] = variant }
+    scenario.state.loaded, scenario.state.editor_target =
+        d, { kind = 'weapon', weapon_slot = 1, family = 'material', index = 1, weapon_resource = d.weapon_resource }
+    scenario.weapon_document = d
+    local raw = Basic.copier().copy(d)
+    raw.kind, raw.family, raw.weapon_slot, raw.weapon_resource, raw.weapon_resource64, raw.binding_documents, raw.mixed =
+        nil, nil, nil, nil, nil, nil, nil
+    local current = {
+        version = 1,
+        entries = {
+            {
+                weapon_slot = 1,
+                weapon_resource = d.weapon_resource,
+                weapon_resource64 = d.weapon_resource64,
+                family = 'material',
+                index = 1,
+                source_resource = '1111111111111111',
+                document = raw,
+                save_keys = { '3:1:0:0', '3:1:1:0' },
+            },
+        },
+    }
+    scenario.weapon_receipt = {
+        unit = 400,
+        lua_unit = 'genuine-weapon-unit',
+        world = 'main-world',
+        weapon_slot = 1,
+        weapon_resource64 = d.weapon_resource,
+        weapon_resource = d.weapon_resource,
+        unit_resource64 = '2222222222222222',
+        remote = false,
+        peer_scope = 'local',
+    }
+    scenario.weapon_binding = {
+        unit = 400,
+        mesh = 500,
+        material = 600,
+        slot = 0x7e662968,
+        original = 700,
+        current = 800,
+        save_key = '3:1:0:0',
+    }
+    scenario.weapon_calls = { captures = 0, restores = 0 }
+    scenario.weapon_runtime = {
+        capture_state = function()
+            scenario.weapon_calls.captures = scenario.weapon_calls.captures + 1
+            return current
+        end,
+        catalog = function(slot)
+            assert(slot == 1)
+            return {
+                available = true,
+                receipt = scenario.weapon_receipt,
+                material = { { bindings = { scenario.weapon_binding } } },
+                pattern = {},
+            }
+        end,
+        restore_state = function(desired)
+            scenario.weapon_calls.restores = scenario.weapon_calls.restores + 1
+            if scenario.weapon_failure then
+                error('atomic weapon restore failed')
+            end
+            current = desired
+            for _, entry in ipairs(current.entries) do
+                local document = entry.document
+                document.kind, document.family, document.weapon_slot, document.weapon_resource, document.weapon_resource64 =
+                    'weapon', entry.family, entry.weapon_slot, entry.weapon_resource, entry.weapon_resource64
+            end
+            scenario.weapon_binding.current = scenario.weapon_binding.current + 1
+            return { { count = 2 } }
+        end,
+    }
+    function scenario.weapon_change()
+        current = {
+            version = 1,
+            entries = {
+                {
+                    weapon_slot = 1,
+                    weapon_resource = d.weapon_resource,
+                    weapon_resource64 = d.weapon_resource64,
+                    family = 'material',
+                    index = 1,
+                    source_resource = '1111111111111111',
+                    document = Basic.copier().copy(current.entries[1].document),
+                    save_keys = { '3:1:0:0', '3:1:1:0' },
+                },
+            },
+        }
+        current.entries[1].document.data[0] = 0.875
+        scenario.weapon_binding.current = scenario.weapon_binding.current + 1
+        return scenario.change()
+    end
+    function scenario.mutate_weapon_pixels()
+        current.entries[1].document.data[0] = 0.333
+    end
+    return scenario
+end
+f = weapon_fixture()
+before = f.service.capture()
+local normal_weapon_clone = Basic.clone(f.weapon_document)
+assert(
+    normal_weapon_clone.binding_documents['3:1:0:0'] == normal_weapon_clone
+        and normal_weapon_clone.weapon_resource == f.weapon_document.weapon_resource
+        and normal_weapon_clone.binding_documents['3:1:1:0'].data
+            ~= f.weapon_document.binding_documents['3:1:1:0'].data,
+    'Normal weapon clones lost metadata or mixed self/variant aliases'
+)
+assert(
+    before.loaded.kind == 'weapon'
+        and before.loaded.family == 'material'
+        and before.loaded.weapon_slot == 1
+        and before.loaded.weapon_resource == '5fecab819f96a3e8'
+)
+assert(
+    before.loaded.binding_documents['3:1:0:0'] == before.loaded
+        and before.loaded.binding_documents['3:1:1:0'].data ~= f.weapon_document.binding_documents['3:1:1:0'].data
+)
+assert(
+    before.weapon_state.entries[1].document.data ~= f.weapon_runtime.capture_state().entries[1].document.data
+        and before.weapon_signature
+        and before.weapon_receipts
+)
+local frozen_weapon_bytes = ffi.string(before.weapon_state.entries[1].document.data, 23 * 16)
+after = f.weapon_change()
+assert(before.signature ~= after.signature and before.bytes > 2 * (23 + 3) * 16)
+assert(f.service.restore(before, after) and f.weapon_calls.restores == 1 and f.bound[1] == 200)
+assert(
+    ffi.string(before.weapon_state.entries[1].document.data, 23 * 16) == frozen_weapon_bytes,
+    'Weapon runtime mutated an immutable stored history frame'
+)
+assert(f.committed.loaded.kind == 'weapon' and f.committed.editor_target.weapon_slot == 1)
+assert(
+    f.service.restore(after, before) and f.weapon_calls.restores == 2 and f.bound[1] == 400,
+    'Fresh weapon texture or normalized document metadata prevented Redo'
+)
+local function reject_weapon(mutator, needle)
+    local scenario = weapon_fixture()
+    local old, expected = scenario.service.capture(), scenario.weapon_change()
+    mutator(scenario, old, expected)
+    local ok, reason = pcall(scenario.service.restore, old, expected)
+    assert(not ok and tostring(reason):find(needle, 1, true), tostring(reason))
+    assert(
+        #scenario.writes == 0 and scenario.weapon_calls.restores == 0 and scenario.commits == 0 and not scenario.stops,
+        'Stale weapon history reached garment writes or highlight cleanup'
+    )
+end
+reject_weapon(function(s)
+    s.mutate_weapon_pixels()
+end, 'Weapon bytes or assignments changed')
+reject_weapon(function(s)
+    s.weapon_receipt.unit = 401
+end, 'Weapon receipt changed')
+reject_weapon(function(s)
+    s.weapon_binding.material = 601
+end, 'Weapon receipt changed')
+reject_weapon(function(_, old)
+    old.weapon_state.entries[1].save_keys[1] = '3:1:7:0'
+end, 'Saved weapon history frame changed')
+f = weapon_fixture()
+before, after = f.service.capture(), f.weapon_change()
+f.weapon_failure = true
+assert(not pcall(f.service.restore, before, after))
+assert(
+    #f.writes == 4 and f.bound[1] == 400 and f.bound[2] == 500 and f.b.current == 400 and f.commits == 0,
+    'Weapon failure did not roll back successful garment writes'
+)
+f = weapon_fixture()
+before, after = f.service.capture(), f.weapon_change()
+f.weapon_failure = true
+f.before_write = function(_, slot, object)
+    if slot == 1 and object == 400 then
+        error('rollback refused')
+    end
+end
+assert(not pcall(f.service.restore, before, after))
+assert(
+    f.bound[1] == 200
+        and f.b.current == 200
+        and f.b.previous == 400
+        and f.b.texture == before.owned[1].texture
+        and f.material.owned[1] == f.b,
+    'Mixed failed rollback discarded cleanup ownership'
+)
+print(
+    'PASS weapon session history: immutable F32/editor metadata/mixed aliases, native receipts, normalized Undo/Redo, stale preflight and mixed transaction rollback ownership'
 )

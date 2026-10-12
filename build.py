@@ -32,7 +32,7 @@ if args.preview_animation and (not args.output or not args.player_preview):
 if args.preview_animation:
     DISPLAY_VERSION += ' Preview Animation Test'
     STATUS = 'development candidate'
-DESCRIPTION = DISPLAY_VERSION + ' - ' + STATUS + '. Basic and Advanced Armor/Helmet/Cape material LUT editing, Pattern LUT editor, live Player Preview, DDS/ZIP/RAR import, named Armory presets, DDS and patch export, and optional squad appearance sharing. F9: Basic; F10: Advanced. Optional MCM settings integration. RAR requires 7-Zip.'
+DESCRIPTION = DISPLAY_VERSION + ' - ' + STATUS + '. Gear and Primary/Secondary/Support weapon LUT workspaces, Pattern LUT editing, live Player Preview, DDS/ZIP/RAR import and mapping, named Armory presets, DDS and assignment-aware patch export, and optional Shared LUT squad appearances. Weapon patch destinations require verified provenance. F9: Basic; F10: Advanced. Optional MCM settings integration. RAR requires 7-Zip.'
 if args.output is None:
     args.output='Epic-LUT-'+VERSION.replace('-alpha','-Alpha').replace('-rc','-RC')+('-BSL' if args.loader=='bsl' else '-MDL')+'.zip'
 if Path(args.output).name != args.output or not args.output.endswith('.zip'):

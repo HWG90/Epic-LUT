@@ -104,8 +104,9 @@ function P.encode_set(dds, documents, options)
         type(documents) == 'table' and #documents > 0 and #documents <= P.MAX_BINDINGS,
         'No complete palette to export or too many LUTs'
     )
-    local unique, ordered, patches, conflict = {}, {}, {}, nil
+    local unique, ordered, patches, conflict, weapon = {}, {}, {}, nil, false
     for _, item in ipairs(documents) do
+        weapon = weapon or item.kind == 'weapon'
         local patch = P.encode(dds, item.document, item.original)
         patches[#patches + 1] = patch
         local previous = unique[patch.resource]
@@ -118,9 +119,17 @@ function P.encode_set(dds, documents, options)
             ordered[#ordered + 1] = patch
         end
     end
-    if conflict then
+    if conflict or weapon then
         if options and options.binding_writer then
-            return options.binding_writer.encode(P.BASE_ARCHIVE, documents, patches, options)
+            local archive = P.BASE_ARCHIVE
+            if weapon then
+                assert(type(options.weapon_patch_archive) == 'function', 'Weapon patch destination is not yet verified')
+                local target, why = options.weapon_patch_archive(documents)
+                assert(target, why or 'Weapon patch destination is not yet verified')
+                hash(target)
+                archive = target
+            end
+            return options.binding_writer.encode(archive, documents, patches, options)
         end
         error(
             'Shared texture has conflicting applied palettes: '

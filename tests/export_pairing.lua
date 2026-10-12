@@ -109,3 +109,32 @@ assert(
 assert(P.live({ a }, unrelated_groups, deps)[1] == pa, 'Unrelated groups counted toward selected export limit')
 assert(not pcall(P.live, { a }, { { bindings = false } }, deps), 'Invalid Pattern group bindings accepted')
 print('export pairing tests passed')
+local weapon_resource = '5fecab819f96a3e8'
+local function weapon_entry(key, doc, resource, slot)
+    local value = entry('weapon', key, doc)
+    value.weapon_resource, value.weapon_slot = resource or weapon_resource, slot or 1
+    return value
+end
+local wm = weapon_entry('3:1:2:3', material)
+local wp = weapon_entry('p:3:1:2:3', pattern)
+assert(P.saved({ wm, wp }, 1)[2] == wp)
+assert(
+    #P.saved({ wm, weapon_entry(wp.key, pattern, 'ffffffffffffffff') }, 1) == 1,
+    'Different weapon configuration paired on the same ordinal destination'
+)
+assert(
+    not pcall(P.saved, { wm, weapon_entry(wp.key, pattern, weapon_resource, 2) }, 1),
+    'Weapon slot mismatch accepted'
+)
+assert(not pcall(P.saved, { weapon_entry(wm.key, material, 'bad') }, 1), 'Malformed weapon ID accepted')
+local wb, wbp = binding(10, 'weapon', 100, 1), binding(10, 'weapon', 200, 2)
+for _, value in ipairs({ wb, wbp }) do
+    value.weapon_resource, value.weapon_slot, value.save_key = weapon_resource, 1, '3:1:2:3'
+end
+wbp.document = pattern
+assert(P.live({ wb }, { { bindings = { wbp } } }, deps)[1] == wbp)
+wbp.weapon_resource = 'ffffffffffffffff'
+assert(#P.live({ wb }, { { bindings = { wbp } } }, deps) == 0, 'Live Pattern crossed weapon configurations')
+wbp.weapon_resource, wbp.weapon_slot, wbp.save_key = weapon_resource, 2, '3:2:2:3'
+assert(#P.live({ wb }, { { bindings = { wbp } } }, deps) == 0, 'Live primary Pattern crossed into secondary')
+print('PASS weapon export pairing: exact live/saved config+slot identity and malformed destination guards')

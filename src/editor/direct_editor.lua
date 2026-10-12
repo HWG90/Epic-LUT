@@ -34,6 +34,7 @@ local region_indicator, stop_identification
 local identify_kind
 local checked_editor_target
 local gear_edits
+local weapon_editor
 local import_target
 local editor_pending
 local history
@@ -76,11 +77,14 @@ local function applied_document(b)
     end
     return b.document
 end
-local function restore()
+local function restore(allow_quarantine)
     if stop_identification then
         stop_identification()
     end
-    return not bindings or bindings.restore()
+    local weapons = operations.weapon_editor
+    local weapon_done = not weapons or weapons.close(allow_quarantine)
+    local gear_done = not bindings or bindings.restore()
+    return weapon_done and gear_done
 end
 local function message(text)
     status = text
@@ -475,10 +479,10 @@ local function recover_appearance(dt)
 end
 local function initialize_editor_state()
     operations.live_edit = m.live_edit and m.live_edit.new()
+    local cohort = { sessions = {} }
+    retain.cohort = cohort
+    operations.texture_cohort = cohort
     if m.texture_lifetime and native.destroy then
-        local cohort = { sessions = {} }
-        retain.cohort = cohort
-        operations.texture_cohort = cohort
         operations.texture_lifetime = m.texture_lifetime.new({
             retain = retain,
             cohort = cohort,
@@ -663,6 +667,13 @@ local function identify_region()
     return message('Flashing region ' .. row .. ' in magenta for 4 seconds; prior bindings restore automatically.')
 end
 local function apply(document, selected_kind)
+    if
+        edit.editor_target
+        and edit.editor_target.kind == 'weapon'
+        and (selected_kind == nil or selected_kind == 'weapon')
+    then
+        return weapon_editor().apply(edit.editor_target, document)
+    end
     local scope = handle.get('scope')
     selected_kind = scope == 5 and 'cape'
         or (selected_kind == 'armor' or selected_kind == 'helmet' or selected_kind == 'cape') and selected_kind
@@ -1251,6 +1262,9 @@ function operations.set_basic_camo_row(row, container, checked, expected_rows)
     return gear_edits().set_camo_row(row, container, checked, expected_rows)
 end
 checked_editor_target = function(target)
+    if target and target.kind == 'weapon' then
+        return weapon_editor().check(target)
+    end
     return gear_edits().check_target(target)
 end
 operations.checked_editor_target = checked_editor_target
@@ -1655,6 +1669,9 @@ local function create_session_history()
             native.commit(b.mesh)
         end,
         commit = commit_history_snapshot,
+        weapon_runtime = function()
+            return operations.weapon_editor and operations.weapon_editor.runtime()
+        end,
     })
 end
 
@@ -1755,21 +1772,41 @@ function operations.request_binding_sources()
 end
 function operations.binding_export_provider(preset)
     local provider
+    local weapon_provider
+    local garments = { entries = {} }
+    for _, entry in ipairs(preset.entries) do
+        if entry.kind ~= 'weapon' then
+            garments.entries[#garments.entries + 1] = entry
+        end
+    end
     -- A shareable ZIP does not prepare native export proof. Hydrate lazily only
     -- when the exporter actually requests an entry's exact binding source.
     return function(entry)
+        if entry.kind == 'weapon' then
+            weapon_provider = weapon_provider or operations.weapon_sources().provider(preset)
+            return weapon_provider(entry)
+        end
         if not provider then
             local resolver, why = operations.ensure_binding_provenance()
             assert(resolver, why or 'Verified named Lua binding identity unavailable')
-            provider = binding_sources().provider(preset)
+            provider = binding_sources().provider(garments)
         end
         return provider(entry)
     end
 end
 function operations.export_material_source(resource)
+    if operations.weapon_sources_service then
+        local ok, source = pcall(operations.weapon_sources_service.material, resource)
+        if ok and source then
+            return source
+        end
+    end
     return binding_sources().material(resource)
 end
 function operations.export_id_available(kind, resource)
+    if operations.weapon_sources_service and operations.weapon_sources_service.state() == 'ready' then
+        return operations.weapon_sources_service.id_available(kind, resource)
+    end
     return binding_sources().id_available(kind, resource)
 end
 local function capture_outfit()
@@ -1801,6 +1838,39 @@ local function capture_outfit()
                 return binding_sources().validate_scope()
             end,
             log = ctx.log,
+            weapon_groups = function()
+                local descriptors = weapon_editor().descriptors()
+                for _, descriptor in ipairs(descriptors) do
+                    if descriptor.family == 'material' then
+                        descriptor.family = 'main'
+                    end
+                end
+                return descriptors
+            end,
+            weapon_original = function(b)
+                return original_luts and original_luts.request_object(b.original)
+            end,
+            weapon_applied_document = function(b)
+                return b.document
+            end,
+            weapon_proof = function(b)
+                local discovery = weapon_editor().discovery()
+                assert(
+                    discovery.present(b) and discovery.binding(b) == b.current,
+                    'Weapon binding changed before saving'
+                )
+                return {
+                    weapon_slot = b.weapon_slot,
+                    weapon_resource = b.weapon_resource,
+                    validate = function()
+                        return discovery.present(b) and discovery.binding(b) == b.current
+                    end,
+                }
+            end,
+            capture_weapon_provenance = function(b, context)
+                local _, refs = operations.weapon_sources().capture(b, context)
+                return refs
+            end,
         })
     end
     return operations.outfit_capture
@@ -1899,6 +1969,12 @@ local function armory_actions()
         }, {
             selected = function()
                 return armory_collection and armory_collection.selected
+            end,
+            weapon_plan = function(preset, options)
+                return operations.weapon_workflow().plan(preset, options)
+            end,
+            apply_weapon_plan = function(plan)
+                return plan.apply()
             end,
             menu = function()
                 return frontend.menu
@@ -2322,6 +2398,244 @@ local function select_import_cell(entry, row, column, identify, kind)
     )
     edit.quick_selection = { row = row, column = column, document = edit.loaded }
 end
+weapon_editor = function()
+    if not operations.weapon_editor then
+        operations.weapon_editor = m.weapon_bridge.new(m, {
+            memory = function()
+                return memory
+            end,
+            native = function()
+                return native
+            end,
+            engine = function()
+                return rawget(_G, 'stingray')
+            end,
+            retain = function()
+                return retain
+            end,
+            cohort = function()
+                return operations.texture_cohort
+            end,
+            remote_authorized = function(peer, slot, resource)
+                if not sharing or not handle or not handle.get('share_appearance') then
+                    return false, 'Shared LUT is disabled'
+                end
+                return sharing.authorized(peer, slot, resource)
+            end,
+            original = function(object)
+                return original_luts and original_luts.request_object(object)
+            end,
+            bind = function(b, object)
+                m.engine.bind(native, b.material, b.slot, object)
+                native.commit(b.mesh)
+            end,
+            create_texture = function(w, h, data)
+                return m.engine.create_texture(native, w, h, data, read, small)
+            end,
+            busy = function()
+                return pending ~= nil or index_job ~= nil
+            end,
+            message = message,
+            weapon_name = function(slot, resource)
+                return m.weapon_names and m.weapon_names[resource] or ({ 'Primary', 'Secondary', 'Support' })[slot]
+            end,
+            load_editor = function(document, target)
+                assert(stop_identification(), 'Highlight restoration pending')
+                edit.loaded = m.weapon_mapping.copy(document)
+                edit.loaded.source, edit.loaded.revision = target.label or 'Weapon LUT', 0
+                edit.loaded.kind, edit.loaded.family = 'weapon', target.family == 'pattern' and 'pattern' or 'material'
+                edit.loaded.weapon_slot, edit.loaded.weapon_resource = target.weapon_slot, target.weapon_resource
+                edit.editor_target = target
+                edit.preview_document, edit.preview_revision = edit.loaded, edit.loaded.revision or 0
+                basic_selected, identify_kind, edit.quick_selection = nil, nil, nil
+                if palette_editor then
+                    palette_editor.gear = 'weapon'
+                    palette_editor.sync()
+                end
+            end,
+            open_editor = function(cell)
+                if frontend.basic_mode then
+                    frontend.open_advanced()
+                end
+                api.focus_page(handle.id, 'colors')
+                if cell and cell.row then
+                    palette_editor.focus_cell(cell.row, cell.column or 1)
+                end
+                if cell and cell.picker then
+                    palette_editor.request_picker = { document = edit.loaded, mode = cell.alpha_only and 6 or 1 }
+                end
+                return true
+            end,
+            invalidate = function(changed)
+                local target = edit.editor_target
+                if target and target.kind == 'weapon' then
+                    for _, slot in ipairs(changed) do
+                        if slot == target.weapon_slot and edit.loaded then
+                            edit.loaded.stale = true
+                        end
+                    end
+                end
+            end,
+            imports = function()
+                return palettes
+            end,
+            import = function()
+                return operations.import_picker.load(true)
+            end,
+            map_imports = function(targets, options)
+                return operations.weapon_workflow().map(targets, options)
+            end,
+            save_preset = function(targets)
+                return operations.weapon_workflow().save(targets)
+            end,
+            export = function(targets)
+                return operations.weapon_workflow().export(targets)
+            end,
+            share = function()
+                assert(handle.set('share_appearance', true))
+                return message('Shared LUT enabled for your applied gear and weapon palettes.')
+            end,
+        })
+    end
+    return operations.weapon_editor
+end
+function operations.weapon_workflow()
+    if not operations.weapon_workflow_service then
+        operations.weapon_workflow_service = m.weapon_workflow.new(m, {
+            bridge = weapon_editor,
+            menu = function()
+                return frontend.menu
+            end,
+            mod = function()
+                return api.mods[handle.id]
+            end,
+            outfits = function()
+                return outfits
+            end,
+            original = function(b)
+                return original_luts and original_luts.request_object(b.original)
+            end,
+            provenance = function(b, context)
+                local _, refs = operations.weapon_sources().capture(b, context)
+                return refs
+            end,
+            invalidate = function(name)
+                refresh_outfits()
+                armory_collection.select_name(name)
+                sync_armory_export()
+            end,
+            message = message,
+            imports = {
+                palettes = function()
+                    return palettes
+                end,
+                document = function(path)
+                    return source_tables[path]
+                end,
+                resource = function(path, document)
+                    return import_ids[path] or document.resource
+                end,
+                pending = function()
+                    return pending ~= nil
+                end,
+                indexing = function()
+                    return index_job ~= nil
+                end,
+            },
+            prepare_imports = function(descriptors, options)
+                assert(not pending and not index_job, 'Wait for imported LUTs to finish loading')
+                local missing = false
+                for _, path in ipairs(palettes) do
+                    missing = missing or source_tables[path] == nil
+                end
+                if missing then
+                    operations.weapon_map_request =
+                        { descriptors = descriptors, options = options, palettes = palettes }
+                    index_job = table_index.start(palettes, source_tables, import_ids)
+                    message('Reading imported LUTs for weapon mapping…')
+                    return false
+                end
+                return true
+            end,
+            export_options = function()
+                return handle.get('armory_export_name'),
+                    handle.get('armory_export_format'),
+                    handle.get('armory_dds_naming')
+            end,
+            exporter = function(preset)
+                return m.preset_export.new(m, paths, {
+                    include_patterns = function()
+                        return true
+                    end,
+                    binding_provenance = operations.binding_export_provider(preset),
+                    original_patch = operations.export_original_patch,
+                    material_source = operations.export_material_source,
+                    unit_layout = m.binding_unit_layout,
+                    resource_id_available = operations.export_id_available,
+                    weapon_patch_archive = function(entries)
+                        return operations.weapon_sources().patch_archive(entries)
+                    end,
+                })
+            end,
+        })
+    end
+    return operations.weapon_workflow_service
+end
+function operations.weapon_sources()
+    if not operations.weapon_sources_service then
+        operations.weapon_sources_service = assert(m.weapon_provenance, 'Weapon provenance module unavailable').new(m, {
+            discovery = function()
+                return weapon_editor().discovery()
+            end,
+            groups = function()
+                return weapon_editor().descriptors()
+            end,
+            original = function(b)
+                return original_luts and original_luts.request_object(b.original)
+            end,
+            paths = paths,
+            memory = memory,
+            game = game,
+            native = native,
+            lua_engine = function()
+                return rawget(_G, 'stingray')
+            end,
+            log = ctx.log,
+        })
+    end
+    return operations.weapon_sources_service
+end
+function operations.weapon_sharing()
+    if not operations.weapon_sharing_service then
+        local editor = weapon_editor()
+        operations.weapon_sharing_service = m.weapon_shared.new({
+            runtime = editor.runtime(),
+            discovery = editor.discovery(),
+            weapon_mapping = m.weapon_mapping,
+            remote_snapshot = editor.remote_snapshot,
+            remote_authorized = function(peer, slot, resource)
+                if not sharing or not handle or not handle.get('share_appearance') then
+                    return false
+                end
+                return sharing.authorized(peer, slot, resource)
+            end,
+            original = function(object)
+                return original_luts and original_luts.request_object(object)
+            end,
+            binding_session = m.binding_session,
+            retain = retain,
+            cohort = operations.texture_cohort,
+            create_texture = function(w, h, data)
+                return m.engine.create_texture(native, w, h, data, read, small)
+            end,
+            bind = function(b, object)
+                m.engine.bind(native, b.material, b.slot, object)
+                native.commit(b.mesh)
+            end,
+        })
+    end
+    return operations.weapon_sharing_service
+end
 local function register(current)
     if api == current and handle then
         return
@@ -2442,6 +2756,7 @@ local function register(current)
         remove_lut = remove_lut,
         save_setup = save_setup,
         keep_outfit = keep_outfit,
+        weapon_enabled = m.weapon_bridge ~= nil,
         appearance_proof = function()
             return operations.appearance_proof()
         end,
@@ -2522,6 +2837,9 @@ local function register(current)
                 original_patch = operations.export_original_patch,
                 material_source = operations.export_material_source,
                 unit_layout = m.binding_unit_layout,
+                weapon_patch_archive = function(entries)
+                    return operations.weapon_sources().patch_archive(entries)
+                end,
                 resource_id_available = function(kind, id)
                     return operations.export_id_available(kind, id)
                 end,
@@ -2560,6 +2878,18 @@ local function register(current)
         end,
         pattern_editor = function()
             return pattern_editor
+        end,
+        weapon_editor = m.weapon_bridge and weapon_editor or nil,
+        weapon_view = m.weapon_view,
+        open_weapons = function()
+            api.focus_page(handle.id, 'weapons')
+            return weapon_editor().load_current()
+        end,
+        apply_weapon_document = function()
+            return action(function()
+                assert(edit.editor_target and edit.editor_target.kind == 'weapon', 'Load a weapon LUT first')
+                return weapon_editor().apply(edit.editor_target, edit.loaded)
+            end)
         end,
         auto_populate_changed = function(enabled)
             edit.auto_signature = nil
@@ -2737,6 +3067,9 @@ local function close()
     if operations.binding_sources and not operations.binding_sources.close() then
         return false
     end
+    if operations.weapon_sources_service and not operations.weapon_sources_service.close() then
+        return false
+    end
     if armory_mirror and not armory_mirror.close() then
         return false
     end
@@ -2769,7 +3102,7 @@ local function close()
     if updates then
         updates.close()
     end
-    if not restore() then
+    if not restore(operations.texture_lifetime ~= nil) then
         return false
     end
     if not dismissed then
@@ -2980,7 +3313,8 @@ return {
                         end
                     end,
                     identity = function()
-                        return m.avatar.resolve(memory, game, remote_read)
+                        local identity = m.avatar.resolve(memory, game, remote_read)
+                        return m.weapon_shared and operations.weapon_sharing().local_identity(identity) or identity
                     end,
                     highlighting = function()
                         return (region_indicator and region_indicator.job ~= nil)
@@ -3019,17 +3353,29 @@ return {
                                 end
                             end
                         end
+                        if m.weapon_shared then
+                            local identity =
+                                operations.weapon_sharing().local_identity(m.avatar.resolve(memory, game, remote_read))
+                            if identity then
+                                for _, entry in ipairs(operations.weapon_sharing().local_entries(identity)) do
+                                    out[#out + 1] = entry
+                                end
+                            end
+                        end
                         return out
                     end,
                     players = function()
                         return m.avatar.players(remote_read, game)
                     end,
                     resolve = function(player)
-                        return m.avatar.resolve_remote(remote_read, game, player)
+                        local identity = m.avatar.resolve_remote(remote_read, game, player)
+                        return m.weapon_shared and operations.weapon_sharing().remote_identity(identity) or identity
                     end,
                     targets = function(identity, appearance)
                         local targets, marks, seen = {}, {}, {}
-                        for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
+                        local compatible = not m.weapon_shared
+                            or m.weapon_shared.garment_compatible(identity, appearance)
+                        for _, unit in ipairs(compatible and m.avatar.units(memory, identity, nil, 0, 9) or {}) do
                             marks[#marks + 1] = unit.unit
                             for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
                                 local key = (unit.type or 0)
@@ -3059,10 +3405,20 @@ return {
                                 end
                             end
                         end
+                        if m.weapon_shared then
+                            local weapons, signature = operations.weapon_sharing().targets(identity, appearance)
+                            marks[#marks + 1] = signature
+                            for document, bindings in pairs(weapons) do
+                                targets[document] = targets[document] or {}
+                                for _, b in ipairs(bindings) do
+                                    targets[document][#targets[document] + 1] = b
+                                end
+                            end
+                        end
                         return targets, table.concat(marks, ':')
                     end,
                     bindings = function()
-                        return m.binding_session.new({
+                        local garments = m.binding_session.new({
                             retain = retain,
                             dead = function(b)
                                 return native.alive(b.unit) == 0
@@ -3080,6 +3436,29 @@ return {
                                 native.commit(b.mesh)
                             end,
                         })
+                        if not m.weapon_shared then
+                            return garments
+                        end
+                        local weapons = operations.weapon_sharing().session()
+                        return {
+                            apply = function(document, targets)
+                                local gear, weapon = {}, {}
+                                for _, b in ipairs(targets) do
+                                    local list = b.kind == 'weapon' and weapon or gear
+                                    list[#list + 1] = b
+                                end
+                                if #gear > 0 then
+                                    garments.apply(document, gear)
+                                end
+                                if #weapon > 0 then
+                                    weapons.apply(document, weapon)
+                                end
+                            end,
+                            restore = function()
+                                local gear_done, weapon_done = garments.restore(), weapons.restore()
+                                return gear_done and weapon_done
+                            end,
+                        }
                     end,
                 })
             end)
@@ -3410,6 +3789,10 @@ return {
                 end,
                 paths.presets,
                 function()
+                    if edit.editor_target and edit.editor_target.kind == 'weapon' then
+                        weapon_editor().check(edit.editor_target)
+                        return original_luts and original_luts.request_object(edit.editor_target.original)
+                    end
                     local group = handle and groups[handle.get('lut')]
                     if not group then
                         return nil
@@ -3433,6 +3816,11 @@ return {
                 function(name, entire)
                     return action(function()
                         assert(m.patch_export, 'Patch exporter unavailable')
+                        if edit.editor_target and edit.editor_target.kind == 'weapon' then
+                            return operations
+                                .weapon_workflow()
+                                .export_editor(edit.editor_target, assert(edit.loaded, 'Load a weapon LUT first'), name, entire)
+                        end
                         if entire then
                             assert(stop_identification(), 'Highlight restoration pending')
                             if pattern_editor then
@@ -3593,10 +3981,32 @@ return {
                 message(report)
             end
         end
+        if operations.weapon_sources_service then
+            local ok, report = pcall(
+                operations.weapon_sources_service.poll,
+                m.weapon_provenance and status == m.weapon_provenance.PENDING
+            )
+            if ok and report then
+                message(report)
+            end
+            if not ok and edit.weapon_source_error ~= report then
+                edit.weapon_source_error = report
+                ctx.log('Weapon source cache error: ' .. tostring(report))
+            end
+        end
         if original_luts then
             local ok, why = pcall(original_luts.tick)
             if not ok then
                 message('Original snapshot error: ' .. tostring(why))
+            end
+        end
+        if operations.weapon_editor then
+            local ok, why = pcall(operations.weapon_editor.update, dt)
+            if not ok and why ~= edit.weapon_update_error then
+                edit.weapon_update_error = why
+                message('Weapon editor update: ' .. tostring(why))
+            elseif ok then
+                edit.weapon_update_error = nil
             end
         end
         local recovered, recovery_error = pcall(recover_appearance, dt)
@@ -3710,7 +4120,11 @@ return {
                     -- Consume the latest attempted revision only when due. A failed
                     -- write keeps the draft and waits for a new edit or explicit retry.
                     edit.preview_revision = edit.loaded.revision or 0
-                    if not frontend.basic_mode and edit.editor_target then
+                    if edit.editor_target and edit.editor_target.kind == 'weapon' then
+                        action(function()
+                            return weapon_editor().apply(edit.editor_target, edit.loaded)
+                        end)
+                    elseif not frontend.basic_mode and edit.editor_target then
                         action(function()
                             checked_editor_target(edit.editor_target)
                             live_select_suppressed = true
@@ -3735,11 +4149,24 @@ return {
                 if not ok then
                     index_job = nil
                     operations.import_map_request = nil
+                    operations.weapon_map_request = nil
                     message('Could not index all tables: ' .. tostring(why))
                 elseif coroutine.status(index_job) == 'dead' then
                     index_job = nil
                     local requested = operations.import_map_request
                     operations.import_map_request = nil
+                    local weapon_request = operations.weapon_map_request
+                    operations.weapon_map_request = nil
+                    if weapon_request and weapon_request.palettes == palettes then
+                        local ready, value = pcall(
+                            operations.weapon_workflow().map_prepared,
+                            weapon_request.descriptors,
+                            weapon_request.options
+                        )
+                        if not ready then
+                            message('Could not prepare weapon mapping: ' .. tostring(value))
+                        end
+                    end
                     if requested and requested.palettes == palettes then
                         local ready, value = pcall(operations.open_import_map, requested.kind, true)
                         if not ready then

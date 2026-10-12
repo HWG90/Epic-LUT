@@ -182,6 +182,10 @@ local function fixture()
         getter = getter,
         resolver = resolver,
         generations = generations,
+        alloc = alloc,
+        map = map,
+        owner = owner,
+        secondary = secondary,
         objects = objects,
         deps = deps,
         set_build = function(value)
@@ -249,7 +253,7 @@ end)
 test('invalid, unowned and avatar-as-weapon candidates are refused', function()
     local f = fixture()
     f.U(f.inventory, 0xffffffff)
-    refusal(f, 'No primary inventory candidate')
+    refusal(f, 'Weapon inventory slot is empty')
     f = fixture()
     f.cells[f.primary + 20] = 0
     refusal(f, 'Primary entity identity or ownership changed')
@@ -260,6 +264,39 @@ test('invalid, unowned and avatar-as-weapon candidates are refused', function()
     f.U(f.primary, 0x294dfa97)
     f.U(f.primary + 4, 0x4d1c334d)
     refusal(f, 'Primary entity identity or ownership changed')
+end)
+test('primary secondary and support use independent exact inventory fields', function()
+    local f = fixture()
+    local secondary_ref, support_ref = 4 * 0x400000 + 3, 5 * 0x400000 + 1
+    local secondary_object, support_object = f.alloc(16), f.alloc(16)
+    f.U(f.secondary + 12, secondary_ref)
+    f.U(f.secondary + 16, 89)
+    f.P(f.objects + 24, secondary_object)
+    f.cells[f.generations + 3] = 4
+    f.U(secondary_object + 8, secondary_ref)
+    local support = f.owner + 0xf32f18 + 72
+    f.U(support, 0x11223344)
+    f.U(support + 4, 0x55667788)
+    f.U(support + 8, 22)
+    f.U(support + 12, support_ref)
+    f.U(support + 16, 90)
+    f.cells[support + 20] = 1
+    f.P(f.objects + 8, support_object)
+    f.cells[f.generations + 1] = 5
+    f.U(support_object + 8, support_ref)
+    f.map(f.owner + 0xf1aeb0, { [10] = 0, [20] = 1, [21] = 2, [22] = 3 })
+    f.U(f.inventory + 8, 22)
+    local first, second, third = assert(f.probe.snapshot(1)), assert(f.probe.snapshot(2)), assert(f.probe.snapshot(3))
+    assert(first.weapon_entity == 20 and first.weapon_unit_ref == f.ref and first.weapon_slot == 1)
+    assert(second.weapon_entity == 21 and second.weapon_unit_ref == secondary_ref and second.weapon_slot == 2)
+    assert(third.weapon_entity == 22 and third.weapon_unit_ref == support_ref and third.weapon_slot == 3)
+    assert(third.weapon_resource64 == '5566778811223344' and third.provenance == 'inventory_slot_3')
+    f.U(f.inventory + 8, 0)
+    local absent, why = f.probe.snapshot(3)
+    assert(not absent and why:find('Weapon inventory slot is empty', 1, true))
+    assert(f.probe.snapshot(1) and f.probe.snapshot(2), 'Absent support damaged primary or secondary')
+    absent, why = f.probe.snapshot(4)
+    assert(not absent and why:find('Invalid local weapon slot', 1, true))
 end)
 test('UnitRef generation, object identity and native resolver are checked', function()
     local f = fixture()
@@ -317,5 +354,180 @@ test('unreadable bytes and changed game module fail without native calls', funct
         return f.game + 1
     end
     refusal(f, 'game.dll changed')
+end)
+local function remote_fixture()
+    local f = fixture()
+    f.deps.avatar = dofile('vendor/avatar.lua')
+    local peer = { player = 19, unit = 177, peer_low = 0x11223344, peer_high = 0x55667788 }
+    local player = f.alloc(24)
+    f.U(player + 8, peer.player)
+    f.cells[player + 20] = 0
+    f.U(f.players + 0x84, 2)
+    f.P(f.players + 0xf0, player)
+    f.map(f.players + 0xd0, { [9] = 0, [19] = 3 })
+    f.U(f.players + 712, 1)
+    f.U(f.players + 716, 2)
+    f.U(f.players + 712 + 56 * 3, peer.peer_low)
+    f.U(f.players + 716 + 56 * 3, peer.peer_high)
+    f.U(f.players + 936 + 32 * 3, peer.unit)
+    local avatar = f.owner + 0xf32f18 + 4 * 24
+    f.U(avatar, 0x294dfa97)
+    f.U(avatar + 4, 0x4d1c334d)
+    f.U(avatar + 8, 30)
+    f.U(avatar + 16, peer.unit)
+    f.cells[avatar + 20] = 0
+    f.map(f.owner + 0xf22ec8, { [77] = 0, [177] = 4 })
+    local customization, avatars = f.alloc(0xb00), f.alloc(0x550000)
+    f.P(f.game + 0x33264f8, customization)
+    f.map(customization + 2352, { [19] = 0 })
+    for index = 0, 3 do
+        f.U(customization + 2412 + index * 4, index + 1)
+    end
+    f.P(f.game + 0x3326d20, avatars)
+    f.map(avatars + 248, { [10] = 0, [30] = 1 })
+    f.U(avatars + 0x6c, 2)
+    local data, records = f.alloc(96), f.alloc(16)
+    f.put(data, f.deps.read(f.inventory, 48))
+    f.inventory = data
+    f.P(f.inv + 0x50, data)
+    f.P(f.inv + 0x40, records)
+    f.P(records, f.avatar)
+    f.P(records + 8, avatar)
+    f.map(f.inv + 0x28, { [10] = 0, [30] = 1 })
+    f.U(f.inv + 0x14, 2)
+    local objects, generations = f.alloc(64), f.alloc(8)
+    f.P(objects + 16, f.object)
+    f.cells[generations + 2] = 3
+    f.P(f.registry + 0x88, objects)
+    f.P(f.registry + 0xa0, generations)
+    f.U(f.registry + 0x98, 8)
+    local owners, owner_records, owner_data = f.alloc(0x50), f.alloc(24), f.alloc(12)
+    f.P(f.game + 0x3326730, owners)
+    f.P(owners + 0x30, owner_records)
+    f.P(owners + 0x38, owner_data)
+    local remote_records = {}
+    for slot = 1, 3 do
+        local id, index = 39 + slot, 4 + slot
+        local record = f.owner + 0xf32f18 + index * 24
+        local ref = slot * 0x400000 + index
+        local object = f.alloc(16)
+        f.U(record, 0x9f96a3e8)
+        f.U(record + 4, 0x5fecab81)
+        f.U(record + 8, id)
+        f.U(record + 12, ref)
+        f.U(record + 16, 188 + slot)
+        f.cells[record + 20] = 0
+        f.P(objects + index * 8, object)
+        f.cells[generations + index] = slot
+        f.U(object + 8, ref)
+        f.U(data + 48 + (slot - 1) * 4, id)
+        f.P(owner_records + (slot - 1) * 8, record)
+        f.U(owner_data + (slot - 1) * 4, 30)
+        remote_records[slot] = record
+    end
+    f.U(data + 48 + 28, 2)
+    f.map(f.owner + 0xf1aeb0, { [10] = 0, [20] = 1, [21] = 2, [30] = 4, [40] = 5, [41] = 6, [42] = 7 })
+    f.map(owners + 0x18, { [40] = 0, [41] = 1, [42] = 2 })
+    f.peer, f.remote_player, f.remote_avatar, f.remote_inventory, f.remote_records, f.owner_data =
+        peer, player, avatar, data + 48, remote_records, owner_data
+    return f
+end
+test('public Avatar receipts prove remote peer and all three independent weapon slots', function()
+    local f = remote_fixture()
+    for slot = 1, 3 do
+        local value, why = f.probe.snapshot_remote(f.peer, slot)
+        assert(value, why)
+        assert(value.remote and value.peer_player == 19 and value.peer_unit == 177 and value.avatar_entity == 30)
+        assert(value.peer_low == f.peer.peer_low and value.peer_high == f.peer.peer_high and value.weapon_slot == slot)
+        assert(value.weapon_entity == 39 + slot and value.weapon_resource64 == '5fecab819f96a3e8')
+        assert(value.inventory_slot == 2 and value.inventory_held_entity == 41)
+    end
+    local local_value, local_why = f.probe.snapshot(1)
+    assert(local_value, local_why)
+    assert(local_value.weapon_entity == 20, 'Remote path changed local selection')
+    f.U(f.remote_inventory + 8, 0)
+    local missing, why = f.probe.snapshot_remote(f.peer, 3)
+    assert(not missing and why:find('Weapon inventory slot is empty', 1, true))
+end)
+test('malformed, stale and local peer claims are refused without relaxed local ownership', function()
+    local f = remote_fixture()
+    local missing, why = f.probe.snapshot_remote({ player = '19' }, 1)
+    assert(not missing and why:find('Malformed remote peer field', 1, true))
+    missing, why = f.probe.snapshot_remote({ player = 9, unit = 77, peer_low = 1, peer_high = 2 }, 1)
+    assert(not missing and why:find('Remote peer player or avatar membership changed', 1, true), why)
+    f.U(f.players + 712 + 56 * 3, f.peer.peer_low + 1)
+    missing, why = f.probe.snapshot_remote(f.peer, 1)
+    assert(not missing and why:find('Remote peer is not a current player', 1, true))
+    f.cells[f.primary + 20] = 0
+    refusal(f, 'Primary entity identity or ownership changed')
+end)
+test('remote owner component rejects local or other-peer weapons before Unit registry reads', function()
+    local f = remote_fixture()
+    f.U(f.owner_data, 10)
+    local missing, why = f.probe.snapshot_remote(f.peer, 1)
+    assert(not missing and why:find('Remote weapon belongs to another avatar', 1, true), why)
+    f = remote_fixture()
+    f.U(f.owner_data + 4, 99)
+    missing, why = f.probe.snapshot_remote(f.peer, 2)
+    assert(not missing and why:find('Remote weapon belongs to another avatar', 1, true), why)
+end)
+test('remote peer and owner changes during snapshot invalidate its result', function()
+    local f = remote_fixture()
+    local count = 0
+    local peer_at = f.players + 712 + 56 * 3
+    f.hook(function(address)
+        if address == peer_at then
+            count = count + 1
+            if count == 2 then
+                f.U(peer_at, 0)
+            end
+        end
+    end)
+    local missing, why = f.probe.snapshot_remote(f.peer, 1)
+    assert(not missing and why:find('Remote peer is not a current player', 1, true), why)
+    f = remote_fixture()
+    count = 0
+    f.hook(function(address)
+        if address == f.owner_data then
+            count = count + 1
+            if count == 2 then
+                f.U(address, 10)
+            end
+        end
+    end)
+    missing, why = f.probe.snapshot_remote(f.peer, 1)
+    assert(not missing and why:find('Remote weapon owner changed during snapshot', 1, true), why)
+end)
+test(
+    'opaque remote cleanup proof can restore an unchanged departed-peer weapon without enabling forward writes',
+    function()
+        local f = remote_fixture()
+        local captured = assert(f.probe.snapshot_remote(f.peer, 1))
+        f.U(f.players + 0x84, 1)
+        f.map(f.players + 0xd0, { [9] = 0 })
+        assert(not f.probe.snapshot_remote(f.peer, 1), 'Departed peer remained eligible for forward editing')
+        local cleanup, why = f.probe.snapshot_remote_cleanup(f.peer, 1, captured)
+        assert(cleanup and cleanup.cleanup_only and cleanup.weapon_entity == captured.weapon_entity, why)
+        f.U(f.owner_data, 10)
+        cleanup, why = f.probe.snapshot_remote_cleanup(f.peer, 1, captured)
+        assert(not cleanup and why:find('belongs to another avatar', 1, true), why)
+    end
+)
+test('remote cleanup rejects fabricated receipts reused peer rows and recycled unit identities', function()
+    local f = remote_fixture()
+    local captured = assert(f.probe.snapshot_remote(f.peer, 1))
+    local copied = {}
+    for field, value in pairs(captured) do
+        copied[field] = value
+    end
+    assert(not f.probe.snapshot_remote_cleanup(f.peer, 1, copied), 'Copied metadata forged a cleanup receipt')
+    f.U(f.players + 712 + 56 * 3, f.peer.peer_low + 1)
+    local cleanup, why = f.probe.snapshot_remote_cleanup(f.peer, 1, captured)
+    assert(not cleanup and why:find('cleared or reused', 1, true), why)
+    f = remote_fixture()
+    captured = assert(f.probe.snapshot_remote(f.peer, 1))
+    captured.weapon_object = captured.weapon_object + 1
+    cleanup, why = f.probe.snapshot_remote_cleanup(f.peer, 1, captured)
+    assert(not cleanup and why:find('receipt was altered', 1, true), why)
 end)
 print('PASS primary weapon read-only identity: ' .. cases .. ' focused contracts')

@@ -1440,7 +1440,10 @@ function M.new(api, measure, Text)
         if code == 33 or code == 34 then
             for _ = 1, #mod.pages do
                 self.page = (self.page - 1 + (code == 33 and -1 or 1)) % #mod.pages + 1
-                if (mod.pages[self.page].id == 'basic') == not not self.basic_only then
+                if
+                    mod.pages[self.page].id == 'weapons'
+                    or (mod.pages[self.page].id == 'basic') == not not self.basic_only
+                then
                     break
                 end
             end
@@ -2799,14 +2802,14 @@ function M.new(api, measure, Text)
         if tabbed then
             local count = 0
             for _, entry in ipairs(mod.pages) do
-                if (entry.id == 'basic') == not not self.basic_only then
+                if entry.id == 'weapons' or (entry.id == 'basic') == not not self.basic_only then
                     count = count + 1
                 end
             end
             local width = (ww - 50) / math.max(1, count)
             local position = 0
             for index, entry in ipairs(mod.pages) do
-                if (entry.id == 'basic') == not not self.basic_only then
+                if entry.id == 'weapons' or (entry.id == 'basic') == not not self.basic_only then
                     local target_page = index
                     local selected = index == self.page
                     local x = 25 + position * width
@@ -4869,11 +4872,12 @@ function M.new(api, measure, Text)
 
         if self.outfit_dialog then
             local dialog = self.outfit_dialog
-            local px, py = (ww - 440) / 2, (wh - 190) / 2
+            local dialog_height = dialog.phase == 'scope' and dialog.weapon_options and 238 or 190
+            local px, py = (ww - 440) / 2, (wh - dialog_height) / 2
             hits = {} -- This confirmation owns mouse input until saved or canceled.
             local first = #commands + 1
-            rect(px, py, 440, 190, { 20, 25, 30 }, 0.99)
-            rect(px, py + 154, 440, 36, T.field)
+            rect(px, py, 440, dialog_height, { 20, 25, 30 }, 0.99)
+            rect(px, py + dialog_height - 36, 440, 36, T.field)
             local dialog_title = dialog.title
                 or (
                     dialog.phase == 'scope' and 'Save to Armory'
@@ -4882,7 +4886,8 @@ function M.new(api, measure, Text)
                 )
             text(
                 px + 14,
-                self.epic_typography and text_y(py + 154, 36, 18, dialog_title, 'heading') or py + 164,
+                self.epic_typography and text_y(py + dialog_height - 36, 36, 18, dialog_title, 'heading')
+                    or py + dialog_height - 26,
                 dialog_title,
                 18,
                 accent,
@@ -4912,7 +4917,7 @@ function M.new(api, measure, Text)
                     end
                 end)
             elseif dialog.phase == 'scope' then
-                bounded(px + 14, py + 116, 'What do you want to save?', 14, white, 412)
+                bounded(px + 14, py + dialog_height - 74, 'What do you want to save?', 14, white, 412)
                 if type(dialog.save_kind) ~= 'table' then
                     local kind = dialog.save_kind
                     dialog.save_kind = { armor = kind ~= 'helmet', helmet = kind ~= 'armor', cape = kind ~= 'helmet' }
@@ -4932,11 +4937,29 @@ function M.new(api, measure, Text)
                     local kind, label = option[1], option[2]
                     local checked = dialog.save_kind[kind] == true
                     any = any or checked
-                    check_ui.checkbox(bx, py + 70, 28, 32, checked, true)
-                    bounded(bx + 34, text_y(py + 70, 32, 14, label), label, 14, white, 98)
-                    hit(bx, py + 70, 132, 32, function()
+                    local by = py + dialog_height - 120
+                    check_ui.checkbox(bx, by, 28, 32, checked, true)
+                    bounded(bx + 34, text_y(by, 32, 14, label), label, 14, white, 98)
+                    hit(bx, by, 132, 32, function()
                         dialog.save_kind[kind] = not checked
                     end)
+                end
+                if dialog.weapon_options then
+                    local selected = dialog.save_kind
+                    selected.weapon_slots = selected.weapon_slots or {}
+                    for slot, label in ipairs({ 'Primary', 'Secondary', 'Support' }) do
+                        local bx, checked = px + 14 + (slot - 1) * 140, selected.weapon_slots[slot] == true
+                        any = any or checked
+                        check_ui.checkbox(bx, py + 70, 28, 32, checked, true)
+                        bounded(bx + 34, text_y(py + 70, 32, 14, label), label, 14, white, 98)
+                        hit(bx, py + 70, 132, 32, function()
+                            selected.weapon_slots[slot] = not checked
+                            selected.weapon = selected.weapon_slots[1]
+                                or selected.weapon_slots[2]
+                                or selected.weapon_slots[3]
+                                or false
+                        end)
+                    end
                 end
                 check_ui.button(px + 14, py + 22, 198, 30, 'Save', function()
                     dialog.phase = 'name'
@@ -4962,6 +4985,13 @@ function M.new(api, measure, Text)
                     for _, option in ipairs({ { 'armor', 'Armor' }, { 'helmet', 'Helmet' }, { 'cape', 'Cape' } }) do
                         if selected[option[1]] then
                             scopes[#scopes + 1] = option[2]
+                        end
+                    end
+                    if selected.weapon then
+                        for slot, label in ipairs({ 'Primary', 'Secondary', 'Support' }) do
+                            if not selected.weapon_slots or selected.weapon_slots[slot] then
+                                scopes[#scopes + 1] = label
+                            end
                         end
                     end
                     bounded(px + 14, py + 130, 'Saving: ' .. table.concat(scopes, ' + '), 14, accent, 412)
@@ -5004,7 +5034,7 @@ function M.new(api, measure, Text)
             rect(px + 228, py + 22, 198, 30, T.field, nil, 'control_fill')
             bounded(px + 236, py + 30, dialog.phase == 'confirm' and 'No' or 'Cancel', 14, white, 180)
             hit(px + 228, py + 22, 198, 30, cancel)
-            frame('outfit_dialog', px, py, 440, 190)
+            frame('outfit_dialog', px, py, 440, dialog_height)
             paint_surface(first, popup_planes.dialog, 20)
             for i = first, #commands do
                 commands[i].popup = true
@@ -5105,7 +5135,13 @@ function M.new(api, measure, Text)
                         ci > 1
                         and column.enabled ~= false
                         and column.checked == true
-                        and (column.kind == 'armor' or column.kind == 'helmet' or column.kind == 'cape')
+                        and (
+                            column.kind == 'armor'
+                            or column.kind == 'helmet'
+                            or column.kind == 'cape'
+                            or dialog.weapon_columns == true
+                                and (column.kind == 'primary' or column.kind == 'secondary' or column.kind == 'support')
+                        )
                     then
                         mask[column.kind], any = true, true
                     end

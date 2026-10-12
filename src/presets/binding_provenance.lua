@@ -106,7 +106,7 @@ local function fields(key)
         integer(tonumber(material), 'material index')
 end
 local function shape(kind, key, slot, original)
-    assert(kind == 'armor' or kind == 'helmet' or kind == 'cape', 'Invalid provenance gear family')
+    assert(kind == 'armor' or kind == 'helmet' or kind == 'cape' or kind == 'weapon', 'Invalid provenance gear family')
     assert(type(key) == 'string', 'Invalid provenance binding key')
     local pattern = key:sub(1, 2) == 'p:'
     fields(pattern and key:sub(3) or key)
@@ -128,8 +128,8 @@ end
 function P.validate(value, kind, key, original)
     assert(
         type(value) == 'table'
-            and (value.version == 1 or value.version == 2 or value.version == 3)
-            and (value.version == 3 or value.kit_override == false),
+            and (value.version == 1 or value.version == 2 or value.version == 3 or value.version == 4)
+            and (value.version >= 3 or value.kit_override == false),
         'Unsupported binding provenance'
     )
     kind, key = kind or value.kind, key or value.key
@@ -137,6 +137,65 @@ function P.validate(value, kind, key, original)
     shape(kind, key, value.texture_slot, original)
     local texture = hex(value.original_texture, 16, 'original texture')
     assert(not original or texture == original.resource:lower(), 'Provenance original texture differs')
+    if value.version == 4 then
+        assert(kind == 'weapon', 'Weapon provenance version4 requires a weapon target')
+        assert(texture ~= P.NO_MATERIAL_TEXTURE, 'Weapon original texture unavailable')
+        local destination = key:sub(1, 2) == 'p:' and key:sub(3) or key
+        local unit_type, weapon_slot, mesh, material = fields(destination)
+        assert(
+            unit_type == 3 and weapon_slot >= 1 and weapon_slot <= 3 and mesh < 64 and material < 64,
+            'Invalid weapon provenance destination'
+        )
+        assert(value.weapon_slot == weapon_slot, 'Weapon provenance slot differs from destination')
+        assert(
+            value.kit == nil and value.kit_override == nil and value.fixed_texture == nil,
+            'Weapon provenance cannot use a garment kit proof'
+        )
+        local unit, material_ref = ref(value.unit), ref(value.material)
+        local weapon_resource = hex(value.weapon_resource, 16, 'weapon resource')
+        assert(
+            weapon_resource ~= P.NO_MATERIAL_TEXTURE and weapon_resource == unit.resource,
+            'Weapon configuration differs from pristine Unit identity'
+        )
+        local stock = hex(value.material_texture, 16, 'stock material texture')
+        assert(type(value.unit_override) == 'boolean', 'Weapon unit override classification unavailable')
+        local result = {
+            version = 4,
+            kind = kind,
+            key = key,
+            texture_slot = value.texture_slot,
+            original_texture = texture,
+            section = integer(value.section, 'SectionID'),
+            index_stamp = hex(value.index_stamp, 64, 'resource index digest'),
+            unit = unit,
+            material = material_ref,
+            weapon_slot = weapon_slot,
+            weapon_resource = weapon_resource,
+            mesh_id = integer(value.mesh_id, 'MeshName ID'),
+            material_slot = integer(value.material_slot, 'mesh material slot'),
+            material_texture = stock,
+            unit_override = value.unit_override,
+        }
+        assert(result.material_slot < 64, 'Mesh material slot exceeds its limit')
+        if value.unit_override then
+            result.unit_override_texture = hex(value.unit_override_texture, 16, 'unit override texture')
+            result.unit_override_offset = integer(value.unit_override_offset, 'unit override offset')
+            assert(
+                result.unit_override_texture == texture and result.unit_override_offset <= P.MAX_PART - 8,
+                'Weapon unit override differs from effective original texture'
+            )
+        else
+            assert(
+                value.unit_override_texture == nil
+                    and value.unit_override_offset == nil
+                    and stock == texture
+                    and stock ~= P.NO_MATERIAL_TEXTURE,
+                'Weapon stock material differs from effective original texture'
+            )
+        end
+        return result
+    end
+    assert(kind ~= 'weapon', 'Weapon assignment requires provenance version4')
     local kit = assert(value.kit, 'Missing kit override proof')
     local result = {
         version = value.version,
@@ -193,16 +252,29 @@ function P.encode(value, kind, key, original)
         v.original_texture,
         tostring(v.section),
         v.index_stamp,
-        tostring(v.kit.id),
-        tostring(v.kit.body),
-        v.kit.archive,
     }
+    if v.version == 4 then
+        out[#out + 1], out[#out + 2] = v.weapon_resource, tostring(v.weapon_slot)
+    else
+        out[#out + 1], out[#out + 2], out[#out + 3] = tostring(v.kit.id), tostring(v.kit.body), v.kit.archive
+    end
     for _, r in ipairs({ v.unit, v.material }) do
         for _, k in ipairs({ 'resource', 'archive', 'main_sha256', 'gpu_sha256', 'stream_sha256' }) do
             out[#out + 1] = r[k] or '-'
         end
     end
-    if v.version == 2 then
+    if v.version == 4 then
+        for _, value in ipairs({
+            tostring(v.mesh_id),
+            tostring(v.material_slot),
+            v.material_texture,
+            v.unit_override and '1' or '0',
+            v.unit_override_texture or '-',
+            v.unit_override_offset and tostring(v.unit_override_offset) or '-',
+        }) do
+            out[#out + 1] = value
+        end
+    elseif v.version == 2 then
         out[#out + 1], out[#out + 2] = tostring(v.mesh_id), tostring(v.material_slot)
     elseif v.version == 3 then
         out[#out + 1] = v.mesh_id and tostring(v.mesh_id) or '-'
@@ -230,7 +302,11 @@ function P.decode(text, kind, key, original)
     local version = rows[1] == 'EPIC-BINDING\t1' and 1
         or rows[1] == 'EPIC-BINDING\t2' and 2
         or rows[1] == 'EPIC-BINDING\t3' and 3
-    assert(version and #rows == (version == 1 and 20 or version == 2 and 22 or 28), 'Invalid binding provenance schema')
+        or rows[1] == 'EPIC-BINDING\t4' and 4
+    assert(
+        version and #rows == (version == 1 and 20 or version == 2 and 22 or version == 4 and 25 or 28),
+        'Invalid binding provenance schema'
+    )
     if version == 3 then
         assert((rows[23] == '0' or rows[23] == '1') and rows[24] == '1', 'Invalid fixed binding flags')
         for _, at in ipairs({ 21, 22, 28 }) do
@@ -245,6 +321,32 @@ function P.decode(text, kind, key, original)
             gpu_sha256 = rows[at + 3] ~= '-' and rows[at + 3] or nil,
             stream_sha256 = rows[at + 4] ~= '-' and rows[at + 4] or nil,
         }
+    end
+    if version == 4 then
+        assert(rows[23] == '0' or rows[23] == '1', 'Invalid weapon unit override flag')
+        for _, at in ipairs({ 9, 20, 21 }) do
+            assert(rows[at]:match('^%d+$'), 'Invalid weapon binding locator')
+        end
+        assert(rows[25] == '-' or rows[25]:match('^%d+$'), 'Invalid unit override locator')
+        return P.validate({
+            version = 4,
+            kind = rows[2],
+            key = rows[3],
+            texture_slot = tonumber(rows[4]),
+            original_texture = rows[5],
+            section = tonumber(rows[6]),
+            index_stamp = rows[7],
+            weapon_resource = rows[8],
+            weapon_slot = tonumber(rows[9]),
+            unit = record(10),
+            material = record(15),
+            mesh_id = tonumber(rows[20]),
+            material_slot = tonumber(rows[21]),
+            material_texture = rows[22],
+            unit_override = rows[23] == '1',
+            unit_override_texture = rows[24] ~= '-' and rows[24] or nil,
+            unit_override_offset = rows[25] ~= '-' and tonumber(rows[25]) or nil,
+        }, kind, key, original)
     end
     return P.validate({
         version = version,
@@ -313,6 +415,10 @@ local function texture(record, wanted)
 end
 -- read(address,size) -> exact bytes or nil; all pointers/counts remain bounded.
 function P.kit_override(read, game, identity, binding, unit_hash, texture_slot)
+    assert(
+        binding.kind ~= 'weapon' and binding.weapon_resource == nil and binding.weapon_slot == nil,
+        'Weapon assignments require a serialized weapon source proof, not a garment kit'
+    )
     assert(type(identity) == 'table', 'Current kit identity unavailable')
     assert(texture_slot == P.LUT or texture_slot == P.PATTERN, 'Unsupported kit texture slot')
     unit_hash = hex(unit_hash, 16, 'live unit resource')

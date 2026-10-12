@@ -68,6 +68,23 @@ function C.new(deps)
             })
         end
         local pattern_editor = deps.pattern_editor()
+        if deps.weapon_editor then
+            table.insert(pages, #pages, deps.weapon_editor().controller().page())
+            if colors_page then
+                colors_page.controls[#colors_page.controls + 1] = {
+                    id = 'editor_load_weapon',
+                    type = 'button',
+                    label = 'Weapon LUT',
+                    on_activate = deps.open_weapons,
+                }
+                colors_page.controls[#colors_page.controls + 1] = {
+                    id = 'editor_apply_weapon',
+                    type = 'button',
+                    label = 'Apply weapon',
+                    on_activate = deps.apply_weapon_document,
+                }
+            end
+        end
         if pattern_editor then
             for _, page in ipairs(pages) do
                 if page.id == 'colors' then
@@ -114,6 +131,18 @@ function C.new(deps)
         mod.tabs_top = true
         mod.minimum_width = 1420
         mod.minimum_height = 960
+        if deps.weapon_editor then
+            local weapons = deps.weapon_editor().controller()
+            weapons.attach(handle, mod.controls)
+            local view = deps.weapon_view.new(weapons)
+            for _, page in ipairs(mod.pages) do
+                if page.id == 'weapons' then
+                    page.minimum_width, page.minimum_height =
+                        deps.weapon_view.minimum_width, deps.weapon_view.minimum_height
+                    page.render_layout, page.on_wheel = view.draw, view.wheel
+                end
+            end
+        end
         deps.default_mod(handle.id)
         if deps.remove_outfit_choice and mod.controls.outfit_preset then
             mod.controls.outfit_preset.on_delete_choice = deps.remove_outfit_choice
@@ -122,6 +151,9 @@ function C.new(deps)
         if palette_editor then
             palette_editor.pattern_editor = pattern_editor
             palette_editor.can_select_gear = function(kind)
+                if kind == 'weapon' and deps.weapon_editor then
+                    return true
+                end
                 local control = mod.controls['basic_' .. kind .. '_lut']
                 control.disabled = not deps.gear_ready() or control.choices[1] == 'Waiting for gear...'
                 return not control.disabled

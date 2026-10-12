@@ -1,10 +1,34 @@
 -- Epic LUT appearance sharing. Lobby transport is derived from CowboyBingus v1.3.
 -- Remote writes are scoped to that peer's live garment slots and matching equipped kits.
 local S = {}
+local function appearance_key(identity)
+    local parts = { identity.body or 0, identity.armor or 0, identity.helmet or 0 }
+    for slot = 1, 3 do
+        parts[#parts + 1] = identity.weapons and identity.weapons[slot] or '0000000000000000'
+    end
+    return table.concat(parts, ':')
+end
+local function compatible(identity, appearance)
+    if
+        identity.body == appearance.body
+        and identity.armor == appearance.armor
+        and identity.helmet == appearance.helmet
+    then
+        return true
+    end
+    for slot = 1, 3 do
+        local current = identity.weapons and identity.weapons[slot]
+        if current and appearance.weapons and current == appearance.weapons[slot] then
+            return true
+        end
+    end
+    return false
+end
 function S.new(deps)
     local self = { status = 'Sharing: waiting for lobby', elapsed = 0, frame = 0, peers = {} }
     local text, signature, current_kit, packet_kit, publication_status
     local decode_failures = {}
+    local target_failures = {}
     local function message(value)
         local line = tostring(value):match('^[^\r\n]*') or 'Appearance unavailable'
         for _ = 1, 4 do
@@ -34,6 +58,7 @@ function S.new(deps)
         if not peer then
             return true
         end
+        peer.job = nil
         if peer.bindings.restore() then
             self.peers[key] = nil
             return true
@@ -41,7 +66,7 @@ function S.new(deps)
         return false
     end
     local function publish(identity)
-        local kit = table.concat({ identity.body or 0, identity.armor or 0, identity.helmet or 0 }, ':')
+        local kit = appearance_key(identity)
         if current_kit ~= kit then
             current_kit, signature, publication_status = kit, nil, nil
             if packet_kit ~= kit then
@@ -57,6 +82,7 @@ function S.new(deps)
         end
         local entries = deps.entries()
         local marks = { identity.body or 0, identity.armor or 0, identity.helmet or 0 }
+        marks[#marks + 1] = appearance_key(identity)
         for _, entry in ipairs(entries) do
             local d = entry.document
             local base = entry.original
@@ -145,31 +171,43 @@ function S.new(deps)
                     for _, player in ipairs(players) do
                         if not player['local'] and peer_key(player) == key then
                             local identity = deps.resolve(player)
-                            if
-                                identity
-                                and identity.body == appearance.body
-                                and identity.armor == appearance.armor
-                                and identity.helmet == appearance.helmet
-                            then
-                                seen[key] = true
-                                local targets, unit_signature = deps.targets(identity, appearance)
-                                if not old or old.text ~= member.text or old.units ~= unit_signature then
-                                    if restore(key) then
-                                        targets = deps.targets(identity, appearance) -- recapture originals after restoring our prior packet
-                                        local peer = {
-                                            text = member.text,
-                                            appearance = appearance,
-                                            units = unit_signature,
-                                            bindings = deps.bindings(),
-                                        }
-                                        self.peers[key] = peer
-                                        peer.job = coroutine.create(function()
-                                            for document, bindings in pairs(targets) do
-                                                peer.bindings.apply(document, bindings)
-                                                coroutine.yield()
-                                            end
-                                        end)
+                            if identity and compatible(identity, appearance) then
+                                local captured, targets, unit_signature = pcall(deps.targets, identity, appearance)
+                                if captured then
+                                    seen[key], target_failures[key] = true, nil
+                                    if not old or old.text ~= member.text or old.units ~= unit_signature then
+                                        if restore(key) then
+                                            -- Recapture originals after removing the prior packet.
+                                            captured, targets = pcall(deps.targets, identity, appearance)
+                                        else
+                                            captured = false
+                                            targets = 'Previous Shared LUT restoration is pending'
+                                        end
+                                        if captured then
+                                            local peer = {
+                                                text = member.text,
+                                                appearance = appearance,
+                                                units = unit_signature,
+                                                bindings = deps.bindings(),
+                                            }
+                                            self.peers[key] = peer
+                                            peer.job = coroutine.create(function()
+                                                for document, bindings in pairs(targets) do
+                                                    peer.bindings.apply(document, bindings)
+                                                    coroutine.yield()
+                                                end
+                                            end)
+                                        end
                                     end
+                                end
+                                if not captured then
+                                    seen[key] = nil
+                                    local refused = message(targets)
+                                    if target_failures[key] ~= refused then
+                                        deps.note('Shared LUT peer deferred: ' .. refused)
+                                    end
+                                    target_failures[key] = refused
+                                    restore(key)
                                 end
                             end
                             break
@@ -192,7 +230,51 @@ function S.new(deps)
             end
         end
     end
+    function self.authorized(peer, slot, resource)
+        if not self.enabled then
+            return false, 'Shared LUT is disabled'
+        end
+        -- Refresh the transport roster instead of granting writes from an old
+        -- cached peer packet. The existing transport keeps publication throttled.
+        local members = session.poll(math.floor(self.frame), text, false, { enabled = true })
+        local wanted, found = peer_key(peer), nil
+        for _, member in ipairs(members or {}) do
+            if not member['local'] and peer_key(member) == wanted and member.text then
+                found = member
+                break
+            end
+        end
+        if not found then
+            return false, 'Peer no longer advertises Shared LUT in this lobby'
+        end
+        local prior = self.peers[wanted]
+        local appearance
+        if prior and prior.text == found.text then
+            appearance = prior.appearance
+        else
+            local ok, decoded = pcall(codec.decode, found.text)
+            if not ok then
+                return false, 'Peer Shared LUT packet is invalid'
+            end
+            appearance = decoded
+        end
+        if not appearance.weapons or appearance.weapons[slot] ~= resource then
+            return false, 'Peer weapon configuration or consent changed'
+        end
+        for _, player in ipairs(deps.players() or {}) do
+            if
+                not player['local']
+                and peer_key(player) == wanted
+                and player.player == peer.player
+                and player.unit == peer.unit
+            then
+                return true
+            end
+        end
+        return false, 'Peer live player identity changed'
+    end
     function self.tick(dt, enabled)
+        self.enabled = enabled == true
         self.frame = self.frame + math.max(0, dt or 0) * 60
         self.elapsed = self.elapsed + math.max(0, dt or 0)
         if not enabled then
@@ -237,6 +319,7 @@ function S.new(deps)
         self.status = not enabled and 'Sharing: off' or publication_status or self.status
     end
     function self.close()
+        self.enabled = false
         local complete = true
         for key in pairs(self.peers) do
             self.peers[key].job = nil

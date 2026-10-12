@@ -7,8 +7,32 @@ function P.is_pattern(document)
 end
 
 local function kind(value)
-    assert(value == 'armor' or value == 'helmet' or value == 'cape', 'Invalid export gear kind')
+    assert(value == 'armor' or value == 'helmet' or value == 'cape' or value == 'weapon', 'Invalid export gear kind')
     return value
+end
+local function weapon_identity(value, destination, saved)
+    if value.kind ~= 'weapon' then
+        return ''
+    end
+    local resource, slot = value.weapon_resource, value.weapon_slot
+    assert(
+        type(resource) == 'string' and #resource == 16 and resource:match('^%x+$') and resource ~= string.rep('0', 16),
+        'Invalid export weapon resource'
+    )
+    assert(type(slot) == 'number' and slot % 1 == 0 and slot >= 1 and slot <= 3, 'Invalid export weapon slot')
+    local key = saved and destination or value.save_key
+    if key then
+        key = key:gsub('^p:', '')
+        local unit_type, key_slot, mesh, material = key:match('^(%d+):(%d+):(%d+):(%d+)$')
+        assert(
+            tonumber(unit_type) == 3
+                and tonumber(key_slot) == slot
+                and tonumber(mesh) <= 63
+                and tonumber(material) <= 63,
+            'Export weapon slot differs from destination'
+        )
+    end
+    return resource:lower() .. ':' .. slot .. ':'
 end
 
 local function document(value)
@@ -60,7 +84,14 @@ local function live_identity(binding, deps)
     assert(type(binding) == 'table', 'Invalid live export binding')
     local key = deps.key(binding)
     assert(type(key) == 'string' and #key > 0 and not key:find('[%c]'), 'Invalid live export destination')
-    return kind(deps.kind(binding)) .. ':' .. key
+    local family = kind(deps.kind(binding))
+    local descriptor = {
+        kind = family,
+        save_key = binding.save_key,
+        weapon_resource = binding.weapon_resource,
+        weapon_slot = binding.weapon_slot,
+    }
+    return family .. ':' .. weapon_identity(descriptor, key) .. key
 end
 
 local function live_alias(a, b)
@@ -124,7 +155,7 @@ local function saved_identity(entry)
     local destination = prefixed and key:sub(3) or key
     -- Older manifests allow variable-length numeric slot keys; retain them.
     assert(destination:match('^%d[%d:]*$') and prefixed == pattern, 'Invalid saved export destination')
-    return entry.kind .. ':' .. key
+    return entry.kind .. ':' .. weapon_identity(entry, destination, true) .. key
 end
 
 -- Returns the selected entry and its stored Pattern entry on the same kind/key.
@@ -146,7 +177,8 @@ function P.saved(entries, index)
     local selected = entries[index]
     local result = { selected }
     if not P.is_pattern(selected.document) then
-        local paired = seen[selected.kind .. ':p:' .. selected.key]
+        local paired =
+            seen[selected.kind .. ':' .. weapon_identity(selected, selected.key, true) .. 'p:' .. selected.key]
         if paired then
             result[#result + 1] = paired
         end

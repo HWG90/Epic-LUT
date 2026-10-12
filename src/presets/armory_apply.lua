@@ -3,11 +3,67 @@
 local ffi = require('ffi')
 local A = {}
 function A.new(modules, host)
+    local function weapons(preset, options)
+        local identities, count = {}, 0
+        for _, entry in ipairs(preset.entries or {}) do
+            if entry.kind == 'weapon' then
+                local slot, mesh, material = tostring(entry.key):gsub('^p:', ''):match('^3:(%d+):(%d+):(%d+)$')
+                slot, mesh, material = tonumber(slot), tonumber(mesh), tonumber(material)
+                assert(
+                    slot and slot >= 1 and slot <= 3 and slot == entry.weapon_slot and mesh <= 63 and material <= 63,
+                    'Invalid saved weapon destination'
+                )
+                local resource = entry.weapon_resource
+                assert(
+                    type(resource) == 'string'
+                        and #resource == 16
+                        and resource:match('^%x+$')
+                        and resource ~= string.rep('0', 16),
+                    'Saved weapon configuration identity unavailable'
+                )
+                assert(
+                    not identities[slot] or identities[slot] == resource:lower(),
+                    'Conflicting saved weapon configurations'
+                )
+                identities[slot], count = resource:lower(), count + 1
+            end
+        end
+        assert(count > 0, 'This preset has no weapon palette')
+        assert(
+            type(host.weapon_plan) == 'function' and type(host.apply_weapon_plan) == 'function',
+            'Weapon preset application unavailable'
+        )
+        local plan, reason = host.weapon_plan(preset, options or {})
+        assert(type(plan) == 'table' and type(plan.validate) == 'function', reason or 'Weapon preset plan unavailable')
+        assert(type(plan.choices) == 'table' and #plan.choices <= 192, 'Weapon preset choice bounds changed')
+        local ids = {}
+        for _, choice in ipairs(plan.choices) do
+            assert(
+                type(choice.id) == 'string' and choice.id ~= '' and not ids[choice.id],
+                'Ambiguous weapon preset choice'
+            )
+            assert(
+                type(choice.weapon_slot) == 'number' and identities[choice.weapon_slot],
+                'Weapon preset slot differs from saved configuration'
+            )
+            if choice.enabled then
+                assert(
+                    type(choice.weapon_resource) == 'string'
+                        and choice.weapon_resource:lower() == identities[choice.weapon_slot],
+                    'Weapon preset configuration differs from current target'
+                )
+            end
+            ids[choice.id] = true
+        end
+        local valid, why = plan.validate()
+        assert(valid == true, why or 'Weapon preset plan is stale')
+        return plan
+    end
     local function apply_outfit(kind, selection)
         local selected_outfit = assert(host.selected(), 'Choose an outfit preset first')
         local combined = type(kind) == 'table'
         local scope, names = {}, {}
-        for _, family in ipairs({ 'armor', 'helmet', 'cape' }) do
+        for _, family in ipairs({ 'armor', 'helmet', 'cape', 'weapon' }) do
             local wanted = combined and kind[family] == true or not combined and kind == family
             if wanted then
                 local available = not combined
@@ -15,7 +71,7 @@ function A.new(modules, host)
                     or family ~= 'cape' and #(selected_outfit[family] or {}) > 0
                 if available then
                     scope[family] = true
-                    names[#names + 1] = modules.gear_catalog.label(family)
+                    names[#names + 1] = family == 'weapon' and 'Weapons' or modules.gear_catalog.label(family)
                 end
             end
         end
@@ -43,6 +99,13 @@ function A.new(modules, host)
             selection.validate(true)
         end
         local exact = host.documents(selected_outfit)
+        local weapon_plan = scope.weapon
+                and weapons(selected_outfit, {
+                    slots = combined and kind.weapon_slots or nil,
+                    selected = selection and selection.weapon or nil,
+                    associated_patterns = true,
+                })
+            or nil
         local has_saved = {}
         for _, entry in ipairs(selected_outfit.entries) do
             if scope[entry.kind] then
@@ -114,7 +177,7 @@ function A.new(modules, host)
             end
         end
         assert(
-            next(batches) or next(patterns),
+            next(batches) or next(patterns) or weapon_plan,
             'No saved LUT bindings match this gear; select a table and apply it manually to adapt the preset'
         )
         if selection then
@@ -128,7 +191,7 @@ function A.new(modules, host)
         if combined then
             for family in pairs(scope) do
                 assert(
-                    family_matches[family],
+                    family == 'weapon' or family_matches[family],
                     'No saved ' .. family .. ' LUT bindings match this gear; apply a table manually to adapt the preset'
                 )
             end
@@ -169,13 +232,18 @@ function A.new(modules, host)
                 )
             end
         end
-        local before = combined and host.capture()
+        local before = combined and (next(batches) or next(patterns)) and host.capture()
         local ok, count = pcall(function()
             -- Multi-LUT presets never become blanket overrides for unmatched pieces.
             for family in pairs(scope) do
-                host.clear_default(family)
+                if family ~= 'weapon' then
+                    host.clear_default(family)
+                end
             end
-            host.begin_application()
+            local gear = next(batches) or next(patterns)
+            if gear then
+                host.begin_application()
+            end
             local applied = 0
             for d, targets in pairs(batches) do
                 applied = applied + apply_batch(d, targets, false)
@@ -188,8 +256,17 @@ function A.new(modules, host)
                 applied = applied + apply_batch(d, targets, true)
                 log_applied(targets, true)
             end
+            if gear then
+                host.finish_application()
+            end
+            if weapon_plan then
+                local valid, reason = weapon_plan.validate()
+                assert(valid == true, reason or 'Weapon changed before preset application')
+                local count, why = host.apply_weapon_plan(weapon_plan)
+                assert(type(count) == 'number' and count > 0 and count % 1 == 0, why or 'No weapon bindings applied')
+                applied = applied + count
+            end
             assert(applied > 0, 'No worn gear bindings available for this preset')
-            host.finish_application()
             return applied
         end)
         if not ok then
@@ -225,7 +302,16 @@ function A.new(modules, host)
         if host.has_patterns() then
             host.scan_patterns()
         end
-        local proof = assert(host.proof(), 'Current gear identity unavailable; load current gear again')
+        local preview_weapon_plan
+        for _, entry in ipairs(preset.entries) do
+            if entry.kind == 'weapon' then
+                preview_weapon_plan = weapons(preset, { preview = true, associated_patterns = true })
+                break
+            end
+        end
+        local proof = host.proof()
+        assert(proof or preview_weapon_plan, 'Current gear identity unavailable; load current gear again')
+        proof = proof or {}
         local exact = host.documents(preset)
         local columns = { { title = 'Armor / Cape', items = {} }, { title = 'Helmet', items = {} } }
         local records, saved, saved_pixels = {}, {}, {}
@@ -254,6 +340,8 @@ function A.new(modules, host)
                 bytes = saved_pixels[entry.document],
                 original = entry.original,
                 metadata = metadata(entry.original),
+                weapon_slot = entry.weapon_slot,
+                weapon_resource = entry.weapon_resource,
             }
         end
         local pattern_bindings = {}
@@ -374,7 +462,38 @@ function A.new(modules, host)
                 }
             end
         end
+        if preview_weapon_plan then
+            local slot_titles = { 'Primary', 'Secondary', 'Support' }
+            for slot = 1, 3 do
+                local items = {}
+                for _, choice in ipairs(preview_weapon_plan.choices) do
+                    if choice.weapon_slot == slot then
+                        assert(not records[choice.id], 'Weapon choice collides with a garment choice')
+                        records[choice.id] = {
+                            target = { kind = 'weapon' },
+                            weapon_choice = choice,
+                            enabled = choice.enabled == true,
+                            material = {},
+                            patterns = {},
+                            members = {},
+                        }
+                        items[#items + 1] = {
+                            id = choice.id,
+                            label = choice.label or (slot_titles[slot] .. ' LUT'),
+                            kind = 'weapon',
+                            enabled = choice.enabled == true,
+                            checked = choice.enabled == true,
+                            detail = choice.detail or (choice.has_pattern and 'Pattern included' or nil),
+                        }
+                    end
+                end
+                if #items > 0 then
+                    columns[#columns + 1] = { title = slot_titles[slot] .. ' Weapons', items = items }
+                end
+            end
+        end
         local dialog = { title = 'Apply Preset', columns = columns }
+        dialog.select_all = true
         local function validate_record(r)
             local b = r.binding
             assert(
@@ -413,7 +532,7 @@ function A.new(modules, host)
                 end
             end
             assert(#chosen > 0, 'Select at least one current LUT')
-            local selection = { material = {}, pattern = {}, proofs = proof }
+            local selection = { material = {}, pattern = {}, weapon = {}, proofs = proof }
             selection.validate = function(refreshed)
                 assert(
                     host.selected() == preset and #preset.entries == #saved,
@@ -431,16 +550,32 @@ function A.new(modules, host)
                             and metadata(current.original) == entry.metadata
                             and current.document.width == entry.width
                             and current.document.height == entry.height,
+                        -- Weapon metadata is part of the assignment, independently
+                        -- of identical pixels or a reused texture resource.
                         'Saved preset changed; reopen Apply Preset'
+                    )
+                    assert(
+                        current.weapon_slot == entry.weapon_slot and current.weapon_resource == entry.weapon_resource,
+                        'Saved weapon identity changed; reopen Apply Preset'
                     )
                     if not checked_documents[current.document] then
                         assert(bytes(current.document) == entry.bytes, 'Saved preset changed; reopen Apply Preset')
                         checked_documents[current.document] = true
                     end
                 end
-                local current = host.proof()
-                for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
-                    assert(current and current[kind] == proof[kind], 'Worn gear changed; reopen Apply Preset')
+                local gear_selected = false
+                for _, record in ipairs(chosen) do
+                    gear_selected = gear_selected or record.target.kind ~= 'weapon'
+                end
+                if gear_selected then
+                    local current = host.proof()
+                    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+                        assert(current and current[kind] == proof[kind], 'Worn gear changed; reopen Apply Preset')
+                    end
+                end
+                if scope.weapon then
+                    local valid, reason = preview_weapon_plan.validate()
+                    assert(valid == true, reason or 'Current weapon changed; reopen Apply Preset')
                 end
                 for _, record in ipairs(chosen) do
                     for _, r in ipairs(record.members) do
@@ -449,7 +584,7 @@ function A.new(modules, host)
                     for _, r in ipairs(record.patterns) do
                         validate_record(r)
                     end
-                    if refreshed then
+                    if refreshed and record.target.kind ~= 'weapon' then
                         local actual, count = {}, 0
                         for _, group in ipairs(host.groups()) do
                             if group.object == record.target.object then
@@ -471,6 +606,9 @@ function A.new(modules, host)
             end
             selection.validate() -- Reject stale state before refresh/flash cleanup or any native write.
             for _, record in ipairs(chosen) do
+                if record.weapon_choice then
+                    selection.weapon[record.weapon_choice.id] = true
+                end
                 for _, r in ipairs(record.material) do
                     selection.material[r.kind .. ':' .. host.key(r.binding)] = true
                 end

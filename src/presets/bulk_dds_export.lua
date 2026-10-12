@@ -1,6 +1,7 @@
 -- Transactional raw DDS export; all pixels and names validate before creating a folder.
 local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
-local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
+local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', weapon = 'Weapon' }
+local weapon_labels = { 'Primary', 'Secondary', 'Support' }
 function B.new(m, paths)
     local self = {}
     function self.save(prefix, entries, naming)
@@ -10,6 +11,15 @@ function B.new(m, paths)
             type(entries) == 'table' and #entries > 0 and #entries <= B.MAX_BINDINGS,
             'Choose between 1 and 4096 LUT bindings to export'
         )
+        local count = 0
+        for index in pairs(entries) do
+            assert(
+                type(index) == 'number' and index % 1 == 0 and index >= 1 and index <= #entries,
+                'DDS entries must be a dense list'
+            )
+            count = count + 1
+        end
+        assert(count == #entries, 'DDS entries must be a dense list')
         -- Reuse shared name validation without touching the filesystem.
         m.lut_files.available_name(prefix, function()
             return false
@@ -17,6 +27,24 @@ function B.new(m, paths)
         local files, resources, targets, stems = {}, {}, {}, {}
         for _, entry in ipairs(entries) do
             assert(kind_labels[entry.kind], 'Invalid LUT gear kind')
+            local weapon = ''
+            if entry.kind == 'weapon' then
+                local slot, resource = entry.weapon_slot, entry.weapon_resource
+                assert(type(slot) == 'number' and slot % 1 == 0 and slot >= 1 and slot <= 3, 'Invalid DDS weapon slot')
+                assert(
+                    type(resource) == 'string'
+                        and #resource == 16
+                        and resource:match('^%x+$')
+                        and resource ~= string.rep('0', 16),
+                    'Invalid DDS weapon resource'
+                )
+                weapon = weapon_labels[slot] .. '-' .. resource:lower()
+            else
+                assert(
+                    entry.weapon_resource == nil and entry.weapon_slot == nil,
+                    'Weapon identity on a garment DDS target'
+                )
+            end
             assert(
                 type(entry.ordinal) == 'number' and entry.ordinal >= 1 and entry.ordinal % 1 == 0,
                 'Invalid LUT ordinal'
@@ -33,7 +61,7 @@ function B.new(m, paths)
             end
             local ordinal = (document.width == 3 and document.height == 1 and 'PatternLUT' or 'LUT')
                 .. string.format('%.0f', entry.ordinal)
-            local key = resource or (entry.kind .. ':' .. ordinal)
+            local key = (weapon ~= '' and weapon .. ':' or '') .. (resource or (entry.kind .. ':' .. ordinal))
             local identity = resource and ('resource ID ' .. resource) or (entry.kind .. ' ' .. ordinal)
             local target = key .. ':' .. entry.kind .. ':' .. ordinal
             assert(not targets[target] or targets[target] == bytes, 'Conflicting LUT values for ' .. identity)
@@ -52,7 +80,7 @@ function B.new(m, paths)
                 elseif naming == 4 or naming == 5 then
                     suffix = id or ordinal
                 end
-                local stem = prefix .. ' ' .. suffix
+                local stem = prefix .. (weapon ~= '' and ' ' .. weapon or '') .. ' ' .. suffix
                 stems[stem:lower()] = (stems[stem:lower()] or 0) + 1
                 files[#files + 1] = { stem = stem, kind = entry.kind, bytes = bytes }
             end

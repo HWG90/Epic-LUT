@@ -14,6 +14,12 @@ OWN = ['gear_edit', 'editor_actions', 'gear_export', 'outfit_capture', 'import_s
 SOURCE_GROUPS.update({'binding_names': 'gear', 'unit_identity': 'gear', 'material_identity': 'gear',
                       'binding_unit_layout': 'presets'})
 
+OWN += ['primary_identity', 'weapon_discovery', 'weapon_runtime', 'weapon_controller', 'weapon_view', 'weapon_bridge', 'weapon_mapping', 'weapon_presets', 'weapon_workflow', 'weapon_names', 'weapon_shared', 'weapon_provenance']
+SOURCE_GROUPS.update({'primary_identity': 'weapons', 'weapon_discovery': 'weapons', 'weapon_runtime': 'weapons',
+                      'weapon_controller': 'editor', 'weapon_view': 'editor', 'weapon_bridge': 'editor',
+                      'weapon_mapping': 'editor', 'weapon_presets': 'presets', 'weapon_workflow': 'editor',
+                      'weapon_names': 'weapons', 'weapon_shared': 'weapons', 'weapon_provenance': 'weapons'})
+
 def source_path(name):
     actual = 'standalone_frontend' if name == 'frontend' else name
     return f'src/{SOURCE_GROUPS[actual]}/{actual}.lua'

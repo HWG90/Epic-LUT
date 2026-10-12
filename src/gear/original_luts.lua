@@ -297,6 +297,14 @@ function O.new(m, paths, native, targets)
         self.requested[object] = true
         return self.get(object)
     end
+    function self.request_object(object)
+        assert(
+            type(object) == 'number' and object >= 65536 and object < 2 ^ 47 and object % 1 == 0,
+            'Invalid original texture object request'
+        )
+        self.requested[object] = true
+        return self.get(object)
+    end
     function self.retry()
         self.attempted = {}
         if not self.worker and not self.job then

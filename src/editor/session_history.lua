@@ -2,6 +2,120 @@
 -- UI, persistence and activation state remain with the session controller.
 local H = {}
 local ffi = require('ffi')
+local function field(value)
+    local kind = type(value)
+    value = value == nil and '' or tostring(value)
+    return kind .. ':' .. #value .. ':' .. value
+end
+local function weapon_signature(state)
+    assert(
+        type(state) == 'table' and state.version == 1 and type(state.entries) == 'table' and #state.entries <= 3072,
+        'Invalid weapon history state'
+    )
+    local entries = {}
+    for _, entry in ipairs(state.entries) do
+        local d = assert(entry.document, 'Weapon history document unavailable')
+        local keys = {}
+        for _, key in ipairs(entry.save_keys or {}) do
+            keys[#keys + 1] = field(key)
+        end
+        table.sort(keys)
+        local parts = {
+            field(entry.weapon_slot),
+            field(entry.weapon_resource or entry.weapon_resource64),
+            field(entry.family),
+            field(entry.index),
+            field(entry.source_resource),
+            field(table.concat(keys)),
+            field(d.width),
+            field(d.height),
+            field(ffi.string(d.data, d.width * d.height * 16)),
+            field(d.source),
+            field(d.resource),
+            field(d.revision),
+            field(d.saved_pixels),
+            field(d.kind or 'weapon'),
+            field(d.family or entry.family),
+            field(d.weapon_slot or entry.weapon_slot),
+            field(d.weapon_resource or entry.weapon_resource or entry.weapon_resource64),
+            field(d.weapon_resource64 or entry.weapon_resource64 or entry.weapon_resource),
+            field(d.original and ffi.string(d.original, d.width * d.height * 16)),
+        }
+        entries[#entries + 1] = table.concat(parts)
+    end
+    table.sort(entries)
+    return field(state.version) .. table.concat(entries)
+end
+local function copy_weapons(state, copier)
+    weapon_signature(state)
+    local result = { version = state.version, entries = {} }
+    for index, entry in ipairs(state.entries) do
+        local copied = {}
+        for key, value in pairs(entry) do
+            copied[key] = value
+        end
+        copied.document = copier(entry.document)
+        if entry.save_keys then
+            copied.save_keys = {}
+            for i, key in ipairs(entry.save_keys) do
+                copied.save_keys[i] = key
+            end
+        end
+        result.entries[index] = copied
+    end
+    return result
+end
+local function weapon_receipts(runtime, state)
+    if type(runtime.catalog) ~= 'function' then
+        return ''
+    end
+    local slots, parts = {}, {}
+    for _, entry in ipairs(state.entries) do
+        slots[entry.weapon_slot] = true
+    end
+    for slot = 1, 3 do
+        if slots[slot] then
+            local catalog = assert(runtime.catalog(slot), 'Weapon history catalog disappeared')
+            assert(catalog.available and catalog.receipt, 'Weapon history receipt unavailable')
+            local receipt = catalog.receipt
+            parts[#parts + 1] = field(slot)
+            for _, name in ipairs({
+                'unit',
+                'lua_unit',
+                'world',
+                'weapon_slot',
+                'weapon_resource',
+                'weapon_resource64',
+                'unit_resource64',
+                'remote',
+                'peer_scope',
+                'peer_player',
+                'peer_unit',
+                'peer_low',
+                'peer_high',
+            }) do
+                parts[#parts + 1] = field(receipt[name])
+            end
+            local bindings = {}
+            for _, family in ipairs({ 'material', 'pattern' }) do
+                for _, group in ipairs(catalog[family] or {}) do
+                    for _, b in ipairs(group.bindings) do
+                        bindings[#bindings + 1] = field(family)
+                            .. field(b.save_key)
+                            .. field(b.unit)
+                            .. field(b.mesh)
+                            .. field(b.material)
+                            .. field(b.slot)
+                            .. field(b.original)
+                    end
+                end
+            end
+            table.sort(bindings)
+            parts[#parts + 1] = field(table.concat(bindings))
+        end
+    end
+    return table.concat(parts)
+end
 
 function H.new(deps)
     for _, name in ipairs({
@@ -65,6 +179,54 @@ function H.new(deps)
             state.loaded and ffi.string(state.loaded.data, state.loaded.width * state.loaded.height * 16) or '',
             state.loaded and state.loaded.source or '',
         }
+        local weapon_runtime = deps.weapon_runtime and deps.weapon_runtime()
+        if weapon_runtime then
+            assert(
+                type(weapon_runtime.capture_state) == 'function' and type(weapon_runtime.restore_state) == 'function',
+                'Weapon history runtime unavailable'
+            )
+            local weapons = weapon_runtime.capture_state()
+            snapshot.weapon_state = copy_weapons(weapons, document)
+            snapshot.weapon_signature = weapon_signature(snapshot.weapon_state)
+            snapshot.weapon_receipts = weapon_receipts(weapon_runtime, weapons)
+            signature[#signature + 1] = 'weapons:'
+                .. field(snapshot.weapon_signature)
+                .. field(snapshot.weapon_receipts)
+        end
+        if state.loaded and state.loaded.kind == 'weapon' then
+            for _, name in ipairs({
+                'kind',
+                'family',
+                'weapon_slot',
+                'weapon_resource',
+                'weapon_resource64',
+                'width',
+                'height',
+                'mixed',
+                'resource',
+                'resource_object',
+                'source_resource',
+                'revision',
+                'saved_pixels',
+            }) do
+                signature[#signature + 1] = 'weapon_editor:' .. name .. ':' .. field(state.loaded[name])
+            end
+        end
+        if state.editor_target and state.editor_target.kind == 'weapon' then
+            for _, name in ipairs({
+                'kind',
+                'family',
+                'weapon_slot',
+                'weapon_resource',
+                'weapon_resource64',
+                'group',
+                'index',
+                'group_id',
+                'save_key',
+            }) do
+                signature[#signature + 1] = 'weapon_target:' .. name .. ':' .. field(state.editor_target[name])
+            end
+        end
         for _, pool in ipairs({
             { session = deps.material_session(), records = snapshot.owned, pattern = false },
             { session = deps.pattern_session(), records = snapshot.pattern_owned, pattern = true },
@@ -134,6 +296,9 @@ function H.new(deps)
             snapshot[k] = v
         end
         local clone = deps.copier().copy
+        if saved.weapon_state then
+            snapshot.weapon_state = copy_weapons(saved.weapon_state, clone)
+        end
         snapshot.loaded = clone(saved.loaded)
         if saved.editor_target then
             snapshot.editor_target = {}
@@ -171,6 +336,36 @@ function H.new(deps)
                 snapshot[name][i] = copy
             end
         end
+        local weapon_runtime = deps.weapon_runtime and deps.weapon_runtime()
+        if saved.weapon_state or expected.weapon_state then
+            assert(
+                weapon_runtime
+                    and type(weapon_runtime.capture_state) == 'function'
+                    and type(weapon_runtime.restore_state) == 'function',
+                'Weapon history runtime unavailable'
+            )
+            assert(saved.weapon_state and expected.weapon_state, 'Weapon history scope changed')
+        end
+        local function validate_weapons()
+            if not expected.weapon_state then
+                return
+            end
+            assert(
+                weapon_signature(saved.weapon_state) == saved.weapon_signature
+                    and weapon_signature(expected.weapon_state) == expected.weapon_signature,
+                'Saved weapon history frame changed'
+            )
+            local actual = weapon_runtime.capture_state()
+            assert(
+                weapon_signature(actual) == expected.weapon_signature,
+                'Weapon bytes or assignments changed; cannot safely undo this action'
+            )
+            assert(
+                weapon_receipts(weapon_runtime, actual) == expected.weapon_receipts,
+                'Weapon receipt changed; cannot safely undo this action'
+            )
+        end
+        validate_weapons() -- Reject stale weapons before highlight cleanup or garment writes.
         assert(deps.stop_identification(), 'Highlight restoration pending')
         local proof = deps.appearance_proof()
         for _, frame in ipairs({ snapshot, expected }) do
@@ -275,6 +470,11 @@ function H.new(deps)
                     deps.bind(plan.binding, plan.slot, plan.object)
                     assert(read_plan(plan) == plan.object)
                 end
+            end
+            if snapshot.weapon_state then
+                validate_weapons()
+                local restored, reason = weapon_runtime.restore_state(snapshot.weapon_state)
+                assert(restored ~= false, reason or 'Weapon history restoration failed')
             end
         end)
         if not ok then

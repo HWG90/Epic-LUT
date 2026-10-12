@@ -1,10 +1,30 @@
 -- Independent editor copies, keyed by target and original resource object.
 local B = {}
 local ffi = require('ffi')
-function B.clone(source, label)
+local weapon_metadata =
+    { 'kind', 'family', 'weapon_slot', 'weapon_resource', 'weapon_resource64', 'source_resource', 'mixed' }
+function B.clone(source, label, skip_binding_documents, seen)
+    seen = seen or {}
+    if seen[source] then
+        return seen[source]
+    end
     local data = ffi.new('float[?]', source.width * source.height * 4)
     ffi.copy(data, source.data, source.width * source.height * 16)
-    return { data = data, width = source.width, height = source.height, source = label or source.source, revision = 0 }
+    local result =
+        { data = data, width = source.width, height = source.height, source = label or source.source, revision = 0 }
+    seen[source] = result
+    if source.kind == 'weapon' then
+        for _, field in ipairs(weapon_metadata) do
+            result[field] = source[field]
+        end
+        if source.binding_documents and not skip_binding_documents then
+            result.binding_documents = {}
+            for key, document in pairs(source.binding_documents) do
+                result.binding_documents[key] = B.clone(document, nil, false, seen)
+            end
+        end
+    end
+    return result
 end
 -- History copies preserve metadata and original pixels; normal edit copies start a new revision.
 function B.copier()
@@ -17,7 +37,8 @@ function B.copier()
         if copies[source] then
             return copies[source]
         end
-        local copy = B.clone(source, source.source)
+        local copy = B.clone(source, source.source, true)
+        copies[source] = copy
         copy.revision = source.revision
         copy.saved_pixels = source.saved_pixels
         copy.resource = source.resource
@@ -28,7 +49,12 @@ function B.copier()
             ffi.copy(copy.original, source.original, bytes)
             self.bytes = self.bytes + bytes
         end
-        copies[source] = copy
+        if source.kind == 'weapon' and source.binding_documents then
+            copy.binding_documents = {}
+            for key, document in pairs(source.binding_documents) do
+                copy.binding_documents[key] = self.copy(document)
+            end
+        end
         self.bytes = self.bytes + bytes
         return copy
     end

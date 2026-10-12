@@ -8,6 +8,22 @@ function V.new(deps)
     local document, note, paint = deps.document, deps.note, deps.paint
     local rgb, editable, color_columns = deps.rgb, deps.editable, deps.color_columns
     local ffi = require('ffi')
+    local function pattern_document(d)
+        return d and d.kind == 'weapon' and d.family == 'pattern' and d.width == 3 and d.height == 1
+    end
+    local function field_label(d, column)
+        return pattern_document(d) and ({ 'Color', 'Mat/Opac', 'Roughness' })[column] or semantics.columns[column]
+    end
+    local function field_hint(d, column)
+        if pattern_document(d) then
+            return ({
+                'Pattern color. Unedited Alpha is retained.',
+                'Pattern material/opacity. Raw values are retained.',
+                'Alpha controls roughness. RGB values are retained.',
+            })[column]
+        end
+        return semantics.hints[column] or 'Unconfirmed shader meaning. Raw values are retained.'
+    end
     local selection_drag
     local splitter_drag
     local function same_source(state)
@@ -22,8 +38,15 @@ function V.new(deps)
     end
     local function layout(ui)
         local d = document()
+        if self.request_picker then
+            local request = self.request_picker
+            self.request_picker = nil
+            if request.document == d and not d.stale and not d.read_only then
+                ui.activate('cell_color', 0, request.mode)
+            end
+        end
         local h = self.handle
-        local pattern = self.pattern_editor
+        local pattern = self.gear ~= 'weapon' and self.pattern_editor or nil
         local pattern_host = not self.embedded and pattern and pattern.workspace and pattern.quick
         if pattern_host and pattern.set_workspace_host then
             pattern.set_workspace_host(true)
@@ -80,7 +103,10 @@ function V.new(deps)
         if gear_controls then
             header_item('Helmet LUT', 'helmet')
             header_item('Armor LUT', 'armor')
-            if self.pattern_editor then
+            if mod.controls.editor_load_weapon then
+                header_item('Weapon LUT', 'weapon')
+            end
+            if pattern then
                 header_item('Pattern LUT Editor', 'pattern')
             end
             header_item('Load Current Gear', 'load')
@@ -328,7 +354,7 @@ function V.new(deps)
             end
         end -- main footer
         if gear_controls then
-            self.gear = self.gear == 'helmet' and 'helmet' or 'armor'
+            self.gear = self.gear == 'weapon' and 'weapon' or self.gear == 'helmet' and 'helmet' or 'armor'
             for _, item in ipairs(header_items) do
                 local target = item.kind
                 local featured = target == 'load'
@@ -379,11 +405,24 @@ function V.new(deps)
             if not pattern_full then
                 local selector_width = math.min(220, left * 0.32)
                 ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
-                ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
-                local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
-                local resource = control.choice_details
-                    and control.choice_details[h.get('basic_' .. self.gear .. '_lut')]
-                local hash = control.choice_hashes and control.choice_hashes[h.get('basic_' .. self.gear .. '_lut')]
+                local resource, hash
+                if self.gear == 'weapon' then
+                    ui.bounded(
+                        selector_x + 6,
+                        selector_y + 7,
+                        d and d.source or 'Weapon LUT',
+                        14,
+                        theme.text,
+                        selector_width - 12
+                    )
+                    hash = d and d.resource
+                    resource = hash and ('[0x' .. hash .. ']')
+                else
+                    ui.choice('basic_' .. self.gear .. '_lut', selector_x, selector_y, selector_width)
+                    local control = self.api.mods[self.handle.id].controls['basic_' .. self.gear .. '_lut']
+                    resource = control.choice_details and control.choice_details[h.get(control.id)]
+                    hash = control.choice_hashes and control.choice_hashes[h.get(control.id)]
+                end
                 local resource_width = ui.x + left - selector_x - selector_width - 30
                 if resource and resource_width > 40 then
                     if hash and mod.controls.rename_lut then
@@ -684,7 +723,9 @@ function V.new(deps)
                 ui.bounded(
                     ui.x + 82 + (c - 1) * cell,
                     top - 119 - extra_header,
-                    d.width == 23 and semantics.short_columns[c] or tostring(c),
+                    d.width == 23 and semantics.short_columns[c]
+                        or pattern_document(d) and ({ 'Color', 'Mat/Op', 'Rgh' })[c]
+                        or tostring(c),
                     12,
                     muted,
                     cell - 2,
@@ -1155,7 +1196,7 @@ function V.new(deps)
                                         self.focus_value(selected_row, selected_col, channel)
                                     end
                                 end
-                                local column_label = 'Column ' .. c .. ': ' .. semantics.columns[c]
+                                local column_label = 'Column ' .. c .. ': ' .. field_label(d, c)
                                 local column_heading_height = text_height(14, column_label, 'heading', 3, 21)
                                 cursor = cursor - column_heading_height
                                 if text_inside(cursor, column_heading_height, 14, column_label, 'heading') then
@@ -1194,13 +1235,7 @@ function V.new(deps)
                                         end)
                                     end
                                 end
-                                for _, line in
-                                    ipairs(
-                                        words(
-                                            semantics.hints[c] or 'Unconfirmed shader meaning. Raw values are retained.'
-                                        )
-                                    )
-                                do
+                                for _, line in ipairs(words(field_hint(d, c))) do
                                     local line_height = text_height(13, line, 'hint', 2, 14)
                                     cursor = cursor - line_height
                                     if text_inside(cursor, line_height, 13, line, 'hint') then

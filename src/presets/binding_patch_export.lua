@@ -135,6 +135,69 @@ local function fingerprint(bytes)
     end
     return string.format('%08x%08x', bit.bnot(a) % 4294967296, b % 4294967296)
 end
+local function weapon_proof(entry, proof)
+    if entry.kind ~= 'weapon' then
+        return false
+    end
+    assert(
+        type(proof) == 'table' and proof.version == 4 and proof.verified == true,
+        'Verified weapon binding provenance unavailable'
+    )
+    local key = entry.key:gsub('^p:', '')
+    local unit_type, slot, mesh, material = key:match('^(%d+):(%d+):(%d+):(%d+)$')
+    unit_type, slot, mesh, material = tonumber(unit_type), tonumber(slot), tonumber(mesh), tonumber(material)
+    assert(
+        unit_type == 3
+            and slot
+            and slot >= 1
+            and slot <= 3
+            and mesh
+            and mesh < 64
+            and material
+            and material < 64
+            and entry.weapon_slot == slot
+            and proof.weapon_slot == slot,
+        'Weapon provenance slot differs from saved destination'
+    )
+    assert(
+        id(entry.weapon_resource) ~= '0000000000000000'
+            and id(entry.weapon_resource) == id(proof.weapon_resource)
+            and id(proof.weapon_resource) == id(proof.unit.resource),
+        'Weapon configuration differs from pristine Unit identity'
+    )
+    assert(
+        proof.kit == nil and proof.kit_override == nil and proof.fixed_texture == nil,
+        'Weapon proof cannot use a garment kit assignment'
+    )
+    assert(
+        type(proof.unit_override) == 'boolean'
+            and proof.mesh_verified == true
+            and proof.mesh_id ~= nil
+            and proof.material_slot ~= nil
+            and proof.material_slot_offset ~= nil,
+        'Precise weapon mesh/override proof unavailable'
+    )
+    id(proof.material_texture)
+    if proof.unit_override then
+        assert(
+            proof.unit_override_verified == true
+                and id(proof.unit_override_texture) == id(proof.original_texture)
+                and type(proof.unit_override_offset) == 'number'
+                and proof.unit_override_offset % 1 == 0
+                and proof.unit_override_offset >= 0
+                and proof.unit_override_offset <= B.MAX_PART_BYTES - 8,
+            'Verified serialized weapon unit override unavailable'
+        )
+    else
+        assert(
+            proof.unit_override_texture == nil
+                and proof.unit_override_offset == nil
+                and id(proof.material_texture) == id(proof.original_texture),
+            'Weapon stock material texture differs from effective original'
+        )
+    end
+    return true
+end
 function B.archive(archive, records)
     id(archive)
     assert(
@@ -213,18 +276,21 @@ function B.encode(archive, documents, patches, options)
         used[B.TEXTURE .. ':' .. resource] = true
         local group = by_texture[resource] or { variants = {}, items = {} }
         by_texture[resource] = group
+        group.weapon = group.weapon or documents[index].kind == 'weapon'
         local signature = patch.main:sub(185) .. patch.gpu
         group.variants[signature] = group.variants[signature] or { patch = patch, indices = {} }
         local variant = group.variants[signature]
         variant.indices[#variant.indices + 1] = index
     end
-    local sources, units, materials, fixed_sources = {}, {}, {}, {}
+    local sources, units, materials, fixed_sources, override_assignments = {}, {}, {}, {}, {}
     for _, group in pairs(by_texture) do
         local count = 0
         for _ in pairs(group.variants) do
             count = count + 1
         end
-        group.conflict = count > 1
+        -- Weapon palettes must retain their Unit/material assignment even when
+        -- there is only one variant. A Pattern texture can also be used by gear.
+        group.conflict = count > 1 or group.weapon
         if group.conflict then
             local captured, fixed = {}, nil
             for _, variant in pairs(group.variants) do
@@ -232,24 +298,37 @@ function B.encode(archive, documents, patches, options)
                     local entry = documents[index]
                     local source = options.provenance and options.provenance(entry) or entry.binding_source
                     local pattern = entry.document.width == 3 and entry.document.height == 1
+                    local weapon = weapon_proof(entry, source)
                     assert(
-                        (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
+                        (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape' or weapon)
                             and type(entry.key) == 'string'
                             and #entry.key <= 96
                             and (pattern and entry.key:match('^p:%d+:%d+:%d+:%d+$') or not pattern and entry.key:match(
                                 '^%d+:%d+:%d+:%d+$'
                             ))
                             and type(source) == 'table'
-                            and source.version == 1
+                            and (source.version == 1 or weapon)
                             and source.verified == true
                             and source.kind == entry.kind
                             and source.key == entry.key
-                            and type(source.kit_override) == 'boolean'
+                            and (type(source.kit_override) == 'boolean' or weapon)
                             and source.texture_slot == (pattern and 0x81d4c49d or 0x7e662968)
                             and id(source.original_texture) == patches[index].resource,
                         'Binding assignment provenance unavailable; no destinations guessed'
                     )
                     captured[index] = source
+                    if weapon and source.unit_override then
+                        local key = id(source.unit.resource) .. ':' .. source.unit_override_offset
+                        local signature = source.original_texture
+                            .. ':'
+                            .. variant.patch.main:sub(185)
+                            .. variant.patch.gpu
+                        assert(
+                            not override_assignments[key] or override_assignments[key] == signature,
+                            'One serialized weapon unit override has conflicting saved palettes'
+                        )
+                        override_assignments[key] = signature
+                    end
                     if source.kit_override or source.fixed_texture == true then
                         fixed_sources[index] = source
                         assert(
@@ -325,8 +404,9 @@ function B.encode(archive, documents, patches, options)
                         if not fixed_sources[index] then
                             local entry = documents[index]
                             local pattern = entry.document.width == 3 and entry.document.height == 1
+                            local weapon = entry.kind == 'weapon'
                             assert(
-                                (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape')
+                                (entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape' or weapon)
                                     and type(entry.key) == 'string'
                                     and #entry.key <= 96
                                     and (
@@ -338,11 +418,11 @@ function B.encode(archive, documents, patches, options)
                             local source = captured[index]
                             assert(
                                 type(source) == 'table'
-                                    and source.version == 1
+                                    and (source.version == 1 or weapon)
                                     and source.verified == true
                                     and source.kind == entry.kind
                                     and source.key == entry.key
-                                    and source.kit_override == false
+                                    and (source.kit_override == false or weapon)
                                     and source.fixed_texture ~= true,
                                 'Binding assignment provenance unavailable or kit override unsupported; no destinations guessed'
                             )
@@ -371,12 +451,26 @@ function B.encode(archive, documents, patches, options)
                                 hex_at(unit.main, 16) == '0000000000000000',
                                 'Composite mesh material splitting is unsupported'
                             )
-                            local slot =
-                                assert(slots[source.texture_slot], 'Certified material texture slot unavailable')
-                            assert(
-                                hex_at(material.main, slot) == patches[index].resource,
-                                'Material original texture ID changed'
-                            )
+                            local slot = slots[source.texture_slot]
+                            if weapon then
+                                assert(
+                                    (slot and hex_at(material.main, slot) or '0000000000000000')
+                                        == id(source.material_texture),
+                                    'Weapon stock material texture differs from certified source'
+                                )
+                            end
+                            if weapon and source.unit_override then
+                                assert(
+                                    hex_at(unit.main, source.unit_override_offset) == id(source.unit_override_texture),
+                                    'Serialized weapon unit override differs from effective original'
+                                )
+                            else
+                                assert(slot, 'Certified material texture slot unavailable')
+                                assert(
+                                    hex_at(material.main, slot) == patches[index].resource,
+                                    'Material original texture ID changed'
+                                )
+                            end
                             local section = assert(sections[source.section], 'Certified unit SectionID unavailable')
                             for _, at in ipairs(section) do
                                 assert(
@@ -440,6 +534,7 @@ function B.encode(archive, documents, patches, options)
                                 section_offsets = section,
                                 precise = precise,
                                 layout = layout,
+                                unit_override = weapon and source.unit_override,
                             }
                             group.anchors[unit.resource] = sources[index]
                         end
@@ -460,8 +555,26 @@ function B.encode(archive, documents, patches, options)
         end
         error('Unable to allocate a collision-free deterministic binding resource ID', 0)
     end
-    local records, destinations, section_modes = {}, {}, {}
+    local records, destinations, section_modes, unit_overrides = {}, {}, {}, {}
     local function destination(proof, target, selected)
+        if proof.unit_override then
+            assert(selected == true, 'Weapon unit override cannot be inferred for a fallback material')
+            local offsets = unit_overrides[proof.unit.resource] or {}
+            local at = proof.source.unit_override_offset
+            for old in pairs(offsets) do
+                assert(
+                    old == at or at + 8 <= old or at >= old + 8,
+                    'Overlapping serialized weapon Unit override fields'
+                )
+            end
+            assert(
+                not offsets[at] or offsets[at].target == target,
+                'Conflicting retargets for one weapon unit override'
+            )
+            offsets[at] = { target = target, proof = proof }
+            unit_overrides[proof.unit.resource] = offsets
+            return
+        end
         local section_key = proof.unit.resource .. ':' .. proof.source.section
         local mode = proof.precise and 'mesh' or 'whole'
         assert(
@@ -521,74 +634,76 @@ function B.encode(archive, documents, patches, options)
         local group = by_texture[resource]
         if group.fixed and group.original_baseline ~= group.baseline then
             for _, anchor in pairs(group.anchors) do
-                assert(
-                    anchor.precise and anchor.layout and anchor.layout.supported,
-                    'Verified mesh layout required to preserve original kit-conflict fallbacks'
-                )
-                local unit, layout, fixed_slots = anchor.unit, anchor.layout, {}
-                for _, fixed in pairs(fixed_sources) do
-                    if
-                        fixed.unit.resource == unit.resource
-                        and fixed.texture_slot == anchor.source.texture_slot
-                        and fixed.original_texture == resource
-                    then
-                        assert(
-                            fixed.mesh_verified == true and fixed.material_slot_offset ~= nil,
-                            'Verified fixed mesh slot required to preserve original fallbacks'
-                        )
-                        local found
-                        for _, mesh in ipairs(layout.meshes) do
-                            if mesh.id == fixed.mesh_id then
-                                local slot = mesh.material_slots[fixed.material_slot + 1]
-                                assert(
-                                    slot
-                                        and slot.offset == fixed.material_slot_offset
-                                        and slot.section == fixed.section
-                                        and slot.material == fixed.material.resource,
-                                    'Fixed mesh slot differs from pristine fallback layout'
-                                )
-                                fixed_slots[slot.offset], found = true, true
+                if not anchor.unit_override then
+                    assert(
+                        anchor.precise and anchor.layout and anchor.layout.supported,
+                        'Verified mesh layout required to preserve original kit-conflict fallbacks'
+                    )
+                    local unit, layout, fixed_slots = anchor.unit, anchor.layout, {}
+                    for _, fixed in pairs(fixed_sources) do
+                        if
+                            fixed.unit.resource == unit.resource
+                            and fixed.texture_slot == anchor.source.texture_slot
+                            and fixed.original_texture == resource
+                        then
+                            assert(
+                                fixed.mesh_verified == true and fixed.material_slot_offset ~= nil,
+                                'Verified fixed mesh slot required to preserve original fallbacks'
+                            )
+                            local found
+                            for _, mesh in ipairs(layout.meshes) do
+                                if mesh.id == fixed.mesh_id then
+                                    local slot = mesh.material_slots[fixed.material_slot + 1]
+                                    assert(
+                                        slot
+                                            and slot.offset == fixed.material_slot_offset
+                                            and slot.section == fixed.section
+                                            and slot.material == fixed.material.resource,
+                                        'Fixed mesh slot differs from pristine fallback layout'
+                                    )
+                                    fixed_slots[slot.offset], found = true, true
+                                end
                             end
+                            assert(found, 'Fixed mesh unavailable in pristine fallback layout')
                         end
-                        assert(found, 'Fixed mesh unavailable in pristine fallback layout')
                     end
-                end
-                for _, section in ipairs(layout.sections) do
-                    local material = materials[section.material]
-                    if not material then
-                        local raw = options.material_source and options.material_source(section.material)
-                        assert(raw and raw.toc, 'Original fallback material source unavailable')
-                        material = record(raw, B.MATERIAL)
-                        assert(material.resource == section.material, 'Original fallback material resource differs')
-                        materials[section.material] = material
-                        used[B.MATERIAL .. ':' .. material.resource] = true
+                    for _, section in ipairs(layout.sections) do
+                        local material = materials[section.material]
+                        if not material then
+                            local raw = options.material_source and options.material_source(section.material)
+                            assert(raw and raw.toc, 'Original fallback material source unavailable')
+                            material = record(raw, B.MATERIAL)
+                            assert(material.resource == section.material, 'Original fallback material resource differs')
+                            materials[section.material] = material
+                            used[B.MATERIAL .. ':' .. material.resource] = true
+                        end
+                        material_slots(material)
                     end
-                    material_slots(material)
-                end
-                local sections = unit_sections(unit)
-                for _, mesh in ipairs(layout.meshes) do
-                    for _, slot in ipairs(mesh.material_slots) do
-                        -- Opaque unmapped slots have no serialized Material
-                        -- texture link. Keep their exact slot bytes untouched.
-                        if slot.mapped then
-                            assert(materials[slot.material], 'Original fallback mesh material source unavailable')
-                            local material = materials[slot.material]
-                            local at = material_slots(material)[anchor.source.texture_slot]
-                            if at and hex_at(material.main, at) == resource and not fixed_slots[slot.offset] then
-                                destination({
-                                    source = {
-                                        section = slot.section,
-                                        mesh_id = mesh.id,
-                                        material_slot = slot.index,
-                                        material_slot_offset = slot.offset,
-                                    },
-                                    unit = unit,
-                                    material = material,
-                                    slot = at,
-                                    section_offsets = sections[slot.section],
-                                    precise = true,
-                                    layout = layout,
-                                }, group.targets[group.original_baseline], false)
+                    local sections = unit_sections(unit)
+                    for _, mesh in ipairs(layout.meshes) do
+                        for _, slot in ipairs(mesh.material_slots) do
+                            -- Opaque unmapped slots have no serialized Material
+                            -- texture link. Keep their exact slot bytes untouched.
+                            if slot.mapped then
+                                assert(materials[slot.material], 'Original fallback mesh material source unavailable')
+                                local material = materials[slot.material]
+                                local at = material_slots(material)[anchor.source.texture_slot]
+                                if at and hex_at(material.main, at) == resource and not fixed_slots[slot.offset] then
+                                    destination({
+                                        source = {
+                                            section = slot.section,
+                                            mesh_id = mesh.id,
+                                            material_slot = slot.index,
+                                            material_slot_offset = slot.offset,
+                                        },
+                                        unit = unit,
+                                        material = material,
+                                        slot = at,
+                                        section_offsets = sections[slot.section],
+                                        precise = true,
+                                        layout = layout,
+                                    }, group.targets[group.original_baseline], false)
+                                end
                             end
                         end
                     end
@@ -670,80 +785,94 @@ function B.encode(archive, documents, patches, options)
             end
         end
     end
+    for resource, overrides in pairs(unit_overrides) do
+        local changes = unit_changes[resource] or { global = {}, slots = {} }
+        changes.overrides = overrides
+        unit_changes[resource] = changes
+    end
     for resource, changes in pairs(unit_changes) do
         local source, main = units[resource], units[resource].main
-        local table_at = uint(main, 112)
-        local count = uint(main, table_at)
-        local sections = main:sub(table_at + 5, table_at + 4 + count * 4)
-        local materials_out = {}
-        local used_sections = {}
-        for index = 0, count - 1 do
-            local section = uint(main, table_at + 4 + index * 4)
-            used_sections[section] = true
-            local old = hex_at(main, table_at + 4 + count * 4 + index * 8)
-            materials_out[#materials_out + 1] = hash(changes.global[section] or old)
-        end
-        if changes.layout then
-            for _, mesh in ipairs(changes.layout.meshes) do
-                used_sections[mesh.id] = true
+        if next(changes.global) or next(changes.slots) then
+            local table_at = uint(main, 112)
+            local count = uint(main, table_at)
+            local sections = main:sub(table_at + 5, table_at + 4 + count * 4)
+            local materials_out = {}
+            local used_sections = {}
+            for index = 0, count - 1 do
+                local section = uint(main, table_at + 4 + index * 4)
+                used_sections[section] = true
+                local old = hex_at(main, table_at + 4 + count * 4 + index * 8)
+                materials_out[#materials_out + 1] = hash(changes.global[section] or old)
+            end
+            if changes.layout then
+                for _, mesh in ipairs(changes.layout.meshes) do
+                    used_sections[mesh.id] = true
+                    for _, slot in ipairs(mesh.material_slots) do
+                        used_sections[slot.section] = true
+                    end
+                end
+            end
+            local offsets = {}
+            for at in pairs(changes.slots) do
+                offsets[#offsets + 1] = at
+            end
+            table.sort(offsets)
+            for _, at in ipairs(offsets) do
+                local change = changes.slots[at]
+                local proof = change.proof.source
+                local seed = resource
+                    .. word(proof.section)
+                    .. word(proof.mesh_id)
+                    .. word(proof.material_slot)
+                    .. word(at)
+                    .. change.material
+                local allocated
+                for salt = 0, 1023 do
+                    local candidate =
+                        tonumber(fingerprint('EPIC-LUT-mesh-section-v1\0' .. seed .. word(salt)):sub(1, 8), 16)
+                    if candidate ~= 0 and candidate ~= 4294967295 and not used_sections[candidate] then
+                        allocated, used_sections[candidate] = candidate, true
+                        break
+                    end
+                end
+                assert(allocated, 'Unable to allocate a collision-free deterministic mesh SectionID')
+                main = replace(main, at, word(allocated))
+                sections = sections .. word(allocated)
+                materials_out[#materials_out + 1] = hash(change.material)
+            end
+            local extended_count = count + #offsets
+            assert(extended_count <= B.MAX_UNIT_MATERIALS, 'Extended Unit material table exceeds its limit')
+            local append_at = math.ceil(#main / 4) * 4
+            local original_table_end = table_at + 4 + count * 12
+            local original_ending = uint(source.main, 96)
+            assert(
+                original_ending >= original_table_end and original_ending + 8 <= #source.main,
+                'Unsupported original Unit ending region'
+            )
+            local extended = word(extended_count) .. sections .. table.concat(materials_out)
+            -- SDK reads opaque bytes from the material table end to EndingOffset,
+            -- then its trailing mesh-count word. Relocate that exact suffix too;
+            -- the pristine original table and suffix stay at their old offsets.
+            local ending = append_at + #extended + original_ending - original_table_end
+            main = replace(replace(main, 96, word(ending)), 112, word(append_at))
+                .. string.rep('\0', append_at - #main)
+                .. extended
+                .. source.main:sub(original_table_end + 1)
+            assert(#main <= B.MAX_PART_BYTES, 'Extended Unit main exceeds its payload budget')
+            for _, mesh in ipairs(changes.layout and changes.layout.meshes or {}) do
                 for _, slot in ipairs(mesh.material_slots) do
-                    used_sections[slot.section] = true
+                    if not changes.slots[slot.offset] then
+                        assert(uint(main, slot.offset) == slot.section, 'Unselected mesh material slot changed')
+                    end
                 end
             end
         end
-        local offsets = {}
-        for at in pairs(changes.slots) do
-            offsets[#offsets + 1] = at
-        end
-        table.sort(offsets)
-        for _, at in ipairs(offsets) do
-            local change = changes.slots[at]
-            local proof = change.proof.source
-            local seed = resource
-                .. word(proof.section)
-                .. word(proof.mesh_id)
-                .. word(proof.material_slot)
-                .. word(at)
-                .. change.material
-            local allocated
-            for salt = 0, 1023 do
-                local candidate =
-                    tonumber(fingerprint('EPIC-LUT-mesh-section-v1\0' .. seed .. word(salt)):sub(1, 8), 16)
-                if candidate ~= 0 and candidate ~= 4294967295 and not used_sections[candidate] then
-                    allocated, used_sections[candidate] = candidate, true
-                    break
-                end
-            end
-            assert(allocated, 'Unable to allocate a collision-free deterministic mesh SectionID')
-            main = replace(main, at, word(allocated))
-            sections = sections .. word(allocated)
-            materials_out[#materials_out + 1] = hash(change.material)
-        end
-        local extended_count = count + #offsets
-        assert(extended_count <= B.MAX_UNIT_MATERIALS, 'Extended Unit material table exceeds its limit')
-        local append_at = math.ceil(#main / 4) * 4
-        local original_table_end = table_at + 4 + count * 12
-        local original_ending = uint(source.main, 96)
-        assert(
-            original_ending >= original_table_end and original_ending + 8 <= #source.main,
-            'Unsupported original Unit ending region'
-        )
-        local extended = word(extended_count) .. sections .. table.concat(materials_out)
-        -- SDK reads opaque bytes from the material table end to EndingOffset,
-        -- then its trailing mesh-count word. Relocate that exact suffix too;
-        -- the pristine original table and suffix stay at their old offsets.
-        local ending = append_at + #extended + original_ending - original_table_end
-        main = replace(replace(main, 96, word(ending)), 112, word(append_at))
-            .. string.rep('\0', append_at - #main)
-            .. extended
-            .. source.main:sub(original_table_end + 1)
-        assert(#main <= B.MAX_PART_BYTES, 'Extended Unit main exceeds its payload budget')
-        for _, mesh in ipairs(changes.layout and changes.layout.meshes or {}) do
-            for _, slot in ipairs(mesh.material_slots) do
-                if not changes.slots[slot.offset] then
-                    assert(uint(main, slot.offset) == slot.section, 'Unselected mesh material slot changed')
-                end
-            end
+        for at, override in pairs(changes.overrides or {}) do
+            assert(
+                hex_at(main, at) == override.proof.source.original_texture,
+                'Weapon unit override locator overlapped a material/Unit rewrite'
+            )
+            main = replace(main, at, hash(override.target))
         end
         records[#records + 1] = {
             resource = resource,

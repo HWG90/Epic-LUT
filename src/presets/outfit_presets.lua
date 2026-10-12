@@ -42,9 +42,14 @@ local function metadata(original)
     )
     return original
 end
-local function target(kind, key, version, strict)
+local function target(kind, key, version, strict, weapon_resource, weapon_slot)
     assert(
-        (kind == 'armor' or kind == 'helmet' or (version >= 2 and kind == 'cape')) and type(key) == 'string',
+        (
+            kind == 'armor'
+            or kind == 'helmet'
+            or (version >= 2 and kind == 'cape')
+            or (version >= 4 and kind == 'weapon')
+        ) and type(key) == 'string',
         'Invalid preset target'
     )
     local pattern = key:sub(1, 2) == 'p:'
@@ -53,7 +58,42 @@ local function target(kind, key, version, strict)
         (not pattern or version >= 2) and destination:match(strict and '^%d+:%d+:%d+:%d+$' or '^[%d:]+$'),
         'Invalid preset target'
     )
-    return pattern
+    local slot
+    if kind == 'weapon' then
+        local unit_type, mesh, material
+        unit_type, slot, mesh, material = destination:match('^(%d+):(%d+):(%d+):(%d+)$')
+        unit_type, slot, mesh, material = tonumber(unit_type), tonumber(slot), tonumber(mesh), tonumber(material)
+        assert(
+            unit_type == 3 and slot and slot >= 1 and slot <= 3 and mesh and mesh <= 63 and material and material <= 63,
+            'Invalid weapon preset target'
+        )
+        assert(weapon_slot == nil or weapon_slot == slot, 'Weapon preset slot disagrees with destination')
+        assert(
+            type(weapon_resource) == 'string'
+                and #weapon_resource == 16
+                and weapon_resource:match('^%x+$')
+                and weapon_resource ~= string.rep('0', 16),
+            'Invalid weapon preset resource ID'
+        )
+    else
+        assert(weapon_resource == nil or weapon_resource == '-', 'Weapon resource on a garment preset target')
+        assert(weapon_slot == nil, 'Weapon slot on a garment preset target')
+    end
+    return pattern, slot
+end
+local function assignment_identity(proof, kind, weapon_resource, weapon_slot)
+    assert(type(proof) == 'table' and proof.kind == kind, 'Preset assignment gear family differs')
+    if kind == 'weapon' then
+        assert(
+            proof.version == 4
+                and type(proof.weapon_resource) == 'string'
+                and proof.weapon_resource:lower() == weapon_resource:lower()
+                and proof.weapon_slot == weapon_slot,
+            'Preset weapon identity differs from assignment proof'
+        )
+    else
+        assert(proof.version ~= 4, 'Weapon assignment on a garment preset target')
+    end
 end
 -- Plain manifests and bounded DDS/metadata only. Never load code from a shared preset.
 function O.read(m, path, label)
@@ -66,18 +106,27 @@ function O.read(m, path, label)
     local version = lines[1] == 'EPIC-OUTFIT\t1' and 1
         or lines[1] == 'EPIC-OUTFIT\t2' and 2
         or lines[1] == 'EPIC-OUTFIT\t3' and 3
+        or lines[1] == 'EPIC-OUTFIT\t4' and 4
     assert(version and #lines > 1 and #lines <= O.MAX_BINDINGS + 1, 'Invalid outfit preset')
-    local result = { name = label, armor = {}, helmet = {}, cape = {}, entries = {} }
+    local result = { name = label, armor = {}, helmet = {}, cape = {}, weapon = {}, entries = {} }
     local bytes, seen, documents, sidecars, payloads, metadata_payloads = 0, {}, {}, {}, {}, {}
-    local provenance_sidecars = {}
+    local provenance_sidecars, weapon_resources = {}, {}
     for i = 2, #lines do
         local fields = {}
         for field in (lines[i] .. '\t'):gmatch('([^\t]*)\t') do
             fields[#fields + 1] = field
         end
-        assert(#fields == (version == 1 and 3 or version == 3 and 8 or 7), 'Invalid preset entry')
+        assert(#fields == (version == 1 and 3 or version >= 3 and version + 5 or 7), 'Invalid preset entry')
         local kind, key, file = fields[1], fields[2], fields[3]
-        local pattern = target(kind, key, version)
+        local pattern, weapon_slot = target(kind, key, version, nil, fields[9])
+        local weapon_resource = kind == 'weapon' and fields[9]:lower() or nil
+        if weapon_slot then
+            assert(
+                not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == weapon_resource,
+                'Conflicting weapon identities in preset slot'
+            )
+            weapon_resources[weapon_slot] = weapon_resource
+        end
         assert(not seen[kind .. ':' .. key], 'Duplicate preset target')
         seen[kind .. ':' .. key] = true
         basename(file, 'dds')
@@ -121,7 +170,7 @@ function O.read(m, path, label)
             assert(fields[5] == '-' and fields[6] == '-' and fields[7] == '-', 'Incomplete preset patch metadata')
         end
         local provenance
-        if version == 3 and fields[8] ~= '-' then
+        if version >= 3 and fields[8] ~= '-' then
             local module = assert(m.binding_provenance, 'Binding provenance reader unavailable')
             local filename = basename(fields[8], 'assignment')
             if not provenance_sidecars[filename:lower()] then
@@ -132,9 +181,17 @@ function O.read(m, path, label)
             end
             assert(original, 'Binding provenance requires original texture metadata')
             provenance = module.decode(provenance_sidecars[filename:lower()], kind, key, original)
+            assignment_identity(provenance, kind, weapon_resource, weapon_slot)
         end
-        result.entries[#result.entries + 1] =
-            { kind = kind, key = key, document = document, original = original, binding_provenance = provenance }
+        result.entries[#result.entries + 1] = {
+            kind = kind,
+            key = key,
+            document = document,
+            original = original,
+            binding_provenance = provenance,
+            weapon_slot = weapon_slot,
+            weapon_resource = weapon_resource,
+        }
         result[kind][#result[kind] + 1] = document
     end
     return result
@@ -172,11 +229,15 @@ function O.new(m, folder)
         local version = 2
         for _, entry in ipairs(entries) do
             if entry.binding_provenance ~= nil then
-                version = 3
+                version = math.max(version, 3)
+            end
+            if entry.kind == 'weapon' then
+                version = 4
             end
         end
         local rows = { 'EPIC-OUTFIT\t' .. version }
         local files, pixels, sidecars, encoded, seen, bytes = {}, {}, {}, {}, {}, 0
+        local weapon_resources = {}
         local function payload_name(stem, extension, payload)
             local candidate, suffix = stem .. extension, 1
             while true do
@@ -196,7 +257,15 @@ function O.new(m, folder)
         for i, e in ipairs(entries) do
             assert(type(e) == 'table' and type(e.document) == 'table', 'Invalid preset entry')
             assert(e.binding_provenance == nil or type(e.binding_provenance) == 'table', 'Invalid binding provenance')
-            local pattern = target(e.kind, e.key, 2, true)
+            local pattern, weapon_slot = target(e.kind, e.key, version, true, e.weapon_resource, e.weapon_slot)
+            if weapon_slot then
+                local resource = e.weapon_resource:lower()
+                assert(
+                    not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == resource,
+                    'Conflicting weapon identities in preset slot'
+                )
+                weapon_resources[weapon_slot] = resource
+            end
             local identity = e.kind .. ':' .. e.key
             assert(not seen[identity], 'Duplicate preset target')
             seen[identity] = true
@@ -234,16 +303,20 @@ function O.new(m, folder)
                 fields[4], fields[5], fields[6], fields[7] =
                     original.resource:lower(), tostring(original.width), tostring(original.height), sidecar
             end
-            if version == 3 then
+            if version >= 3 then
                 fields[8] = '-'
                 if e.binding_provenance then
                     assert(original, 'Binding provenance requires original texture metadata')
                     local module = assert(m.binding_provenance, 'Binding provenance writer unavailable')
                     local text = module.encode(e.binding_provenance, e.kind, e.key, original)
+                    assignment_identity(e.binding_provenance, e.kind, e.weapon_resource, weapon_slot)
                     fields[8] = payload_name('outfit-' .. label .. '-' .. e.kind .. '-' .. i, '.assignment', text)
                     bytes = bytes + #text
                     assert(bytes <= O.MAX_PAYLOAD_BYTES, 'Preset payload budget exceeded')
                 end
+            end
+            if version >= 4 then
+                fields[9] = e.kind == 'weapon' and e.weapon_resource:lower() or '-'
             end
             rows[#rows + 1] = table.concat(fields, '\t')
         end

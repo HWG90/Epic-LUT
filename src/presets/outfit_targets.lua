@@ -2,7 +2,7 @@
 -- An extra live mesh can inherit only a unanimous saved family certified by an
 -- exact live anchor using the same original resource and LUT dimensions.
 local T = { MAX_BINDINGS = 4096, MAX_PAYLOAD_BYTES = 8 * 1024 * 1024, MAX_DOCUMENT_BYTES = 65536 }
-local kinds = { armor = true, helmet = true, cape = true }
+local kinds = { armor = true, helmet = true, cape = true, weapon = true }
 local function dense(list, name)
     assert(type(list) == 'table' and #list <= T.MAX_BINDINGS, 'Invalid ' .. name .. ' list')
     local count = 0
@@ -27,7 +27,33 @@ local function target(key)
     end
     return destination, pattern
 end
-local function family(kind, key, pattern)
+local function weapon_identity(kind, key, descriptor)
+    if kind ~= 'weapon' then
+        return ''
+    end
+    local unit_type, slot, mesh, material = key:match('^(%d+):(%d+):(%d+):(%d+)$')
+    unit_type, slot, mesh, material = tonumber(unit_type), tonumber(slot), tonumber(mesh), tonumber(material)
+    local resource = descriptor.weapon_resource
+    if
+        unit_type ~= 3
+        or not slot
+        or slot < 1
+        or slot > 3
+        or not mesh
+        or mesh > 63
+        or not material
+        or material > 63
+        or (descriptor.weapon_slot ~= nil and descriptor.weapon_slot ~= slot)
+        or type(resource) ~= 'string'
+        or #resource ~= 16
+        or not resource:match('^%x+$')
+        or resource == string.rep('0', 16)
+    then
+        return
+    end
+    return resource:lower()
+end
+local function family(kind, key, pattern, descriptor)
     if not kinds[kind] or type(key) ~= 'string' or #key > 128 then
         return
     end
@@ -43,7 +69,11 @@ local function family(kind, key, pattern)
         end
         fields[index] = tostring(number)
     end
-    return kind .. ':' .. (pattern and 'p:' or '') .. fields[1] .. ':' .. fields[2] .. ':' .. fields[4]
+    local weapon = weapon_identity(kind, key, descriptor or {})
+    if not weapon then
+        return
+    end
+    return kind .. ':' .. weapon .. ':' .. (pattern and 'p:' or '') .. fields[1] .. ':' .. fields[2] .. ':' .. fields[4]
 end
 local function shape(document, pattern)
     return type(document) == 'table'
@@ -68,14 +98,24 @@ function T.new(preset, deps)
     local entries = preset and preset.entries or {}
     dense(entries, 'Preset targets')
     local exact, families, encoded, payloads, payload_bytes = {}, {}, {}, {}, 0
+    local weapon_resources = {}
     for _, entry in ipairs(entries) do
         assert(type(entry) == 'table' and kinds[entry.kind], 'Invalid preset gear kind')
         local key, pattern = target(entry.key)
         assert(key and shape(entry.document, pattern), 'Invalid saved LUT target or dimensions')
+        local weapon_resource = assert(weapon_identity(entry.kind, key, entry), 'Invalid saved weapon identity')
+        if entry.kind == 'weapon' then
+            local slot = tonumber(key:match('^%d+:(%d+):'))
+            assert(
+                not weapon_resources[slot] or weapon_resources[slot] == weapon_resource,
+                'Conflicting saved weapon identities in preset slot'
+            )
+            weapon_resources[slot] = weapon_resource
+        end
         local identity = entry.kind .. ':' .. entry.key
         assert(not exact[identity], 'Duplicate saved LUT target')
         exact[identity] = entry
-        local identity_family = family(entry.kind, key, pattern)
+        local identity_family = family(entry.kind, key, pattern, entry)
         if identity_family then
             local document = entry.document
             local bytes = encoded[document]
@@ -104,7 +144,7 @@ function T.new(preset, deps)
             end
         end
     end
-    local self = {}
+    local self = { weapon_resources = weapon_resources }
     local function exact_entry(kind, binding, pattern)
         if not kinds[kind] or type(binding) ~= 'table' then
             return
@@ -115,7 +155,14 @@ function T.new(preset, deps)
             return
         end
         key = (pattern and 'p:' or '') .. key
-        return exact[kind .. ':' .. key] or kind == 'cape' and binding.cape == true and exact['armor:' .. key]
+        local saved = exact[kind .. ':' .. key] or kind == 'cape' and binding.cape == true and exact['armor:' .. key]
+        if
+            kind == 'weapon'
+            and (not saved or weapon_identity(kind, destination, binding) ~= weapon_identity(kind, destination, saved))
+        then
+            return
+        end
+        return saved
     end
     function self.prepare(live)
         dense(live, 'Live targets')
@@ -135,7 +182,7 @@ function T.new(preset, deps)
                 and saved.document.width == original.width
                 and saved.document.height == original.height
             then
-                local identity = family(kind, binding.save_key, pattern)
+                local identity = family(kind, binding.save_key, pattern, binding)
                 local current, hash = identity and families[identity], resource(original)
                 if
                     current
@@ -155,7 +202,7 @@ function T.new(preset, deps)
         if saved then
             return saved.document, 'exact'
         end
-        local identity = type(binding) == 'table' and family(kind, binding.save_key, pattern)
+        local identity = type(binding) == 'table' and family(kind, binding.save_key, pattern, binding)
         if not identity then
             return nil, 'Unsupported saved target topology'
         end

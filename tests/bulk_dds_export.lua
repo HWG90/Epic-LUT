@@ -238,6 +238,44 @@ assert(
 )
 os.remove(foreign_staging)
 assert(rmdir(last_stage))
+local weapon_ids = { '5fecab819f96a3e8', '1111111111111111', '2222222222222222' }
+local weapon_labels = { 'Primary', 'Secondary', 'Support' }
+local weapon_entries, weapon_names = {}, {}
+for slot = 1, 3 do
+    local value = entry(material, 'weapon', 1, 'd3ce605892d5331b')
+    value.weapon_resource, value.weapon_slot = weapon_ids[slot], slot
+    weapon_entries[#weapon_entries + 1] = value
+    weapon_names[#weapon_names + 1] = 'Weapon Roles '
+        .. weapon_labels[slot]
+        .. '-'
+        .. weapon_ids[slot]
+        .. ' LUT1-d3ce605892d5331b.dds'
+end
+weapon_entries[#weapon_entries + 1] = weapon_entries[1]
+local weapon_folder = save('Weapon Roles', weapon_entries, 1, weapon_names)
+for _, name in ipairs(weapon_names) do
+    assert_file(weapon_folder, name, material)
+end
+local first, second = entry(pattern, 'weapon', 1), entry(pattern, 'weapon', 1)
+first.weapon_resource, first.weapon_slot = weapon_ids[1], 1
+second.weapon_resource, second.weapon_slot = 'ffffffffffffffff', 1
+local configurations =
+    { 'Configs Primary-' .. weapon_ids[1] .. ' PatternLUT1.dds', 'Configs Primary-ffffffffffffffff PatternLUT1.dds' }
+local configuration_folder = save('Configs', { first, second }, 3, configurations)
+for _, name in ipairs(configurations) do
+    assert_file(configuration_folder, name, pattern)
+end
+before_made, before_writes = made, writes
+for _, value in ipairs({
+    { document = material, kind = 'weapon', ordinal = 1, weapon_slot = 0, weapon_resource = weapon_ids[1] },
+    { document = material, kind = 'weapon', ordinal = 1, weapon_slot = 1, weapon_resource = 'bad' },
+    { document = material, kind = 'weapon', ordinal = 1, weapon_slot = 1, weapon_resource = ('0'):rep(16) },
+    { document = material, kind = 'armor', ordinal = 1, weapon_slot = 1, weapon_resource = weapon_ids[1] },
+}) do
+    assert(not pcall(export.save, 'Bad Weapon', { value }, 1))
+end
+assert(not pcall(export.save, 'Sparse Weapon', { [1] = first, [3] = second }, 1))
+assert(made == before_made and writes == before_writes, 'Malformed weapon export touched the filesystem')
 for _, output in ipairs(published) do
     for _, name in ipairs(output.filenames) do
         assert(os.remove(output.folder .. '/' .. name))
@@ -247,4 +285,7 @@ end
 assert(rmdir(root))
 print(
     'PASS bulk DDS: 4096 bindings, 129 unique IDs, five naming formats, exact HDR/signed-zero pixels, deterministic dedup/collisions and owned rollback'
+)
+print(
+    'PASS weapon bulk DDS: primary/secondary/support and configuration names, within-weapon dedup, exact F32/Pattern bytes and pre-write validation'
 )

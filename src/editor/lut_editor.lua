@@ -7,7 +7,13 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
     local function editable(d, column, channel)
         return d
             and not d.read_only
-            and (self.handle.get('unlock') or (m.semantics.is_color(d.width, column) and channel <= 3))
+            and (
+                self.handle.get('unlock')
+                or (m.semantics.is_color(d.width, column) and channel <= 3)
+                or d.kind == 'weapon'
+                    and d.family == 'pattern'
+                    and ((column == 2 and channel <= 3) or (column == 3 and channel == 4))
+            )
     end
     function self.can_pick(row, column, mode)
         local d = document()
@@ -432,16 +438,19 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             return true
         end
         local row = math.min(h.get('edit_row'), d.height)
-        local column = h.get('edit_column')
+        local column = math.min(h.get('edit_column'), d.width)
+        local weapon_pattern = d.kind == 'weapon' and d.family == 'pattern' and d.width == 3 and d.height == 1
+        mod.controls.edit_column.choices = weapon_pattern and { 'Color', 'Mat/Opac', 'Roughness' }
+            or m.semantics.columns
         local rows = {}
         for i = 1, d.height do
             rows[i] = 'Row ' .. i
         end
         mod.controls.edit_row.choices = rows
         mod.controls.advanced_row.choices = rows
-        local color_column = h.get('edit_column')
+        local color_column = column
         local i = m.semantics.index(row, color_column, 1, d.width, d.height)
-        local values = { edit_row = row, advanced_row = row }
+        local values = { edit_row = row, advanced_row = row, edit_column = column }
         local r = rgb(d.data, i)
         values.cell_color = string.format('#%02X%02X%02X', r[1], r[2], r[3])
         for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
@@ -467,7 +476,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             },
         }) do
             local id, col, ch, lo, hi = unpack(spec)
-            local value = tonumber(d.data[m.semantics.index(row, col, ch, d.width, d.height)])
+            local value = col <= d.width and tonumber(d.data[m.semantics.index(row, col, ch, d.width, d.height)]) or 0
             local choices = {}
             for v = lo, hi do
                 local label = id == 'shader_mode' and (v == 0 and 'Off / default' or 'Shader mode ' .. v)
@@ -488,12 +497,10 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         self.busy = false
         assert(ok, why)
         for ch, name in ipairs({ 'r', 'g', 'b', 'a' }) do
-            mod.controls['cell_' .. name].disabled = not (
-                h.get('unlock') or (m.semantics.is_color(d.width, column) and ch <= 3)
-            )
+            mod.controls['cell_' .. name].disabled = not editable(d, column, ch)
         end
         for _, id in ipairs({ 'shader_mode', 'detail_texture', 'camo_pattern' }) do
-            mod.controls[id].disabled = not h.get('unlock')
+            mod.controls[id].disabled = weapon_pattern or not h.get('unlock')
         end
         local target = self.value_target
         local value_column = target and target.column or h.get('edit_column')

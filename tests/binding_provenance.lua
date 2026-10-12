@@ -559,3 +559,186 @@ end, 'count exceeds')
 print(
     'PASS binding provenance: real Lua Unit/named material proof with zero ResourceManager calls, fresh named SDK mesh/slot offsets, v1/v2 metadata-only compatibility, composite partial proof and stale/ambiguous refusal'
 )
+local weapon_refs = {
+    version = 4,
+    kind = 'weapon',
+    key = 'p:3:1:5:3',
+    texture_slot = P.PATTERN,
+    original_texture = tex,
+    section = 0xabc12345,
+    index_stamp = ('b'):rep(64),
+    weapon_resource = unit_id,
+    weapon_slot = 1,
+    unit = unit,
+    material = mat,
+    mesh_id = 99,
+    material_slot = 0,
+    material_texture = tex,
+    unit_override = false,
+    verified = true,
+    mesh_verified = true,
+    material_slot_offset = 268,
+}
+local weapon_text = P.encode(weapon_refs)
+assert(weapon_text:match('^EPIC%-BINDING\t4\n'))
+local weapon_decoded = P.decode(weapon_text, 'weapon', weapon_refs.key, { resource = tex })
+assert(
+    P.matches(weapon_refs, weapon_decoded)
+        and weapon_decoded.weapon_resource == unit_id
+        and weapon_decoded.weapon_slot == 1
+        and weapon_decoded.kit == nil
+        and weapon_decoded.kit_override == nil
+)
+assert(
+    not weapon_decoded.verified
+        and not weapon_decoded.unit.main
+        and not weapon_decoded.material.main
+        and not weapon_decoded.material_slot_offset
+        and not weapon_text:find('verified', 1, true)
+)
+local function copy_weapon()
+    local copy = {}
+    for key, value in pairs(weapon_refs) do
+        copy[key] = value
+    end
+    return copy
+end
+for _, mutation in ipairs({
+    { 'kind', 'armor' },
+    { 'weapon_slot', 2 },
+    { 'weapon_resource', 'ffffffffffffffff' },
+    { 'weapon_resource', 'bad' },
+    { 'mesh_id', false },
+    { 'material_slot', 64 },
+    { 'kit', {} },
+    { 'kit_override', false },
+    { 'fixed_texture', true },
+    { 'material_texture', '1111111111111111' },
+    { 'unit_override', nil },
+}) do
+    local copy = copy_weapon()
+    copy[mutation[1]] = mutation[2]
+    assert(not pcall(P.encode, copy), 'Malformed weapon provenance accepted: ' .. mutation[1])
+end
+local overridden = copy_weapon()
+overridden.unit_override, overridden.unit_override_verified = true, true
+overridden.unit_override_texture, overridden.unit_override_offset = tex, 88
+overridden.material_texture = '1111111111111111'
+local override_text = P.encode(overridden)
+local override_decoded = P.decode(override_text)
+assert(
+    override_decoded.unit_override
+        and override_decoded.unit_override_offset == 88
+        and override_decoded.unit_override_texture == tex
+        and override_decoded.material_texture == '1111111111111111'
+)
+assert(not override_decoded.unit_override_verified and not override_decoded.verified)
+overridden.unit_override_texture = 'ffffffffffffffff'
+assert(not pcall(P.encode, overridden), 'Mismatched effective Unit override accepted')
+overridden.unit_override_texture, overridden.unit_override_offset = tex, P.MAX_PART - 7
+assert(not pcall(P.encode, overridden), 'Out-of-bounds Unit override locator accepted')
+assert(not pcall(P.decode, weapon_text:gsub('EPIC%-BINDING\t4', 'EPIC-BINDING\t3', 1)))
+assert(not pcall(P.decode, weapon_text .. '\nEXTRA'))
+local kit_reads = 0
+local kit_ok = pcall(
+    P.kit_override,
+    function()
+        kit_reads = kit_reads + 1
+    end,
+    game,
+    identity,
+    { kind = 'weapon', weapon_resource = unit_id, weapon_slot = 1, save_key = '3:1:0:0' },
+    unit_id,
+    P.PATTERN
+)
+assert(not kit_ok and kit_reads == 0, 'Weapon configuration entered the 32-bit garment kit reader')
+local DDS = dofile('src/core/dds.lua')
+local Outfit = dofile('src/presets/outfit_presets.lua')
+local Export = dofile('src/presets/preset_export.lua')
+local weapon_document = { width = 3, height = 1, data = ffi.new('float[12]') }
+weapon_document.data[0], weapon_document.data[7] = 4.75, -0.375
+local weapon_original = {
+    width = 3,
+    height = 1,
+    resource = tex,
+    patch_source = '0123456789abcdef\n' .. ('\0'):rep(192) .. DDS.encode(weapon_document.data, 3, 1):sub(1, 148),
+}
+local bundle = Export.bundle({ dds = DDS, binding_provenance = P }, {
+    entries = {
+        {
+            kind = 'weapon',
+            key = weapon_refs.key,
+            weapon_slot = 1,
+            weapon_resource = unit_id,
+            document = weapon_document,
+            original = weapon_original,
+            binding_provenance = weapon_refs,
+        },
+    },
+})
+local memory_files = {}
+for _, file in ipairs(bundle) do
+    memory_files[file[1]] = file[2]
+end
+local imported = Outfit.read({
+    dds = DDS,
+    binding_provenance = P,
+    file_io = {
+        read = function(path)
+            return assert(memory_files[path:match('[^/]+$')])
+        end,
+    },
+}, 'memory/preset.tsv', 'Weapon Proof')
+assert(
+    imported.entries[1].weapon_resource == unit_id
+        and imported.entries[1].binding_provenance.version == 4
+        and P.matches(weapon_refs, imported.entries[1].binding_provenance)
+)
+local mismatched_entry = {
+    kind = 'weapon',
+    key = weapon_refs.key,
+    weapon_slot = 1,
+    weapon_resource = 'ffffffffffffffff',
+    document = weapon_document,
+    original = weapon_original,
+    binding_provenance = weapon_refs,
+}
+assert(
+    not pcall(Export.bundle, { dds = DDS, binding_provenance = P }, { entries = { mismatched_entry } }),
+    'Outer preset weapon ID differed from its internally valid assignment proof'
+)
+local save_writes = 0
+local memory_store = Outfit.new({
+    dds = DDS,
+    binding_provenance = P,
+    file_io = {
+        read = function()
+            return nil
+        end,
+        write = function()
+            save_writes = save_writes + 1
+        end,
+    },
+    windows = {
+        files = function()
+            return {}
+        end,
+    },
+}, 'memory')
+assert(
+    not pcall(memory_store.save, 'Mismatched Weapon', { mismatched_entry }) and save_writes == 0,
+    'Mismatched weapon assignment wrote preset payloads'
+)
+memory_files['preset.tsv'] = memory_files['preset.tsv']:gsub(unit_id, 'ffffffffffffffff')
+assert(not pcall(Outfit.read, {
+    dds = DDS,
+    binding_provenance = P,
+    file_io = {
+        read = function(path)
+            return assert(memory_files[path:match('[^/]+$')])
+        end,
+    },
+}, 'memory/preset.tsv', 'Mismatched Weapon'), 'Schema4 imported a proof for another weapon configuration')
+print(
+    'PASS v4 weapon provenance: exact config/slot/unit identity, metadata-only pristine refs, explicit stock/Unit override semantics and schema4 preset ZIP round trip'
+)

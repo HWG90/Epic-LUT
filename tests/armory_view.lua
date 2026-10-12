@@ -63,12 +63,12 @@ local controls = {
         end,
     },
 }
-for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+for _, kind in ipairs({ 'armor', 'helmet', 'cape', 'weapon' }) do
     controls[#controls + 1] = {
         id = 'outfit_target_' .. kind,
         type = 'toggle',
         label = kind,
-        default = true,
+        default = kind ~= 'weapon',
         on_change = function(value)
             state.armory_targets[kind] = value
         end,
@@ -1083,10 +1083,121 @@ for _, lane in pairs(view.preview_lanes) do
     assert(#lane.items == 0 and lane.maximum == 0, 'Missing preset retained cached previews or scrollbar state')
 end
 assert(not view.preview_fingerprints and not view.preview_plan, 'Deselected preset retained full preview buffers')
+local weapon_document = make_document(23, 8, 0.25)
+local weapon_pattern = make_document(3, 1, 0.7)
+weapon_pattern.data[11] = 0.75
+local weapon_entries, weapon_documents = {}, {}
+local ids = { '5fecab819f96a3e8', '1111111111111111', '2222222222222222' }
+for slot = 1, 3 do
+    for mesh = 0, 4 do
+        weapon_entries[#weapon_entries + 1] = {
+            kind = 'weapon',
+            key = '3:' .. slot .. ':' .. mesh .. ':0',
+            weapon_slot = slot,
+            weapon_resource = ids[slot],
+            document = weapon_document,
+        }
+        weapon_documents[#weapon_documents + 1] = weapon_document
+    end
+end
+for mesh = 0, 4 do
+    weapon_entries[#weapon_entries + 1] = {
+        kind = 'weapon',
+        key = 'p:3:1:' .. mesh .. ':0',
+        weapon_slot = 1,
+        weapon_resource = ids[1],
+        document = weapon_pattern,
+    }
+    weapon_documents[#weapon_documents + 1] = weapon_pattern
+end
+state.raw.outfit = { armor = {}, helmet = {}, cape = {}, weapon = weapon_documents, entries = weapon_entries }
+state.armory_targets.weapon = false
+view.lane_scroll, view.sidebar_scroll = {}, 0
+compose_at(2560, 1440)
+assert(
+    #view.preview_lanes.weapon.items == 4 and view.preview_lanes.weapon.bindings == 20,
+    'Weapon preview collapsed different slots or discarded LOD counts'
+)
+assert(
+    view.preview_lanes.armor == nil and view.preview_lanes.pattern == nil,
+    'Weapon-only preset wasted space on empty garment lanes'
+)
+assert(
+    view.preview_lanes.weapon.items[1].count == 5
+        and view.preview_lanes.weapon.items[2].count == 5
+        and view.preview_lanes.weapon.items[3].count == 5
+        and view.preview_lanes.weapon.items[4].count == 5
+)
+local before_reads = view.preview_fingerprint_reads
+compose_at(2560, 1440)
+assert(view.preview_fingerprint_reads == before_reads, 'Weapon preview reread unchanged raw tables')
+weapon_entries[1].weapon_resource = 'ffffffffffffffff'
+compose_at(2560, 1440)
+assert(#view.preview_lanes.weapon.items == 5, 'Identical bytes from another weapon configuration were merged')
+weapon_entries[1].weapon_resource = ids[1]
+for _, font in ipairs({ 12, 16, 20, 28 }) do
+    for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+        for _, size in ipairs({ { 1100, 900 }, { 2000, 1100 } }) do
+            menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = font, scale, size[1], size[2]
+            view.lane_scroll, view.sidebar_scroll = {}, 0
+            local draw = compose_at(2560, 1440)
+            local lane = view.preview_lanes.weapon
+            assert(
+                lane.viewport.x >= view.bounds.x
+                    and lane.viewport.y >= view.bounds.y
+                    and lane.viewport.x + lane.viewport.w <= view.bounds.x + view.bounds.w
+                    and lane.viewport.y + lane.viewport.h <= view.bounds.y + view.bounds.h
+            )
+            for _, card in ipairs(lane.cards) do
+                assert(card.cell <= 18 and #card.samples <= 8, 'Weapon preview escaped its row/cell cap')
+            end
+            if lane.maximum > 0 then
+                assert(view.wheel(lane.viewport.x + 1, lane.viewport.y + 1, -12000))
+                assert(view.lane_scroll.weapon == lane.maximum)
+                draw = compose_at(2560, 1440)
+            end
+            local primary, secondary, support, roughness = false, false, false, false
+            view.lane_scroll.weapon = 0
+            for _, c in ipairs(compose_at(2560, 1440)) do
+                primary = primary or c.full_text == 'Primary LUT 1'
+                secondary = secondary or c.full_text == 'Secondary LUT 2'
+                support = support or c.full_text == 'Support LUT 3'
+            end
+            assert(primary, 'Primary weapon caption missing')
+            view.lane_scroll.weapon = math.min(lane.maximum, lane.cards[3].depth)
+            for _, c in ipairs(compose_at(2560, 1440)) do
+                support = support or c.full_text == 'Support LUT 3'
+            end
+            view.lane_scroll.weapon = lane.maximum
+            for _, c in ipairs(compose_at(2560, 1440)) do
+                support = support or c.full_text == 'Support LUT 3'
+                if c.ui_role == 'swatch_fill' and c.c[1] == 191 and c.c[2] == 191 and c.c[3] == 191 then
+                    roughness = true
+                end
+            end
+            assert(
+                support and roughness,
+                'Bounded weapon preview lost Support/Pattern alpha roughness font='
+                    .. font
+                    .. ' scale='
+                    .. scale
+                    .. ' width='
+                    .. size[1]
+            )
+        end
+    end
+end
+assert(
+    h.set('outfit_target_weapon', true) and state.armory_targets.weapon == true,
+    'Weapons checkbox did not use its registered target control'
+)
 renderer.release()
 state.raw.outfit, state.armory_cape_available = original_outfit, nil
 print(
     'PASS Armory masks: seven save/apply combinations, checkbox and label hits, explicit name commits, empty/cancel guards, unavailable targets, inline/fallback layout and native checkbox/label containment'
+)
+print(
+    'PASS Armory weapon preview: 3 slots/20 LOD+Pattern bindings, exact identity/bytes compaction, metadata/cache and 24 bounded font/scale layouts'
 )
 print(
     'PASS Armory preview: exact cached RGBA/dimension/kind compaction, 169 retained bindings, four independent responsive lanes, native masks/headers, wheel/thumb/track endpoints and bounded tall-row sampling'

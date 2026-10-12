@@ -11,7 +11,57 @@ local E = {
         'Raw DDS (entire preset)',
     },
 }
-local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
+local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', weapon = 'Weapon' }
+local weapon_labels = { 'Primary', 'Secondary', 'Support' }
+local function weapon_target(entry)
+    if entry.kind ~= 'weapon' then
+        assert(entry.weapon_resource == nil and entry.weapon_slot == nil, 'Weapon identity on a garment preset target')
+        return
+    end
+    local key = type(entry.key) == 'string' and entry.key:gsub('^p:', '') or ''
+    local unit_type, slot, mesh, material = key:match('^(%d+):(%d+):(%d+):(%d+)$')
+    unit_type, slot, mesh, material = tonumber(unit_type), tonumber(slot), tonumber(mesh), tonumber(material)
+    assert(
+        unit_type == 3 and slot and slot >= 1 and slot <= 3 and mesh and mesh <= 63 and material and material <= 63,
+        'Invalid weapon preset target'
+    )
+    assert(entry.weapon_slot == nil or entry.weapon_slot == slot, 'Weapon preset slot disagrees with destination')
+    assert(
+        type(entry.weapon_resource) == 'string'
+            and #entry.weapon_resource == 16
+            and entry.weapon_resource:match('^%x+$')
+            and entry.weapon_resource ~= string.rep('0', 16),
+        'Invalid weapon preset resource ID'
+    )
+    return slot
+end
+local function validate(entries)
+    assert(type(entries) == 'table' and #entries <= E.MAX_BINDINGS, 'Invalid saved preset entries')
+    local count, seen, weapons = 0, {}, {}
+    for index in pairs(entries) do
+        assert(
+            type(index) == 'number' and index % 1 == 0 and index >= 1 and index <= #entries,
+            'Saved preset entries must be a dense list'
+        )
+        count = count + 1
+    end
+    assert(count == #entries, 'Saved preset entries must be a dense list')
+    for _, entry in ipairs(entries) do
+        assert(
+            type(entry) == 'table' and kind_labels[entry.kind] and type(entry.key) == 'string',
+            'Invalid saved LUT gear target'
+        )
+        local identity = entry.kind .. ':' .. entry.key
+        assert(not seen[identity], 'Duplicate saved LUT target')
+        seen[identity] = true
+        local slot = weapon_target(entry)
+        if slot then
+            local resource = entry.weapon_resource:lower()
+            assert(not weapons[slot] or weapons[slot] == resource, 'Conflicting weapon identities in preset slot')
+            weapons[slot] = resource
+        end
+    end
+end
 local function collection(preset, include_capes, include_patterns)
     local entries = assert(preset and preset.entries, 'Choose a saved Armory preset first')
     if include_capes ~= false and include_patterns ~= false then
@@ -35,9 +85,14 @@ local function collection(preset, include_capes, include_patterns)
 end
 function E.lut_choices(preset)
     local choices, counts = {}, {}
+    validate(preset and preset.entries or {})
     for _, entry in ipairs(preset and preset.entries or {}) do
         local pattern = entry.document.width == 3
         local kind = assert(kind_labels[entry.kind], 'Invalid saved LUT gear kind')
+        local slot = weapon_target(entry)
+        if slot then
+            kind = weapon_labels[slot]
+        end
         local label = kind .. (pattern and ' Pattern LUT ' or ' LUT ')
         counts[label] = (counts[label] or 0) + 1
         choices[#choices + 1] = label
@@ -49,17 +104,23 @@ end
 function E.bundle(m, preset, include_capes, include_patterns)
     assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
     assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
+    validate(preset.entries)
     local entries = collection(preset, include_capes, include_patterns)
     local version = 2
     for _, entry in ipairs(entries) do
         if entry.binding_provenance then
-            version = 3
+            version = math.max(version, 3)
+        end
+        if entry.kind == 'weapon' then
+            version = 4
         end
     end
     local manifest, files = { 'EPIC-OUTFIT\t' .. version }, {}
     local payloads, sources, payload_count, source_count, bytes = {}, {}, 0, 0, 0
     local assignments, assignment_count = {}, 0
     for _, entry in ipairs(entries) do
+        assert(kind_labels[entry.kind], 'Invalid saved LUT gear kind')
+        local weapon_slot = weapon_target(entry)
         local encoded = m.dds.encode(entry.document.data, entry.document.width, entry.document.height)
         local file = payloads[encoded]
         if not file then
@@ -86,12 +147,26 @@ function E.bundle(m, preset, include_capes, include_patterns)
             fields[4], fields[5], fields[6], fields[7] =
                 entry.original.resource, tostring(entry.original.width), tostring(entry.original.height), sidecar
         end
-        if version == 3 then
+        if version >= 3 then
             fields[8] = '-'
             if entry.binding_provenance then
                 assert(fields[4] ~= '-', 'Binding provenance requires original texture metadata')
                 local module = assert(m.binding_provenance, 'Binding provenance writer unavailable')
                 local encoded_proof = module.encode(entry.binding_provenance, entry.kind, entry.key, entry.original)
+                if entry.kind == 'weapon' then
+                    assert(
+                        entry.binding_provenance.version == 4
+                            and type(entry.binding_provenance.weapon_resource) == 'string'
+                            and entry.binding_provenance.weapon_resource:lower() == entry.weapon_resource:lower()
+                            and entry.binding_provenance.weapon_slot == weapon_slot,
+                        'Preset weapon identity differs from assignment proof'
+                    )
+                else
+                    assert(
+                        entry.binding_provenance.kind == entry.kind and entry.binding_provenance.version ~= 4,
+                        'Preset assignment gear family differs'
+                    )
+                end
                 local filename = assignments[encoded_proof]
                 if not filename then
                     bytes = bytes + #encoded_proof
@@ -103,6 +178,9 @@ function E.bundle(m, preset, include_capes, include_patterns)
                 end
                 fields[8] = filename
             end
+        end
+        if version >= 4 then
+            fields[9] = entry.kind == 'weapon' and entry.weapon_resource:lower() or '-'
         end
         manifest[#manifest + 1] = table.concat(fields, '\t')
     end
@@ -127,10 +205,12 @@ function E.new(m, paths, options)
         original_patch = options.original_patch,
         material_source = options.material_source,
         unit_layout = options.unit_layout or m.binding_unit_layout,
+        weapon_patch_archive = options.weapon_patch_archive,
     })
     function self.save(name, preset, format, index, naming)
         assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
         assert(#preset.entries <= E.MAX_BINDINGS, 'Preset exceeds 4096 LUT bindings')
+        validate(preset.entries)
         assert(format >= 1 and format <= #E.formats and format % 1 == 0, 'Choose an Armory export format')
         index = index or 1
         assert(type(index) == 'number' and index % 1 == 0 and preset.entries[index], 'Choose a saved preset LUT')
@@ -152,13 +232,16 @@ function E.new(m, paths, options)
         if format == 5 or (format == 4 and #selected_entries > 1) then
             local entries, counts = {}, {}
             for _, entry in ipairs(format == 5 and saved_entries or selected_entries) do
-                local key = entry.kind .. ':' .. entry.document.width
+                local weapon_slot = weapon_target(entry)
+                local key = entry.kind .. ':' .. (weapon_slot or 0) .. ':' .. entry.document.width
                 counts[key] = (counts[key] or 0) + 1
                 entries[#entries + 1] = {
                     document = entry.document,
                     original = entry.original,
                     kind = entry.kind,
                     ordinal = counts[key],
+                    weapon_slot = weapon_slot,
+                    weapon_resource = entry.weapon_resource and entry.weapon_resource:lower(),
                 }
             end
             local folder, count = assert(m.bulk_dds_export, 'Bulk DDS exporter unavailable')
@@ -177,7 +260,7 @@ function E.new(m, paths, options)
                     'This preset has no patch destination IDs; resave it on the intended gear before exporting a patch'
                 )
             end
-            if format == 2 and #entries == 1 then
+            if format == 2 and #entries == 1 and entries[1].kind ~= 'weapon' then
                 return patch.save(name, entries[1].document, entries[1].original)
             end
             return patch.save(name, entries)

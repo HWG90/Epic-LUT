@@ -400,13 +400,13 @@ function A.new(deps)
         apply_armor_activate = function()
             return deps.action(function()
                 assert(deps.handle().set('scope', 2))
-                return deps.apply()
+                return deps.apply(nil, 'armor')
             end)
         end,
         apply_helmet_activate = function()
             return deps.action(function()
                 assert(deps.handle().set('scope', 3))
-                return deps.apply()
+                return deps.apply(nil, 'helmet')
             end)
         end,
         remove_lut_activate = function()
@@ -427,12 +427,16 @@ function A.new(deps)
             frontend.menu.outfit_dialog = {
                 phase = 'scope',
                 save_kind = { armor = true, helmet = true, cape = true },
+                weapon_options = deps.weapon_enabled == true,
                 mod = mod,
                 control = mod.controls.outfit_name,
                 names = outfits.names(),
                 on_save = deps.keep_outfit,
             }
-            return deps.message('Choose Armor, Helmet and Cape LUTs to keep as a named preset.')
+            return deps.message(
+                deps.weapon_enabled and 'Choose gear and weapon LUTs to keep as a named preset.'
+                    or 'Choose Armor, Helmet and Cape LUTs to keep as a named preset.'
+            )
         end,
         restore_activate = function()
             return deps.action(function()

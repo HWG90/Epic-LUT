@@ -967,6 +967,13 @@ assert(restart_handle.activate('restore'))
 bound[8] = 400
 assert(restarted.on_disable(ctx))
 local actual_launch = m.native_import.launch_worker
+if not m.zip_import_script then
+    local script = assert(io.open('tools/import_zip.ps1', 'rb'))
+    m.zip_import_script = script:read('*a'):gsub('.', function(c)
+        return string.format('%02x', c:byte())
+    end)
+    script:close()
+end
 local workers = {}
 m.native_import.launch_worker = function(args)
     local base = assert(args:match('%-Result "([^"]+)%.txt"'))

@@ -945,3 +945,163 @@ assert(f:close())
 print(
     'PASS binding patch prototype: authenticated baselines, isolated mesh SectionID/material forks, divergent shared-section palettes, exact unchanged geometry/GPU/stream/TOC bytes, collision retries and strict provenance guards'
 )
+local weapon_id, second_weapon_id = '5fecab819f96a3e8', '1111111111111111'
+local weapon_unit = source(weapon_id, B.UNIT, unit_main, unit.gpu, unit.stream)
+local function weapon_entry(slot, unit_id, unit_source, document, section, override)
+    local value = entry('weapon', 'p:3:' .. slot .. ':' .. (section - 100) .. ':0', document, section)
+    value.weapon_resource, value.weapon_slot = unit_id, slot
+    local proof = value.binding_source
+    proof.version, proof.weapon_resource, proof.weapon_slot, proof.unit = 4, unit_id, slot, unit_source
+    proof.kit, proof.kit_override, proof.fixed_texture = nil, nil, nil
+    proof.material_texture, proof.unit_override = old_texture, override == true
+    if override then
+        proof.unit_override_verified, proof.unit_override_texture, proof.unit_override_offset = true, old_texture, 88
+    end
+    return value
+end
+local weapon_set = {
+    weapon_entry(1, weapon_id, weapon_unit, a, 101),
+    weapon_entry(1, weapon_id, weapon_unit, b, 102),
+}
+assert(not pcall(P.encode_set, D, weapon_set, options), 'Weapon export guessed the garment patch destination')
+-- Synthetic independently approved destination supplied by the host proof layer.
+options.weapon_patch_archive = function()
+    return '0102030405060708'
+end
+local isolated_weapon = P.encode_set(D, { weapon_set[1] }, options)
+assert(
+    isolated_weapon.binding_aware and isolated_weapon.archive == '0102030405060708',
+    'Single weapon palette was emitted as a global texture replacement'
+)
+local isolated_unit, isolated_material
+for _, record in ipairs(isolated_weapon.records) do
+    if record.type == B.UNIT then
+        isolated_unit = record
+    end
+    if record.type == B.MATERIAL then
+        isolated_material = record
+    end
+end
+assert(isolated_unit and isolated_material, 'Single weapon palette lost its exact Unit/material assignments')
+assert(
+    hex_at(isolated_material.main, 144) ~= old_texture,
+    'Single weapon Pattern edit retained the shared global texture ID'
+)
+local weapon_patch = P.encode_set(D, weapon_set, options)
+local weapon_changed, weapon_materials = nil, 0
+for _, value in ipairs(weapon_patch.records) do
+    if value.type == B.UNIT then
+        weapon_changed = value
+    end
+    if value.type == B.MATERIAL then
+        weapon_materials = weapon_materials + 1
+    end
+end
+assert(weapon_changed.resource == weapon_id and weapon_materials == 2)
+local weapon_layout = L.parse(weapon_changed.main)
+assert(
+    #weapon_layout.sections == 5
+        and u(weapon_changed.main, 704) == 103
+        and weapon_changed.gpu == weapon_unit.gpu
+        and weapon_changed.stream == weapon_unit.stream
+)
+for index = 1, 3 do
+    assert(
+        weapon_layout.sections[index].material == old_material and weapon_layout.sections[index].section == 100 + index,
+        'Weapon patch changed original material assignments'
+    )
+end
+local weapon_proof = weapon_set[1].binding_source
+for _, mutation in ipairs({
+    { 'weapon_resource', 'ffffffffffffffff' },
+    { 'weapon_slot', 2 },
+    { 'version', 1 },
+    { 'verified', false },
+    { 'mesh_verified', false },
+    { 'material_texture', untouched },
+    { 'kit_override', false },
+    { 'material_slot_offset', 321 },
+}) do
+    local saved = weapon_proof[mutation[1]]
+    weapon_proof[mutation[1]] = mutation[2]
+    assert(not pcall(P.encode_set, D, weapon_set, options), 'Malformed weapon patch proof accepted: ' .. mutation[1])
+    weapon_proof[mutation[1]] = saved
+end
+local override_main = replace(unit_main, 88, hash(old_texture))
+local override_unit = source(weapon_id, B.UNIT, override_main, unit.gpu, unit.stream)
+local other_weapon_unit = source(second_weapon_id, B.UNIT, unit_main, unit.gpu, unit.stream)
+local override_set = {
+    weapon_entry(1, weapon_id, override_unit, a, 101, true),
+    weapon_entry(2, second_weapon_id, other_weapon_unit, b, 102),
+}
+local override_patch = P.encode_set(D, override_set, options)
+local override_changed, override_materials = nil, 0
+for _, value in ipairs(override_patch.records) do
+    if value.type == B.UNIT and value.resource == weapon_id then
+        override_changed = value
+    end
+    if value.type == B.MATERIAL then
+        override_materials = override_materials + 1
+    end
+end
+assert(
+    override_changed and #override_changed.main == #override_main and override_materials == 1,
+    'Unit override unnecessarily forked or extended its original material assignments'
+)
+assert(
+    hex_at(override_changed.main, 88) ~= old_texture
+        and replace(override_changed.main, 88, hash(old_texture)) == override_main,
+    'Weapon Unit override changed bytes outside its proven 8-byte field'
+)
+assert(override_changed.gpu == override_unit.gpu and override_changed.stream == override_unit.stream)
+-- A proven Unit override may supply a role absent from its stock Material;
+-- retain the Material table and avoid inventing a texture-slot offset.
+local absent_material_id = '3333333333333333'
+local absent_material_main = replace(string.rep('\0', 136), 64, word(1)) .. word(0x7e662968) .. hash(untouched)
+local absent_material = source(absent_material_id, B.MATERIAL, absent_material_main, material.gpu, material.stream)
+local absent_unit_main = override_main
+for index = 0, 2 do
+    absent_unit_main = replace(absent_unit_main, 816 + index * 8, hash(absent_material_id))
+end
+local absent_unit = source(weapon_id, B.UNIT, absent_unit_main, unit.gpu, unit.stream)
+local absent_entry = weapon_entry(1, weapon_id, absent_unit, a, 101, true)
+absent_entry.binding_source.material, absent_entry.binding_source.material_texture = absent_material, '0000000000000000'
+local absent_patch = P.encode_set(D, { absent_entry, override_set[2] }, options)
+local absent_changed
+for _, value in ipairs(absent_patch.records) do
+    if value.type == B.UNIT and value.resource == weapon_id then
+        absent_changed = value
+    end
+end
+assert(
+    absent_changed and replace(absent_changed.main, 88, hash(old_texture)) == absent_unit_main,
+    'Unit override with absent stock role rewrote the Material or Unit layout'
+)
+local override_proof = override_set[1].binding_source
+for _, mutation in ipairs({
+    { 'unit_override_verified', false },
+    { 'unit_override_offset', 80 },
+    { 'unit_override_texture', untouched },
+}) do
+    local saved = override_proof[mutation[1]]
+    override_proof[mutation[1]] = mutation[2]
+    assert(not pcall(P.encode_set, D, override_set, options), 'Unproven weapon Unit override accepted')
+    override_proof[mutation[1]] = saved
+end
+local conflicting_override_set = {
+    override_set[1],
+    weapon_entry(1, weapon_id, override_unit, b, 102, true),
+}
+local conflict_ok, conflict_why = pcall(P.encode_set, D, conflicting_override_set, options)
+assert(
+    not conflict_ok
+        and tostring(conflict_why):find('One serialized weapon unit override has conflicting saved palettes', 1, true),
+    'Different saved palettes were collapsed into a single weapon Unit override'
+)
+assert(
+    weapon_unit.main == unit_main and override_unit.main == override_main and material.main == material_main,
+    'Weapon exporter mutated pristine source records'
+)
+print(
+    'PASS v4 weapon patch export: precise material/mesh forks, preserved original assignments, exact Unit override rewrites and conflicting/unproven destination rejection'
+)

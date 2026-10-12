@@ -390,3 +390,81 @@ do
         'PASS v3 outfit provenance: metadata-only stable refs, mixed v2-style rows, exact pixel aliases, untrusted flag stripping, destination/path rejection and atomic invalid-save protection'
     )
 end
+local weapon_entries = {
+    aliases[1],
+    { kind = 'weapon', key = '3:1:0:0', weapon_slot = 1, weapon_resource = '5FECAB819F96A3E8', document = positive },
+    { kind = 'weapon', key = '3:1:1:0', weapon_slot = 1, weapon_resource = '5fecab819f96a3e8', document = negative },
+    { kind = 'weapon', key = '3:2:0:0', weapon_slot = 2, weapon_resource = '1111111111111111', document = positive },
+    {
+        kind = 'weapon',
+        key = 'p:3:3:0:0',
+        weapon_slot = 3,
+        weapon_resource = '2222222222222222',
+        document = { width = 3, height = 1, data = pattern },
+        original = original,
+    },
+}
+store.save('Weapon Format', weapon_entries)
+local weapon_manifest = modules.file_io.read('tests/tmp/presets/outfit-Weapon Format.tsv', module.MAX_MANIFEST)
+assert(weapon_manifest:match('^EPIC%-OUTFIT\t4\n'), 'Weapon preset did not use schema4')
+local weapon_preset = store.load('Weapon Format')
+assert(#weapon_preset.entries == 5 and #weapon_preset.armor == 1 and #weapon_preset.weapon == 4)
+for index = 2, 5 do
+    local got, expected = weapon_preset.entries[index], weapon_entries[index]
+    assert(
+        got.kind == 'weapon'
+            and got.key == expected.key
+            and got.weapon_slot == expected.weapon_slot
+            and got.weapon_resource == expected.weapon_resource:lower()
+    )
+    assert(
+        dds.encode(got.document.data, got.document.width, got.document.height)
+            == dds.encode(expected.document.data, expected.document.width, expected.document.height),
+        'Weapon F32 payload changed'
+    )
+end
+assert(
+    weapon_preset.entries[1].document == weapon_preset.entries[2].document
+        and weapon_preset.entries[2].document == weapon_preset.entries[4].document,
+    'Mixed gear/weapon aliases duplicated pixels'
+)
+assert(ffi.cast('uint32_t *', weapon_preset.entries[3].document.data)[1] == 0x80000000)
+assert(weapon_preset.entries[5].original.patch_source == original.patch_source)
+local before_write, weapon_writes = modules.file_io.write, 0
+modules.file_io.write = function(...)
+    weapon_writes = weapon_writes + 1
+    return before_write(...)
+end
+local invalid_weapon_entries = {
+    { kind = 'weapon', key = '3:1:0:0', document = positive },
+    { kind = 'weapon', key = '3:1:0:0', weapon_resource = 'bad', document = positive },
+    { kind = 'weapon', key = '3:1:0:0', weapon_resource = string.rep('0', 16), document = positive },
+    { kind = 'weapon', key = '0:1:0:0', weapon_resource = '5fecab819f96a3e8', document = positive },
+    { kind = 'weapon', key = '3:4:0:0', weapon_resource = '5fecab819f96a3e8', document = positive },
+    { kind = 'weapon', key = '3:1:64:0', weapon_resource = '5fecab819f96a3e8', document = positive },
+    { kind = 'weapon', key = '3:1:0:0', weapon_slot = 2, weapon_resource = '5fecab819f96a3e8', document = positive },
+    { kind = 'armor', key = '0:1:0:0', weapon_resource = '5fecab819f96a3e8', document = positive },
+}
+for _, entry in ipairs(invalid_weapon_entries) do
+    assert(not pcall(store.save, 'Weapon Format', { entry }) and weapon_writes == 0)
+end
+assert(not pcall(store.save, 'Weapon Format', {
+    weapon_entries[2],
+    { kind = 'weapon', key = '3:1:4:0', weapon_resource = 'ffffffffffffffff', document = positive },
+}) and weapon_writes == 0)
+modules.file_io.write = before_write
+assert(modules.file_io.read('tests/tmp/presets/outfit-Weapon Format.tsv', module.MAX_MANIFEST) == weapon_manifest)
+for _, mutation in ipairs({
+    weapon_manifest:gsub('5fecab819f96a3e8', '5fecab819f96a3eg', 1),
+    weapon_manifest:gsub('EPIC%-OUTFIT\t4', 'EPIC-OUTFIT\t3', 1),
+    weapon_manifest:gsub('3:1:1:0', '3:4:1:0', 1),
+    (weapon_manifest:gsub('5fecab819f96a3e8', 'ffffffffffffffff', 1)),
+}) do
+    modules.file_io.write('tests/tmp/presets/invalid-weapon.tsv', mutation)
+    assert(not pcall(module.read, modules, 'tests/tmp/presets/invalid-weapon.tsv', 'Bad Weapon'))
+end
+assert(#store.load('Roundtrip Outfit').entries == 2 and saved_manifest:match('^EPIC%-OUTFIT\t2'))
+store.delete('Weapon Format')
+print(
+    'PASS schema4 weapon presets: mixed gear/3 weapon slots, exact IDs/F32/Pattern metadata, shared payloads, signed-zero and atomic malformed rejection'
+)

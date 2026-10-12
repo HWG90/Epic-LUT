@@ -665,3 +665,80 @@ os.remove(output2)
 print(
     'PASS preset export: 4096 destination compact round trip, exact Pattern pairing/options, independent metadata, exact full-float bytes, shared-ID conflicts, bounded manifests/payloads and legacy safety'
 )
+local weapon_preset = {
+    entries = {
+        loaded.entries[1],
+        {
+            kind = 'weapon',
+            key = '3:1:0:0',
+            weapon_slot = 1,
+            weapon_resource = '5FECAB819F96A3E8',
+            document = document,
+        },
+        {
+            kind = 'weapon',
+            key = 'p:3:1:0:0',
+            weapon_slot = 1,
+            weapon_resource = '5fecab819f96a3e8',
+            document = pattern,
+        },
+        {
+            kind = 'weapon',
+            key = '3:2:0:0',
+            weapon_slot = 2,
+            weapon_resource = '1111111111111111',
+            document = document,
+        },
+        {
+            kind = 'weapon',
+            key = '3:3:1:0',
+            weapon_slot = 3,
+            weapon_resource = '2222222222222222',
+            document = document,
+        },
+    },
+}
+local weapon_files = E.bundle({ dds = D }, weapon_preset)
+local material_files, pattern_files = 0, 0
+for _, file in ipairs(weapon_files) do
+    if file[1]:match('%.dds$') then
+        local _, width = D.decode(file[2])
+        if width == 3 then
+            pattern_files = pattern_files + 1
+        else
+            material_files = material_files + 1
+        end
+    end
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+assert(material_files == 1 and pattern_files == 1, 'Weapon bundle duplicated aliased documents')
+assert(weapon_files[#weapon_files][2]:match('^EPIC%-OUTFIT\t4\n'))
+local weapon_import = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Weapon Shared Import')
+assert(#weapon_import.entries == 5 and weapon_import.entries[2].weapon_resource == '5fecab819f96a3e8')
+assert(weapon_import.entries[2].document == weapon_import.entries[4].document)
+local weapon_choices = E.lut_choices(weapon_import)
+assert(
+    weapon_choices[2]:find('Primary LUT 1', 1, true)
+        and weapon_choices[3]:find('Primary Pattern LUT 1', 1, true)
+        and weapon_choices[4]:find('Secondary LUT 1', 1, true)
+        and weapon_choices[5]:find('Support LUT 1', 1, true)
+)
+local bad_weapon = { kind = 'weapon', key = '3:1:0:0', weapon_resource = 'bad', document = document }
+assert(not pcall(E.bundle, { dds = D }, { entries = { bad_weapon } }))
+assert(not pcall(E.lut_choices, { entries = { bad_weapon } }))
+assert(
+    not pcall(E.bundle, { dds = D }, { entries = { [1] = weapon_preset.entries[2], [3] = weapon_preset.entries[4] } })
+)
+assert(not pcall(
+    E.bundle,
+    { dds = D },
+    {
+        entries = {
+            weapon_preset.entries[2],
+            { kind = 'weapon', key = '3:1:1:0', weapon_resource = 'ffffffffffffffff', document = document },
+        },
+    }
+))
+print(
+    'PASS weapon preset export: schema4 ZIP/import, 3 weapon slot labels, exact shared documents and malformed identity rejection'
+)

@@ -809,3 +809,164 @@ do
             .. ' bytes,124 exact destinations/13 material and Pattern tables'
     )
 end
+local weapon_ids = { '5FECAB819F96A3E8', '1111111111111111', '2222222222222222' }
+local weapon_identity = { body = identity.body, armor = identity.armor, helmet = identity.helmet, weapons = weapon_ids }
+local weapon_entries = {
+    { key = '0:1:2:3', document = doc },
+    { kind = 'weapon', key = '3:1:0:0', weapon_slot = 1, weapon_resource = weapon_ids[1], document = doc },
+    { kind = 'weapon', key = 'p:3:1:0:0', weapon_slot = 1, weapon_resource = weapon_ids[1], document = pattern },
+    { kind = 'weapon', key = '3:2:2:3', weapon_slot = 2, weapon_resource = weapon_ids[2], document = doc },
+    { kind = 'weapon', key = '3:3:63:63', weapon_slot = 3, weapon_resource = weapon_ids[3], document = doc },
+}
+ffi.cast('uint32_t *', doc.data)[1] = 0x80000000
+local weapon_packet = codec.encode(weapon_identity, weapon_entries)
+assert(weapon_packet:match('^6x?|') and #weapon_packet <= C.MAX_TEXT)
+local garment_only_packet = codec.encode(weapon_identity, { weapon_entries[1] })
+assert(
+    garment_only_packet:match('^[12345]x?|') and codec.decode(garment_only_packet).weapons == nil,
+    'Equipped weapon identity forced garment-only packets onto EL6'
+)
+local weapon_result = codec.decode(weapon_packet)
+assert(#weapon_result.documents == 2 and weapon_result.entries['0:1:2:3'].weapon_resource == nil)
+local received_count = 0
+for _ in pairs(weapon_result.entries) do
+    received_count = received_count + 1
+end
+assert(received_count == #weapon_entries, 'Shared weapon destinations were discarded')
+for index, entry in ipairs(weapon_entries) do
+    local received = weapon_result.entries[entry.key]
+    assert(
+        ffi.string(received.document.data, received.document.width * received.document.height * 16)
+            == ffi.string(entry.document.data, entry.document.width * entry.document.height * 16)
+    )
+    if index > 1 then
+        assert(
+            received.kind == 'weapon'
+                and received.weapon_slot == entry.weapon_slot
+                and received.weapon_resource == weapon_ids[entry.weapon_slot]:lower()
+                and not received.helmet
+        )
+    end
+end
+assert(weapon_result.entries['0:1:2:3'].document == weapon_result.entries['3:1:0:0'].document)
+assert(weapon_result.weapons[1] == weapon_ids[1]:lower() and weapon_result.weapons[3] == weapon_ids[3])
+local one_weapon = { weapons = { [1] = weapon_ids[1] } }
+local only_primary = { weapon_entries[2] }
+assert(codec.decode(codec.encode(one_weapon, only_primary)).weapons[2] == nil)
+assert(codec.encode(identity, entries):match('^[1235]x?|'), 'Weapon support changed garment-only protocol selection')
+for _, bad_ids in ipairs({
+    { 'bad' },
+    { string.rep('0', 16) },
+    { '5fecab819f96a3eg' },
+    { [0] = weapon_ids[1] },
+    { [4] = weapon_ids[1] },
+}) do
+    assert(not pcall(codec.encode, { weapons = bad_ids }, only_primary), 'Invalid shared weapon IDs accepted')
+end
+assert(not pcall(codec.encode, identity, only_primary), 'Type3 destination shared without weapon identity')
+assert(not pcall(codec.encode, one_weapon, { weapon_entries[4] }), 'Secondary destination inferred from primary ID')
+assert(not pcall(codec.encode, one_weapon, {
+    { key = '3:1:0:0', weapon_resource = 'ffffffffffffffff', document = doc },
+}), 'Mismatched entry/packet weapon configuration accepted')
+assert(not pcall(codec.encode, one_weapon, {
+    { key = '3:1:0:0', weapon_slot = 2, weapon_resource = weapon_ids[1], document = doc },
+}), 'Mismatched weapon slot accepted')
+assert(not pcall(codec.encode, one_weapon, {
+    { key = '0:1:0:0', kind = 'weapon', weapon_resource = weapon_ids[1], document = doc },
+}), 'Weapon descriptor accepted a garment destination')
+assert(
+    not pcall(codec.encode, one_weapon, { [1] = weapon_entries[2], [3] = weapon_entries[3] }),
+    'Sparse shared list dropped a weapon'
+)
+-- All four exact representations remain available in EL6. Native compression
+-- is used here, while candidate forcing isolates representation reconstruction.
+local native_compression = C.compression()
+local function forced_weapon(mode, entry, baseline)
+    local backend = {
+        formats = native_compression.formats,
+        compress = function(raw, tag)
+            local selected = mode == 'dictionary' and raw:byte(67) == 1
+                or mode ~= 'dictionary'
+                    and raw:byte(67) == 0
+                    and raw:byte(68) == ({ full = 0, sparse = 1, xor = 2 })[mode]
+            return selected and native_compression.compress(raw, tag) or string.rep('x', 4000)
+        end,
+        decompress = native_compression.decompress,
+    }
+    local selected_codec = C.new(backend, baseline)
+    local copied =
+        { key = '3:1:0:0', weapon_resource = weapon_ids[1], document = entry.document, original = entry.original }
+    local packet = selected_codec.encode(one_weapon, { copied })
+    assert(packet:match('^6x?|'))
+    local decoded = selected_codec.decode(packet)
+    assert(
+        ffi.string(decoded.entries[copied.key].document.data, copied.document.width * copied.document.height * 16)
+            == ffi.string(copied.document.data, copied.document.width * copied.document.height * 16),
+        'EL6 ' .. mode .. ' changed F32 bits'
+    )
+    if mode == 'sparse' or mode == 'xor' then
+        assert(not pcall(codec.decode, packet), 'EL6 accepted a missing baseline')
+    end
+end
+forced_weapon('full', { document = doc })
+forced_weapon('dictionary', { document = doc })
+forced_weapon('sparse', many[1], function(resource)
+    return originals[resource]
+end)
+forced_weapon('xor', dense_entries[1], function(resource)
+    return originals[resource]
+end)
+local function packed_weapon(slot, is_pattern)
+    local packed = slot * 131072 + (3 + (is_pattern and 4 or 0)) * 2097152
+    return string.char(packed % 256, math.floor(packed / 256) % 256, math.floor(packed / 65536))
+end
+local ids = weapon_ids[1]:lower() .. weapon_ids[2] .. weapon_ids[3]
+local function raw_packet(ids, slot, representation)
+    return 'EL6'
+        .. kit
+        .. ids
+        .. string.char(1, 1, 0, representation or 0)
+        .. string.char(0, 23, 8)
+        .. ffi.string(doc.data, 2944)
+        .. packed_weapon(slot)
+end
+local function decode_raw(raw, version)
+    return C.new({
+        decompress = function()
+            return raw
+        end,
+    }).decode((version or '6') .. '|' .. #raw .. '|AAAA')
+end
+assert(decode_raw(raw_packet(ids, 1)).entries['3:1:0:0'].weapon_resource == weapon_ids[1]:lower())
+assert(not pcall(decode_raw, raw_packet('g' .. ids:sub(2), 1)), 'EL6 decoder accepted a malformed weapon ID')
+assert(not pcall(decode_raw, raw_packet(string.rep('0', 48), 1)), 'EL6 decoder guessed absent weapon identity')
+assert(not pcall(decode_raw, raw_packet(ids, 0)), 'EL6 accepted slot0 weapon')
+assert(not pcall(decode_raw, raw_packet(ids, 4)), 'EL6 accepted slot4 weapon')
+assert(not pcall(decode_raw, raw_packet(ids, 1, 2)), 'EL6 accepted unknown representation')
+local old_raw = 'EL4'
+    .. kit
+    .. string.char(1, 1, 0)
+    .. string.char(0, 23, 8)
+    .. ffi.string(doc.data, 2944)
+    .. packed_weapon(1)
+assert(not pcall(decode_raw, old_raw, '4'), 'Legacy protocol silently accepted type3')
+local many_weapons = {}
+for index = 0, C.MAX_BINDINGS - 1 do
+    many_weapons[#many_weapons + 1] = {
+        key = '3:1:' .. math.floor(index / 64) .. ':' .. index % 64,
+        weapon_resource = weapon_ids[1],
+        document = doc,
+    }
+end
+local large_packet = serialization.encode(one_weapon, many_weapons)
+local large_result = serialization.decode(large_packet)
+local large_count = 0
+for _ in pairs(large_result.entries) do
+    large_count = large_count + 1
+end
+assert(large_count == C.MAX_BINDINGS, 'EL6 discarded aliased weapon destinations')
+many_weapons[#many_weapons + 1] = weapon_entries[3]
+assert(not pcall(serialization.encode, one_weapon, many_weapons), 'EL6 widened binding budget')
+print(
+    'PASS EL6 weapon sharing: mixed gear/3 explicit IDs, all lossless representations, 4096 aliased destinations, signed-zero/HDR/Pattern and malformed/legacy guards'
+)
