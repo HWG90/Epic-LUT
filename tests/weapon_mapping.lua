@@ -1,5 +1,33 @@
 local F = dofile('tests/weapon_services_fixture.lua')
 local M = dofile('src/editor/weapon_mapping.lua')
+do
+    local ffi = require('ffi')
+    local chunk = assert(loadfile('src/editor/weapon_mapping.lua'))
+    setfenv(
+        chunk,
+        setmetatable({
+            tostring = function(value)
+                return type(value) == 'cdata' and '[cdata (deleted)]' or tostring(value)
+            end,
+        }, { __index = _G })
+    )
+    local mapping = chunk()
+    local document = F.document(23, 8, 0.625)
+    document.original = document.data
+    local copied = mapping.copy(document)
+    assert(mapping.bytes(copied) == mapping.bytes(document))
+    assert(ffi.string(copied.original, 23 * 8 * 16) == ffi.string(document.original, 23 * 8 * 16))
+    assert(copied.data ~= document.data and copied.original ~= document.original)
+    local data = document.data
+    document.data = ffi.cast('float *', data)
+    assert(not pcall(mapping.copy, document), 'Mapping accepted a float pointer')
+    document.data, document.original = data, ffi.cast('float *', data)
+    assert(not pcall(mapping.copy, document), 'Mapping accepted an original float pointer')
+    document.original = ffi.new('float[?]', 1)
+    assert(not pcall(mapping.copy, document), 'Mapping accepted an undersized original array')
+    document.original, document.data = data, ffi.new('uint8_t[?]', 23 * 8 * 16)
+    assert(not pcall(mapping.copy, document), 'Mapping accepted a non-float backing array')
+end
 local function populated()
     local f = F.new()
     for index = 1, 3 do

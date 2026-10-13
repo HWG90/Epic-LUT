@@ -42,7 +42,7 @@ function R.new(deps)
             'Invalid weapon LUT document'
         )
         assert(
-            tostring(ffi.typeof(document.data)):match('float %[.*%]') and ffi.sizeof(document.data) >= w * h * 16,
+            ffi.istype('float[?]', document.data) and ffi.sizeof(document.data) >= w * h * 16,
             'Weapon LUT must own its complete float32 array'
         )
         for index = 0, w * h * 4 - 1 do
@@ -61,7 +61,7 @@ function R.new(deps)
         if document.original then
             assert(
                 type(document.original) == 'cdata'
-                    and tostring(ffi.typeof(document.original)):match('float %[.*%]')
+                    and ffi.istype('float[?]', document.original)
                     and ffi.sizeof(document.original) >= w * h * 16,
                 'Invalid original weapon LUT array'
             )

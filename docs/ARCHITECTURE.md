@@ -87,6 +87,7 @@ The maintained bundle inventory is in `tools/module_inventory.py`. Run `python t
 - `src/core`: DDS/color semantics, document copies, history and bounded IO.
 - `src/editor`: controller, views, registry definitions and guidance.
 - `src/gear`: local binding ownership, discovery, original snapshots and region indication.
+- Original snapshot workers resolve installed loose LUT replacements before packed base textures. Their cache scope includes patch TOCs, LUT headers and pixel spans; conflicting definitions refuse instead of guessing patch precedence. Lua waits for scope validation, discards snapshots from another scope and explicitly rechecks sources on Load Current Gear. Material/Pattern editing and temporary highlights therefore use the installed custom baseline under reused resource IDs.
 - `src/imports`: worker messages/lifetime, resource matching and table indexing.
 - `src/presets`: Armory collections and named DDS storage.
 - `src/platform`: Windows APIs, preferences, paths and standalone frontend.

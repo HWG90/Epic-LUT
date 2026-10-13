@@ -6,7 +6,14 @@ local file = assert(io.open('tests/direct_editor.lua', 'rb'))
 local text = file:read('*a')
 file:close()
 local marker = assert(text:find("local f = assert(io.open('src/editor/direct_editor.lua'", 1, true))
-local base = assert(loadstring(text:sub(1, marker - 1) .. [[
+-- This focused fixture already resolves dofile paths from the repository root.
+-- verify.py supplies an absolute root; a direct LuaRunner invocation need not.
+local fixture_source, replacements = text:sub(1, marker - 1):gsub(
+    "local test_root = assert%(os%.getenv%('EPIC_LUT_TEST_ROOT'%)%)",
+    "local test_root = os.getenv('EPIC_LUT_TEST_ROOT') or '.'"
+)
+assert(replacements == 1, 'Garment fixture test-root contract changed')
+local base = assert(loadstring(fixture_source .. [[
 return {m=m,api=api,memory=memory,native=native,bound=bound,frontend=function()return test_frontend end,info=function()return quick_info()end}
 ]], '@weapon-editor-garment-fixture'))()
 local m = base.m
@@ -242,6 +249,115 @@ for _, unit in ipairs({ 100, 200 }) do
         end
     end
 end
+
+-- Complete-addon cleanup must restore known garment/weapon bindings even if a
+-- weapon session cannot certify retirement. The actual lifetime service then
+-- quarantines its backing buffers without guessing ownership or destroying GPU
+-- handles. Use separate activations so the cohorts cannot certify each other.
+m.texture_lifetime = dofile('src/gear/texture_lifetime.lua')
+local runtime_new = m.weapon_runtime.new
+local creates = m.engine.create_texture
+local destroyed = 0
+native.destroy = function()
+    destroyed = destroyed + 1
+end
+m.engine.create_texture = function(...)
+    local texture = creates(...)
+    texture.handle = texture.object
+    return texture
+end
+for _, fault in ipairs({ 'foreign', 'throw' }) do
+    m.weapon_runtime.new = function(deps)
+        local runtime = runtime_new(deps)
+        if fault == 'throw' then
+            runtime.restore = function()
+                error('Uncertain weapon restoration read', 0)
+            end
+        end
+        return runtime
+    end
+    local closing_editor = assert(loadstring('local m=...\n' .. source, '@weapon-editor-cleanup-' .. fault))(m)
+    closing_editor.on_enable(ctx)
+    closing_editor.on_update(ctx, 0)
+    mod, handle = base.api.mods.epic_direct_lut, base.api.mods.epic_direct_lut.handle
+    for _, candidate in ipairs(mod.pages) do
+        if candidate.id == 'weapons' then
+            page = candidate
+        end
+    end
+    assert(handle.activate('editor_load_weapon') and buttons().weapon_editor())
+    assert(handle.set('cell_r', fault == 'foreign' and 0.4375 or 0.5625))
+    closing_editor.on_update(ctx, 0.1)
+    assert(handle.activate('apply_armor') and base.bound[3] ~= gear[3])
+    local foreign_material = f.units[100].meshes[1].materials[1]
+    if fault == 'foreign' then
+        f.textures[foreign_material][0x7e662968] = 0xdead00
+    end
+    local retained = assert(package.loaded['epic.direct_lut.retained.v1'])
+    local cohort, count, bytes, destroyed_before = retained.cohort, #retained.records, retained.bytes, destroyed
+    assert(closing_editor.on_disable(ctx), 'Weapon cleanup failure prevented completed quarantine: ' .. fault)
+    for material, value in pairs(gear) do
+        assert(base.bound[material] == value, 'Weapon cleanup failure skipped garment restoration: ' .. fault)
+    end
+    assert(
+        #retained.records == count
+            and retained.bytes == bytes
+            and destroyed == destroyed_before
+            and cohort.sessions == nil
+            and retained.cohort == nil,
+        'Uncertified cleanup freed textures, skipped quarantine, or retained addon closures: ' .. fault
+    )
+    if fault == 'foreign' then
+        assert(f.textures[foreign_material][0x7e662968] == 0xdead00, 'Cleanup overwrote a foreign weapon writer')
+        for _, mesh in ipairs(f.units[100].meshes) do
+            if mesh.materials[1] ~= foreign_material then
+                assert(f.textures[mesh.materials[1]][0x7e662968] == f.A, 'Known weapon LOD was not restored')
+            end
+        end
+    end
+    local quarantined = false
+    for _, value in ipairs(logs) do
+        quarantined = quarantined or value:find('texture retirement: quarantined', 1, true) ~= nil
+    end
+    assert(quarantined, 'Production cleanup never reached the lifetime quarantine service')
+    assert(closing_editor.on_disable(ctx) and destroyed == destroyed_before, 'Completed quarantine retried disposal')
+    -- The next synthetic activation starts from pristine test inputs; actual
+    -- runtime cleanup must retain these unsafe buffers and never do this reset.
+    for _, mesh in ipairs(f.units[100].meshes) do
+        f.textures[mesh.materials[1]][0x7e662968] = f.A
+    end
+end
+m.weapon_runtime.new = runtime_new
+
+-- Exercise the real provenance pending sentinel through the production update
+-- poll. Reuse only the provenance fixture factory, before its test cases run.
+local provenance_file = assert(io.open('tests/weapon_provenance.lua', 'rb'))
+local provenance_text = provenance_file:read('*a')
+provenance_file:close()
+local provenance_marker = assert(provenance_text:find("test('weapon source worker paths", 1, true))
+local provenance_setup = assert(loadstring(provenance_text:sub(1, provenance_marker - 1) .. 'return setup'))()
+local pending_sources = provenance_setup()
+local pending_binding = pending_sources.runtime.groups(1, 'material')[1].bindings[1]
+local ready, pending_status = pcall(pending_sources.sources.capture, pending_binding)
+assert(not ready and pending_status == dofile('src/weapons/weapon_provenance.lua').PENDING)
+local pending_source, hooks = source:gsub("(return {[%s]+name = 'Epic LUT')", function(value)
+    return 'm.weapon_fixture_access=function()return operations,function(value)status=value end end\n' .. value
+end)
+assert(hooks == 1, 'Production pending fixture did not find the addon return')
+local pending_editor = assert(loadstring('local m=...\n' .. pending_source, '@weapon-editor-source-pending'))(m)
+pending_editor.on_enable(ctx)
+local pending_operations, set_status = m.weapon_fixture_access()
+pending_operations.weapon_sources_service = pending_sources.sources
+m.weapon_provenance = dofile('src/weapons/weapon_provenance.lua')
+set_status(pending_status)
+local notes = #logs
+pending_editor.on_update(ctx, 0)
+assert(
+    #logs > notes and logs[notes + 1] == 'Epic LUT: Exact weapon binding sources ready',
+    'A prefixed pending exception prevented the production source-ready notification'
+)
+assert(pending_editor.on_disable(ctx))
+m.weapon_fixture_access = nil
 print(
-    'PASS production weapon editor integration: actual registered UI→bridge→discovery/runtime/sessions, main RGB/raw guards, roughness numeric/Alpha picker, all LOD writes, explicit gear isolation and cleanup'
+    'PASS production weapon editor integration: actual registered UI→bridge→discovery/runtime/sessions, main RGB/raw guards, roughness numeric/Alpha picker, all LOD writes, explicit gear isolation, independent garment cleanup, foreign/exception texture quarantine and exact provenance pending→ready notification'
 )

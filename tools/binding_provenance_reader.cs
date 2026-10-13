@@ -20,8 +20,9 @@ public static class EpicBindingProvenanceReader {
  sealed class Request {public ulong Unit;public string Preferred;}
  sealed class Archive {public string Name,Hash;public int Size,Start,Count;public bool Materials;}
  sealed class LooseFile {public string Path;public long Length,Ticks;}
+ sealed class LooseCandidate {public string Archive;public LooseFile Main,GPU,Stream;public byte[] TOC;public int At;}
  sealed class Resource {
-  public ulong Name,Type;public string Archive;
+  public ulong Name,Type;public string Archive,SourceFile;
   public byte[] Main,GPU,Stream,TOC;
   public long Bytes {get{return (long)Main.Length+GPU.Length+Stream.Length+TOC.Length;}}
  }
@@ -224,9 +225,24 @@ public static class EpicBindingProvenanceReader {
   if(current.Length!=file.Length || current.Ticks!=file.Ticks)
    throw new Exception("Binding provenance loose patch changed during extraction");
  }
+ static void Effective(Dictionary<ulong,Resource> selected,Dictionary<ulong,Resource> loose,Resource candidate,ref long total) {
+  Resource previous;
+  if(loose.TryGetValue(candidate.Name,out previous)) {
+   // No numeric patch-priority guess: distinct loose replacements refuse.
+   try {long ignored=0;Remember(loose,candidate,ref ignored);}
+   catch(Exception error){throw new Exception("Ambiguous effective weapon binding overrides: "+Hex(candidate.Name)+"; "+error.Message);}
+   return;
+  }
+  long retained=selected.TryGetValue(candidate.Name,out previous)?total-previous.Bytes:total;
+  if(retained+candidate.Bytes>SetBudget)throw new Exception("Effective weapon binding source set byte budget exceeded");
+  candidate.SourceFile=candidate.Archive;
+  candidate.Archive=candidate.Archive.Substring(0,16).ToLowerInvariant();
+  loose.Add(candidate.Name,candidate);selected[candidate.Name]=candidate;total=retained+candidate.Bytes;
+ }
  static string ScanLoose(string game,Dictionary<ulong,Resource> units,Dictionary<ulong,Resource> materials,
                          Dictionary<ulong,HashSet<ulong>> collisions,ref long metadata,ref long rows,long total,
-                         string status,Stopwatch clock,int owner) {
+                         string status,Stopwatch clock,int owner,bool effective,Dictionary<ulong,List<LooseCandidate>> looseMaterials,
+                         out List<LooseFile> observedFiles,out long effectiveTotal) {
   var paths=new List<string>();
   foreach(string path in Directory.EnumerateFiles(game)) {
    string name=Path.GetFileName(path);
@@ -235,9 +251,11 @@ public static class EpicBindingProvenanceReader {
     throw new Exception("Binding provenance loose patch main missing for companion: "+name);
    if(!Regex.IsMatch(name,@"^[0-9a-fA-F]{16}\.patch_[0-9]+$",RegexOptions.CultureInvariant))continue;
    paths.Add(path);metadata+=name.Length*2L+128;
+   if(paths.Count>4096)throw new Exception("Binding provenance loose patch count exceeds its limit");
    if(metadata>MetadataBudget)throw new Exception("Binding provenance loose patch metadata budget exceeded");
   }
   paths.Sort(StringComparer.Ordinal);var scope=new StringBuilder();var observed=new List<LooseFile>();
+  var looseUnits=new Dictionary<ulong,Resource>();
   foreach(string path in paths) {
    Check(status,clock,owner);string archive=Path.GetFileName(path);
    File.WriteAllText(status,"Checking loose binding patch sources: "+archive);
@@ -261,9 +279,19 @@ public static class EpicBindingProvenanceReader {
     if(collisions.TryGetValue(type,out collision) && collision.Add(resource)) {
      metadata+=24;if(metadata>MetadataBudget)throw new Exception("Binding provenance loose patch collision metadata budget exceeded");
     }
+    if(effective && type==MaterialType) {
+     List<LooseCandidate> candidates;
+     if(!looseMaterials.TryGetValue(resource,out candidates)){candidates=new List<LooseCandidate>();looseMaterials.Add(resource,candidates);}
+     candidates.Add(new LooseCandidate{Archive=archive,Main=main,GPU=gpu,Stream=stream,TOC=toc,At=at});
+     metadata+=64;if(metadata>MetadataBudget)throw new Exception("Effective weapon material locator budget exceeded");
+    }
     var set=type==UnitType?units:type==MaterialType?materials:null;Resource original;
     if(set==null || !set.TryGetValue(resource,out original))continue;
     Resource candidate=LooseResource(archive,main,gpu,stream,toc,at,status,clock,owner,total-original.Bytes);
+    if(effective) {
+     if(type==UnitType)Effective(units,looseUnits,candidate,ref total);
+     continue;
+    }
     try {long retained=total;Remember(set,candidate,ref retained);}
     catch(Exception error){throw new Exception("Loose patch overrides requested binding source: "+archive+" / "+Hex(resource)+"; "+error.Message);}
    }
@@ -279,10 +307,16 @@ public static class EpicBindingProvenanceReader {
    scope.Append('\n');
   }
   foreach(var file in observed)Unchanged(file);
+  observedFiles=observed;effectiveTotal=total;
   return "top-level-game-data-patches-v1\n"+paths.Count.ToString(CultureInfo.InvariantCulture)+"\n"
    +Digest(new UTF8Encoding(false).GetBytes(scope.ToString()))+"\n";
  }
  public static int Run(string gameData,string destination,string requestPath,int ownerPID,string status) {
+  return Run(gameData,destination,requestPath,ownerPID,status,"stock");
+ }
+ public static int Run(string gameData,string destination,string requestPath,int ownerPID,string status,string mode) {
+  if(mode!="stock" && mode!="weapon_effective")throw new Exception("Unsupported binding provenance mode");
+  bool effective=mode=="weapon_effective";
   string game=Path.GetFullPath(gameData).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
   string output=Path.GetFullPath(destination),request=Path.GetFullPath(requestPath);
   if((output+Path.DirectorySeparatorChar).StartsWith(game,StringComparison.OrdinalIgnoreCase)
@@ -303,6 +337,8 @@ public static class EpicBindingProvenanceReader {
   var wantedUnits=new HashSet<ulong>();var preferred=new List<string>();
   foreach(var item in requests){wantedUnits.Add(item.Unit);preferred.Add(item.Preferred);}
   var collisions=new Dictionary<ulong,HashSet<ulong>>{{UnitType,new HashSet<ulong>()},{MaterialType,new HashSet<ulong>()},{TextureType,new HashSet<ulong>()}};
+  string scopeMetadata=null;List<LooseFile> effectiveFiles=null;
+  var looseMaterials=new Dictionary<ulong,List<LooseCandidate>>();
   using(var reader=new EpicOriginalReader(game)) {
    var entries=(IDictionary)typeof(EpicOriginalReader).GetField("entries",Hidden).GetValue(reader);
    var names=new List<string>();
@@ -337,6 +373,11 @@ public static class EpicBindingProvenanceReader {
     }
    }
    if(units.Count!=wantedUnits.Count)throw new Exception("Exact binding provenance unit resources missing: "+units.Count+"/"+wantedUnits.Count);
+   if(effective) {
+    long retained;
+    scopeMetadata=ScanLoose(game,units,materials,collisions,ref metadata,ref rows,total,status,clock,ownerPID,true,looseMaterials,out effectiveFiles,out retained);
+    total=retained;
+   }
    var wantedMaterials=new HashSet<ulong>();var materialPreferred=new List<string>();
    foreach(var item in requests) {
     var unit=units[item.Unit];materialPreferred.Add(unit.Archive);
@@ -356,19 +397,35 @@ public static class EpicBindingProvenanceReader {
      Remember(materials,Load(reader,method,archive,toc,at,status,clock,ownerPID,retained),ref total);
     }
    }
+   if(effective) {
+    var selectedLoose=new Dictionary<ulong,Resource>();
+    foreach(ulong resource in wantedMaterials) {
+     List<LooseCandidate> candidates;if(!looseMaterials.TryGetValue(resource,out candidates))continue;
+     foreach(var locator in candidates) {
+      Resource old;long retained=materials.TryGetValue(resource,out old)?total-old.Bytes:total;
+      var candidate=LooseResource(locator.Archive,locator.Main,locator.GPU,locator.Stream,locator.TOC,locator.At,status,clock,ownerPID,retained);
+      Effective(materials,selectedLoose,candidate,ref total);
+     }
+    }
+    foreach(var file in effectiveFiles)Unchanged(file);
+   }
    if(materials.Count!=wantedMaterials.Count)throw new Exception("Exact binding provenance material resources missing: "+materials.Count+"/"+wantedMaterials.Count);
   }
-  // Packed originals remain the sole retained source. Active top-level loose
-  // overrides may add collision IDs, but may never silently replace originals.
-  // External archives and runtime-only shader mutations are outside this scope.
-  string scopeMetadata=ScanLoose(game,units,materials,collisions,ref metadata,ref rows,total,status,clock,ownerPID);
+  // Stock mode retains packed originals and refuses differing loose overrides.
+  // Explicit weapon_effective mode preserves the unambiguous scoped Unit and
+  // linked Material triplets. External archives/runtime-only changes are outside this scope.
+  if(!effective) {
+   List<LooseFile> observed;long retained;
+   scopeMetadata=ScanLoose(game,units,materials,collisions,ref metadata,ref rows,total,status,clock,ownerPID,false,looseMaterials,out observed,out retained);
+  }
   // Nothing is published until every requested resource, all duplicates, the
   // unit tables, and the complete collision catalog have passed validation.
   var ordered=new List<Resource>();ordered.AddRange(units.Values);ordered.AddRange(materials.Values);
   ordered.Sort(delegate(Resource a,Resource b){int type=a.Type.CompareTo(b.Type);return type!=0?type:a.Name.CompareTo(b.Name);});
   foreach(var collision in collisions.Values)if(metadata+collision.Count*8L>MetadataBudget)
    throw new Exception("Binding provenance collision sorting budget exceeded");
-  var manifest=new StringBuilder();
+  var manifest=new StringBuilder();var sourceManifest=new StringBuilder();
+  string scopeHash=scopeMetadata.Split('\n')[2];
   foreach(var item in ordered) {
    Check(status,clock,ownerPID);string basename=Hex(item.Name)+"."+Hex(item.Type);
    AtomicBytes(Child(output,basename+".main"),item.Main);AtomicBytes(Child(output,basename+".toc"),item.TOC);
@@ -379,6 +436,9 @@ public static class EpicBindingProvenanceReader {
     .Append(item.Stream.Length==0?"-":basename+".stream").Append('\t').Append(basename+".toc").Append('\t')
     .Append(Digest(item.Main)).Append('\t').Append(item.GPU.Length==0?"-":Digest(item.GPU)).Append('\t')
     .Append(item.Stream.Length==0?"-":Digest(item.Stream)).Append('\n');
+   if(effective)sourceManifest.Append(Hex(item.Type)).Append('\t').Append(Hex(item.Name)).Append('\t')
+    .Append(item.SourceFile==null?"packed":"loose").Append('\t').Append(item.SourceFile??item.Archive).Append('\t')
+    .Append(scopeHash).Append('\n');
   }
   var typesOrdered=new List<ulong>(collisions.Keys);typesOrdered.Sort();
   Atomic(Child(output,"collisions.tsv"),delegate(FileStream stream){
@@ -397,6 +457,7 @@ public static class EpicBindingProvenanceReader {
    +DigestFile(collisionPath,status,clock,ownerPID)+"\n"));
   AtomicBytes(Child(output,"resources.tsv"),new UTF8Encoding(false).GetBytes(manifest.ToString()));
   AtomicBytes(Child(output,"scope.meta"),new UTF8Encoding(false).GetBytes(scopeMetadata));
+  if(effective)AtomicBytes(Child(output,"sources.tsv"),new UTF8Encoding(false).GetBytes(sourceManifest.ToString()));
   Check(status,clock,ownerPID);
   File.WriteAllText(status,"Binding provenance ready: "+units.Count+" units, "+materials.Count+" materials, "+total+" raw bytes; full "+visited+" TOCs, "+rows+" rows");
   return ordered.Count;

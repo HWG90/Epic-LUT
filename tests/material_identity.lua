@@ -308,6 +308,80 @@ refuse(function()
 end, 'No verified material slot')
 assert(sole_calls == 0, 'Unavailable/composite mesh layout reached the singleton native check')
 deps.single_material = nil
+-- The game's read-only Mesh.name query supplies an exact signed int32 ID even
+-- when its literal name is unknown. Serialized ordering still differs from the
+-- runtime ordinal; the hash selects only a unique record.
+local runtime_id = 99
+deps.mesh_id = function(handle)
+    assert(handle == mesh and type(handle) == 'cdata', 'Unverified handle reached Mesh.name')
+    calls[#calls + 1] = 'mesh_name'
+    return runtime_id
+end
+mesh_names[99], E.Unit.has_mesh = nil, nil
+proof = resolve(nil, layout)
+assert(proof.mesh_verified and proof.mesh_id == 99 and proof.material_slot == 3)
+assert(proof.material_slot_offset == 800 and proof.section == 11 and proof.slot_name == 'm_body')
+for _, call in ipairs(calls) do
+    assert(not call:match('^has_mesh:'), 'Hash proof depended on an unknown literal name')
+end
+layout[2].id, runtime_id = 0xa0cad59e, -1597319778
+proof = resolve(nil, layout)
+assert(proof.mesh_id == 0xa0cad59e, 'Signed live hash lost high bits')
+runtime_id = 0xa0cad59e
+proof = resolve(nil, layout)
+assert(proof.mesh_id == 0xa0cad59e, 'Unsigned hash representation lost high bits')
+layout[2].id, runtime_id = 99, 99
+local name_query = deps.mesh_id
+for _, value in ipairs({ false, '99', 0.5, -0x80000001, 0x100000000, 0 / 0, math.huge }) do
+    deps.mesh_id = function()
+        return value
+    end
+    refuse(function()
+        resolve(nil, layout)
+    end, 'Invalid runtime MeshName ID')
+end
+deps.mesh_id = function()
+    return nil
+end
+refuse(function()
+    resolve(nil, layout)
+end, 'Invalid runtime MeshName ID')
+deps.mesh_id, runtime_id = name_query, 100
+refuse(function()
+    resolve(nil, layout)
+end, 'does not match the serialized layout')
+runtime_id = 99
+refuse(function()
+    resolve(nil, { layout[2], layout[2] })
+end, 'Ambiguous serialized MeshName ID')
+runtime_mesh = other_mesh
+refuse(function()
+    resolve(nil, layout)
+end, 'Lua Mesh handle differs')
+assert(not table.concat(calls, ','):find('mesh_name', 1, true), 'Wrong handle reached name query')
+runtime_mesh = mesh
+on_material = function()
+    runtime_id = 88
+end
+refuse(function()
+    resolve(nil, layout)
+end, 'Runtime MeshName ID changed')
+on_material, runtime_id = nil, 99
+on_material = function()
+    garments = {}
+end
+refuse(function()
+    resolve(nil, layout)
+end, 'not a current local garment')
+on_material = nil
+garments = { { unit = 123, type = 0, slot = 1, preview = false } }
+deps.single_material = function(value)
+    return value == binding
+end
+proof = resolve(sole_candidates, sole_layout)
+assert(proof.singleton and proof.mesh_verified and proof.mesh_id == 99)
+deps.single_material, deps.mesh_id = nil, nil
+mesh_names[99], E.Unit.has_mesh = 'mesh_body', old_has_mesh
 print(
-    'PASS named material identity: genuine local Unit/Mesh/Material handles, has-before-get, exact named SectionID proof, optional named SDK mesh/slot proof without ordinal guesses, bounded/stale/ambiguous refusal; no ResourceManager calls'
+    'PASS material identity: genuine Unit/Mesh/Material handles; exact signed Mesh.name or literal mesh proof; named SectionID/slot and singleton proof; malformed/stale/ambiguous refusal without ordinal guesses or ResourceManager calls'
 )

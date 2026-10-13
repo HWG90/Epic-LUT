@@ -2575,6 +2575,9 @@ function operations.weapon_workflow()
                     weapon_patch_archive = function(entries)
                         return operations.weapon_sources().patch_archive(entries)
                     end,
+                    weapon_export_batch = function(entries, serialize)
+                        return operations.weapon_sources().with_export_batch(entries, serialize)
+                    end,
                 })
             end,
         })
@@ -2839,6 +2842,9 @@ local function register(current)
                 unit_layout = m.binding_unit_layout,
                 weapon_patch_archive = function(entries)
                     return operations.weapon_sources().patch_archive(entries)
+                end,
+                weapon_export_batch = function(entries, serialize)
+                    return operations.weapon_sources().with_export_batch(entries, serialize)
                 end,
                 resource_id_available = function(kind, id)
                     return operations.export_id_available(kind, id)

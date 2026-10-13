@@ -12,7 +12,20 @@ The cooperative resource scan completed all **2,355 catalog IDs** and resolved t
 
 These bindings belong to runtime mesh indices **4–8**. The four shadow meshes at indices **0–3** were excluded. The fifteen bindings resolve to **three unique tables**; preserve every destination when deduplicating their data.
 
-Original DDS data was captured from serialized archive `18235e0c9ec0e636`. This establishes the containing archive. The winning patch export destination still requires independent provenance validation.
+Original DDS data was captured from serialized archive `18235e0c9ec0e636`. This establishes the containing archive. The SDK's base-patch policy targets `9ba626afa44a3aa3`; winning in-game behavior of a generated weapon patch still requires separate installation and verification.
+
+## Link's Link to Memory test bridge
+
+The diagnostic bridge in `tools/links_weapon_probe` uses ApenasLink's Link's Link to Memory addon to run the same guarded R6 identity and discovery modules on the game thread. It is a development tool, not a package dependency. Its initial read-only pass on October 12, 2026 resolved the entire 2,355-ID catalog and captured 25 destinations:
+
+| Equipped weapon | Material LUTs | Pattern LUT | Destinations |
+| --- | --- | --- | --- |
+| BR-14 Adjudicator | `babd338977faa2ff`, `d1c943c12a564150` (23 × 8) | `cf0cc31b981786c9` (3 × 1) | 15 |
+| P/40-K Bolt Pistol (`dbb6c961c59fadc1`) | `77e6377816d402cc` (23 × 8) | `cf0cc31b981786c9` (3 × 1) | 10 |
+
+The support inventory slot was empty. Each listed table has five LOD bindings. Both weapons use the same original Pattern texture; this does not make their material destinations interchangeable. Preserve per-weapon destinations and fork applied textures at those bindings. Never replace the shared stock texture globally.
+
+The pass performed no texture allocations, binds, commits or memory writes. Original DDS headers independently confirmed the dimensions above. These results establish mapping, not rendered editing or export behavior. Logs, live pointers and extracted originals remain in private review output.
 
 ## Probe contracts
 
@@ -24,7 +37,17 @@ Original DDS data was captured from serialized archive `18235e0c9ec0e636`. This 
 
 The R6 worktree adds independent local Primary, Secondary and Support discovery and binding sessions. The Weapons workspace routes material and Pattern tables through the existing LUT/Value Editor. Import mapping, Auto-map/rollover, schema 4 presets, Armory previews and EL6 transport retain exact weapon configuration IDs and every LOD destination. Focused fixtures cover raw float32 values, differing palettes within a LOD group, stale ownership and transactional restoration.
 
-Weapon patch encoding must isolate its Unit/material assignment even for one palette; a Pattern texture may also be used by garments. It requires a separate verified patch destination and never substitutes the garment export archive from the containing DDS archive. Until that destination is proven, a weapon patch export refuses before creating files.
+Weapon patch encoding isolates its Unit/material assignment even for one palette; a Pattern texture may also be used by garments. Exact assignment and effective source proof are required before creating patch files. The containing DDS archive does not determine the export target.
+
+## Exact effective assignment sources
+
+Weapon export uses a separate `weapon_effective` cache mode. It resolves the requested Unit and its linked Materials from the current packed and loose-patch scope, preserving complete main/GPU/stream parts and TOC flags. Identical repeated global SectionID associations are deduplicated for identity lookup while their physical rows and offsets remain intact. Conflicting Material IDs or distinct loose overrides refuse; filename order is not treated as archive priority proof. Garment stock-mode caches remain separate.
+
+The supported game exposes a read-only `Mesh.name(genuine_mesh)` query returning a signed int32 MeshID. The identity helper normalizes that representation, matches a unique serialized MeshID, and rechecks the genuine Unit receipt, Mesh pointer, hash, named Material pointer and exact local slot. A numeric runtime mesh index finds a handle only; it never chooses a serialized mesh record. The hash is never passed to numeric `Unit.mesh`, whose numeric argument is an index. Older APIs retain the verified literal-name path.
+
+On October 13, the same production helper proved all 25 material/Pattern assignment chains against the effective Adjudicator and Bolt Pistol Unit layouts in game. This includes a customized Adjudicator LOD with a changed material-slot order and Bolt Pistol meshes with unknown literal names. This is live read-only assignment proof; it does not establish texture creation, restoration or winning patch rendering.
+
+Weapon patch serialization preserves effective Unit/Material bytes and forks assignments at the verified mesh slot. The base archive target follows the SDK's `PatchBaseArchiveOnly` policy for Unit, Material and Texture records, independently of the archive that supplied each source. The exported weapon patch remains a candidate until installation and in-game rendering have been checked.
 
 ## Remaining validation
 

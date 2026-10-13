@@ -6,10 +6,15 @@ local function id(value, n)
 end
 function C.new(m, host)
     host = host or {}
+    local mode = host.mode or 'stock'
+    assert(mode == 'stock' or mode == 'weapon_effective', 'Unsupported binding source mode')
+    local effective = mode == 'weapon_effective'
+    local expected_schema = effective and '2' or C.SCHEMA
     local paths = host.paths or m.paths.new(m)
     local io_api, now = host.io or io, host.time or os.clock
-    local folder, scripts = paths.cache .. '/' .. C.FOLDER, paths.cache .. '/binding-worker'
-    local self = { state = 'idle', status = 'Binding source cache not requested', records = {} }
+    local partition = effective and '-weapon-effective' or ''
+    local folder, scripts = paths.cache .. '/' .. C.FOLDER .. partition, paths.cache .. '/binding-worker' .. partition
+    local self = { state = 'idle', status = 'Binding source cache not requested', records = {}, mode = mode }
     local loaded_bytes = 0
     local function read(path, limit)
         local f = io_api.open(path, 'rb')
@@ -112,7 +117,8 @@ function C.new(m, host)
                         .. '" -Request "'
                         .. folder
                         .. '/request.tsv" -OwnerPID '
-                        .. self.owner,
+                        .. self.owner
+                        .. (effective and ' -Mode weapon_effective' or ''),
                     scripts
                 )
             )
@@ -128,7 +134,7 @@ function C.new(m, host)
     local function load()
         local marker = assert(read(folder .. '/complete.txt', 8192), 'Binding worker ended without a result')
         local path, schema, stamp = marker:match('^([^\r\n]+)\r?\n([^\r\n]+)\r?\n([^\r\n]+)')
-        assert(path and schema == C.SCHEMA, 'Binding cache schema changed')
+        assert(path and schema == expected_schema, 'Binding cache schema changed')
         stamp = id(stamp, 64)
         local normalized = path:gsub('\\', '/')
         local prefix = folder:gsub('\\', '/') .. '/'
@@ -194,6 +200,30 @@ function C.new(m, host)
             'Binding patch scope schema invalid'
         )
         self.scope_count, self.scope_sha256 = scope_count, id(scope_hash, 64)
+        if effective then
+            local sources =
+                assert(read(path .. '/sources.tsv', 2 * 1024 * 1024), 'Effective binding source receipt unavailable')
+            local seen, source_count = {}, 0
+            for line in sources:gmatch('[^\r\n]+') do
+                local kind, resource, origin, source_file, source_scope =
+                    line:match('^(%x+)\t(%x+)\t([^\t]+)\t([^\t]+)\t(%x+)$')
+                assert(kind and resource and source_scope, 'Malformed effective binding source receipt')
+                local key = id(kind) .. ':' .. id(resource)
+                local spec = assert(records[key], 'Effective receipt refers to an uncaptured source')
+                assert(not seen[key], 'Duplicate effective binding source receipt')
+                local base = origin == 'packed' and source_file:match('^(%x+)$')
+                    or origin == 'loose' and source_file:match('^(%x+)%.patch_%d+$')
+                assert(
+                    base and #base == 16 and id(base) == spec.archive,
+                    'Effective source origin differs from its archive'
+                )
+                assert(id(source_scope, 64) == self.scope_sha256, 'Effective source scope receipt differs')
+                spec.source_mode, spec.source_kind, spec.source_file, spec.source_scope =
+                    mode, origin, source_file, self.scope_sha256
+                seen[key], source_count = true, source_count + 1
+            end
+            assert(source_count == count, 'Effective binding source receipts are incomplete')
+        end
         self.path, self.index_stamp, self.collision_count, self.collision_sha256 = path, stamp, rows, id(digest, 64)
         self.records, self.state, self.status, self.error = records, 'ready', 'Exact binding sources ready', nil
     end

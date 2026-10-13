@@ -51,18 +51,18 @@ def package(path, mode, loader, extra='', stamp=None):
     return path
 
 
-def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', defaults=None, extra=None):
+def modular_package(path, mode, stamp=None, module=b'return {shared=true}\n', defaults=None, extra=None, version='R5.5.4'):
     animated = mode == 'animation'
-    name = 'Epic LUT R5.5.4'+(' Preview Animation Test' if animated else '')
+    name = 'Epic LUT '+version+(' Preview Animation Test' if animated else '')
     main = ('local m={}\nmod.scope.m=m\n'+
-            'm.version="R5.5.4"\n'+
+            'm.version='+json.dumps(version)+'\n'+
             'm.preview_animation='+json.dumps('authored_salute' if animated else 'disabled')+'\n'+
             ('m.dev_build_id='+json.dumps(stamp)+'\n' if stamp is not None else '')+
             'm.description='+json.dumps(name)+'\n'+
             'm.build_label='+json.dumps('Dev-'+mode)+'\n'+
             'mod.scope.PREVIEW_ANIMATION_ENABLED='+('true' if animated else 'false')+'\n').encode()
     modules = {'src/preview/player_animation.lua': module, 'src/preview/player_preview_candidate.lua': b'return editor\n'}
-    manifest = {'id': 'armor_lut_editor', 'name': name, 'version': 'R5.5.4', 'author': 'Goose',
+    manifest = {'id': 'armor_lut_editor', 'name': name, 'version': version, 'author': 'Goose',
                 'lll': {'entry': 'main.lua', 'defaults': 'config/defaults.cfg', 'modules': sorted(modules)}}
     files = {'main.lua': main, 'manifest.json': json.dumps(manifest).encode(), dev.NATIVE: DLL,
              'library.txt': dev.NATIVE.encode(), 'config/defaults.cfg': defaults if defaults is not None else b'{"preferences":{}}\n',
@@ -429,6 +429,25 @@ class ManagedDevelopment(unittest.TestCase):
                     dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
                 self.assertEqual(dev.installed_files(self.target), before)
                 self.assertFalse((self.root/'dist/deployment/active.json').exists())
+
+    def test_prerelease_upgrade_retains_prior_notes_and_protects_noncurrent_docs(self):
+        old_name = 'docs/RELEASE-R5.5.4.md'
+        before = self.install_modular_fixture(extra={old_name: b'published notes'})
+        new_name = 'docs/RELEASE-R6.0.0-alpha1.md'
+        docs = {old_name: before[old_name], new_name: b'development notes'}
+        candidate = dev.read_package(modular_package(self.root/'r6-alpha.zip', 'static', '4'*32,
+            extra=docs, version='R6.0.0-alpha1'))
+        receipt = dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        self.assertEqual((self.target/old_name).read_bytes(), before[old_name])
+        self.assertNotIn(old_name, receipt['changed_files'])
+        self.assertIn(new_name, receipt['changed_files'])
+        self.assertNotIn(dev.NATIVE, receipt['changed_files'])
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+        docs[old_name] = b'changed prior notes'
+        candidate = dev.read_package(modular_package(self.root/'r6-alpha-changed.zip', 'static', '5'*32,
+            extra=docs, version='R6.0.0-alpha1'))
+        with self.assertRaisesRegex(RuntimeError, 'Non-code modular payload differs'):
+            dev.deploy(self.root, candidate, 'static', install=True, target=self.target)
 
     def test_public_modular_docs_partial_failure_restores_updates_and_removes_additions(self):
         before = self.install_modular_fixture(extra={'README.md': b'old readme'})

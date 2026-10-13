@@ -140,6 +140,55 @@ test('invalid dimensions, nonfinite pixels and closing cohorts cannot mutate bin
     ok = pcall(f.runtime.apply, doc, 1, 1)
     assert(not ok and #f.writes == 0 and f.allocations == 0)
 end)
+test('engine CType stringification cannot reject owned float arrays or admit pointers', function()
+    local f = fixture()
+    local chunk = assert(loadfile('src/weapons/weapon_runtime.lua'))
+    setfenv(
+        chunk,
+        setmetatable({
+            tostring = function(value)
+                return type(value) == 'cdata' and '[cdata (deleted)]' or tostring(value)
+            end,
+        }, { __index = _G })
+    )
+    local runtime = chunk().new({
+        discovery = f.discovery,
+        binding_session = dofile('src/gear/binding_session.lua'),
+        retain = f.retain,
+        cohort = f.cohort,
+        document = function(object)
+            local original = f.documents[object]
+            original.original = original.data
+            return original
+        end,
+        create_texture = function(w, h, data)
+            f.allocations = f.allocations + 1
+            return { object = 0x70000000, data = data, width = w, height = h }
+        end,
+        bind = function(binding, object)
+            f.writes[#f.writes + 1] = object
+            f.textures[binding.material][binding.slot] = object
+        end,
+    })
+    runtime.refresh(1)
+    local document = runtime.load(1, 1)
+    assert(document.original and ffi.istype('float[?]', document.original))
+    local saved = document.data
+    document.data = ffi.cast('float *', saved)
+    local ok = pcall(runtime.apply, document, 1, 1)
+    assert(not ok and f.allocations == 0 and #f.writes == 0, 'Float pointer admitted as an owned array')
+    document.data = saved
+    document.original = ffi.cast('float *', saved)
+    ok = pcall(runtime.apply, document, 1, 1)
+    assert(not ok and f.allocations == 0 and #f.writes == 0, 'Original float pointer admitted as an owned array')
+    document.original = ffi.new('float[?]', 1)
+    ok = pcall(runtime.apply, document, 1, 1)
+    assert(not ok and f.allocations == 0, 'Undersized original array admitted')
+    document.original = saved
+    document.data[0] = 0.625
+    assert(runtime.apply(document, 1, 1) == 5 and f.allocations == 1)
+    assert(runtime.restore(1))
+end)
 test('atomic main and Pattern plan failure restores the entire pre-operation state', function()
     local f = fixture()
     f.runtime.refresh(1)

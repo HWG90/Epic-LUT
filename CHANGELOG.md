@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Resolve R6 weapon export assignments from exact effective Unit and Material sources, preserving installed model/material modifications and refusing conflicting overrides. Retain repeated identical SectionID rows while deduplicating identity lookup, and use the game's signed MeshID query to prove exact mesh slots when literal names are unknown.
+- Correct R6 float-array ownership checks to use LuaJIT type identity when the game's CType formatter hides array types. Keep pointer, undersized-array and non-float rejection; add cleanup regressions that restore garments independently and quarantine uncertain weapon allocations.
+- Load current LUT pixels from installed custom texture patches instead of reusing stock pixels under the same resource ID. Validate the patch-sensitive snapshot scope before exposing cached colors and recheck it on Load Current Gear; highlighting retains the custom model's other rows and original bindings.
+- Match Basic Apply Preset to Armory's live assignments: apply valid material LUTs when a mesh has no matching Pattern, include every resolved companion, and offer Pattern-only destinations without inventing assignments. Preserve checked targets, stale-state checks, rollback and one-action Undo.
 - Extend Player Preview gore filtering to cataloged numbered gib sections and separate named gore/LOD meshes. Preserve copied clothing and live LUT sync when material replacement recreates handles; reject replacements that alias equipped source materials.
 - Identify Pattern LUT column 3 Alpha as roughness. Restore the third quick swatch with Color, Mat/Opac and Roughness labels above the selectors, retaining compact grid-sized cells and abbreviated labels when needed.
 - Expose Roughness A without Advanced. Ordinary roughness picker edits preserve every other channel exactly, including unmapped RGB, with live preview, Cancel and Undo/Redo.

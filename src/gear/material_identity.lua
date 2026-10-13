@@ -1,5 +1,6 @@
 -- Read-only named material identity on a verified local Lua Unit handle.
--- Literal names come from a hash-verified catalog, never a guessed ordinal.
+-- Mesh identity uses an exact runtime hash or hash-verified literal catalog,
+-- never a guessed ordinal. Material sections retain named pointer proof.
 local M = { MAX_SECTIONS = 64, MAX_MESHES = 512, MAX_SLOTS = 64 }
 local function integer(value, limit)
     return type(value) == 'number' and value % 1 == 0 and value >= 0 and value <= limit
@@ -46,7 +47,7 @@ function M.new(E, deps)
         return value
     end
     local function named_mesh(unit, receipt, binding, meshes)
-        if not meshes or not deps.mesh_name or type(U.has_mesh) ~= 'function' then
+        if not meshes then
             return nil, 'Verified named mesh layout/API unavailable'
         end
         assert(type(meshes) == 'table' and #meshes <= M.MAX_MESHES, 'Serialized mesh layout bounds changed')
@@ -54,10 +55,36 @@ function M.new(E, deps)
         for _, record in ipairs(meshes) do
             assert(integer(record.id, 0xffffffff) and not seen[record.id], 'Ambiguous serialized MeshName ID')
             seen[record.id] = true
-            local name = deps.mesh_name(record.id)
+            local name = deps.mesh_name and deps.mesh_name(record.id)
             if literal(name) then
                 names[#names + 1] = { record = record, name = name }
             end
+        end
+        if type(deps.mesh_id) == 'function' then
+            deps.unit_identity.validate(receipt)
+            local handle = U.mesh(unit, binding.mesh_index + 1)
+            assert(pointer(handle) == binding.mesh, 'Lua Mesh handle differs from the native binding')
+            local id = deps.mesh_id(handle)
+            -- The supported game's Mesh.name returns a signed int32 hash.
+            -- Also accept a uint32 representation, without coercing other types.
+            assert(
+                type(id) == 'number' and id % 1 == 0 and id >= -0x80000000 and id <= 0xffffffff,
+                'Invalid runtime MeshName ID'
+            )
+            if id < 0 then
+                id = id + 0x100000000
+            end
+            deps.unit_identity.validate(receipt)
+            assert(pointer(U.mesh(unit, binding.mesh_index + 1)) == binding.mesh, 'Runtime Mesh handle changed')
+            for _, record in ipairs(meshes) do
+                if record.id == id then
+                    return record
+                end
+            end
+            return nil, 'Runtime MeshName ID does not match the serialized layout'
+        end
+        if not deps.mesh_name or type(U.has_mesh) ~= 'function' then
+            return nil, 'Verified named mesh layout/API unavailable'
         end
         local selected
         for _, entry in ipairs(names) do
@@ -76,11 +103,13 @@ function M.new(E, deps)
         end
         return selected
     end
-    local function mesh_proof(unit, receipt, binding, match, meshes)
+    local function mesh_proof(unit, receipt, binding, match, meshes, initial_mesh)
         local selected, why = named_mesh(unit, receipt, binding, meshes)
         if not selected then
+            assert(not initial_mesh, 'Runtime MeshName ID changed: ' .. tostring(why))
             return nil, why
         end
+        assert(not initial_mesh or initial_mesh.id == selected.id, 'Runtime MeshName ID changed')
         local slots = selected.material_slots
         assert(type(slots) == 'table' and #slots <= M.MAX_SLOTS, 'Serialized material slot bounds changed')
         local slot, seen_slots = nil, {}
@@ -143,6 +172,12 @@ function M.new(E, deps)
         -- mesh record or material-table slot.
         local mesh = U.mesh(unit, binding.mesh_index + 1)
         assert(pointer(mesh) == binding.mesh, 'Lua Mesh handle differs from the native binding')
+        local initial_mesh
+        if type(deps.mesh_id) == 'function' then
+            local why
+            initial_mesh, why = named_mesh(unit, receipt, binding, meshes)
+            assert(initial_mesh, why)
+        end
         local match
         for _, candidate in ipairs(named) do
             deps.unit_identity.validate(receipt)
@@ -184,7 +219,7 @@ function M.new(E, deps)
             match,
             'No verified material slot matches the native binding; selected literal material slot name unavailable'
         )
-        local specific, why = mesh_proof(unit, receipt, binding, match, meshes)
+        local specific, why = mesh_proof(unit, receipt, binding, match, meshes, initial_mesh)
         deps.unit_identity.validate(receipt)
         assert(pointer(U.mesh(unit, binding.mesh_index + 1)) == binding.mesh, 'Runtime Mesh handle changed')
         if match.singleton then

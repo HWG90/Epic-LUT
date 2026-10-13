@@ -240,6 +240,10 @@ local over_manifest = {
 }
 assert(not pcall(E.bundle, { dds = D }, over_manifest), 'Oversized manifest exported')
 local calls = {}
+local weapon_batch_callback = function()
+    error('Raw export must not start weapon batch')
+end
+local received_weapon_batch
 local bulk_entries, bulk_naming
 local m = {
     dds = D,
@@ -258,7 +262,8 @@ local m = {
     },
     patch_export = {
         zip_entries = P.zip_entries,
-        new = function()
+        new = function(_, options)
+            received_weapon_batch = options.weapon_export_batch
             return {
                 save = function(name, doc, orig)
                     calls[#calls + 1] = { name, doc, orig }
@@ -278,7 +283,8 @@ local export = E.new(m, {
         end
         return false
     end,
-})
+}, { weapon_export_batch = weapon_batch_callback })
+assert(received_weapon_batch == weapon_batch_callback, 'Armory exporter dropped the weapon batch callback')
 local actual_codec, actual_io, failed_writes = m.dds, m.file_io, 0
 m.dds = over_bytes.dds
 m.file_io = {
@@ -729,16 +735,12 @@ assert(not pcall(E.lut_choices, { entries = { bad_weapon } }))
 assert(
     not pcall(E.bundle, { dds = D }, { entries = { [1] = weapon_preset.entries[2], [3] = weapon_preset.entries[4] } })
 )
-assert(not pcall(
-    E.bundle,
-    { dds = D },
-    {
-        entries = {
-            weapon_preset.entries[2],
-            { kind = 'weapon', key = '3:1:1:0', weapon_resource = 'ffffffffffffffff', document = document },
-        },
-    }
-))
+assert(not pcall(E.bundle, { dds = D }, {
+    entries = {
+        weapon_preset.entries[2],
+        { kind = 'weapon', key = '3:1:1:0', weapon_resource = 'ffffffffffffffff', document = document },
+    },
+}))
 print(
     'PASS weapon preset export: schema4 ZIP/import, 3 weapon slot labels, exact shared documents and malformed identity rejection'
 )

@@ -1,5 +1,6 @@
 param([string]$GameData='', [Parameter(Mandatory=$true)][string]$Output,
-      [Parameter(Mandatory=$true)][string]$Request, [int]$OwnerPID=0)
+      [Parameter(Mandatory=$true)][string]$Request, [int]$OwnerPID=0,
+      [ValidateSet('stock','weapon_effective')][string]$Mode='stock')
 $ErrorActionPreference='Stop'
 $cacheValidated=$false
 function Assert-CachePath([string]$Path) {
@@ -43,7 +44,11 @@ try {
  $marker=Join-Path $outputRoot 'complete.txt';if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  $status=Join-Path $outputRoot 'progress.txt'
  Write-AtomicText $status 'Checking binding provenance game index...'
- $index=Join-Path $gameRoot 'bundles.nxa';$stamp=Get-Stamp $index;$requestStamp=Get-Stamp $requestFile
+ $index=Join-Path $gameRoot 'bundles.nxa';$stamp=Get-Stamp $index;$requestFileStamp=Get-Stamp $requestFile;$requestStamp=$requestFileStamp
+ if($Mode -eq 'weapon_effective') {
+  $sha=[Security.Cryptography.SHA256]::Create()
+  try {$requestStamp=[BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Mode+"`n"+$requestStamp))).Replace('-','')} finally {$sha.Dispose()}
+ }
  $versionFolder=Join-Path (Join-Path $outputRoot $stamp) $requestStamp
  Assert-CachePath $versionFolder
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
@@ -55,12 +60,13 @@ try {
  $imports=[regex]::Matches($source,'(?m)^using [^;]+;') | ForEach-Object {$_.Value} | Select-Object -Unique
  $body=[regex]::Replace($source,'(?m)^using [^;]+;\r?\n?','')
  Add-Type -TypeDefinition (($imports -join "`n")+"`n"+$body)
- $count=[EpicBindingProvenanceReader]::Run($gameRoot,$versionFolder,$requestFile,$OwnerPID,$status)
+ $count=[EpicBindingProvenanceReader]::Run($gameRoot,$versionFolder,$requestFile,$OwnerPID,$status,$Mode)
  if($count -lt 2){throw 'Binding provenance resource set is incomplete'}
  if((Get-Stamp $index) -ne $stamp){throw 'Game index changed during binding provenance extraction'}
- if((Get-Stamp $requestFile) -ne $requestStamp){throw 'Binding provenance request changed during extraction'}
+ if((Get-Stamp $requestFile) -ne $requestFileStamp){throw 'Binding provenance request changed during extraction'}
  if(Test-Path -LiteralPath $cancelFile){throw 'Binding provenance extraction canceled'}
- Write-AtomicText $marker ($versionFolder+"`n1`n"+$stamp+"`n")
+ $schema=if($Mode -eq 'weapon_effective'){'2'}else{'1'}
+ Write-AtomicText $marker ($versionFolder+"`n"+$schema+"`n"+$stamp+"`n")
  Write-Output $versionFolder
 } catch {
  if($cacheValidated -and [IO.Directory]::Exists($outputRoot)) {

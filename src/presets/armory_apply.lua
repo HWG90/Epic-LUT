@@ -368,40 +368,14 @@ function A.new(modules, host)
                 pattern = pattern,
             }
         end
-        local function companion(material, match)
+        local function companion(material)
             local kind = modules.gear_catalog.kind(material)
             local key = kind .. ':' .. host.key(material)
             local b = pattern_bindings[key]
-            local candidate = b
-                or {
-                    unit = material.unit,
-                    mesh = material.mesh,
-                    material = material.material,
-                    save_key = material.save_key,
-                    cape = material.cape,
-                    helmet = material.helmet,
-                    armor = material.armor,
-                }
-            local d
-            if b then
-                d = host.document(exact, b, true)
-            elseif exact.resolve then
-                d = exact.resolve(kind, candidate, true, nil)
-            else
-                d = exact[kind .. ':p:' .. material.save_key]
-                    or material.cape and exact['armor:p:' .. material.save_key]
-            end
-            local required = d ~= nil
-            if not required and match == 'mesh-family' then
-                local own_prefix, own_index = material.save_key:match('^(%d+:%d+):%d+:(%d+)$')
-                for _, entry in ipairs(preset.entries) do
-                    local prefix, index = entry.key:match('^p:(%d+:%d+):%d+:(%d+)$')
-                    if own_prefix and entry.kind == kind and prefix == own_prefix and index == own_index then
-                        required = true
-                    end
-                end
-            end
-            if not required then
+            -- Use the same live resolver as apply_outfit. A saved Pattern at
+            -- another LOD does not create a slot or certify this destination.
+            local d = b and host.document(exact, b, true)
+            if not d then
                 return
             end
             local original = b and host.original(b.original)
@@ -420,33 +394,40 @@ function A.new(modules, host)
             )
             return receipt(b, true)
         end
+        local represented = {}
         for column, container in ipairs({ 'armor', 'helmet' }) do
             for _, choice in ipairs(host.choices(container)) do
                 local group = host.groups()[choice.group]
                 local record =
                     { target = host.target(choice.kind, choice.group), material = {}, patterns = {}, members = {} }
+                for _, b in ipairs(group.bindings) do
+                    if modules.gear_catalog.kind(b) == choice.kind then
+                        represented[choice.kind .. ':' .. host.key(b)] = true
+                    end
+                end
                 local allowed, reason = pcall(function()
                     assert(proof[choice.kind], 'Current gear identity unavailable')
                     for _, b in ipairs(group.bindings) do
                         if modules.gear_catalog.kind(b) == choice.kind then
                             record.members[#record.members + 1] = receipt(b, false)
                             assert(host.present(b) and host.binding(b) == b.current, 'Current LUT binding changed')
-                            local d, match = host.document(exact, b, false)
+                            local d = host.document(exact, b, false)
                             if d then
                                 assert(d.width == 23, 'Saved material LUT must have 23 columns')
                                 record.material[#record.material + 1] = receipt(b, false)
-                                local paired = companion(b, match)
-                                if paired then
-                                    record.patterns[#record.patterns + 1] = paired
-                                end
+                            end
+                            local paired = companion(b)
+                            if paired then
+                                record.patterns[#record.patterns + 1] = paired
                             end
                         end
                     end
-                    assert(#record.material > 0, 'No saved material LUT matches this current LUT')
+                    assert(#record.material > 0 or #record.patterns > 0, 'No saved LUT matches this current LUT')
                 end)
                 record.enabled = allowed
                 records[choice.key] = record
-                local detail = #record.patterns > 0 and 'Pattern included' or nil
+                local detail = #record.patterns > 0 and (#record.material > 0 and 'Pattern included' or 'Pattern only')
+                    or nil
                 if not allowed then
                     detail = tostring(reason):gsub('^.-%.lua:%d+:%s*', '')
                 end
@@ -460,6 +441,48 @@ function A.new(modules, host)
                     checked = allowed,
                     detail = detail,
                 }
+            end
+        end
+        -- Some materials expose only a Pattern slot. Armory already applies
+        -- these; give Basic a frozen choice instead of silently dropping them.
+        local pattern_ordinals = {}
+        for _, group in ipairs(host.pattern_groups()) do
+            for _, kind in ipairs({ 'armor', 'cape', 'helmet' }) do
+                local record = {
+                    target = { kind = kind, object = group.object, binding_keys = {}, pattern_only = true },
+                    material = {},
+                    patterns = {},
+                    members = {},
+                }
+                local allowed, reason = pcall(function()
+                    for _, b in ipairs(group.bindings) do
+                        if modules.gear_catalog.kind(b) == kind and not represented[kind .. ':' .. host.key(b)] then
+                            if host.document(exact, b, true) then
+                                assert(proof[kind], 'Current gear identity unavailable')
+                                local member = receipt(b, true)
+                                record.members[#record.members + 1] = member
+                                record.target.binding_keys[host.key(b) .. ':' .. member.slot] = b.save_key
+                                local paired = assert(companion(b))
+                                record.patterns[#record.patterns + 1] = paired
+                            end
+                        end
+                    end
+                end)
+                if #record.members > 0 then
+                    pattern_ordinals[kind] = (pattern_ordinals[kind] or 0) + 1
+                    local id = 'pattern:' .. kind .. ':' .. pattern_ordinals[kind]
+                    records[id] = record
+                    record.enabled = allowed
+                    local column = kind == 'helmet' and 2 or 1
+                    columns[column].items[#columns[column].items + 1] = {
+                        id = id,
+                        kind = kind,
+                        enabled = allowed,
+                        checked = allowed,
+                        label = modules.gear_catalog.label(kind) .. ' Pattern LUT ' .. pattern_ordinals[kind],
+                        detail = allowed and 'Pattern only' or tostring(reason):gsub('^.-%.lua:%d+:%s*', ''),
+                    }
+                end
             end
         end
         if preview_weapon_plan then
@@ -586,10 +609,18 @@ function A.new(modules, host)
                     end
                     if refreshed and record.target.kind ~= 'weapon' then
                         local actual, count = {}, 0
-                        for _, group in ipairs(host.groups()) do
+                        local collection = record.target.pattern_only and host.pattern_groups() or host.groups()
+                        for _, group in ipairs(collection) do
                             if group.object == record.target.object then
                                 for _, b in ipairs(group.bindings) do
-                                    if modules.gear_catalog.kind(b) == record.target.kind then
+                                    if
+                                        modules.gear_catalog.kind(b) == record.target.kind
+                                        and (
+                                            not record.target.pattern_only
+                                            or record.target.binding_keys[host.key(b) .. ':' .. tostring(b.slot)]
+                                                ~= nil
+                                        )
+                                    then
                                         actual[host.key(b) .. ':' .. tostring(b.slot or modules.material_slot)] =
                                             b.save_key
                                         count = count + 1

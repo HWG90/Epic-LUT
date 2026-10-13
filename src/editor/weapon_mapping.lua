@@ -40,9 +40,7 @@ function M.bytes(document)
     )
     local size = document.width * document.height * 16
     assert(
-        type(document.data) == 'cdata'
-            and tostring(ffi.typeof(document.data)):match('float %[.*%]')
-            and ffi.sizeof(document.data) >= size,
+        type(document.data) == 'cdata' and ffi.istype('float[?]', document.data) and ffi.sizeof(document.data) >= size,
         'Weapon LUT must own its complete float32 array'
     )
     for index = 0, size / 4 - 1 do
@@ -61,7 +59,7 @@ function M.copy(document)
     if document.original ~= nil then
         assert(
             type(document.original) == 'cdata'
-                and tostring(ffi.typeof(document.original)):match('float %[.*%]')
+                and ffi.istype('float[?]', document.original)
                 and ffi.sizeof(document.original) >= #bytes,
             'Invalid original weapon LUT array'
         )

@@ -30,6 +30,7 @@ function L.parse(main)
         mesh_info_offset = uint(main, 100),
         materials_offset = uint(main, 112),
         sections = {},
+        unique_sections = {},
         section_by_id = {},
         meshes = {},
     }
@@ -55,9 +56,13 @@ function L.parse(main)
             section_offset = section_at,
             material_offset = material_at,
         }
-        assert(not result.section_by_id[entry.section], 'Ambiguous Unit global SectionID')
+        local previous = result.section_by_id[entry.section]
+        assert(not previous or previous.material == entry.material, 'Ambiguous Unit global SectionID')
         result.sections[#result.sections + 1] = entry
-        result.section_by_id[entry.section] = entry
+        if not previous then
+            result.section_by_id[entry.section] = entry
+            result.unique_sections[#result.unique_sections + 1] = entry
+        end
     end
     if result.composite ~= '0000000000000000' then
         result.supported, result.unsupported = false, 'composite_geometry'

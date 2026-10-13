@@ -450,7 +450,7 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
         # Only the public documents shipped by build_lll.py may accompany a
         # code update. Other non-code payloads remain protected.
         writable |= {'README.md', 'CHANGELOG.md'}
-        if re.fullmatch(r'R\d+\.\d+\.\d+', package['version']):
+        if re.fullmatch(r'R\d+\.\d+\.\d+(?:-(?:alpha|rc)\d+)?', package['version']):
             writable.add('docs/RELEASE-'+package['version']+'.md')
         defaults = 'config/defaults.cfg'
         require(defaults in before and defaults in runtime, 'Protected modular defaults schema is unavailable')

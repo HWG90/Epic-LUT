@@ -25,6 +25,7 @@ function W.new(m, host)
     host = host or {}
     local P, L = assert(m.binding_provenance), assert(m.binding_unit_layout)
     local cache, materials, request_set = nil, nil, {}
+    local serializing = false
     local self = {}
     local function ensure()
         if cache then
@@ -39,7 +40,7 @@ function W.new(m, host)
         if not paths.directory_exists(isolated.cache) then
             paths.mkdir_new(isolated.cache)
         end
-        cache = assert(m.binding_source_cache).new(m, { paths = isolated, log = host.log })
+        cache = assert(m.binding_source_cache).new(m, { paths = isolated, log = host.log, mode = 'weapon_effective' })
         return cache
     end
     local function discovery()
@@ -68,6 +69,12 @@ function W.new(m, host)
             return a.resource < b.resource
         end)
         return ensure().start(list, force == true)
+    end
+    local function start_required(force)
+        local ok, why = start(force)
+        if not ok then
+            error(why or 'Weapon source worker unavailable', 0)
+        end
     end
     function self.request(bindings, force)
         local ok, result, why = pcall(function()
@@ -100,20 +107,79 @@ function W.new(m, host)
         local sources = ensure()
         if not request_set[resource] then
             request_set[resource] = '0000000000000000'
-            assert(start(false))
+            start_required(false)
         end
-        assert(sources.state ~= 'failed' and sources.state ~= 'stale', sources.error or sources.status)
+        if sources.state == 'failed' or sources.state == 'stale' then
+            error(sources.error or sources.status or 'Weapon source cache unavailable', 0)
+        end
         if sources.state ~= 'ready' then
             error(W.PENDING, 0)
         end
         return sources
     end
-    local function record(value, resource, kind, expected)
+    local source_fields = {
+        'resource',
+        'archive',
+        'index_stamp',
+        'source_mode',
+        'source_kind',
+        'source_file',
+        'source_scope',
+        'toc',
+        'main',
+        'gpu',
+        'stream',
+        'main_sha256',
+        'gpu_sha256',
+        'stream_sha256',
+    }
+    local function unchanged(snapshot)
+        for _, field in ipairs(source_fields) do
+            assert(
+                snapshot.value[field] == snapshot.fields[field] and snapshot.copy[field] == snapshot.fields[field],
+                'Weapon source changed during export batch'
+            )
+        end
+    end
+    local function record(value, resource, kind, expected, batch)
+        local key = kind .. ':' .. resource
+        local saved = batch and batch.records[key]
+        if saved then
+            assert(value == saved.value, 'Weapon source record replaced during export batch')
+            unchanged(saved)
+            if expected then
+                assert(value.archive == expected.archive, 'Saved weapon source archive differs')
+                for _, part in ipairs({ 'main', 'gpu', 'stream' }) do
+                    assert(
+                        expected[part .. '_sha256'] == value[part .. '_sha256'],
+                        'Saved weapon source digest differs'
+                    )
+                end
+            end
+            return saved.copy
+        end
         assert(
             type(value) == 'table' and value.resource == resource and type(value.toc) == 'string' and #value.toc == 80,
             'Exact weapon pristine source unavailable'
         )
         assert(id_at(value.toc, 0) == resource and id_at(value.toc, 8) == kind, 'Weapon source TOC identity differs')
+        local sources = ensure()
+        assert(
+            sources.mode == 'weapon_effective'
+                and value.source_mode == sources.mode
+                and value.source_scope == sources.scope_sha256,
+            'Weapon source mode or current patch scope differs'
+        )
+        local source_file = value.source_file
+        assert(type(source_file) == 'string', 'Weapon source file receipt unavailable')
+        if value.source_kind == 'packed' then
+            assert(source_file == value.archive, 'Weapon packed source identity differs')
+        else
+            assert(
+                value.source_kind == 'loose' and source_file:match('^' .. value.archive .. '%.patch_%d+$'),
+                'Weapon loose source identity differs'
+            )
+        end
         for _, spec in ipairs({ { 'main', 56 }, { 'stream', 60 }, { 'gpu', 64 } }) do
             local bytes = value[spec[1]] or ''
             assert(
@@ -134,6 +200,16 @@ function W.new(m, host)
         hex(value.index_stamp, 64, 'weapon source index')
         if expected then
             assert(value.archive == expected.archive, 'Saved weapon source archive differs')
+        end
+        if batch then
+            batch.record_count = batch.record_count + 1
+            assert(batch.record_count <= 4160, 'Weapon export source count exceeds its limit')
+            local fields, copy = {}, {}
+            for _, field in ipairs(source_fields) do
+                fields[field], copy[field] = value[field], value[field]
+            end
+            batch.records[key] = { value = value, fields = fields, copy = copy, toc_digest = P.digest(value.toc) }
+            return copy
         end
         return value
     end
@@ -170,6 +246,7 @@ function W.new(m, host)
             },
             section_name = assert(m.binding_names).section,
             mesh_name = m.binding_names.mesh,
+            mesh_id = type(E.Mesh.name) == 'function' and E.Mesh.name or nil,
             single_material = function(b)
                 return tonumber(host.native.materials(b.mesh)) == 1
                     and tonumber(host.native.material(b.mesh, 0)) == b.material
@@ -178,14 +255,25 @@ function W.new(m, host)
         })
         return materials
     end
-    local function hydrate(refs, original)
+    local function hydrate(refs, original, batch)
         refs = P.validate(refs, 'weapon', refs.key, original)
         local sources = ready(refs.unit.resource)
         assert(refs.index_stamp == sources.index_stamp, 'Saved weapon game index changed')
-        local unit = record(assert(sources.unit(refs.unit.resource)), refs.unit.resource, P.UNIT, refs.unit)
-        local material =
-            record(assert(sources.material(refs.material.resource)), refs.material.resource, P.MATERIAL, refs.material)
-        local layout = L.parse(unit.main)
+        local unit = record(assert(sources.unit(refs.unit.resource)), refs.unit.resource, P.UNIT, refs.unit, batch)
+        local material = record(
+            assert(sources.material(refs.material.resource)),
+            refs.material.resource,
+            P.MATERIAL,
+            refs.material,
+            batch
+        )
+        local layout = batch and batch.layouts[unit.resource] or L.parse(unit.main)
+        if batch and not layout then
+            layout = L.parse(unit.main)
+        end
+        if batch then
+            batch.layouts[unit.resource] = layout
+        end
         assert(layout.supported, 'Composite weapon binding provenance is unsupported')
         local selected_mesh, selected_slot
         for _, mesh in ipairs(layout.meshes) do
@@ -264,7 +352,7 @@ function W.new(m, host)
         local unit = record(assert(sources.unit(resource)), resource, P.UNIT)
         local layout = L.parse(unit.main)
         assert(layout.supported, 'Composite weapon binding provenance is unsupported')
-        local proof = named().resolve(binding, layout.sections, binding, layout.meshes)
+        local proof = named().resolve(binding, assert(layout.unique_sections), binding, layout.meshes)
         assert(
             proof.mesh_verified and proof.material_slot_offset and proof.mesh_id and proof.material_slot,
             'Exact weapon MeshID/material-slot identity unavailable'
@@ -344,17 +432,159 @@ function W.new(m, host)
             end
         end
         assert(next(selected), 'Preset has no certified weapon assignments')
-        assert(start(false))
+        start_required(false)
         return function(entry)
             local refs = assert(selected[entry], 'Export entry is not in the certified weapon preset')
-            if not hydrated[entry] then
-                local sources = ready(refs.unit.resource)
-                local valid, why = sources.validate_scope()
-                assert(valid, why)
-                hydrated[entry] = hydrate(refs, entry.original)
-            end
+            local stored = entry.binding_provenance
+            local current_refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
+                or P.validate(stored, 'weapon', entry.key, entry.original)
+            assert(
+                entry.kind == 'weapon'
+                    and P.matches(refs, current_refs)
+                    and refs.weapon_resource == entry.weapon_resource
+                    and refs.weapon_slot == entry.weapon_slot,
+                'Weapon export assignment changed'
+            )
+            local sources = ready(refs.unit.resource)
+            local valid, why = sources.validate_scope()
+            assert(valid, why)
+            hydrated[entry] = hydrate(refs, entry.original)
             return hydrated[entry]
         end
+    end
+    function self.with_export_batch(entries, serialize)
+        assert(not serializing, 'Nested weapon export batches are unsupported')
+        assert(
+            type(entries) == 'table' and #entries > 0 and #entries <= 4096 and type(serialize) == 'function',
+            'Invalid weapon export batch'
+        )
+        local batch = { records = {}, layouts = {}, selected = {}, hydrated = {}, record_count = 0, active = true }
+        local preferences, count = {}, 0
+        local function refs_for(entry)
+            assert(entry.kind == 'weapon', 'Export entry is not a weapon')
+            local stored = entry.binding_provenance
+            local refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
+                or P.validate(stored, 'weapon', entry.key, entry.original)
+            assert(
+                refs.weapon_resource == entry.weapon_resource and refs.weapon_slot == entry.weapon_slot,
+                'Weapon export configuration differs from assignment proof'
+            )
+            return refs
+        end
+        for _, entry in ipairs(entries) do
+            if entry.kind == 'weapon' then
+                local refs = refs_for(entry)
+                assert(
+                    not preferences[refs.unit.resource] or preferences[refs.unit.resource] == refs.unit.archive,
+                    'Conflicting saved weapon source archives'
+                )
+                preferences[refs.unit.resource], request_set[refs.unit.resource] = refs.unit.archive, refs.unit.archive
+                batch.selected[entry] = refs
+                count = count + 1
+            end
+        end
+        assert(count > 0, 'No weapon export bindings requested')
+        start_required(false)
+        local sources = ready(next(preferences))
+        local valid, why = sources.validate_scope()
+        if not valid then
+            error(why, 0)
+        end
+        local stamp, scope = sources.index_stamp, sources.scope_sha256
+        local function current()
+            assert(batch.active, 'Weapon export batch has ended')
+            assert(
+                cache == sources
+                    and sources.state == 'ready'
+                    and sources.mode == 'weapon_effective'
+                    and sources.index_stamp == stamp
+                    and sources.scope_sha256 == scope,
+                'Weapon export source scope changed'
+            )
+        end
+        local function resolve(entry)
+            current()
+            local refs = assert(batch.selected[entry], 'Export entry is not in the certified weapon batch')
+            assert(P.matches(refs, refs_for(entry)), 'Weapon export assignment changed during serialization')
+            if not batch.hydrated[entry] then
+                batch.hydrated[entry] = hydrate(refs, entry.original, batch)
+            end
+            return batch.hydrated[entry]
+        end
+        local callbacks = {
+            provenance = resolve,
+            patch_archive = function(values)
+                current()
+                assert(
+                    type(values) == 'table' and #values > 0 and #values <= 4096,
+                    'Invalid weapon export batch subset'
+                )
+                local found = false
+                for _, entry in ipairs(values) do
+                    if entry.kind == 'weapon' then
+                        resolve(entry)
+                        found = true
+                    end
+                end
+                assert(found, 'No weapon export bindings requested')
+                return hex(assert(m.patch_export).BASE_ARCHIVE, 16, 'weapon patch destination')
+            end,
+            material_source = function(resource)
+                current()
+                local value = sources.material(resource)
+                return value and record(value, hex(resource, 16, 'weapon Material'), P.MATERIAL, nil, batch) or nil
+            end,
+        }
+        -- A single resume rejects yielding callbacks; no ambient batch state or
+        -- active proof lease survives into another asynchronous export action.
+        local thread = coroutine.create(function()
+            return serialize(callbacks)
+        end)
+        serializing = true
+        local ok, result = coroutine.resume(thread)
+        serializing = false
+        if ok and coroutine.status(thread) ~= 'dead' then
+            ok, result = false, 'Weapon export serialization must not yield'
+        end
+        local final_ok, final_why = pcall(function()
+            current()
+            local unchanged_scope, reason = sources.validate_scope()
+            if not unchanged_scope then
+                error(reason, 0)
+            end
+            for entry in pairs(batch.selected) do
+                assert(
+                    P.matches(batch.selected[entry], refs_for(entry)),
+                    'Weapon export assignment changed during serialization'
+                )
+            end
+            for _, snapshot in pairs(batch.records) do
+                unchanged(snapshot)
+                for _, part in ipairs({ 'main', 'gpu', 'stream' }) do
+                    local bytes = snapshot.fields[part] or ''
+                    assert(
+                        #bytes == 0 and snapshot.fields[part .. '_sha256'] == nil
+                            or P.digest(bytes) == snapshot.fields[part .. '_sha256'],
+                        'Weapon source digest changed during export batch'
+                    )
+                end
+                assert(
+                    P.digest(snapshot.fields.toc) == snapshot.toc_digest,
+                    'Weapon source TOC changed during export batch'
+                )
+            end
+        end)
+        batch.active = false
+        for _, proof in pairs(batch.hydrated) do
+            proof.verified, proof.mesh_verified, proof.unit_override_verified = nil, nil, nil
+        end
+        if not final_ok then
+            error(final_why, 0)
+        end
+        if not ok then
+            error(result, 0)
+        end
+        return result
     end
     function self.material(resource)
         return assert(ensure().material(resource))
@@ -383,8 +613,26 @@ function W.new(m, host)
     function self.close()
         return not cache or cache.close()
     end
-    function self.patch_archive()
-        return nil, W.DESTINATION_PENDING
+    function self.patch_archive(entries)
+        if cache and (cache.state == 'failed' or cache.state == 'stale') then
+            return nil, cache.error or cache.status or 'Weapon source cache unavailable'
+        end
+        if not cache or cache.state ~= 'ready' then
+            return nil, W.PENDING
+        end
+        local ok, result = pcall(function()
+            assert(
+                type(entries) == 'table' and #entries > 0 and #entries <= 4096,
+                'No weapon export bindings requested'
+            )
+            return self.with_export_batch(entries, function(batch)
+                return batch.patch_archive(entries)
+            end)
+        end)
+        if not ok then
+            return nil, tostring(result)
+        end
+        return result
     end
     return self
 end

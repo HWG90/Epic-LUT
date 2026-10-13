@@ -11,7 +11,7 @@ function B.new(m, host)
         'Weapon editor modules unavailable'
     )
     local self, runtime, discovery, controller, identity = {}, nil, nil, nil, nil
-    local status, elapsed = 'Load current weapons to begin.', 0
+    local status, elapsed, recovery = 'Load current weapons to begin.', 0, {}
     local function get_runtime()
         if runtime then
             return runtime
@@ -182,6 +182,11 @@ function B.new(m, host)
         end
         local restored = get_runtime().restore(target and target.weapon_slot)
         assert(restored, 'Weapon restoration is pending')
+        if target then
+            recovery[target.weapon_slot] = nil
+        else
+            recovery = {}
+        end
         status = 'Restored original weapon LUTs.'
         host.message(status)
         if controller then
@@ -206,10 +211,72 @@ function B.new(m, host)
             return
         end
         elapsed = 0
+        local prior = {}
+        for slot = 1, 3 do
+            local catalog = runtime.catalog(slot)
+            if catalog and catalog.available then
+                local candidate = {
+                    resource = catalog.weapon_resource or catalog.weapon_resource64,
+                    bindings = {},
+                    applied = false,
+                }
+                for _, kind in ipairs({ 'material', 'pattern' }) do
+                    for _, group in ipairs(catalog[kind]) do
+                        for _, binding in ipairs(group.bindings) do
+                            candidate.bindings[#candidate.bindings + 1] = binding
+                            candidate.applied = candidate.applied
+                                or binding.current ~= binding.original and binding.document ~= nil
+                        end
+                    end
+                end
+                prior[slot] = candidate
+            end
+        end
         local changed = runtime.update()
         if #changed > 0 then
             status = 'Weapon changed; load current weapons again.'
             host.invalidate(changed)
+            for _, slot in ipairs(changed) do
+                local candidate = prior[slot]
+                if candidate and candidate.applied and not recovery[slot] then
+                    recovery[slot] = candidate
+                end
+            end
+        end
+        for slot, candidate in pairs(recovery) do
+            local dead, foreign = true, false
+            for _, binding in ipairs(candidate.bindings) do
+                dead = discovery.dead(binding) == true and dead
+                if discovery.present(binding) and discovery.binding(binding) ~= binding.current then
+                    foreign = true
+                end
+            end
+            if foreign then
+                -- An external writer owns this change. A later death must not
+                -- turn it into permission to restore our earlier draft.
+                recovery[slot] = nil
+            elseif dead then
+                local current = identity.snapshot(slot)
+                local resource = current and (current.weapon_resource or current.weapon_resource64)
+                if resource and resource ~= candidate.resource then
+                    recovery[slot] = nil
+                elseif resource then
+                    local ok, catalog, count = pcall(runtime.recovery, slot, true)
+                    if ok and catalog then
+                        recovery[slot] = nil
+                        if count > 0 then
+                            status = 'Recovered ' .. names[slot] .. ' LUTs after respawn.'
+                            host.message(status)
+                        end
+                        if controller then
+                            controller.sync()
+                        end
+                    elseif not ok and not tostring(catalog):find('Original weapon LUT pixels unavailable', 1, true) then
+                        recovery[slot] = nil
+                        error(catalog, 0)
+                    end
+                end
+            end
         end
     end
     function self.runtime()
@@ -251,6 +318,7 @@ function B.new(m, host)
         return out
     end
     function self.close(allow_quarantine)
+        recovery = {}
         if not runtime then
             return true
         end

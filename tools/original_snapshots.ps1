@@ -2,29 +2,27 @@ param([string]$GameData='',[Parameter(Mandatory=$true)][string]$Output,[int]$Own
 $ErrorActionPreference='Stop'
 try {
  New-Item -ItemType Directory -Path $Output -Force | Out-Null
+ $marker=Join-Path $Output $(if($IndexOnly){'index-complete.txt'}else{'complete.txt'})
  $errorFile=Join-Path $Output 'error.txt';if(Test-Path -LiteralPath $errorFile){Remove-Item -LiteralPath $errorFile}
  $cancelFile=Join-Path $Output 'progress.txt.cancel';if(Test-Path -LiteralPath $cancelFile){Remove-Item -LiteralPath $cancelFile}
  [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Locating game data...')
  if(!$GameData){throw 'GameData must be supplied by the editor'}
- $index=Join-Path $GameData 'bundles.nxa'
- [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Checking original LUT cache...')
- $stream=[IO.File]::OpenRead($index);$sha=[Security.Cryptography.SHA256]::Create()
- try {$stamp=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')} finally {$stream.Dispose();$sha.Dispose()}
- $marker=Join-Path $Output $(if($IndexOnly){'index-complete.txt'}else{'complete.txt'})
+ [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Preparing snapshot reader...')
+ Add-Type -Path (Join-Path $PSScriptRoot 'original_snapshots.cs')
+ [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Checking patched original LUT sources...')
+ $stamp=[EpicOriginalReader]::SourceStamp($GameData,$OwnerPID,(Join-Path $Output 'progress.txt'))
  $versionFolder=Join-Path $Output $stamp
- $schema=Join-Path $versionFolder 'patch-source-v3.txt'
+ $schema=Join-Path $versionFolder 'patch-source-v4.txt'
  if($IndexOnly -and (Test-Path -LiteralPath $schema) -and (Test-Path -LiteralPath $marker) -and ([IO.File]::ReadAllLines($marker)[0] -eq $stamp) -and (Test-Path -LiteralPath (Join-Path $versionFolder 'catalog.txt'))){exit 0}
  if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
  New-Item -ItemType Directory -Path $Output -Force | Out-Null
- [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Preparing snapshot reader...')
- Add-Type -Path (Join-Path $PSScriptRoot 'original_snapshots.cs')
  [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Reader ready; checking editor heartbeat...')
  $wantedPath=if($IndexOnly){$null}else{$Wanted}
  if(!$IndexOnly -and !(Test-Path -LiteralPath $Wanted)){throw 'Equipped LUT request missing'}
- $count=[EpicOriginalReader]::Run($GameData,$versionFolder,$OwnerPID,(Join-Path $Output 'progress.txt'),$wantedPath)
+ $count=[EpicOriginalReader]::RunChecked($GameData,$versionFolder,$OwnerPID,(Join-Path $Output 'progress.txt'),$wantedPath,$stamp)
  if($count -eq 0){throw 'No original material LUTs found'}
  [IO.File]::WriteAllText($marker,$stamp+"`n"+$count)
- if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23x1-64')}
-} catch { [IO.File]::WriteAllText((Join-Path $Output 'error.txt'),$_.Exception.Message);exit 1 }
+ if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23x1-64; exact loose LUT overrides')}
+} catch { if($marker -and (Test-Path -LiteralPath $marker)){Remove-Item -LiteralPath $marker};[IO.File]::WriteAllText((Join-Path $Output 'error.txt'),$_.Exception.Message);exit 1 }
 

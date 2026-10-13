@@ -84,13 +84,14 @@ local m = {
         end,
     },
 }
-local function new()
+local function new(mode)
     return C.new(m, {
         paths = paths,
         io = io_fake,
         time = function()
             return time
         end,
+        mode = mode,
     })
 end
 local stamp, request = ('A'):rep(64), ('B'):rep(64)
@@ -248,6 +249,93 @@ stop_ready = false
 assert(not cache.close() and cache.worker and cache.state == 'loading', 'Pending worker cleanup was forgotten')
 stop_ready = true
 assert(cache.close() and stops >= 2)
+running = false
+local stock_launch = m.windows.launch_worker
+m.windows.launch_worker = function(command, scripts)
+    assert(command:find(' -Mode weapon_effective', 1, true))
+    assert(command:find('binding-sources-weapon-effective/request.tsv', 1, true))
+    assert(scripts == 'C:/fixture/binding-worker-weapon-effective')
+    return stock_launch(command:gsub('%-weapon%-effective', ''), scripts:gsub('%-weapon%-effective', ''))
+end
+local effective_folder = folder:gsub('binding%-sources/', 'binding-sources-weapon-effective/')
+local effective_root = 'C:/fixture/binding-sources-weapon-effective'
+local function effective_dataset()
+    dataset()
+    local copy = {}
+    for path, bytes in pairs(files) do
+        if path:find('C:/fixture/binding-sources/', 1, true) == 1 then
+            copy[path:gsub('binding%-sources/', 'binding-sources-weapon-effective/')] = bytes
+        end
+    end
+    for path, bytes in pairs(copy) do
+        files[path] = bytes
+    end
+    files[effective_root .. '/complete.txt'] = effective_folder .. '\n2\n' .. stamp .. '\n'
+    files[effective_folder .. '/sources.tsv'] = P.UNIT
+        .. '\t'
+        .. unit_id
+        .. '\tloose\t1234567890abcdef.patch_34\t'
+        .. P.digest('')
+        .. '\n'
+        .. P.MATERIAL
+        .. '\t'
+        .. mat_id
+        .. '\tpacked\t1234567890abcdef\t'
+        .. P.digest('')
+        .. '\n'
+end
+cache = new('weapon_effective')
+assert(cache.mode == 'weapon_effective' and cache.start(units))
+effective_dataset()
+time = time + 1
+cache.tick()
+assert(cache.state == 'ready' and cache.validate_scope())
+unit = assert(cache.unit(unit_id))
+assert(
+    unit.source_mode == 'weapon_effective'
+        and unit.source_kind == 'loose'
+        and unit.source_file == '1234567890abcdef.patch_34'
+        and unit.source_scope == P.digest('')
+)
+assert(cache.material(mat_id).source_kind == 'packed')
+assert(cache.close())
+local function invalid_effective(mutator, expected)
+    local current = new('weapon_effective')
+    assert(current.start(units))
+    effective_dataset()
+    mutator()
+    time = time + 1
+    current.tick()
+    assert(current.state == 'failed' and current.error:find(expected, 1, true), current.error)
+    current.close()
+end
+invalid_effective(function()
+    files[effective_root .. '/complete.txt'] = effective_folder .. '\n1\n' .. stamp .. '\n'
+end, 'schema')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] = nil
+end, 'receipt unavailable')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] =
+        files[effective_folder .. '/sources.tsv']:gsub('patch_34', 'patch_34/evil')
+end, 'origin differs')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] = files[effective_folder .. '/sources.tsv']:gsub('loose', 'guessed')
+end, 'origin differs')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] =
+        files[effective_folder .. '/sources.tsv']:gsub(P.digest(''), ('a'):rep(64))
+end, 'scope receipt differs')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] = files[effective_folder .. '/sources.tsv']:match('[^\n]+') .. '\n'
+end, 'incomplete')
+invalid_effective(function()
+    files[effective_folder .. '/sources.tsv'] = files[effective_folder .. '/sources.tsv']
+        .. files[effective_folder .. '/sources.tsv']:match('[^\n]+')
+        .. '\n'
+end, 'Duplicate effective')
+m.windows.launch_worker = stock_launch
+assert(not pcall(new, 'guessed_priority'), 'Unsupported cache mode accepted')
 print(
-    'PASS binding source cache: owned request/worker lifecycle, exact bounded inventory/parts, isolated cache paths, immutable loaded data, complete unloaded collision lookup and malformed/cleanup rejection'
+    'PASS binding source cache: owned worker lifecycle, exact bounded parts, immutable data, collision/scope checks, isolated weapon-effective mode and validated source receipts'
 )

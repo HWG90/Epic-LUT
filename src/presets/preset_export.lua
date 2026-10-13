@@ -206,6 +206,7 @@ function E.new(m, paths, options)
         material_source = options.material_source,
         unit_layout = options.unit_layout or m.binding_unit_layout,
         weapon_patch_archive = options.weapon_patch_archive,
+        weapon_export_batch = options.weapon_export_batch,
     })
     function self.save(name, preset, format, index, naming)
         assert(preset and preset.entries and #preset.entries > 0, 'Choose a saved Armory preset first')
