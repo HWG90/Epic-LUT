@@ -89,6 +89,7 @@ for _, font in ipairs({ 12, 16, 20, 28 }) do
     for _, scale in ipairs({ 0.7, 1, 1.15 }) do
         for _, size in ipairs({ { 700, 620 }, { 1800, 1100 } }) do
             local f = fixture()
+            f.host.apply_camo = function() return true end
             local view = View.new(f.controller)
             local ui, commands = canvas(size[1], size[2], font, scale)
             view.draw(ui)

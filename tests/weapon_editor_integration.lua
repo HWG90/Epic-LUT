@@ -417,9 +417,18 @@ assert(handle.activate('editor_load_weapon'))
 local camo_callbacks = buttons()
 assert(camo_callbacks.weapon_camo_all and camo_callbacks.weapon_camo_clear, 'Weapon Camo actions were not rendered')
 assert(camo_callbacks.weapon_camo_all())
+local camo_before = ffi.string(base.info().editor.data,23*8*16)
 assert(handle.set('weapon_camo_colorway', 5))
 local camo_document = base.info().editor
 assert(m.basic_camo.colorway_selection(camo_document,'weapon') == 5, 'Arctic did not reach the weapon rows')
+assert(handle.activate('global_undo'))
+assert(ffi.string(base.info().editor.data,23*8*16) == camo_before,
+    'Camo Undo did not restore the shared editor draft')
+assert(handle.get('weapon_camo_colorway') == 1, 'Camo Undo left the named colorway selected')
+assert(handle.activate('global_redo'))
+assert(m.basic_camo.colorway_selection(base.info().editor,'weapon') == 5,
+    'Camo Redo did not restore its recipe in the shared editor')
+assert(handle.get('weapon_camo_colorway') == 5, 'Camo Redo did not resync its named colorway')
 assert(handle.set('edit_row',1) and handle.set('edit_column',17))
 assert(handle.set('cell_r',0.321))
 editor.on_update(ctx,0.1)

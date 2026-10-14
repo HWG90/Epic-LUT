@@ -1683,6 +1683,9 @@ local function commit_history_snapshot(snapshot)
         import_view.selected = nil
     end
     refresh(true)
+    if operations.weapon_editor then
+        operations.weapon_editor.controller().sync()
+    end
     if (edit.remember_application or remember_before) and setup then
         local ok, why = pcall(save_setup)
         if not ok then
