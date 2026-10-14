@@ -51,13 +51,12 @@ local function validate(entries)
             type(entry) == 'table' and kind_labels[entry.kind] and type(entry.key) == 'string',
             'Invalid saved LUT gear target'
         )
-        local identity = entry.kind .. ':' .. entry.key
+        local slot = weapon_target(entry)
+        local identity = entry.kind .. ':' .. entry.key .. (slot and ':' .. entry.weapon_resource:lower() or '')
         assert(not seen[identity], 'Duplicate saved LUT target')
         seen[identity] = true
-        local slot = weapon_target(entry)
         if slot then
             local resource = entry.weapon_resource:lower()
-            assert(not weapons[slot] or weapons[slot] == resource, 'Conflicting weapon identities in preset slot')
             weapons[slot] = resource
         end
     end
@@ -107,12 +106,19 @@ function E.bundle(m, preset, include_capes, include_patterns)
     validate(preset.entries)
     local entries = collection(preset, include_capes, include_patterns)
     local version = 2
+    local weapons = {}
     for _, entry in ipairs(entries) do
         if entry.binding_provenance then
             version = math.max(version, 3)
         end
         if entry.kind == 'weapon' then
-            version = 4
+            version = math.max(version, 4)
+            local slot = weapon_target(entry)
+            local resource = entry.weapon_resource:lower()
+            if weapons[slot] and weapons[slot] ~= resource then
+                version = 5
+            end
+            weapons[slot] = resource
         end
     end
     local manifest, files = { 'EPIC-OUTFIT\t' .. version }, {}

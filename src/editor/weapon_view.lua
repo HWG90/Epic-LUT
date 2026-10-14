@@ -35,6 +35,7 @@ function V.new(controller)
     function self.draw(ui)
         controller.sync()
         local state, theme = controller.state(), ui.theme
+        local basic = ui.basic_only and state.quick_ready
         local gap = ui.spacing and ui.spacing(6) or 6
         local height = ui.control_height and ui.control_height(14, 4, 28) or 28
         local hint_height = ui.control_height and ui.control_height(12, 1, 16, 'hint') or 16
@@ -110,7 +111,10 @@ function V.new(controller)
             'hint',
             theme.muted
         )
-        local action_width = math.min(340, math.max(180, ui.w * 0.30, measure('Pattern Editor') + gap * 4 + 8))
+        local action_width = math.min(
+            basic and 520 or 340,
+            math.max(180, ui.w * (basic and 0.44 or 0.30), measure('Pattern Editor') + gap * 4 + 8)
+        )
         action_width = math.min(action_width, math.max(80, ui.w * 0.42))
         local main_width = math.max(1, ui.w - action_width - gap * 4)
         local main_x, action_x = ui.x + gap, ui.x + gap * 3 + main_width
@@ -118,24 +122,26 @@ function V.new(controller)
         ui.rect(action_x - gap, body_bottom, 1, body_height, theme.line)
         local ready = state.target ~= nil and not state.busy
         local family_x = main_x
-        family_x = family_x
-            + button(family_x, body_top - height, main_width, 'Material LUTs', 'weapon_main', function()
-                controller.choose_family('main')
-            end, not state.busy, 'Material')
-            + gap
-        button(
-            family_x,
-            body_top - height,
-            math.max(0, main_x + main_width - family_x),
-            'Pattern LUTs',
-            'weapon_pattern',
-            function()
-                controller.choose_family('pattern')
-            end,
-            not state.busy,
-            'Pattern'
-        )
-        local choice_y = body_top - height * 2 - gap
+        if not basic then
+            family_x = family_x
+                + button(family_x, body_top - height, main_width, 'Material LUTs', 'weapon_main', function()
+                    controller.choose_family('main')
+                end, not state.busy, 'Material')
+                + gap
+            button(
+                family_x,
+                body_top - height,
+                math.max(0, main_x + main_width - family_x),
+                'Pattern LUTs',
+                'weapon_pattern',
+                function()
+                    controller.choose_family('pattern')
+                end,
+                not state.busy,
+                'Pattern'
+            )
+        end
+        local choice_y = body_top - height * (basic and 1 or 2) - gap
         local choice_width = math.min(
             main_width,
             math.max(180, measure(state.group and state.group.label or 'Weapon LUT') + gap * 4 + 40)
@@ -150,11 +156,15 @@ function V.new(controller)
         end
         bounded(main_x, table_top, label, main_width, 'heading')
         table_top = table_top - hint_height - gap
-        local pattern_band = height + hint_height * 2 + gap * 4
+        local pattern_band = height + hint_height * 2 + gap * 4 + (basic and height + hint_height + gap * 3 or 0)
         local table_available = math.max(0, table_top - body_bottom - pattern_band)
         local document = state.document
-        local row_height = math.max(18, math.min(40, height))
-        local label_width = math.min(main_width * 0.35, measure('Row 64', 'hint') + gap * 2)
+        local row_height = basic and math.max(29, math.min(56, table_available / math.max(1, document.height)))
+            or math.max(18, math.min(40, height))
+        local label_width = math.min(
+            main_width * 0.65,
+            measure(basic and 'Region 64' or 'Row 64', 'hint') + gap * 4 + (basic and 24 or 0)
+        )
         local columns = document and document.width or 0
         local rows = document and document.height or 0
         local data_ready = document
@@ -163,7 +173,12 @@ function V.new(controller)
             and columns <= 64
             and rows >= 1
             and rows <= 64
-        local cell_width = data_ready and math.min(40, math.max(1, (main_width - label_width - gap) / columns)) or 0
+        local cell_width = data_ready
+                and (basic and math.max(1, main_width - label_width - gap) or math.min(
+                    40,
+                    math.max(1, (main_width - label_width - gap) / columns)
+                ))
+            or 0
         local content_height = data_ready and rows * row_height or hint_height * 2
         local table_height = math.min(table_available, content_height)
         self.table_maximum = math.max(0, content_height - table_height)
@@ -206,11 +221,11 @@ function V.new(controller)
                     bounded(
                         main_x + (camo and box + gap or 0),
                         ui.text_y and ui.text_y(y, row_height, 14, 'Row ' .. row, 'hint') or y + 3,
-                        'Row ' .. row,
+                        (basic and 'Region ' or 'Row ') .. row,
                         label_width - (camo and box + gap or 0),
                         'hint'
                     )
-                    for column = 1, columns do
+                    for column = 1, (basic and 1 or columns) do
                         local x, selected_column = main_x + label_width + (column - 1) * cell_width, column
                         ui.rect(
                             x,
@@ -263,6 +278,29 @@ function V.new(controller)
             )
         end
         local pattern_top = self.table_bounds.y - gap * 2
+        if basic then
+            bounded(main_x, pattern_top - hint_height, 'Camo: check regions above', main_width, 'heading')
+            local rows_selected = controller.camo_selection()
+            local first
+            for row = 1, document.height do
+                if rows_selected[row] then
+                    first = row
+                    break
+                end
+            end
+            local lane = (main_width - gap * 3) / 4
+            for color = 1, 4 do
+                local x, selected_color = main_x + (color - 1) * (lane + gap), color
+                local y = pattern_top - hint_height - gap - height
+                ui.rect(x, y, lane, height, rgb(document, first or 1, 16 + color))
+                if ui.hit and first and ready then
+                    ui.hit(x, y, lane, height, function()
+                        return controller.edit_camo(first, selected_color, state.target)
+                    end, nil, nil, 'Edit checked Camo color ' .. color)
+                end
+            end
+            pattern_top = pattern_top - hint_height - height - gap * 3
+        end
         bounded(main_x, pattern_top - hint_height, 'Quick Editor: Pattern LUT', main_width, 'heading')
         local captions = { 'Color', 'Mat/Opac', 'Roughness' }
         local short = { 'Color', 'Mat/Op', 'Rough.' }
@@ -369,7 +407,7 @@ function V.new(controller)
         action('Auto-map LUTs', 'weapon_auto_map', function()
             return controller.map_imports(true)
         end, ready and controller.available('map_imports'), 'Auto-map')
-        heading('Presets and sharing')
+        heading('Armory Presets')
         actions[#actions + 1] = { kind = 'choice', id = 'outfit_preset', height = height + gap }
         action(
             'Map selected Armory preset',
@@ -379,7 +417,7 @@ function V.new(controller)
             'Apply Preset'
         )
         action(
-            'Save Weapon Preset',
+            'Save to Armory',
             'weapon_preset',
             controller.save_preset,
             ready and controller.available('save_preset'),

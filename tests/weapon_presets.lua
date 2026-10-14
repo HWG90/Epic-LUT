@@ -87,6 +87,23 @@ assert(
         and stored.entries[1].weapon_resource == f.config[1]
         and stored.entries[1].document.data[0] == 2.75
 )
+local extra = {
+    kind = 'weapon',
+    key = stored.entries[1].key,
+    weapon_slot = 1,
+    weapon_resource = 'ffffffffffffffff',
+    document = F.document(23, 8, 6),
+}
+local armor = { kind = 'armor', key = '0:1:0:0', document = F.document(23, 8, 7) }
+local merged = service.save('Weapon Service Save', nil, { entries = { extra, armor } })
+assert(
+    #merged.entries == 4
+        and merged.entries[1].weapon_resource == 'ffffffffffffffff'
+        and merged.entries[2].kind == 'armor'
+        and merged.entries[3].weapon_resource == f.config[1]
+)
+local again = service.save('Weapon Service Save', nil, merged)
+assert(#again.entries == 4, 'Replacing an existing weapon duplicated or removed other gear')
 store.delete('Weapon Service Save')
 -- V4 references are optional for an ordinary save, but any supplied proof must
 -- describe the exact captured weapon, key and original role.

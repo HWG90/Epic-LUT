@@ -669,9 +669,16 @@ for activation = 1, 2 do
     assert(handle.activate('global_redo'))
     assert(buttons().weapon_auto_map())
     assert(workflow_factories == activation, 'Workflow service was recreated or erased during activation')
-    assert(buttons().weapon_preset())
+    buttons().weapon_preset()
     local naming = assert(base.frontend().menu.outfit_dialog)
-    assert(naming.on_save('weapon-factory-fixture'))
+    if naming.phase == 'confirm' then
+        assert(naming.on_confirm())
+    else
+        if naming.on_save('weapon-factory-fixture') == false then
+            local confirmation = assert(base.frontend().menu.outfit_dialog)
+            assert(confirmation.phase == 'confirm' and confirmation.on_confirm())
+        end
+    end
     local preset = m.outfit_presets.new(m, m.paths.new().presets).load('weapon-factory-fixture')
     assert(#preset.weapon == 15 and preset.weapon[1].data[0] == 0.78125)
     local preset_index

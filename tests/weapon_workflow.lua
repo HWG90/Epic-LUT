@@ -6,7 +6,8 @@ local f = F.new()
 local body = f.group(1, 'material', 1, 'babd338977faa2ff', 2.5, 3)
 local pattern = f.group(1, 'pattern', 1, 'cf0cc31b981786c9', -0.25, 3)
 local secondary = f.group(2, 'material', 1, '3333333333333333', 0.5, 1)
-local saved, invalidated, exported, mutations
+local saved, invalidated, exported, mutations, selected_preset
+local stored_presets = {}
 local bridge = {
     runtime = function()
         return f.runtime
@@ -17,15 +18,19 @@ local bridge = {
 }
 local storage = {
     names = function()
-        return { 'Existing' }
+        local names = {}
+        for name in pairs(stored_presets) do
+            names[#names + 1] = name
+        end
+        return names
     end,
     save = function(name, entries)
         saved = { name = name, entries = entries }
+        stored_presets[name] = saved
         return true
     end,
     load = function(name)
-        assert(saved.name == name)
-        return saved
+        return assert(stored_presets[name])
     end,
 }
 local workflow = Workflow.new(
@@ -40,6 +45,9 @@ local workflow = Workflow.new(
         end,
         outfits = function()
             return storage
+        end,
+        selected_preset = function()
+            return selected_preset
         end,
         invalidate = function(name)
             invalidated = name
@@ -72,6 +80,30 @@ local save_status = f.menu.outfit_dialog.on_save('Adjudicator')
 assert(save_status:find('Patch assignment proof is pending or unavailable', 1, true))
 assert(saved and #saved.entries == 6 and invalidated == 'Adjudicator' and not f.menu.outfit_dialog)
 assert(saved.entries[1].document.data[0] == 2.5)
+stored_presets.Mixed = {
+    name = 'Mixed',
+    entries = {
+        { kind = 'armor', key = '0:1:0:0', document = F.document(23, 8, 7) },
+        {
+            kind = 'weapon',
+            key = '3:1:0:0',
+            weapon_slot = 1,
+            weapon_resource = 'ffffffffffffffff',
+            document = F.document(23, 8, 8),
+        },
+    },
+}
+local original_saved = saved
+selected_preset = stored_presets.Mixed
+assert(workflow.save({ body, pattern }) and not f.menu.outfit_dialog)
+assert(
+    #saved.entries == 8 and saved.entries[1].kind == 'armor' and saved.entries[2].weapon_resource == 'ffffffffffffffff'
+)
+local before_confirm = saved
+assert(workflow.save({ body, pattern }) == false)
+assert(saved == before_confirm and f.menu.outfit_dialog.phase == 'confirm')
+assert(f.menu.outfit_dialog.on_confirm() and #saved.entries == 8)
+selected_preset, saved, invalidated = nil, original_saved, 'Adjudicator'
 local preview = workflow.plan(saved, { preview = true })
 assert(#preview.choices == 2 and preview.choices[1].has_pattern and preview.validate())
 local selected = { [preview.choices[1].id] = true }
@@ -121,33 +153,30 @@ do
             return scoped.runtime.target(1, 1, 'material')
         end,
     }
-    local scoped_workflow = Workflow.new(
-        {
-            weapon_mapping = Mapping,
-            weapon_presets = Presets,
-            outfit_targets = dofile('src/presets/outfit_targets.lua'),
-        },
-        {
-            bridge = function()
-                return scoped_bridge
-            end,
-            outfits = function()
-                return storage
-            end,
-            message = function(value)
-                return value
-            end,
-            exporter = function(preset)
-                return {
-                    save = function(_, _, format)
-                        captured = preset.entries
-                        assert(format == 2, 'Selected weapon export changed its format')
-                        return 'output', 'subset', 'subset.zip'
-                    end,
-                }
-            end,
-        }
-    )
+    local scoped_workflow = Workflow.new({
+        weapon_mapping = Mapping,
+        weapon_presets = Presets,
+        outfit_targets = dofile('src/presets/outfit_targets.lua'),
+    }, {
+        bridge = function()
+            return scoped_bridge
+        end,
+        outfits = function()
+            return storage
+        end,
+        message = function(value)
+            return value
+        end,
+        exporter = function(preset)
+            return {
+                save = function(_, _, format)
+                    captured = preset.entries
+                    assert(format == 2, 'Selected weapon export changed its format')
+                    return 'output', 'subset', 'subset.zip'
+                end,
+            }
+        end,
+    })
     local target =
         { kind = 'weapon', weapon_slot = 1, group_index = 1, family = 'material', bindings = { main.bindings[1] } }
     local draft = F.document(23, 8, 0.25)

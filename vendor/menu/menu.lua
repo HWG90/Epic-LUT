@@ -997,7 +997,7 @@ function M.new(api, measure, Text)
             local dialog = self.outfit_dialog
             local ok, why = pcall(dialog.on_save, self.text_edit.text, dialog.save_kind)
             self.notice = ok and tostring(why or 'Preset saved') or tostring(why)
-            if ok then
+            if ok and why ~= false then
                 self.outfit_dialog = nil
                 self.text_edit = nil
             end
@@ -2740,12 +2740,14 @@ function M.new(api, measure, Text)
 
         wheel_bounds = { x = ox, y = oy + 196 * s, w = ww * s, h = (wh - 316) * s, split = ox + rail * s }
 
-        text(
+        local header_title = self.basic_only and 'EPIC LUT / Basic' or 'EPIC LUT'
+        bounded(
             30,
-            self.epic_typography and text_y(wh - 60, 60, 28, 'EPIC LUT', 'title') or wh - 43,
-            'EPIC LUT',
+            self.epic_typography and text_y(wh - 60, 60, 28, header_title, 'title') or wh - 43,
+            header_title,
             28,
             accent,
+            math.max(0, ww - 274),
             'title'
         )
         local mode_switch = self.basic_only and self.open_advanced or self.open_basic
@@ -3110,6 +3112,7 @@ function M.new(api, measure, Text)
                 local ok, why = pcall(
                     page.render_layout,
                     M.custom_ui({
+                        basic_only = self.basic_only,
                         epic_style = self.epic_typography,
                         pixel_width = 1 / s,
                         x = rail + 20,
@@ -4972,10 +4975,16 @@ function M.new(api, measure, Text)
                     self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
                 end, { enabled = any, accent = any and accent, ink = T.background })
             elseif dialog.phase == 'confirm' then
-                bounded(px + 14, py + 116, 'Save the current gear as a named preset.', 14, white, 412)
+                bounded(px + 14, py + 116, dialog.description or 'Save the current gear as a named preset.', 14, white, 412)
                 rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, 'Yes', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
+                    if dialog.on_confirm then
+                        local ok, why = pcall(dialog.on_confirm)
+                        self.notice = tostring(why or 'Preset saved')
+                        if ok and why ~= false then cancel() end
+                        return
+                    end
                     dialog.phase = 'name'
                     dialog.save_kind = 'both'
                     self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }

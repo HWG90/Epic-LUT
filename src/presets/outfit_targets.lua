@@ -106,13 +106,9 @@ function T.new(preset, deps)
         local weapon_resource = assert(weapon_identity(entry.kind, key, entry), 'Invalid saved weapon identity')
         if entry.kind == 'weapon' then
             local slot = tonumber(key:match('^%d+:(%d+):'))
-            assert(
-                not weapon_resources[slot] or weapon_resources[slot] == weapon_resource,
-                'Conflicting saved weapon identities in preset slot'
-            )
             weapon_resources[slot] = weapon_resource
         end
-        local identity = entry.kind .. ':' .. entry.key
+        local identity = entry.kind .. ':' .. entry.key .. (entry.kind == 'weapon' and ':' .. weapon_resource or '')
         assert(not exact[identity], 'Duplicate saved LUT target')
         exact[identity] = entry
         local identity_family = family(entry.kind, key, pattern, entry)
@@ -155,7 +151,15 @@ function T.new(preset, deps)
             return
         end
         key = (pattern and 'p:' or '') .. key
-        local saved = exact[kind .. ':' .. key] or kind == 'cape' and binding.cape == true and exact['armor:' .. key]
+        local identity = kind .. ':' .. key
+        if kind == 'weapon' then
+            local resource = weapon_identity(kind, destination, binding)
+            if not resource then
+                return
+            end
+            identity = identity .. ':' .. resource
+        end
+        local saved = exact[identity] or kind == 'cape' and binding.cape == true and exact['armor:' .. key]
         if
             kind == 'weapon'
             and (not saved or weapon_identity(kind, destination, binding) ~= weapon_identity(kind, destination, saved))

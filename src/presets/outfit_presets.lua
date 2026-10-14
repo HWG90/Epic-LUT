@@ -107,6 +107,7 @@ function O.read(m, path, label)
         or lines[1] == 'EPIC-OUTFIT\t2' and 2
         or lines[1] == 'EPIC-OUTFIT\t3' and 3
         or lines[1] == 'EPIC-OUTFIT\t4' and 4
+        or lines[1] == 'EPIC-OUTFIT\t5' and 5
     assert(version and #lines > 1 and #lines <= O.MAX_BINDINGS + 1, 'Invalid outfit preset')
     local result = { name = label, armor = {}, helmet = {}, cape = {}, weapon = {}, entries = {} }
     local bytes, seen, documents, sidecars, payloads, metadata_payloads = 0, {}, {}, {}, {}, {}
@@ -116,19 +117,20 @@ function O.read(m, path, label)
         for field in (lines[i] .. '\t'):gmatch('([^\t]*)\t') do
             fields[#fields + 1] = field
         end
-        assert(#fields == (version == 1 and 3 or version >= 3 and version + 5 or 7), 'Invalid preset entry')
+        assert(#fields == (version == 1 and 3 or version >= 4 and 9 or version == 3 and 8 or 7), 'Invalid preset entry')
         local kind, key, file = fields[1], fields[2], fields[3]
         local pattern, weapon_slot = target(kind, key, version, nil, fields[9])
         local weapon_resource = kind == 'weapon' and fields[9]:lower() or nil
         if weapon_slot then
             assert(
-                not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == weapon_resource,
+                version >= 5 or not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == weapon_resource,
                 'Conflicting weapon identities in preset slot'
             )
             weapon_resources[weapon_slot] = weapon_resource
         end
-        assert(not seen[kind .. ':' .. key], 'Duplicate preset target')
-        seen[kind .. ':' .. key] = true
+        local identity = kind .. ':' .. key .. (version >= 5 and kind == 'weapon' and ':' .. weapon_resource or '')
+        assert(not seen[identity], 'Duplicate preset target')
+        seen[identity] = true
         basename(file, 'dds')
         local document = documents[file:lower()]
         if not document then
@@ -227,12 +229,22 @@ function O.new(m, folder)
         end
         assert(count == #entries, 'Preset entries must be a dense list')
         local version = 2
+        local saved_weapons = {}
         for _, entry in ipairs(entries) do
             if entry.binding_provenance ~= nil then
                 version = math.max(version, 3)
             end
             if entry.kind == 'weapon' then
-                version = 4
+                version = math.max(version, 4)
+                local slot = entry.weapon_slot
+                    or tonumber(entry.key:match('^p:3:(%d+):') or entry.key:match('^3:(%d+):'))
+                local previous = saved_weapons[slot]
+                if previous and previous ~= entry.weapon_resource:lower() then
+                    version = 5
+                end
+                if slot then
+                    saved_weapons[slot] = entry.weapon_resource:lower()
+                end
             end
         end
         local rows = { 'EPIC-OUTFIT\t' .. version }
@@ -261,12 +273,12 @@ function O.new(m, folder)
             if weapon_slot then
                 local resource = e.weapon_resource:lower()
                 assert(
-                    not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == resource,
+                    version >= 5 or not weapon_resources[weapon_slot] or weapon_resources[weapon_slot] == resource,
                     'Conflicting weapon identities in preset slot'
                 )
                 weapon_resources[weapon_slot] = resource
             end
-            local identity = e.kind .. ':' .. e.key
+            local identity = e.kind .. ':' .. e.key .. (e.kind == 'weapon' and ':' .. e.weapon_resource:lower() or '')
             assert(not seen[identity], 'Duplicate preset target')
             seen[identity] = true
             assert(

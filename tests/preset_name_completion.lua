@@ -201,3 +201,32 @@ assert(menu.focus == 'settings' and writes == 0)
 print(
     'PASS preset name completion: case-insensitive sorted prefix hints, Tab/caret and draft Undo only, explicit Save/Enter overwrite, unchanged scope, empty/unmatched/Cancel and normal Tab, compact font-safe hint'
 )
+local confirmation_saves = 0
+local pending = start('Armor Alpha')
+pending.on_save = function()
+    menu.outfit_dialog = {
+        phase = 'confirm',
+        title = 'Update Weapon Preset',
+        description = 'Replace this weapon? Other saved gear is kept.',
+        on_confirm = function()
+            confirmation_saves = confirmation_saves + 1
+            return true
+        end,
+    }
+    menu.text_edit = nil
+    return false
+end
+menu.key(13)
+assert(menu.outfit_dialog and menu.outfit_dialog.phase == 'confirm' and confirmation_saves == 0)
+click(label('No'))
+assert(not menu.outfit_dialog and confirmation_saves == 0)
+menu.outfit_dialog = {
+    phase = 'confirm',
+    title = 'Update Weapon Preset',
+    on_confirm = function()
+        confirmation_saves = confirmation_saves + 1
+        return true
+    end,
+}
+click(label('Yes'))
+assert(not menu.outfit_dialog and confirmation_saves == 1)

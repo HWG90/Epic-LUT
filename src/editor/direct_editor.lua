@@ -2650,6 +2650,9 @@ function operations.weapon_workflow()
             outfits = function()
                 return outfits
             end,
+            selected_preset = function()
+                return armory_collection and armory_collection.selected
+            end,
             original = function(b)
                 return original_luts and original_luts.request_object(b.original)
             end,

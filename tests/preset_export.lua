@@ -735,12 +735,23 @@ assert(not pcall(E.lut_choices, { entries = { bad_weapon } }))
 assert(
     not pcall(E.bundle, { dds = D }, { entries = { [1] = weapon_preset.entries[2], [3] = weapon_preset.entries[4] } })
 )
-assert(not pcall(E.bundle, { dds = D }, {
+local multi_weapon_bundle = E.bundle({ dds = D }, {
     entries = {
         weapon_preset.entries[2],
         { kind = 'weapon', key = '3:1:1:0', weapon_resource = 'ffffffffffffffff', document = document },
     },
-}))
+})
+assert(
+    multi_weapon_bundle[#multi_weapon_bundle][2]:match('^EPIC%-OUTFIT\t5\n'),
+    'Multiple weapons in one slot lost the collection schema'
+)
+for _, file in ipairs(multi_weapon_bundle) do
+    F.write('tests/tmp/presets/' .. file[1], file[2])
+end
+local multi_import = O.read(modules, 'tests/tmp/presets/preset.tsv', 'Multi Weapon Import')
+assert(
+    #multi_import.entries == 2 and multi_import.entries[1].weapon_resource ~= multi_import.entries[2].weapon_resource
+)
 print(
     'PASS weapon preset export: schema4 ZIP/import, 3 weapon slot labels, exact shared documents and malformed identity rejection'
 )

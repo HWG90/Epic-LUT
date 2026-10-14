@@ -89,7 +89,9 @@ for _, font in ipairs({ 12, 16, 20, 28 }) do
     for _, scale in ipairs({ 0.7, 1, 1.15 }) do
         for _, size in ipairs({ { 700, 620 }, { 1800, 1100 } }) do
             local f = fixture()
-            f.host.apply_camo = function() return true end
+            f.host.apply_camo = function()
+                return true
+            end
             local view = View.new(f.controller)
             local ui, commands = canvas(size[1], size[2], font, scale)
             view.draw(ui)
@@ -143,6 +145,31 @@ for _, font in ipairs({ 12, 16, 20, 28 }) do
     end
 end
 local f = fixture()
+for _, font in ipairs({ 12, 16, 20, 28 }) do
+    for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+        for _, size in ipairs({ { 700, 620 }, { 1800, 1100 } }) do
+            local basic_fixture = fixture()
+            basic_fixture.host.apply_camo = function()
+                return true
+            end
+            local basic_view = View.new(basic_fixture.controller)
+            local basic_ui, basic_commands = canvas(size[1], size[2], font, scale)
+            basic_ui.basic_only = true
+            basic_view.draw(basic_ui)
+            local regions = 0
+            for _, item in ipairs(basic_commands) do
+                if item.kind == 'text' and item.label:match('^Region %d+$') then
+                    regions = regions + 1
+                end
+                assert(
+                    not (item.kind == 'hit' and item.label == 'Edit Row 1, column 2 in the LUT table.'),
+                    'Basic weapon view retained the dense material grid'
+                )
+            end
+            assert(regions > 0, 'Basic weapon region colors missing')
+        end
+    end
+end
 local view = View.new(f.controller)
 local ui, commands = canvas(1800, 1100, 16, 1)
 view.draw(ui)

@@ -101,23 +101,65 @@ function W.new(m, host)
             mask.weapon_slots[descriptor.weapon_slot] = true
         end
         local mod, menu = host.mod(), assert(host.menu(), 'Preset dialog unavailable')
+        local function save(name, existing)
+            validate()
+            local _, summary = presets().save(name, descriptors, existing)
+            menu.outfit_dialog, menu.text_edit = nil, nil
+            local text = 'Saved ' .. name .. ' with ' .. summary.count .. ' weapon LUT bindings.'
+            if summary.provenance_incomplete then
+                text = text
+                    .. ' Patch assignment proof is pending or unavailable; retry Export with these weapons equipped.'
+            end
+            return host.message(text)
+        end
+        local function submit(name)
+            local existing
+            for _, stored_name in ipairs(host.outfits().names()) do
+                if stored_name:lower() == name:lower() then
+                    name, existing = stored_name, host.outfits().load(stored_name)
+                    break
+                end
+            end
+            if existing then
+                local collision = false
+                for _, entry in ipairs(existing.entries) do
+                    if entry.kind == 'weapon' then
+                        for _, descriptor in ipairs(descriptors) do
+                            collision = collision
+                                or (
+                                    entry.weapon_resource:lower() == descriptor.weapon_resource:lower()
+                                    and entry.weapon_slot == descriptor.weapon_slot
+                                )
+                        end
+                    end
+                end
+                if collision then
+                    menu.text_edit = nil
+                    menu.outfit_dialog = {
+                        phase = 'confirm',
+                        title = 'Update Weapon Preset',
+                        preset_name = name,
+                        description = 'Replace this weapon in ' .. name .. '? Other saved gear is kept.',
+                        on_confirm = function()
+                            return save(name, existing)
+                        end,
+                    }
+                    return false
+                end
+            end
+            return save(name, existing)
+        end
+        local selected = host.selected_preset and host.selected_preset()
+        if selected then
+            return submit(selected.name)
+        end
         menu.outfit_dialog = {
             phase = 'name',
             save_kind = mask,
             mod = mod,
             control = mod.controls.outfit_name,
             names = host.outfits().names(),
-            on_save = function(name)
-                validate()
-                local _, summary = presets().save(name, descriptors)
-                menu.outfit_dialog, menu.text_edit = nil, nil
-                local text = 'Saved ' .. name .. ' with ' .. summary.count .. ' weapon LUT bindings.'
-                if summary.provenance_incomplete then
-                    text = text
-                        .. ' Patch assignment proof is pending or unavailable; retry Export with these weapons equipped.'
-                end
-                return host.message(text)
-            end,
+            on_save = submit,
         }
         menu.text_edit = { mod = mod, control = mod.controls.outfit_name, text = '', replace = true }
         return true
@@ -201,6 +243,8 @@ function W.new(m, host)
                 local id = 'weapon:'
                     .. entry.weapon_slot
                     .. ':'
+                    .. entry.weapon_resource:lower()
+                    .. ':'
                     .. (pattern and 'pattern:' or 'material:')
                     .. (entry.original and entry.original.resource or entry.key)
                 local choice = by_id[id]
@@ -231,7 +275,8 @@ function W.new(m, host)
         end
         local chosen, selected_keys = {}, {}
         for _, choice in ipairs(choices) do
-            local selected = not options.selected or options.selected[choice.id] == true
+            local selected = options.selected and options.selected[choice.id] == true
+                or not options.selected and choice.enabled
             local slot_selected = not options.slots or options.slots[choice.weapon_slot] == true
             if not choice.enabled then
                 choice.detail = 'Requires the saved weapon configuration and LUT destinations'
@@ -239,7 +284,7 @@ function W.new(m, host)
             if selected and slot_selected and not options.preview then
                 assert(choice.enabled, 'Saved weapon differs from current slot; choose its matching weapon')
                 for _, entry in ipairs(choice.entries) do
-                    chosen[entry], selected_keys[entry.key:gsub('^p:', '')] = true, true
+                    chosen[entry], selected_keys[entry.weapon_resource .. ':' .. entry.key:gsub('^p:', '')] = true, true
                 end
             end
         end
@@ -247,7 +292,7 @@ function W.new(m, host)
         for _, choice in ipairs(choices) do
             if choice.pattern then
                 for _, entry in ipairs(choice.entries) do
-                    if selected_keys[entry.key:gsub('^p:', '')] then
+                    if selected_keys[entry.weapon_resource .. ':' .. entry.key:gsub('^p:', '')] then
                         chosen[entry] = true
                     end
                 end

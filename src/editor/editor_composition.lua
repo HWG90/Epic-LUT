@@ -37,7 +37,7 @@ function C.new(deps)
         if deps.basic_view then
             table.insert(pages, 1, {
                 id = 'basic',
-                name = 'Basic',
+                name = 'Armor',
                 require_confirmation = false,
                 controls = deps.basic_camo and deps.basic_camo.controls(deps.apply_camo) or {},
             })

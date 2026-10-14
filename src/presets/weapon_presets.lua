@@ -105,7 +105,7 @@ function W.new(modules, host)
         summary.provenance_incomplete = summary.provenance_count < summary.count
         return entries, summary
     end
-    function self.save(name, descriptors)
+    function self.save(name, descriptors, existing)
         assert(
             host.outfits
                 and type(host.outfits.save) == 'function'
@@ -114,6 +114,23 @@ function W.new(modules, host)
             'Weapon preset persistence/cache operations unavailable'
         )
         local entries, summary = self.capture(descriptors)
+        if existing then
+            local replacing, merged = {}, {}
+            for _, entry in ipairs(entries) do
+                replacing[entry.weapon_resource:lower() .. ':' .. entry.weapon_slot] = true
+            end
+            for _, entry in ipairs(existing.entries) do
+                if
+                    entry.kind ~= 'weapon' or not replacing[entry.weapon_resource:lower() .. ':' .. entry.weapon_slot]
+                then
+                    merged[#merged + 1] = entry
+                end
+            end
+            for _, entry in ipairs(entries) do
+                merged[#merged + 1] = entry
+            end
+            entries = merged
+        end
         assert(host.outfits.save(name, entries) ~= false, 'Weapon preset was not saved')
         host.invalidate(name)
         return host.outfits.load(name), summary

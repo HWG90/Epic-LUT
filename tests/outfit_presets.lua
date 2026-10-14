@@ -450,10 +450,21 @@ for _, entry in ipairs(invalid_weapon_entries) do
 end
 assert(not pcall(store.save, 'Weapon Format', {
     weapon_entries[2],
-    { kind = 'weapon', key = '3:1:4:0', weapon_resource = 'ffffffffffffffff', document = positive },
+    weapon_entries[2],
 }) and weapon_writes == 0)
 modules.file_io.write = before_write
 assert(modules.file_io.read('tests/tmp/presets/outfit-Weapon Format.tsv', module.MAX_MANIFEST) == weapon_manifest)
+assert(
+    store.save(
+        'Weapon Collection',
+        {
+            weapon_entries[2],
+            { kind = 'weapon', key = weapon_entries[2].key, weapon_resource = 'ffffffffffffffff', document = positive },
+        }
+    )
+)
+local collection = store.load('Weapon Collection')
+assert(#collection.entries == 2 and collection.entries[1].weapon_resource ~= collection.entries[2].weapon_resource)
 for _, mutation in ipairs({
     weapon_manifest:gsub('5fecab819f96a3e8', '5fecab819f96a3eg', 1),
     weapon_manifest:gsub('EPIC%-OUTFIT\t4', 'EPIC-OUTFIT\t3', 1),

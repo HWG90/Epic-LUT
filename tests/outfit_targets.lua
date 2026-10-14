@@ -262,15 +262,14 @@ for _, bad in ipairs({ 'bad', string.rep('0', 16), '5fecab819f96a3eg' }) do
     local entry = { kind = 'weapon', key = '3:1:0:0', weapon_resource = bad, document = weapon_doc }
     assert(not pcall(resolver, { entries = { entry } }), 'Malformed weapon identity accepted')
 end
-assert(not pcall(
-    resolver,
-    {
-        entries = {
-            weapons.entries[1],
-            { kind = 'weapon', key = '3:1:5:0', weapon_resource = 'ffffffffffffffff', document = weapon_doc },
-        },
-    }
-), 'Conflicting weapon IDs in one slot accepted')
+local multi = resolver({
+    entries = {
+        weapons.entries[1],
+        { kind = 'weapon', key = weapons.entries[1].key, weapon_resource = 'ffffffffffffffff', document = weapon_doc },
+    },
+})
+assert(multi.resolve('weapon', weapon_binding(0, 1, 'ffffffffffffffff'), false) == weapon_doc)
+assert(multi.resolve('weapon', weapon_binding(0), false) == weapons.entries[1].document)
 print(
     'PASS weapon outfit targets: exact configuration and slot guards, same-weapon LOD anchors, Pattern isolation and exact signed-zero aliases'
 )
