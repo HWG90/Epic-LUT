@@ -512,8 +512,12 @@ function B.new(m, host)
             snapshot = self.snapshot,
             selection_changed = function(state)
                 if host.follow_selection and host.follow_selection() then
-                    assert(state.target and state.document, 'Selected weapon LUT pixels are not ready')
-                    return self.open(state.document, state.target)
+                    if state.target and state.document then
+                        return self.open(state.document, state.target)
+                    end
+                    if host.selection_unavailable then
+                        host.selection_unavailable()
+                    end
                 end
                 return true
             end,

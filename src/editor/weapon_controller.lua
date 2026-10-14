@@ -151,7 +151,8 @@ function C.new(host)
                 state.quick_ready = self.family == 'main'
                     and state.document
                     and state.document.width == 23
-                    and state.document.height == 8
+                    and integer(state.document.height, 64)
+                    and state.document.height >= 1
                     and state.document.data ~= nil
                     and not state.document.stale
                     and not state.document.read_only
@@ -268,13 +269,16 @@ function C.new(host)
     end
     function self.edit_rgb(row, expected)
         local state, selected, document = current(expected)
-        assert(state.quick_ready and integer(row, 8) and row >= 1, 'Verified 23 x 8 weapon LUT required')
+        assert(
+            state.quick_ready and integer(row, state.document.height) and row >= 1,
+            'Verified 23-column weapon LUT required'
+        )
         return invoke('edit_rgb', row, selected, document)
     end
     function self.edit_camo(row, color, expected)
         local state, selected, document = current(expected)
         assert(
-            state.quick_ready and integer(row, 8) and row >= 1 and integer(color, 4) and color >= 1,
+            state.quick_ready and integer(row, state.document.height) and row >= 1 and integer(color, 4) and color >= 1,
             'Verified weapon camo cell required'
         )
         return invoke('edit_camo', row, color, selected, document)
@@ -325,7 +329,11 @@ function C.new(host)
                 default = 1,
                 on_change = function(value)
                     if not syncing then
-                        return self.choose_slot(value)
+                        local ok, why = self.choose_slot(value)
+                        if ok and host.selection_changed then
+                            return host.selection_changed(self.state())
+                        end
+                        return ok, why
                     end
                 end,
             },
@@ -337,7 +345,11 @@ function C.new(host)
                 default = 1,
                 on_change = function(value)
                     if not syncing then
-                        return self.choose_family(value)
+                        local ok, why = self.choose_family(value)
+                        if ok and host.selection_changed then
+                            return host.selection_changed(self.state())
+                        end
+                        return ok, why
                     end
                 end,
             },

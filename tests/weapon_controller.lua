@@ -163,6 +163,14 @@ assert(shared.hits.open_pattern[3].row == 1 and shared.hits.open_pattern[3].colu
 assert(shared.controller.open_editor(2, 3) == false and shared.controller.open_editor(1, 4) == false)
 assert(shared.controller.choose_family('main'))
 assert(shared.controller.state().pattern_group == second_pattern, 'Remembered companion Pattern choice was lost')
+for _, height in ipairs({ 1, 16, 32, 64 }) do
+    local tall = fixture()
+    tall.source.weapons[1].main[1].document = document(23, height)
+    assert(tall.controller.state().quick_ready, 'Verified material rows were restricted to eight')
+    assert(tall.controller.edit_rgb(height) and tall.hits.edit_rgb[1] == height)
+    assert(tall.controller.edit_camo(height, 4) and tall.hits.edit_camo[1] == height)
+    assert(tall.controller.edit_rgb(height + 1) == false, 'Quick RGB exceeded its verified table height')
+end
 f.source.busy = true
 assert(c.edit_rgb(1) == false and c.map_imports(true) == false)
 f.source.busy = false

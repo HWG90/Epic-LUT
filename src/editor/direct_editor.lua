@@ -2529,6 +2529,12 @@ weapon_editor = function()
             weapon_name = function(slot, resource)
                 return m.weapon_names and m.weapon_names[resource] or ({ 'Primary', 'Secondary', 'Support' })[slot]
             end,
+            selection_unavailable = function()
+                edit.loaded, edit.editor_target, edit.preview_document = nil, nil, nil
+                edit.preview_revision = 0
+                palette_editor.sync()
+                message('Selected weapon LUT colors are unavailable; load current weapons or choose another slot.')
+            end,
             follow_selection = function()
                 local menu, mod = frontend.menu, api.mods[handle.id]
                 local page = menu and mod.pages[menu.page]
@@ -2609,7 +2615,10 @@ weapon_editor = function()
     return operations.weapon_editor
 end
 function operations.weapon_document_target(document)
-    assert(document and document.data, 'Load or import a weapon LUT first')
+    assert(
+        document and document.data and not document.stale and not document.read_only,
+        'Load or import a current editable weapon LUT first'
+    )
     local kind = document.width == 3 and document.height == 1 and 'pattern' or 'material'
     local target = edit.editor_target
     if not target or target.kind ~= 'weapon' or (target.family == 'pattern' and 'pattern' or 'material') ~= kind then
@@ -3039,8 +3048,18 @@ local function register(current)
             palette_editor.gear = 'weapon'
             editor_pending, populate_request = nil, nil
             edit.populate_manual_request = nil
+            local service = weapon_editor()
+            service.load_current()
+            local controller = service.controller()
+            controller.choose_family('main')
+            local state = controller.state()
+            if state.target and state.document then
+                return controller.open_editor()
+            end
+            edit.loaded, edit.editor_target, edit.preview_document = nil, nil, nil
+            palette_editor.sync()
             api.focus_page(handle.id, 'weapons')
-            return weapon_editor().load_current()
+            return message('Weapon LUT colors are not ready; select an available weapon on this page.')
         end,
         apply_weapon_document = function()
             return action(function()

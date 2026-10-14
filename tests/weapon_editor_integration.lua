@@ -17,6 +17,12 @@ local base = assert(loadstring(fixture_source .. [[
 return {m=m,api=api,memory=memory,native=native,bound=bound,frontend=function()return test_frontend end,info=function()return quick_info()end}
 ]], '@weapon-editor-garment-fixture'))()
 local m = base.m
+local palette_new = m.lut_editor.new
+m.lut_editor.new = function(...)
+    local palette = palette_new(...)
+    base.palette = palette
+    return palette
+end
 m.weapon_runtime = dofile('src/weapons/weapon_runtime.lua')
 m.weapon_discovery = dofile('src/weapons/weapon_discovery.lua')
 m.weapon_controller = dofile('src/editor/weapon_controller.lua')
@@ -111,6 +117,8 @@ for _, candidate in ipairs(mod.pages) do
 end
 assert(page and page.render_layout and page.on_wheel)
 assert(handle.activate('editor_load_weapon'))
+assert(base.info().editor and base.info().editor.kind == 'weapon',
+    'Weapon header did not load its table like Armor and Helmet')
 local function buttons()
     local result = {}
     page.render_layout({
@@ -159,6 +167,13 @@ assert(base.info().editor.kind == 'weapon' and base.info().editor.data[0] == f.d
     'Weapon LUT dropdown did not load its selected group into the shared table')
 assert(#f.writes == selection_writes, 'Selecting a weapon LUT applied it to live bindings')
 assert(handle.set('weapon_lut', 1))
+assert(handle.set('weapon_slot', 2))
+assert(base.info().editor.weapon_slot == 2, 'Shared weapon slot selector retained the primary draft')
+assert(handle.set('weapon_slot', 3))
+assert(base.info().editor == nil, 'Unavailable support slot retained an applicable primary/secondary draft')
+assert(handle.set('weapon_slot', 1))
+assert(base.info().editor.weapon_slot == 1 and #f.writes == selection_writes,
+    'Selecting a weapon slot wrote live bindings')
 base.frontend().menu.page = selected_page
 local loaded = base.info().editor
 assert(loaded.kind == 'weapon' and loaded.family == 'material' and loaded.weapon_slot == 1 and loaded.width == 23)
@@ -166,6 +181,9 @@ assert(
     mod.controls.cell_a.disabled and not mod.controls.cell_r.disabled,
     'Main raw Alpha lock or primary RGB permission changed'
 )
+assert(handle.set('unlock', true) and not mod.controls.cell_a.disabled,
+    'Advanced mode did not provide the same raw Alpha access as garments')
+assert(handle.set('unlock', false) and mod.controls.cell_a.disabled)
 local rendered_menu = dofile('vendor/menu/menu.lua').new(base.api, function(value, size)
     return #value * size * 0.5
 end)
@@ -321,6 +339,36 @@ assert(reset_document.data[0] ~= original_red, 'Weapon numeric edit did not chan
 assert(handle.activate('reset_cell'))
 editor.on_update(ctx, 0.1)
 assert(reset_document.data[0] == original_red, 'Weapon Reset cell did not restore loaded values')
+-- Exercise the real grid clipboard and keyboard path on a weapon draft.
+weapon_footer()
+local palette = assert(base.palette)
+local clipboard_before = ffi.string(reset_document.data, 23 * 8 * 16)
+palette.selection = {r1=1,r2=2,c1=1,c2=2}
+assert(palette.key(67, true, false, {}))
+palette.set_paste_anchor(3, 17)
+assert(palette.key(86, true, false, {}))
+local clipboard_after = ffi.string(reset_document.data, 23 * 8 * 16)
+assert(clipboard_after ~= clipboard_before, 'Weapon clipboard test did not change destination cells')
+for row=0,1 do
+    local source_at = row * 23 * 16
+    local destination_at = ((row+2)*23+16)*16
+    assert(clipboard_after:sub(destination_at+1,destination_at+32) == clipboard_before:sub(source_at+1,source_at+32),
+        'Weapon clipboard lost HDR, signed-zero or Alpha bytes')
+end
+local pasted_writes = #f.writes
+editor.on_update(ctx, 0.1)
+assert(#f.writes == pasted_writes + 5, 'Weapon paste did not apply to exactly its five selected LODs')
+assert(not palette.key(46, false, false, {control='cell_r'}), 'Delete in a numeric input reset the grid')
+assert(ffi.string(reset_document.data, 23*8*16) == clipboard_after)
+assert(palette.key(46, false, false, {}))
+assert(ffi.string(reset_document.data, 23*8*16) == clipboard_before,
+    'Weapon Delete did not reset only selected cells to their loaded float32 bytes')
+local deleted_writes = #f.writes
+editor.on_update(ctx, 0.1)
+assert(#f.writes == deleted_writes + 5, 'Weapon Delete did not update exactly its five LODs')
+for _, mesh in ipairs(f.units[200].meshes) do
+    assert(f.textures[mesh.materials[1]][0x7e662968] == f.A, 'Weapon grid edits changed the secondary')
+end
 local flash_before = {}
 for _, mesh in ipairs(f.units[100].meshes) do
     for _, material in ipairs(mesh.materials) do

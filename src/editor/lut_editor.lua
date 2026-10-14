@@ -7,6 +7,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
     local function editable(d, column, channel)
         return d
             and not d.read_only
+            and not d.stale
             and (
                 self.handle.get('unlock')
                 or (m.semantics.is_color(d.width, column) and channel <= 3)
@@ -99,6 +100,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
     end
     local function remember()
         local d = assert(document(), 'Import a palette first')
+        assert(d.data and not d.read_only and not d.stale, 'Load a current editable LUT first')
         d.revision = (d.revision or 0) + 1
         self.undo[#self.undo + 1] = snapshot(d)
         if #self.undo > 64 then

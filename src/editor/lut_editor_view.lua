@@ -413,6 +413,10 @@ function V.new(deps)
                 ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
                 local resource, hash
                 if self.gear == 'weapon' then
+                    local slot_width = math.min(140, left * 0.18)
+                    ui.choice('weapon_slot', selector_x, selector_y, slot_width)
+                    selector_x = selector_x + slot_width + 8 * font_scale
+                    selector_width = math.min(selector_width, math.max(40, ui.x + left - selector_x - 30))
                     if pattern_document(d) then
                         ui.bounded(
                             selector_x + 6,
