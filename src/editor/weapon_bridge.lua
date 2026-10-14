@@ -318,6 +318,9 @@ function B.new(m, host)
                 count, texture = result[1].count, result[1].texture
             end
             status = 'Applied ' .. names[target.weapon_slot] .. ' LUT to ' .. count .. ' bindings.'
+            if controller then
+                controller.sync()
+            end
             host.message(status)
             return count, texture
         end
@@ -551,6 +554,32 @@ function B.new(m, host)
         }
         for _, name in ipairs({ 'import', 'map_imports', 'apply_preset', 'save_preset', 'export', 'share' }) do
             actions[name] = host[name]
+        end
+        if m.basic_camo then
+            actions.camo_choices = m.basic_camo.CHOICES
+            actions.camo_colorways = { 'Current / custom' }
+            for _, palette in ipairs(m.basic_camo.COLORWAYS) do
+                actions.camo_colorways[#actions.camo_colorways + 1] = palette.name
+            end
+            actions.camo_state = function(document, rows)
+                return {
+                    pattern = m.basic_camo.selection(document, 'weapon', rows),
+                    colorway = m.basic_camo.colorway_selection(document, 'weapon', rows),
+                }
+            end
+            actions.apply_camo = function(target, document, rows, choice, mode)
+                return (host.mutate or function(fn)
+                    return fn()
+                end)(function()
+                    source_group(target)
+                    local copy = m.weapon_mapping.copy(document)
+                    local result = m.basic_camo.apply(copy, choice, mode, nil, 'weapon', rows)
+                    self.apply(target, copy)
+                    host.load_editor(copy, target)
+                    controller.sync()
+                    return host.message(result)
+                end)
+            end
         end
         controller = m.weapon_controller.new(actions)
         return controller

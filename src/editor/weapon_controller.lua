@@ -177,6 +177,37 @@ function C.new(host)
         end
         return state
     end
+    local camo_rows = {}
+    local function camo_key(state)
+        return state.target and state.target.weapon_resource .. ':' .. state.target.group_id
+    end
+    function self.camo_selection()
+        local state = self.state()
+        local key = camo_key(state)
+        return key and camo_rows[key] or {}
+    end
+    function self.toggle_camo_row(row, enabled)
+        local state = self.state()
+        assert(state.quick_ready and integer(row, state.document.height) and row >= 1, 'Choose a current material row')
+        local key = camo_key(state)
+        camo_rows[key] = camo_rows[key] or {}
+        camo_rows[key][row] = enabled == true or nil
+        self.sync()
+        return true
+    end
+    function self.select_camo_rows(enabled)
+        local state = self.state()
+        assert(state.quick_ready, 'Choose a current material LUT')
+        local rows = {}
+        if enabled then
+            for row = 1, state.document.height do
+                rows[row] = true
+            end
+        end
+        camo_rows[camo_key(state)] = rows
+        self.sync()
+        return true
+    end
     local function current(expected, pattern)
         local state = self.state()
         assert(not state.busy, 'Weapons are loading')
@@ -307,6 +338,15 @@ function C.new(host)
     function self.map_imports(auto)
         return invoke('map_imports', self.targets(), { auto = auto == true, rollover = true })
     end
+    function self.apply_camo(choice, mode)
+        if choice == 1 then
+            return true
+        end
+        local _, selected, document = current()
+        local rows = self.camo_selection()
+        assert(next(rows), 'Check at least one Camo row first')
+        return invoke('apply_camo', selected, document, rows, choice, mode)
+    end
     function self.apply_preset()
         return invoke('apply_preset', self.targets())
     end
@@ -320,7 +360,7 @@ function C.new(host)
         return invoke('share', self.targets())
     end
     function self.controls()
-        return {
+        local controls = {
             {
                 id = 'weapon_slot',
                 type = 'choice',
@@ -371,6 +411,27 @@ function C.new(host)
                 end,
             },
         }
+        if host.apply_camo and host.camo_choices then
+            for _, spec in ipairs({
+                { 'weapon_camo_pattern', 'Camo pattern', host.camo_choices, nil },
+                { 'weapon_camo_colorway', 'Camo colorway', host.camo_colorways, 'colorway' },
+            }) do
+                local id, label, choices, mode = unpack(spec)
+                controls[#controls + 1] = {
+                    id = id,
+                    type = 'choice',
+                    label = label,
+                    choices = choices,
+                    default = 1,
+                    on_change = function(value)
+                        if not syncing then
+                            return self.apply_camo(value, mode)
+                        end
+                    end,
+                }
+            end
+        end
+        return controls
     end
     function self.page()
         return { id = 'weapons', name = 'Weapons', require_confirmation = false, controls = self.controls() }
@@ -415,6 +476,14 @@ function C.new(host)
                 end
                 update('weapon_slot', self.weapon_slot)
                 update('weapon_family', self.family == 'main' and 1 or 2)
+                if registry.weapon_camo_pattern and host.camo_state then
+                    local rows = self.camo_selection()
+                    local recipe = host.camo_state(state.document, rows)
+                    update('weapon_camo_pattern', recipe.pattern)
+                    update('weapon_camo_colorway', recipe.colorway)
+                    registry.weapon_camo_pattern.disabled = not state.quick_ready or not next(rows)
+                    registry.weapon_camo_colorway.disabled = registry.weapon_camo_pattern.disabled
+                end
                 update('weapon_lut', state.group_index or 1)
             end
         end)
@@ -423,6 +492,9 @@ function C.new(host)
     end
     for _, name in ipairs({
         'choose_slot',
+        'toggle_camo_row',
+        'select_camo_rows',
+        'apply_camo',
         'choose_family',
         'choose_group',
         'toggle_weapon',

@@ -187,11 +187,27 @@ function V.new(controller)
                 local y = table_top - row * row_height + self.table_scroll
                 if y >= self.table_bounds.y and y + row_height <= table_top + 0.01 then
                     local selected_row, expected = row, state.target
+                    local camo = state.quick_ready and controller.available('apply_camo')
+                    local box = camo and math.min(20, row_height - 6) or 0
+                    if camo and ui.checkbox then
+                        local selected_rows = controller.camo_selection()
+                        ui.checkbox(
+                            main_x,
+                            y + (row_height - box) / 2,
+                            box,
+                            box,
+                            selected_rows[row] == true,
+                            not state.busy,
+                            function(value)
+                                return controller.toggle_camo_row(selected_row, value)
+                            end
+                        )
+                    end
                     bounded(
-                        main_x,
+                        main_x + (camo and box + gap or 0),
                         ui.text_y and ui.text_y(y, row_height, 14, 'Row ' .. row, 'hint') or y + 3,
                         'Row ' .. row,
-                        label_width,
+                        label_width - (camo and box + gap or 0),
                         'hint'
                     )
                     for column = 1, columns do
@@ -324,6 +340,17 @@ function V.new(controller)
         action('Restore LUT', 'weapon_restore', function()
             return controller.restore(state.target)
         end, ready and controller.available('restore'))
+        if controller.available('apply_camo') then
+            heading('Camo: checked rows')
+            action('Select all Camo rows', 'weapon_camo_all', function()
+                return controller.select_camo_rows(true)
+            end, state.quick_ready, 'Check rows')
+            action('Clear Camo rows', 'weapon_camo_clear', function()
+                return controller.select_camo_rows(false)
+            end, state.quick_ready, 'Clear rows')
+            actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_pattern', height = height + gap }
+            actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_colorway', height = height + gap }
+        end
         heading('Selected weapons')
         for slot = 1, 3 do
             actions[#actions + 1] = { kind = 'target', slot = slot, label = SLOT_NAMES[slot], height = height + gap }

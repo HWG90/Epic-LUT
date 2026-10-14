@@ -407,6 +407,34 @@ for _, unit in ipairs({ 100, 200 }) do
     end
 end
 
+-- Camo recipes reuse garment behavior but stay in the selected weapon scope.
+m.basic_camo = dofile('src/editor/basic_camo.lua')
+editor.on_enable(ctx)
+editor.on_update(ctx, 0)
+mod, handle = base.api.mods.epic_direct_lut, base.api.mods.epic_direct_lut.handle
+for _, candidate in ipairs(mod.pages) do if candidate.id == 'weapons' then page=candidate end end
+assert(handle.activate('editor_load_weapon'))
+local camo_callbacks = buttons()
+assert(camo_callbacks.weapon_camo_all and camo_callbacks.weapon_camo_clear, 'Weapon Camo actions were not rendered')
+assert(camo_callbacks.weapon_camo_all())
+assert(handle.set('weapon_camo_colorway', 5))
+local camo_document = base.info().editor
+assert(m.basic_camo.colorway_selection(camo_document,'weapon') == 5, 'Arctic did not reach the weapon rows')
+assert(handle.set('edit_row',1) and handle.set('edit_column',17))
+assert(handle.set('cell_r',0.321))
+editor.on_update(ctx,0.1)
+assert(handle.get('weapon_camo_colorway') == 1, 'Custom weapon Camo edit did not leave its named colorway')
+assert(handle.set('weapon_camo_pattern', 2))
+assert(m.basic_camo.selection(base.info().editor,'weapon') == 2, 'Weapon Camo Off did not reach checked rows')
+local camo_count = #f.writes
+assert(camo_callbacks.weapon_camo_clear())
+assert(not pcall(handle.set, 'weapon_camo_colorway', 2), 'Camo with no checked rows was accepted')
+assert(#f.writes == camo_count, 'Rejected Camo selection wrote native bindings')
+for _, mesh in ipairs(f.units[200].meshes) do
+    assert(f.textures[mesh.materials[1]][0x7e662968] == f.A, 'Camo recipes changed the secondary')
+end
+assert(editor.on_disable(ctx))
+
 -- Complete-addon cleanup must restore known garment/weapon bindings even if a
 -- weapon session cannot certify retirement. The actual lifetime service then
 -- quarantines its backing buffers without guessing ownership or destroying GPU
