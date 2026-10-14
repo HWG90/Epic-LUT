@@ -424,6 +424,32 @@ function A.new(deps)
             end
             assert(deps.stop_identification(), 'Highlight restoration pending')
             local mod = deps.mod()
+            local collection = deps.armory_collection()
+            local selected = collection and collection.selected
+            if selected then
+                local name = selected.name
+                local scope = {}
+                for _, entry in ipairs(selected.entries or {}) do
+                    if entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape' then
+                        scope[entry.kind] = true
+                    elseif entry.kind == 'weapon' then
+                        scope.weapon = true
+                        scope.weapon_slots = scope.weapon_slots or {}
+                        scope.weapon_slots[entry.weapon_slot] = true
+                    end
+                end
+                frontend.menu.outfit_dialog = {
+                    phase = 'delete',
+                    title = 'Overwrite Current Preset?',
+                    preset_name = name,
+                    description = 'Replace the saved gear palettes with their current values?',
+                    action_label = 'Overwrite Preset',
+                    on_save = function()
+                        return deps.keep_outfit(name, scope)
+                    end,
+                }
+                return deps.message('Confirm overwriting ' .. name .. ' with the current gear.')
+            end
             frontend.menu.outfit_dialog = {
                 phase = 'scope',
                 save_kind = { armor = true, helmet = true, cape = true },

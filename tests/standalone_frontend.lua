@@ -293,6 +293,35 @@ assert(
 )
 assert(not f.closed and f.render_ready(), 'UI dismissal closed the frontend needed by native cleanup')
 assert(package.loaded['dbf.epic_lut.frontend.v1'] == f, 'UI dismissal discarded its cleanup owner')
+-- Photo owns capture until its cooperative release has completed.
+local photo_ready, photo_lent = false, false
+local prior_photo, prior_sync = rawget(_G, 'DBF_PHOTO_EDITOR_INPUT'), capture.sync
+_G.DBF_PHOTO_EDITOR_INPUT = {
+    acquire = function(owner)
+        assert(owner == 'Epic LUT')
+        if not photo_ready then return false, 'Photo restoration pending' end
+        photo_lent = true
+        return true
+    end,
+    release = function(owner)
+        assert(owner == 'Epic LUT' and not capture.active, 'Photo resumed before editor input release')
+        photo_lent = false
+        return true
+    end,
+}
+capture.sync = function(visible, focus)
+    if visible and focus then assert(photo_lent, 'Editor captured input before Photo yielded') end
+    return prior_sync(visible, focus)
+end
+assert(f.open_advanced())
+f.tick(0.1)
+assert(not capture.active and not photo_lent and f.menu.notice == 'Photo restoration pending')
+photo_ready = true
+f.tick(0.1)
+assert(capture.active and photo_lent)
+assert(f.dismiss() and not capture.active and not photo_lent)
+capture.sync = prior_sync
+_G.DBF_PHOTO_EDITOR_INPUT = prior_photo
 assert(f.preferences.preview_key() == 117)
 assert(f.preferences.handle.set('preview_key', 45))
 assert(f.preferences.preview_key() == 45)

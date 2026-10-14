@@ -139,6 +139,15 @@ function F.new(m,ctx,deps)
                 local loader=rawget(_G,'LiveLuaLoader')
                 if loader and type(loader.close_manager)=='function'then assert(loader.close_manager()~=false,'Loader cursor restoration pending')end
             end
+            local photo=rawget(_G,'DBF_PHOTO_EDITOR_INPUT')
+            local opening=focused and process_input and (full_down or basic_down)
+            if photo and type(photo.acquire)=='function' and (self.menu.visible or opening)then
+                local ready,why=photo.acquire('Epic LUT')
+                if not ready then self.menu.notice=tostring(why);return end
+                self.photo_input_bridge=photo
+            elseif self.photo_input_bridge and not self.capture.active then
+                self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil
+            end
             local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window())
             if not acquired then
                 local text=tostring(reason)
@@ -163,6 +172,7 @@ function F.new(m,ctx,deps)
             -- Retiring preview resources keep their own receipt. They must not
             -- reopen the editor or hold its cursor lease after a close shortcut.
             if not self.menu.visible and self.capture.active then assert(self.capture.release())end
+            if not self.menu.visible and not self.capture.active and not opening and self.photo_input_bridge then self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil end
             if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
                 self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
             end
@@ -195,6 +205,7 @@ function F.new(m,ctx,deps)
             if not composed then return false,reason end
             if not retired then return false,result end
         end
+        if released and self.photo_input_bridge then self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil end
         if not released then return false,why end
         if not polled then return false,poll_error end
         if not cleared then return false,'Menu GUI retirement waits for game focus and valid display dimensions'end

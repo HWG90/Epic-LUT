@@ -409,6 +409,7 @@ for _, entry in ipairs(bulk_entries) do
 end
 assert(exported_cape, 'Outgoing include flag discarded Cape')
 local function save(scope)
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     assert(frontend.menu.outfit_dialog)
     local defaults = frontend.menu.outfit_dialog.save_kind
@@ -434,6 +435,7 @@ do
     local selector = api.mods[h.id].controls.outfit_preset
     local choices = selector.choices
     selector.choices = { 'Choose a saved outfit...' }
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     local dialog = assert(frontend.menu.outfit_dialog)
     assert(
@@ -446,6 +448,7 @@ do
     )
     frontend.menu.outfit_dialog = nil
     selector.choices = choices
+    assert(h.set('outfit_preset', 2))
 end
 do
     local native_before = { bound[armor][1], bound[cape][1], bound[helmet][1], bound[cape][3] }
@@ -479,11 +482,13 @@ do
     )
     for _, scope in ipairs({ {}, { armor = false, helmet = false, cape = false }, { armor = 1 }, { torso = true } }) do
         local previous, save_count = saved_outfit, outfit_save_calls
+        assert(h.set('outfit_preset', 1))
         activate('save_setup')
         assert(not pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', scope))
         assert(saved_outfit == previous and outfit_save_calls == save_count and created == texture_count)
     end
     local previous, saved_pixels = saved_outfit, both.cape[1].saved_pixels
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     local dialog = frontend.menu.outfit_dialog
     fail_outfit_save = true
@@ -501,6 +506,7 @@ do
     )
 end
 activate('restore')
+assert(h.set('outfit_preset', 2))
 activate('outfit_apply_cape')
 assert(
     bound[cape][1] == custom and bound[armor][1] == 1001 and bound[helmet][1] == 1002 and bound[cape][3] == 999,
@@ -523,10 +529,12 @@ assert(
     'Armor preset action applied the separately controlled Cape/Helmet'
 )
 local armory_armor = bound[armor][1]
+assert(h.set('outfit_preset', 2))
 activate('outfit_apply_cape')
 assert(bound[armor][1] == armory_armor and bound[cape][1] == custom and bound[helmet][1] == 1002)
 local before = saved_outfit
 gear_ready = false
+assert(h.set('outfit_preset', 1))
 activate('save_setup')
 local saved, why = pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', 'both')
 assert(
@@ -536,6 +544,7 @@ assert(
 do
     local saved_before, save_count, texture_count = saved_outfit, outfit_save_calls, created
     for _, scope in ipairs({ { armor = true }, { cape = true }, { helmet = true, cape = true } }) do
+        assert(h.set('outfit_preset', 1))
         activate('save_setup')
         local accepted, reason = pcall(frontend.menu.outfit_dialog.on_save, 'Cape fixture', scope)
         assert(
@@ -799,6 +808,7 @@ do
         { kind = 'armor', key = '0:1:0:0', document = legacy_doc },
         { kind = 'cape', key = '0:1:0:0', document = cape_doc },
     })
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     local typed = bound[cape][1]
     assert(
@@ -808,6 +818,7 @@ do
     activate('restore')
     choose({ { kind = 'armor', key = '0:1:0:0', document = cape_doc } })
     assert(not api.mods[h.id].controls.outfit_apply_cape.disabled, 'Legacy same-destination Cape entry is unavailable')
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     assert(
         bound[cape][1] == typed and bound[armor][1] == 4001,
@@ -848,6 +859,7 @@ do
         { kind = 'cape', key = '0:1:0:0', document = cape_doc },
         { kind = 'cape', key = '0:1:0:1', document = cape_doc },
     })
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     assert(
         bound[cape][1] == typed and bound[extra][1] == typed and bound[extra][3] == 998,
@@ -1054,6 +1066,7 @@ do
     }
     assert(h.set('outfit_preset', 2))
     local history_count = #action_history.undo
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     assert(
         uploads[bound[cape][1]] == ffi.string(material.data, 23 * 8 * 16)
@@ -1138,6 +1151,7 @@ do
     assert(bound[cape][1] == 5001 and bound[cape][2] == 5004, 'Cape material/Pattern originals failed to restore')
     -- If a foreign writer wins during rollback, its third object is neither
     -- claimed as ours nor removed by the later Restore.
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     activate('global_undo')
     m.engine.bind = function(native_arg, target, slot, object)
@@ -1163,6 +1177,7 @@ do
     saved_outfit.armor, saved_outfit.helmet, saved_outfit.cape = {}, {}, { pattern }
     assert(h.set('outfit_preset', 1) and h.set('outfit_preset', 2))
     assert(not api.mods[h.id].controls.outfit_apply_cape.disabled, 'Matched Pattern-only Cape preset cannot apply')
+    assert(h.set('outfit_preset', 2))
     activate('outfit_apply_cape')
     assert(
         bound[cape][1] == 5001 and uploads[bound[cape][2]] == ffi.string(pattern.data, 48),
@@ -3006,6 +3021,7 @@ do
     assert(not cache and starts == 0, 'Startup requested binding sources')
     local native_before, texture_count = { bound[armor][1], bound[cape][1], bound[helmet][1] }, created
     activate('populate_worn')
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
     local legacy = saved_outfit
@@ -3015,6 +3031,7 @@ do
     )
     local registered, menu, history_count = api.mods[h.id], frontend.menu, #action_history.undo
     assert(h.set('armory_export_format', 3))
+    assert(h.set('outfit_preset', 2))
     local why = api.mods[h.id].controls.armory_export.on_activate()
     assert(
         why:find('Verified named Lua binding identity unavailable', 1, true),
@@ -3061,6 +3078,7 @@ do
     }
     activate('populate_worn')
     assert(starts == 1 and cache.state == 'loading')
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
     legacy = saved_outfit
@@ -3068,6 +3086,7 @@ do
     assert(h.set('armory_export_format', 3))
     local function export_refused(text)
         local before_captures, before_history, before_starts = captures, #action_history.undo, starts
+        assert(h.set('outfit_preset', 2))
         local why = api.mods[h.id].controls.armory_export.on_activate()
         assert(why:find(text, 1, true), why)
         assert(
@@ -3102,6 +3121,7 @@ do
     export_refused(start_failure)
     assert(start_attempts == 2 and cache.state == 'idle', 'Cache-start refusal was masked or restarted')
     start_failure, cache.state = nil, 'closed'
+    assert(h.set('outfit_preset', 2))
     why = api.mods[h.id].controls.armory_export.on_activate()
     assert(why == pending_status and starts == 2 and start_attempts == 3, 'Closed cache did not start exactly once')
     local count = captures
@@ -3129,6 +3149,7 @@ do
     )
     cache.state, ready = 'loading', false
     export_refused(pending_status)
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     local unrelated_status = basic_info().status
     assert(unrelated_status ~= pending_status)
@@ -3148,6 +3169,7 @@ do
     local original = legacy.entries[2].original
     legacy.entries[2].original = { resource = 'eeeeeeeeeeeeeeee', width = 23, height = 8 }
     count = captures
+    assert(h.set('outfit_preset', 2))
     why = api.mods[h.id].controls.armory_export.on_activate()
     assert(
         why:find('does not uniquely match', 1, true) and captures == count,
@@ -3157,13 +3179,16 @@ do
     local old = legacy.entries[1].document
     legacy.entries[1].document = m.basic_state.clone(old)
     legacy.entries[1].document.data[0] = legacy.entries[1].document.data[0] + 0.25
+    assert(h.set('outfit_preset', 2))
     why = api.mods[h.id].controls.armory_export.on_activate()
     assert(why:find('Apply this legacy preset', 1, true), 'Legacy export guessed unmatched active colors')
     legacy.entries[1].document = old
     fail = true
+    assert(h.set('outfit_preset', 2))
     why = api.mods[h.id].controls.armory_export.on_activate()
     assert(why:find('pointer proof', 1, true), 'Unproven native material pointer accepted')
     fail = false
+    assert(h.set('outfit_preset', 1))
     activate('save_setup')
     frontend.menu.outfit_dialog.on_save('Cape fixture', { armor = true, helmet = true, cape = true })
     assert(
