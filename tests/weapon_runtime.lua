@@ -2,6 +2,36 @@ local ffi = require('ffi')
 local fixture = dofile('tests/weapon_fixture.lua')
 local D = dofile('src/weapons/weapon_discovery.lua')
 local cases = 0
+do
+    local poll = fixture()
+    poll.runtime.refresh(1)
+    local snapshots = 0
+    poll.identity_hook = function()
+        snapshots = snapshots + 1
+    end
+    assert(
+        #poll.runtime.update() == 0 and snapshots == 2,
+        'Idle polling repeated full identity/World searches for every binding'
+    )
+    snapshots = 0
+    poll.identity_hook = function()
+        snapshots = snapshots + 1
+        if snapshots == 2 then
+            poll.snapshots[1].weapon_entity = 999
+        end
+    end
+    assert(#poll.runtime.update() == 1, 'End-of-batch identity drift escaped polling invalidation')
+    poll.identity_hook = nil
+    assert(not pcall(poll.discovery.with_validation_batch, function()
+        coroutine.yield()
+    end), 'A validation cache survived across frames')
+    assert(
+        poll.discovery.with_validation_batch(function()
+            return true
+        end),
+        'Rejected yielding poll retained its validation cache'
+    )
+end
 local function test(name, callback)
     callback()
     cases = cases + 1

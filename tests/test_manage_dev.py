@@ -449,6 +449,18 @@ class ManagedDevelopment(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Non-code modular payload differs'):
             dev.deploy(self.root, candidate, 'static', install=True, target=self.target)
 
+    def test_release_transition_preserves_previous_notes_but_refuses_code_removal(self):
+        old_name = 'docs/RELEASE-R6.0.0-alpha1.md'
+        before = self.install_modular_fixture(extra={old_name: b'previous release notes'})
+        candidate = dev.read_package(modular_package(self.root/'alpha2.zip', 'static', '3'*32,
+            extra={'docs/RELEASE-R6.0.0-alpha2.md': b'current release notes'}, version='R6.0.0-alpha2'))
+        receipt = dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        self.assertEqual((self.target/old_name).read_bytes(), before[old_name])
+        self.assertEqual(receipt['retained_documents'][old_name], dev.sha(before[old_name]))
+        self.assertNotIn(old_name, receipt['installed_hashes'])
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+        self.assertEqual(dev.deploy(self.root, candidate, 'static', target=self.target)['changed_files'], [])
+
     def test_public_modular_docs_partial_failure_restores_updates_and_removes_additions(self):
         before = self.install_modular_fixture(extra={'README.md': b'old readme'})
         docs = {'README.md': b'updated readme', 'CHANGELOG.md': b'new changelog',

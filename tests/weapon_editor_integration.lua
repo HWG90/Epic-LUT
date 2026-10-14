@@ -271,6 +271,59 @@ local weapon_writes = #f.writes
 assert(handle.activate('apply_armor'))
 assert(#f.writes == weapon_writes, 'Explicit Apply Armor from a weapon draft was routed into the weapon runtime')
 assert(base.bound[3] ~= gear[3], 'Explicit Apply Armor did not reach its garment scope')
+-- Import and Send must retain the selected weapon destination, including Pattern DDS.
+for _, sample in ipairs({{name='weapon-import', object=f.A, width=23, height=8}, {name='weapon-pattern-import', object=f.P, width=3, height=1}}) do
+    assert(buttons().weapon_editor())
+    local before = #f.writes
+    m.dds.write('tests/tmp/files/' .. sample.name .. '.dds', f.documents[sample.object].data, sample.width, sample.height)
+    assert(handle.set('format', 1) and handle.set('file', sample.name))
+    assert(handle.activate('load'))
+    assert(#f.writes == before, 'Import wrote to live weapons')
+    assert(handle.activate('save_palette'))
+    local imported = base.info().editor
+    assert(imported.kind == 'weapon' and imported.width == sample.width, 'Send lost weapon import context')
+    assert(handle.activate('editor_apply_weapon'))
+    assert(#f.writes > before, 'Apply imported weapon document did not bind its destination')
+    before = #f.writes
+    assert(handle.activate('apply_checked'))
+    assert(base.info().editor.kind == 'weapon', 'Apply imported file lost weapon scope')
+end
+assert(handle.set('weapon_family', 1) and buttons().weapon_editor())
+local reset_document = base.info().editor
+assert(handle.set('auto_populate_worn', true))
+editor.on_update(ctx, 1.1)
+assert(base.info().editor == reset_document and reset_document.kind == 'weapon', 'Automatic worn gear replaced the weapon table')
+assert(handle.set('edit_row', 1) and handle.set('edit_column', 1))
+local original_red = reset_document.data[0]
+assert(handle.set('cell_r', 0.19375))
+editor.on_update(ctx, 0.1)
+assert(reset_document.data[0] ~= original_red, 'Weapon numeric edit did not change its draft')
+assert(handle.activate('reset_cell'))
+editor.on_update(ctx, 0.1)
+assert(reset_document.data[0] == original_red, 'Weapon Reset cell did not restore loaded values')
+local flash_before = {}
+for _, mesh in ipairs(f.units[100].meshes) do
+    for _, material in ipairs(mesh.materials) do
+        flash_before[material] = f.textures[material][0x7e662968]
+    end
+end
+local flash_pixels = ffi.string(reset_document.data, reset_document.width * reset_document.height * 16)
+assert(handle.activate('identify_region'))
+for _, mesh in ipairs(f.units[100].meshes) do
+    assert(f.textures[mesh.materials[1]][0x7e662968] ~= flash_before[mesh.materials[1]], 'Identify missed primary LOD')
+    assert(f.textures[mesh.materials[2]][0x7e662968] == flash_before[mesh.materials[2]], 'Identify changed sibling material')
+end
+assert(ffi.string(base.info().editor.data, #flash_pixels) == flash_pixels, 'Highlight leaked into editor pixels')
+editor.on_update(ctx, 0.3)
+for _, mesh in ipairs(f.units[100].meshes) do
+    assert(f.textures[mesh.materials[1]][0x7e662968] == flash_before[mesh.materials[1]], 'Weapon blink off did not restore exact binding')
+end
+assert(handle.activate('stop_identify'))
+assert(handle.activate('identify_region'))
+editor.on_update(ctx, 4.1)
+for _, mesh in ipairs(f.units[100].meshes) do
+    assert(f.textures[mesh.materials[1]][0x7e662968] == flash_before[mesh.materials[1]], 'Weapon highlight timeout did not restore')
+end
 assert(editor.on_disable(ctx))
 for material, value in pairs(gear) do
     assert(base.bound[material] == value, 'Cleanup left modified garment bindings')
@@ -516,6 +569,12 @@ for activation = 1, 2 do
     assert(naming.on_save('weapon-factory-fixture'))
     local preset = m.outfit_presets.new(m, m.paths.new().presets).load('weapon-factory-fixture')
     assert(#preset.weapon == 15 and preset.weapon[1].data[0] == 0.78125)
+    local preset_index
+    for index, name in ipairs(mod.controls.outfit_preset.choices) do
+        if name == 'weapon-factory-fixture' then preset_index = index end
+    end
+    assert(preset_index and handle.set('outfit_preset', preset_index))
+    assert(buttons().weapon_apply_preset(), 'Registered weapon preset action failed')
     assert(buttons().weapon_export():find('Exported weapons', 1, true))
     assert(buttons().weapon_share())
     workflow_editor.on_update(ctx, 0)

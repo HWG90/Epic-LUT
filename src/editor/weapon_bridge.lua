@@ -99,6 +99,116 @@ function B.new(m, host)
         source_group(target)
         return true
     end
+    local highlight
+    function self.highlighting()
+        return highlight ~= nil
+    end
+    function self.stop_highlight()
+        if not highlight then
+            return true
+        end
+        local remaining = {}
+        for _, item in ipairs(highlight.items) do
+            local b = item.binding
+            if discovery.present(b) then
+                local current = discovery.binding(b)
+                if current == item.object or current == item.flash then
+                    local ok = pcall(function()
+                        host.bind(b, item.object)
+                        assert(discovery.binding(b) == item.object, 'Weapon highlight restoration pending')
+                        b.current, b.texture, b.document = item.object, item.texture, item.document
+                    end)
+                    if not ok then
+                        remaining[#remaining + 1] = item
+                    end
+                end
+            end
+        end
+        highlight.items = remaining
+        highlight = #remaining > 0 and highlight or nil
+        return highlight == nil
+    end
+    function self.identify(target, row)
+        assert(self.stop_highlight(), 'Previous weapon highlight restoration pending')
+        local active, group, index, kind, chosen = source_group(target)
+        local loaded = active.load(target.weapon_slot, index, kind)
+        assert(type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= loaded.height, 'Invalid weapon region')
+        local ffi, plans, variants, items = require('ffi'), {}, {}, {}
+        local cache = {
+            document = group.document,
+            preview = group.preview_document,
+            bindings = group.binding_documents,
+            mixed = group.mixed,
+        }
+        for _, b in ipairs(chosen) do
+            local source = assert(b.document or group.source_document, 'Original weapon colors unavailable')
+            local bytes = ffi.string(source.data, source.width * source.height * 16)
+            local plan = variants[bytes]
+            if not plan then
+                local data = ffi.new('float[?]', source.width * source.height * 4)
+                ffi.copy(data, source.data, source.width * source.height * 16)
+                for _, column in ipairs(source.width == 23 and { 1, 3, 6, 7, 13, 17, 18, 19, 20 } or { 1 }) do
+                    local at = ((row - 1) * source.width + column - 1) * 4
+                    data[at], data[at + 1], data[at + 2] = 1, 0, 1
+                end
+                plan = {
+                    weapon_slot = target.weapon_slot,
+                    weapon_resource = target.weapon_resource,
+                    index = index,
+                    family = kind,
+                    document = { data = data, width = source.width, height = source.height },
+                    targets = {},
+                }
+                variants[bytes], plans[#plans + 1] = plan, plan
+            end
+            plan.targets[#plan.targets + 1] = b
+            items[#items + 1] = { binding = b, object = b.current, texture = b.texture, document = b.document }
+        end
+        -- One atomic plan validates all LODs and material privacy before allocation.
+        -- Temporary appearance must never enter history, presets or shared pixels.
+        active.apply_plan(plans, nil, true)
+        for _, item in ipairs(items) do
+            local b = item.binding
+            item.flash = b.current
+            b.texture, b.document = item.texture, item.document
+        end
+        group.document, group.preview_document, group.binding_documents, group.mixed =
+            cache.document, cache.preview, cache.bindings, cache.mixed
+        highlight = { items = items, remaining = 4, elapsed = 0, on = true, context = host.context and host.context() }
+        return host.message('Flashing weapon region ' .. row .. ' for 4 seconds; prior bindings restore automatically.')
+    end
+    function self.tick_highlight(dt, visible)
+        local job = highlight
+        if not job then
+            return
+        end
+        local delta = math.max(0, tonumber(dt) or 0)
+        job.remaining, job.elapsed = job.remaining - delta, job.elapsed + delta
+        if job.remaining <= 0 or visible == false or host.context and host.context() ~= job.context then
+            return self.stop_highlight()
+        end
+        local on = math.floor(job.elapsed * 4) % 2 == 0
+        if on == job.on then
+            return
+        end
+        local ok = pcall(discovery.with_validation_batch or function(fn)
+            return fn()
+        end, function()
+            for _, item in ipairs(job.items) do
+                local b = item.binding
+                local expected = job.on and item.flash or item.object
+                assert(discovery.present(b) and discovery.binding(b) == expected, 'Weapon highlight target changed')
+                local object = on and item.flash or item.object
+                host.bind(b, object)
+                assert(discovery.binding(b) == object, 'Weapon highlight binding failed')
+                b.current = object
+            end
+        end)
+        job.on = on
+        if not ok then
+            self.stop_highlight()
+        end
+    end
     function self.snapshot()
         local out = {
             weapons = {},
@@ -128,7 +238,7 @@ function B.new(m, host)
                 end
                 for _, kind in ipairs({ 'material', 'pattern' }) do
                     for index, group in ipairs(runtime.groups(slot, kind)) do
-                        local document, load_error = group.document, nil
+                        local document, load_error = group.preview_document or group.document, nil
                         if not document then
                             local ok, value = pcall(runtime.load, slot, index, kind)
                             if ok then
@@ -171,6 +281,7 @@ function B.new(m, host)
         return out
     end
     function self.load_current()
+        assert(self.stop_highlight(), 'Weapon highlight restoration pending')
         local active, count = get_runtime(), 0
         for slot = 1, 3 do
             local catalog = active.refresh(slot)
@@ -186,6 +297,7 @@ function B.new(m, host)
         return count > 0
     end
     function self.apply(target, document)
+        assert(self.stop_highlight(), 'Weapon highlight restoration pending')
         local function apply()
             local active, group, index, kind, chosen = source_group(target)
             local count, texture
@@ -214,6 +326,7 @@ function B.new(m, host)
         end)(apply)
     end
     function self.restore(target)
+        assert(self.stop_highlight(), 'Weapon highlight restoration pending')
         local function restore()
             local active, restored = get_runtime()
             if target and active.apply_plan and active.all_owned then
@@ -253,6 +366,7 @@ function B.new(m, host)
         end)(restore)
     end
     function self.open(document, target, cell)
+        assert(self.stop_highlight(), 'Weapon highlight restoration pending')
         source_group(target)
         assert(document and document.data, 'Weapon LUT pixels are loading')
         local active, group, index, kind, chosen = source_group(target)
@@ -379,6 +493,7 @@ function B.new(m, host)
         return out
     end
     function self.close(allow_quarantine)
+        local flash_restored = self.stop_highlight()
         recovery = {}
         if not runtime then
             return true
@@ -387,7 +502,7 @@ function B.new(m, host)
         if not ok or not restored then
             status = 'Weapon restoration could not be certified; its texture allocations remain retained.'
         end
-        return allow_quarantine == true or ok and restored
+        return allow_quarantine == true or flash_restored and ok and restored
     end
     function self.controller()
         if controller then
@@ -423,7 +538,7 @@ function B.new(m, host)
                 })
             end,
         }
-        for _, name in ipairs({ 'import', 'map_imports', 'save_preset', 'export', 'share' }) do
+        for _, name in ipairs({ 'import', 'map_imports', 'apply_preset', 'save_preset', 'export', 'share' }) do
             actions[name] = host[name]
         end
         controller = m.weapon_controller.new(actions)

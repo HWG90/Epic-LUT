@@ -86,6 +86,24 @@ assert(
     'Workflow did not forward mapping history or preserve its result tuple'
 )
 assert(workflow.save({ secondary }))
+local existing = {
+    name = 'Existing Armor Look',
+    entries = {
+        { kind = 'armor', key = '0:1:0:0', document = F.document(23, 8, 5.25) },
+        { kind = 'helmet', key = 'p:1:0:0:0', document = F.document(3, 1, 0.625) },
+    },
+}
+existing.entries[2].document.data[11] = 0.875
+local existing_pixels = Mapping.bytes(existing.entries[1].document)
+assert(workflow.map_preset({ body, pattern }, existing))
+assert(
+    #f.plan == 2 and body.bindings[1].document.data[0] == 5.25 and pattern.bindings[1].document.data[11] == 0.875,
+    'Existing garment preset did not map material and Pattern palettes to selected weapons'
+)
+assert(
+    Mapping.bytes(existing.entries[1].document) == existing_pixels,
+    'Testing a preset on weapons modified the saved garment palette'
+)
 f.foreign(secondary.bindings[1])
 assert(not pcall(f.menu.outfit_dialog.on_save, 'Changed'))
 assert(invalidated == 'Adjudicator')

@@ -343,6 +343,14 @@ function V.new(controller)
             return controller.map_imports(true)
         end, ready and controller.available('map_imports'), 'Auto-map')
         heading('Presets and sharing')
+        actions[#actions + 1] = { kind = 'choice', id = 'outfit_preset', height = height + gap }
+        action(
+            'Map selected Armory preset',
+            'weapon_apply_preset',
+            controller.apply_preset,
+            ready and controller.available('apply_preset'),
+            'Apply Preset'
+        )
         action(
             'Save Weapon Preset',
             'weapon_preset',
@@ -372,6 +380,15 @@ function V.new(controller)
                 if y >= body_bottom - 0.01 and y + item.height <= body_top + 0.01 then
                     if item.kind == 'heading' then
                         bounded(action_x, y + gap, item.label, action_width - gap * 2, 'heading')
+                    elseif item.kind == 'choice' then
+                        ui.choice(
+                            item.id,
+                            action_x,
+                            y,
+                            action_width - gap * 2,
+                            nil,
+                            { enabled = not state.busy, height = height }
+                        )
                     elseif item.kind == 'target' then
                         local slot, weapon = item.slot, state.weapons[item.slot]
                         local enabled = weapon and weapon.status == 'ready' and not state.busy

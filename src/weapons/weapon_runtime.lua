@@ -303,6 +303,7 @@ function R.new(deps)
         end
         if not chosen then
             group.document = not mixed and document or nil
+            group.preview_document = document
         end
         group.width, group.height = document.width, document.height
         for _, b in ipairs(group.bindings) do
@@ -310,7 +311,8 @@ function R.new(deps)
         end
         return document, group
     end
-    function self.apply_plan(entries, restore_targets)
+    function self.apply_plan(entries, restore_targets, temporary)
+        assert(temporary == nil or temporary == true, 'Invalid temporary weapon plan flag')
         assert(type(entries) == 'table' and #entries <= 3072, 'Weapon application plan bounds')
         local plan, targets, before, seen, material_intents = {}, {}, {}, {}, {}
         for _, entry in ipairs(entries) do
@@ -442,6 +444,11 @@ function R.new(deps)
             end
             return results
         end)
+        -- Identification owns only temporary bindings; never retain its pixels
+        -- as a recovery draft or publish them to the cached editor preview.
+        if temporary then
+            return results
+        end
         local changed_groups = {}
         for _, b in ipairs(restore_targets) do
             local kind = b.slot == R.PATTERN and 'pattern' or 'material'
@@ -477,6 +484,8 @@ function R.new(deps)
         for group in pairs(changed_groups) do
             local representative, _, mixed = group_documents(group)
             group.document = not mixed and document_copy(representative) or nil
+            group.preview_document = document_copy(representative)
+            group.preview_document.mixed = mixed
         end
         return results
     end
@@ -661,7 +670,9 @@ function R.new(deps)
         for weapon_slot = 1, R.SLOTS do
             local catalog = catalogs[weapon_slot]
             if catalog and catalog.available then
-                local checked, valid, why = pcall(function()
+                local checked, valid, why = pcall(discovery.with_validation_batch or function(fn)
+                    return fn()
+                end, function()
                     local valid, why = discovery.validate(catalog.receipt)
                     if valid then
                         for _, kind in ipairs({ 'material', 'pattern' }) do

@@ -155,6 +155,7 @@ function D.new(E, deps)
         assert(hash and #hash == 16, 'Stable weapon Unit resource ID unavailable')
         return hash:lower()
     end
+    local validation_batch
     local function validate(receipt, cleanup)
         local kept = assert(receipts[receipt], 'Unknown weapon Unit receipt')
         assert(
@@ -173,6 +174,9 @@ function D.new(E, deps)
                 and receipt.peer_high == (kept.peer and kept.peer.peer_high or nil),
             'Weapon Unit receipt was altered'
         )
+        if validation_batch and not kept.peer and not cleanup and validation_batch[receipt] then
+            return kept
+        end
         local fresh, why
         if kept.peer then
             if cleanup then
@@ -211,7 +215,30 @@ function D.new(E, deps)
             'Weapon Unit disappeared or became ambiguous'
         )
         assert(resource(kept.lua_unit) == kept.resource, 'Weapon Unit resource changed')
+        if validation_batch and not kept.peer and not cleanup then
+            validation_batch[receipt] = kept
+        end
         return kept
+    end
+    function self.with_validation_batch(fn)
+        assert(not validation_batch, 'Nested weapon validation batches are unsupported')
+        local batch = {}
+        validation_batch = batch
+        local function pack(...)
+            return { n = select('#', ...), ... }
+        end
+        local task = coroutine.create(fn)
+        local result = pack(coroutine.resume(task))
+        validation_batch = nil
+        assert(coroutine.status(task) == 'dead', 'Weapon validation batches cannot yield')
+        if not result[1] then
+            error(result[2], 0)
+        end
+        -- No cached identity escapes this synchronous read-only polling scope.
+        for receipt in pairs(batch) do
+            validate(receipt)
+        end
+        return unpack(result, 2, result.n)
     end
     local function capture(slot, requested_peer, expected_resource)
         local ok, value = pcall(function()

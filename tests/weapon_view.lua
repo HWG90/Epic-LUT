@@ -145,6 +145,13 @@ local f = fixture()
 local view = View.new(f.controller)
 local ui, commands = canvas(1800, 1100, 16, 1)
 view.draw(ui)
+local preset_choice = false
+for _, item in ipairs(commands) do
+    if item.kind == 'choice' and item.label == 'outfit_preset' then
+        preset_choice = true
+    end
+end
+assert(preset_choice, 'Weapon page omitted the existing Armory preset selector')
 local actions = {}
 local hits = {}
 for _, item in ipairs(commands) do

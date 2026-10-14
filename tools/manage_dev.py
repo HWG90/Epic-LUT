@@ -440,9 +440,16 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
             require(Path(active['target']).resolve() == target.resolve() and active['installed_hashes'] == expected, 'Installed files contain untracked changes; refusing replacement')
     require(not install or active or expect_installed, 'First installation requires --expect-installed with the current Lua SHA-256')
     runtime = {name[len(RUNTIME):]: data for name, data in package['files'].items() if name.startswith(RUNTIME)}
+    retained_documents = {}
     if entry == 'main.lua':
         current_names = set(checksum_inventory(before['FILES-SHA256.txt']))
-        require(current_names <= set(runtime), 'Modular candidate removes installed runtime files; migration is not authorized')
+        removed = current_names - set(runtime)
+        # A release transition may stop shipping its predecessor's public notes.
+        # Preserve those exact bytes on disk; runtime code/assets may not disappear.
+        for name in removed:
+            require(re.fullmatch(r'docs/RELEASE-R\d+\.\d+\.\d+(?:-(?:alpha|rc)\d+)?\.md', name) is not None,
+                    'Modular candidate removes installed runtime files; migration is not authorized')
+            retained_documents[name] = before[name]
         for name in (NATIVE, 'library.txt'):
             require(name in before and runtime[name] == before[name], 'Protected modular runtime differs: '+name)
         writable = set(package['manifest']['lll']['modules']) | {'main.lua', 'manifest.json', 'FILES-SHA256.txt'}
@@ -469,7 +476,8 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
                'entry': entry, 'format': package['format'], 'changed_files': sorted(desired),
                'development_build_id': package['development_build_id'],
                'archive_sha256': package['sha256'], 'target': str(target.resolve()),
-               'before_hashes': expected, 'installed_hashes': {**expected, **hashes(desired)},
+               'before_hashes': expected, 'installed_hashes': {**{name: digest for name, digest in expected.items() if name not in retained_documents}, **hashes(desired)},
+               'retained_documents': hashes(retained_documents),
                'reload_requested': False, 'installed': install}
     if not install:
         return receipt
@@ -480,6 +488,7 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
     write_json(backup.with_suffix('.json'), receipt)
     replace_pair(target, desired, before, backup, entry=entry)
     require(hashes(installed_files(target)) == receipt['installed_hashes'], 'Installed runtime inventory verification failed')
+    require(all((target/name).read_bytes() == data for name, data in retained_documents.items()), 'Retained release notes changed during deployment')
     write_json(backup/'receipt.json', receipt)
     write_json(active_path, receipt)
     return receipt

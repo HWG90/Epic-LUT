@@ -211,8 +211,9 @@ local function recovery_fixture(prepare)
         original = function(object)
             return f.documents[object]
         end,
-        bind = function()
-            error('Runtime fixture owns writes')
+        bind = function(binding, object)
+            f.writes[#f.writes + 1] = { binding = binding, object = object }
+            f.textures[binding.material][binding.slot] = object
         end,
         create_texture = function()
             error('Runtime fixture owns allocations')
@@ -294,6 +295,40 @@ writes = #closed_recovery.writes
 assert(closed_bridge.close())
 closed_bridge.update(0.2)
 assert(#closed_recovery.writes == writes, 'Closed bridge retained a respawn replay job')
+local flashed, flashed_bridge = recovery_fixture()
+local flash_target = flashed_bridge.controller().state().target
+local flash_group = flashed.runtime.groups(1)[1]
+local saved_source = ffi.string(flash_group.preview_document.data, 23 * 8 * 16)
+local restore_objects = {}
+for _, binding in ipairs(flash_group.bindings) do
+    restore_objects[binding] = binding.current
+end
+assert(flashed_bridge.identify(flash_target, 2) == nil)
+assert(flashed_bridge.highlighting())
+assert(ffi.string(flash_group.preview_document.data, 23 * 8 * 16) == saved_source, 'Flash changed cached preview')
+local captured = flashed.runtime.capture_state()
+for _, entry in ipairs(captured.entries) do
+    assert(entry.document.data[(2 - 1) * 23 * 4] ~= 1, 'Flash entered persisted pixels')
+end
+local foreign_target = flash_group.bindings[1]
+flashed.textures[foreign_target.material][foreign_target.slot] = 0xdead00
+assert(flashed_bridge.stop_highlight() and not flashed_bridge.highlighting())
+assert(
+    flashed.textures[foreign_target.material][foreign_target.slot] == 0xdead00,
+    'Flash restoration overwrote foreign binding'
+)
+for binding, object in pairs(restore_objects) do
+    if binding ~= foreign_target then
+        assert(flashed.textures[binding.material][binding.slot] == object)
+    end
+end
+local dropped_flash, dropped_flash_bridge = recovery_fixture()
+assert(dropped_flash_bridge.identify(dropped_flash_bridge.controller().state().target, 1) == nil)
+dropped_flash.snapshots[1] = nil
+local flash_writes = #dropped_flash.writes
+assert(dropped_flash_bridge.stop_highlight())
+assert(#dropped_flash.writes == flash_writes, 'Flash restoration wrote to a dropped weapon')
+
 local scoped, scoped_bridge = recovery_fixture(function(f)
     for _, mesh in ipairs(f.units[100].meshes) do
         f.textures[mesh.materials[2]][0x81d4c49d] = f.P
@@ -309,6 +344,16 @@ assert(
     scoped_controller.state().pattern_document.data[11] == body.data[11],
     'Body quick swatch lost its scoped Pattern value'
 )
+scoped_bridge.snapshot()
+local draw_checks = 0
+scoped.identity_hook = function()
+    draw_checks = draw_checks + 1
+end
+for _ = 1, 10 do
+    scoped_bridge.snapshot()
+end
+scoped.identity_hook = nil
+assert(draw_checks == 0, 'Mixed Pattern UI redraw repeated native identity/World discovery')
 for _, mesh in ipairs(scoped.units[100].meshes) do
     assert(scoped.textures[mesh.materials[1]][0x81d4c49d] ~= scoped.P)
     assert(scoped.textures[mesh.materials[2]][0x81d4c49d] == scoped.P, 'Body Pattern edit recolored a sibling material')

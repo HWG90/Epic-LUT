@@ -106,7 +106,12 @@ local function palette_choices(labels)
 end
 local function action(fn, recover)
     local before
-    if history and not history.busy and not region_indicator.job then
+    if
+        history
+        and not history.busy
+        and not region_indicator.job
+        and not (operations.weapon_editor and operations.weapon_editor.highlighting())
+    then
         local ok, value = pcall(history.capture)
         if ok then
             before = value
@@ -121,7 +126,11 @@ local function action(fn, recover)
         end
         return message(tostring(why))
     end
-    if before and not region_indicator.job then
+    if
+        before
+        and not region_indicator.job
+        and not (operations.weapon_editor and operations.weapon_editor.highlighting())
+    then
         local ok, err = pcall(function()
             history.record(before, history.capture())
         end)
@@ -226,7 +235,8 @@ local function load_dds(path)
         bytes = m.file_io.read(path, m.dds.MAX_BYTES)
     end
     local data, w, h = m.dds.decode(bytes)
-    if w == 3 and h == 1 and pattern_editor then
+    local weapon_mode = palette_editor and palette_editor.gear == 'weapon'
+    if w == 3 and h == 1 and pattern_editor and not weapon_mode then
         local ok, changed = disable_matching()
         assert(ok, changed)
         if changed then
@@ -243,8 +253,10 @@ local function load_dds(path)
         end
         return result
     end
-    assert(w == 23, 'Expected a 23-column material LUT or 3x1 Pattern LUT DDS')
-    edit.editor_target = nil
+    assert(w == 23 or weapon_mode and w == 3 and h == 1, 'Expected a 23-column material LUT or 3x1 Pattern LUT DDS')
+    if not weapon_mode then
+        edit.editor_target = nil
+    end
     editor_pending = nil
     local ok, changed = disable_matching()
     assert(ok, changed)
@@ -658,11 +670,16 @@ local function initialize_editor_state()
         end,
     })
     stop_identification = function()
-        return region_indicator.stop() and (not pattern_editor or pattern_editor.stop_flash())
+        return region_indicator.stop()
+            and (not operations.weapon_editor or operations.weapon_editor.stop_highlight())
+            and (not pattern_editor or pattern_editor.stop_flash())
     end
 end
 local function identify_region()
     assert(stop_identification(), 'Previous highlight restoration pending')
+    if edit.editor_target and edit.editor_target.kind == 'weapon' then
+        return weapon_editor().identify(edit.editor_target, handle.get('edit_row'))
+    end
     if frontend.basic_mode then
         assert(basic_selected, 'Click an Armor or Helmet color region first')
     end
@@ -852,12 +869,21 @@ local function save_setup()
     )
 end
 local function save_palette()
-    edit.editor_target = nil
+    local weapon_mode = palette_editor and palette_editor.gear == 'weapon'
+    if not weapon_mode then
+        edit.editor_target = nil
+    end
     editor_pending = nil
     local source = assert(edit.imported, 'Import a LUT first')
     local data = ffi.new('float[?]', source.width * source.height * 4)
     ffi.copy(data, source.data, source.width * source.height * 16)
     edit.loaded = { data = data, width = source.width, height = source.height, source = source.source }
+    if weapon_mode then
+        local target = operations.weapon_document_target(edit.loaded)
+        edit.editor_target = target
+        edit.loaded.kind, edit.loaded.family = 'weapon', target.family == 'pattern' and 'pattern' or 'material'
+        edit.loaded.weapon_slot, edit.loaded.weapon_resource = target.weapon_slot, target.weapon_resource
+    end
     editor_tables[source.source] = edit.loaded
     edit.preview_document = edit.loaded
     edit.preview_revision = 0
@@ -887,6 +913,10 @@ local function load_debug_lut()
     end)
 end
 local function apply_checked(document)
+    if palette_editor and palette_editor.gear == 'weapon' then
+        document = assert(document or edit.imported, 'Import a weapon LUT file first')
+        return weapon_editor().apply(operations.weapon_document_target(document), document)
+    end
     if basic_selected and frontend.basic_mode then
         local selected = basic_selected
         live_select_suppressed = true
@@ -2491,6 +2521,9 @@ weapon_editor = function()
             busy = function()
                 return pending ~= nil or index_job ~= nil
             end,
+            context = function()
+                return frontend.menu and frontend.menu.page
+            end,
             mutate = operations.weapon_mutation,
             message = message,
             weapon_name = function(slot, resource)
@@ -2498,6 +2531,8 @@ weapon_editor = function()
             end,
             load_editor = function(document, target)
                 assert(stop_identification(), 'Highlight restoration pending')
+                editor_pending, populate_request = nil, nil
+                edit.populate_manual_request = nil
                 edit.loaded = m.weapon_mapping.copy(document)
                 edit.loaded.source, edit.loaded.revision = target.label or 'Weapon LUT', 0
                 edit.loaded.kind, edit.loaded.family = 'weapon', target.family == 'pattern' and 'pattern' or 'material'
@@ -2537,6 +2572,9 @@ weapon_editor = function()
                 return palettes
             end,
             import = function()
+                if palette_editor then
+                    palette_editor.gear = 'weapon'
+                end
                 return operations.import_picker.load(true)
             end,
             map_imports = function(targets, options)
@@ -2544,6 +2582,12 @@ weapon_editor = function()
             end,
             save_preset = function(targets)
                 return operations.weapon_workflow().save(targets)
+            end,
+            apply_preset = function(targets)
+                return operations.weapon_workflow().map_preset(
+                    targets,
+                    assert(armory_collection.selected, 'Choose an existing preset on The Armory page first')
+                )
             end,
             export = function(targets)
                 return operations.weapon_workflow().export(targets)
@@ -2555,6 +2599,19 @@ weapon_editor = function()
         })
     end
     return operations.weapon_editor
+end
+function operations.weapon_document_target(document)
+    assert(document and document.data, 'Load or import a weapon LUT first')
+    local kind = document.width == 3 and document.height == 1 and 'pattern' or 'material'
+    local target = edit.editor_target
+    if not target or target.kind ~= 'weapon' or (target.family == 'pattern' and 'pattern' or 'material') ~= kind then
+        local controller = weapon_editor().controller()
+        controller.choose_family(kind == 'pattern' and 'pattern' or 'main')
+        target = controller.state().target
+    end
+    assert(target and target.kind == 'weapon', 'Load Current Weapons and select a weapon LUT first')
+    weapon_editor().check(target)
+    return target
 end
 function operations.weapon_workflow()
     if not operations.weapon_workflow_service then
@@ -2971,13 +3028,17 @@ local function register(current)
         weapon_editor = m.weapon_bridge and weapon_editor or nil,
         weapon_view = m.weapon_view,
         open_weapons = function()
+            palette_editor.gear = 'weapon'
+            editor_pending, populate_request = nil, nil
+            edit.populate_manual_request = nil
             api.focus_page(handle.id, 'weapons')
             return weapon_editor().load_current()
         end,
         apply_weapon_document = function()
             return action(function()
-                assert(edit.editor_target and edit.editor_target.kind == 'weapon', 'Load a weapon LUT first')
-                return weapon_editor().apply(edit.editor_target, edit.loaded)
+                local target = operations.weapon_document_target(edit.loaded)
+                edit.editor_target = target
+                return weapon_editor().apply(target, edit.loaded)
             end)
         end,
         auto_populate_changed = function(enabled)
@@ -3278,6 +3339,7 @@ local function reset_transient_state()
         request_binding_sources = operations.request_binding_sources,
         binding_export_provider = operations.binding_export_provider,
         weapon_workflow = operations.weapon_workflow,
+        weapon_document_target = operations.weapon_document_target,
         weapon_sources = operations.weapon_sources,
         weapon_sharing = operations.weapon_sharing,
         weapon_mutation = operations.weapon_mutation,
@@ -3415,6 +3477,7 @@ return {
                     end,
                     highlighting = function()
                         return (region_indicator and region_indicator.job ~= nil)
+                            or (operations.weapon_editor and operations.weapon_editor.highlighting())
                             or (pattern_editor and pattern_editor.flashing())
                     end,
                     entries = function()
@@ -4059,6 +4122,9 @@ return {
     end,
     on_update = function(dt_context, dt)
         pcall(region_indicator.tick, dt, not frontend.menu or frontend.menu.visible)
+        if operations.weapon_editor then
+            operations.weapon_editor.tick_highlight(dt, not frontend.menu or frontend.menu.visible)
+        end
         local myc = not not rawget(_G, 'MatchYourColorsInstalled')
         if frontend and frontend.menu then
             frontend.menu.warning = myc
@@ -4155,7 +4221,8 @@ return {
                 end
             end
             edit.auto_elapsed = (edit.auto_elapsed or 0) + math.max(0, dt or 0)
-            if handle.get('auto_populate_worn') and edit.auto_elapsed >= 1 then
+            local weapon_selected = palette_editor and palette_editor.gear == 'weapon'
+            if handle.get('auto_populate_worn') and not weapon_selected and edit.auto_elapsed >= 1 then
                 edit.auto_elapsed = 0
                 local identity = m.avatar.resolve_live(memory, game)
                 if identity then
@@ -4181,6 +4248,9 @@ return {
                         end
                     end
                 end
+            end
+            if populate_request and weapon_selected and not edit.populate_manual_request then
+                populate_request = nil
             end
             if populate_request and os.time() >= populate_next then
                 populate_next = os.time() + 1

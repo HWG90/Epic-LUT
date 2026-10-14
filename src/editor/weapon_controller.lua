@@ -303,6 +303,9 @@ function C.new(host)
     function self.map_imports(auto)
         return invoke('map_imports', self.targets(), { auto = auto == true, rollover = true })
     end
+    function self.apply_preset()
+        return invoke('apply_preset', self.targets())
+    end
     function self.save_preset()
         return invoke('save_preset', self.targets())
     end
@@ -417,6 +420,7 @@ function C.new(host)
         'restore',
         'import',
         'map_imports',
+        'apply_preset',
         'save_preset',
         'export',
         'share',

@@ -49,6 +49,50 @@ function W.new(m, host)
         end
         return mapper.open(descriptors, options)
     end
+    function self.map_preset(targets, preset)
+        assert(
+            preset and type(preset.entries) == 'table' and #preset.entries > 0 and #preset.entries <= 4096,
+            'Choose an existing Armory preset first'
+        )
+        local paths, documents, resources, seen = {}, {}, {}, {}
+        for index, entry in ipairs(preset.entries) do
+            local document = m.weapon_mapping.copy(entry.document)
+            local signature = document.width .. ':' .. document.height .. ':' .. m.weapon_mapping.bytes(document)
+            if not seen[signature] then
+                local path = (preset.name or 'Preset')
+                    .. '/'
+                    .. (document.width == 3 and 'PatternLUT' or 'LUT')
+                    .. string.format('%03d', index - 1)
+                    .. '.dds'
+                paths[#paths + 1], documents[path], resources[path], seen[signature] =
+                    path, document, entry.original and entry.original.resource, true
+            end
+        end
+        local mapping = m.weapon_mapping.new({
+            runtime = bridge().runtime(),
+            menu = host.menu,
+            message = host.message,
+            mutate = host.mutate,
+            imports = {
+                palettes = function()
+                    return paths
+                end,
+                document = function(path)
+                    return documents[path]
+                end,
+                resource = function(path)
+                    return resources[path]
+                end,
+                pending = function()
+                    return false
+                end,
+                indexing = function()
+                    return false
+                end,
+            },
+        })
+        return mapping.open(bridge().descriptors(targets), { auto = true, rollover = true })
+    end
     function self.save(targets)
         local descriptors = bridge().descriptors(targets)
         local _, validate = m.weapon_mapping.freeze(bridge().runtime(), descriptors)
