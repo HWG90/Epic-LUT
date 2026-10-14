@@ -126,3 +126,10 @@ Player Preview selects `ui_3d` and renders to its owned portrait output directly
 Use [HD2SDK Community Edition](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition) as a primary format reference for texture, mesh and material work. Its archive and texture serializers informed Epic's patch writer; the local reference catalog retains known resource, binding and shader-variable names. Follow its linked modding wiki for additional format guidance. Inspect the relevant upstream revision before relying on layouts or mappings, and verify those against the targeted game build and round-trip fixtures. The Blender addon is a development reference, not an Epic LUT runtime dependency.
 
 Use [HD2-Transmog](https://github.com/tyrypyrking/HD2-Transmog) for native Armory/preview behavior. Pin the inspected commit in investigation notes and preserve Epic's own resource ownership when adapting its approach.
+
+
+### Installed texture patch layers
+
+Original LUT capture treats `archive.patch_N` as numeric layers within that exact 16-digit archive family. For each texture, the highest layer containing that resource supplies its original pixels; a higher archive layer that does not contain it does not erase a lower replacement. Numeric ordering is independent of filename sorting. Conflicting equal-index records or resource collisions across archive families still require exact source proof. Source-stamp v5 and patch-source-v5 invalidate older ambiguous caches.
+
+Reference: Nexus-Mods/Vortex issue 16582 includes the Helldivers extension author's numeric priority contract (higher numbers take priority); CowboyBingus/BingusSharedLoader `docs/THIRD_PARTY_REFERENCE.md`, Discovery and start order, likewise documents highest patch number first.

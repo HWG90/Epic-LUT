@@ -1,12 +1,12 @@
-# EPIC LUT R5.7.2 :goose:
+# EPIC LUT R5.7.3 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
 Share applied **Armor, Helmet and Pattern** edits with compatible squadmates: exact color, alpha, material, camo and emissive values. Apply an Armory preset to share it. Improved lossless compression fits larger looks; oversized looks stay local.
 
-Both players need R5.7.2. **Configuration > Share full LUT appearance with Epic LUT users** is On by default and controls sending/receiving. Updates wait for settled edits and matching sender kits. Cape materials are excluded. **Shared Lobby LUT remains in testing.**
+Both players need R5.7.3. **Configuration > Share full LUT appearance with Epic LUT users** is On by default and controls sending/receiving. Updates wait for settled edits and matching sender kits. Cape materials are excluded. **Shared Lobby LUT remains in testing.**
 
-**R5.7.2 MAINTENANCE**
+**R5.7.3 MAINTENANCE**
 - Custom model LUTs load installed patch colors; highlights preserve their other rows.
 - Basic Apply Preset matches Armory assignments. Preview gore caps and large-font Apply clipping fixed.
 - Right-click a LUT ID/name to copy its real ID in your configured format.
@@ -21,11 +21,11 @@ Both players need R5.7.2. **Configuration > Share full LUT appearance with Epic 
 
 Massive thanks to **Scarpheon** for testing, patch help and all 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex LUT Editor and the modding community.
 
-**Downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.2
+**Downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.3
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **Bugs:** https://github.com/HWG90/Epic-LUT/issues
 
 **Nexus: BSL Main, MDL Optional. LLL: GitHub only.** Enable one copy. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.
 
-**R6 weapon LUT editing preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha1
-Experimental prerelease. **No support offered.** Stable users should stay on R5.7.2.
+**R6 weapon LUT editing preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha2
+Experimental prerelease. **No support offered.** Stable users should stay on R5.7.3.

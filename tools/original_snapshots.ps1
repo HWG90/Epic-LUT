@@ -12,7 +12,7 @@ try {
  [IO.File]::WriteAllText((Join-Path $Output 'progress.txt'),'Checking patched original LUT sources...')
  $stamp=[EpicOriginalReader]::SourceStamp($GameData,$OwnerPID,(Join-Path $Output 'progress.txt'))
  $versionFolder=Join-Path $Output $stamp
- $schema=Join-Path $versionFolder 'patch-source-v4.txt'
+ $schema=Join-Path $versionFolder 'patch-source-v5.txt'
  if($IndexOnly -and (Test-Path -LiteralPath $schema) -and (Test-Path -LiteralPath $marker) -and ([IO.File]::ReadAllLines($marker)[0] -eq $stamp) -and (Test-Path -LiteralPath (Join-Path $versionFolder 'catalog.txt'))){exit 0}
  if(Test-Path -LiteralPath $marker){Remove-Item -LiteralPath $marker}
  New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
@@ -23,6 +23,6 @@ try {
  $count=[EpicOriginalReader]::RunChecked($GameData,$versionFolder,$OwnerPID,(Join-Path $Output 'progress.txt'),$wantedPath,$stamp)
  if($count -eq 0){throw 'No original material LUTs found'}
  [IO.File]::WriteAllText($marker,$stamp+"`n"+$count)
- if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23x1-64; exact loose LUT overrides')}
+ if($IndexOnly){[IO.File]::WriteAllText($schema,'3x1 and 23x1-64; numeric patch layers within exact archive families')}
 } catch { if($marker -and (Test-Path -LiteralPath $marker)){Remove-Item -LiteralPath $marker};[IO.File]::WriteAllText((Join-Path $Output 'error.txt'),$_.Exception.Message);exit 1 }
 

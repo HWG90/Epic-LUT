@@ -133,10 +133,31 @@ class PatchedOriginalSnapshots(unittest.TestCase):
                 output = self.capture()
                 self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), self.custom.tobytes())
 
-    def test_conflicting_duplicate_does_not_guess_patch_number_precedence(self):
+    def test_numeric_patch_layers_use_highest_same_archive_resource(self):
         override(self.game, self.custom)
-        override(self.game, self.custom+1, name='aaaaaaaaaaaaaaaa.patch_999')
-        self.refused('Ambiguous loose LUT replacements')
+        override(self.game, self.custom+2, name='aaaaaaaaaaaaaaaa.patch_2')
+        override(self.game, self.custom+10, name='aaaaaaaaaaaaaaaa.patch_10')
+        output = self.capture()
+        self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), (self.custom+10).tobytes())
+        (self.game/'aaaaaaaaaaaaaaaa.patch_10').unlink()
+        (self.game/'aaaaaaaaaaaaaaaa.patch_10.gpu_resources').unlink()
+        output = self.capture()
+        self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), (self.custom+2).tobytes())
+
+    def test_cross_archive_conflict_still_requires_exact_source_proof(self):
+        override(self.game, self.custom)
+        override(self.game, self.custom+1, name='bbbbbbbbbbbbbbbb.patch_999')
+        self.refused('across archive families')
+
+    def test_conflicting_equal_patch_numbers_do_not_guess_filename_order(self):
+        override(self.game, self.custom, name='aaaaaaaaaaaaaaaa.patch_2')
+        override(self.game, self.custom+1, name='aaaaaaaaaaaaaaaa.patch_02')
+        self.refused('at patch_2')
+
+    def test_invalid_highest_patch_never_falls_back_to_lower_colors(self):
+        override(self.game, self.custom)
+        loose_patch(self.game, 'aaaaaaaaaaaaaaaa.patch_2', [resource(ID, TEXTURE, b'not-a-DDS')])
+        self.refused('DDS metadata unavailable')
 
     def test_identical_duplicate_same_archive_is_not_a_false_conflict(self):
         override(self.game, self.custom)
@@ -148,7 +169,7 @@ class PatchedOriginalSnapshots(unittest.TestCase):
         conflict = '4444444444444444'
         override(self.game, self.custom)
         override(self.game, self.custom, hash=conflict, name='aaaaaaaaaaaaaaaa.patch_1')
-        override(self.game, self.custom+1, hash=conflict, name='aaaaaaaaaaaaaaaa.patch_2')
+        override(self.game, self.custom+1, hash=conflict, name='bbbbbbbbbbbbbbbb.patch_2')
         result, error = run(self.game, self.output)
         self.assertEqual(result.returncode, 0, error)
         self.assertEqual((version(self.output, 'index-complete.txt')/'catalog.txt').read_text().splitlines(),

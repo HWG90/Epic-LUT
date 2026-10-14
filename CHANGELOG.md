@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## R5.7.3 - 2026-10-14
+
+- Resolve installed custom LUT layers by numeric patch precedence within their exact archive family. Higher layers replace lower layers for the same texture; equal-layer conflicts and competing archive families remain explicit errors. Invalidate older source caches.
+
 ## R5.7.2 - 2026-10-14
 
 - Right-click a LUT ID or its local name to copy the underlying texture ID using the configured hexadecimal or exact unsigned decimal format. Keep left-click naming and LUT values unchanged.
