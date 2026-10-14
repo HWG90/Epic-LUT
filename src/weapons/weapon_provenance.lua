@@ -4,6 +4,7 @@ local W = {
     PENDING = 'Reading exact weapon binding sources; retry after the background cache is ready',
     DESTINATION_PENDING = 'Weapon patch destination has not yet been verified in-game',
 }
+local ffi = require('ffi')
 local function hex(value, length, label)
     assert(type(value) == 'string' and #value == (length or 16) and value:match('^%x+$'), 'Invalid ' .. label)
     return value:lower()
@@ -407,37 +408,183 @@ function W.new(m, host)
         )
         return hydrated, refs
     end
+    local function saved_refs(entry)
+        local stored = entry.binding_provenance
+        local refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
+            or P.validate(stored, 'weapon', entry.key, entry.original)
+        assert(
+            refs.weapon_resource == entry.weapon_resource and refs.weapon_slot == entry.weapon_slot,
+            'Saved weapon configuration differs from assignment proof'
+        )
+        return refs
+    end
+    local function pixels(document)
+        assert(
+            document
+                and document.data
+                and (document.width == 23 or document.width == 3)
+                and type(document.height) == 'number'
+                and document.height >= 1
+                and document.height <= 64
+                and document.height % 1 == 0
+                and (document.width ~= 3 or document.height == 1),
+            'Saved weapon LUT pixels unavailable'
+        )
+        return ffi.string(document.data, document.width * document.height * 16)
+    end
+    -- Missing assignment sidecars follow the same current-match policy as legacy
+    -- garment presets. Palette saves remain useful while the worker is loading;
+    -- export certifies every missing destination without rewriting that preset.
+    local function prepare_saved(entries)
+        local selected, preferences, missing, receipts = {}, {}, {}, {}
+        for _, entry in ipairs(entries) do
+            if entry.kind == 'weapon' then
+                local resource = hex(entry.weapon_resource, 16, 'saved weapon configuration')
+                local refs = entry.binding_provenance and saved_refs(entry)
+                local archive = refs and refs.unit.archive or '0000000000000000'
+                assert(
+                    not preferences[resource]
+                        or preferences[resource] == archive
+                        or preferences[resource] == '0000000000000000'
+                        or archive == '0000000000000000',
+                    'Conflicting saved weapon source archives'
+                )
+                if not preferences[resource] or archive ~= '0000000000000000' then
+                    preferences[resource] = archive
+                end
+                if refs then
+                    selected[entry] = refs
+                else
+                    missing[#missing + 1] = entry
+                end
+            end
+        end
+        assert(next(preferences), 'Preset has no weapon assignments')
+        for resource, archive in pairs(preferences) do
+            request_set[resource] = archive
+        end
+        start_required(false)
+        local sources = ready(next(preferences))
+        local valid, why = sources.validate_scope()
+        if not valid then
+            error(why, 0)
+        end
+        if #missing > 0 then
+            local current = {}
+            for _, binding in ipairs(descriptors(host.groups())) do
+                if binding.kind == 'weapon' and not binding.remote then
+                    local key = (binding.slot == P.PATTERN and 'p:' or '') .. binding.save_key
+                    current[key] = current[key] or {}
+                    current[key][#current[key] + 1] = binding
+                end
+            end
+            for _, entry in ipairs(missing) do
+                local candidates = current[entry.key]
+                local binding = candidates and #candidates == 1 and candidates[1]
+                local saved = {
+                    key = entry.key,
+                    kind = entry.kind,
+                    weapon_slot = entry.weapon_slot,
+                    weapon_resource = entry.weapon_resource,
+                    document = entry.document,
+                    bytes = pixels(entry.document),
+                    original = entry.original,
+                    resource = entry.original and entry.original.resource,
+                    width = entry.original and entry.original.width,
+                    height = entry.original and entry.original.height,
+                    patch_source = entry.original and entry.original.patch_source,
+                }
+                local target = {}
+                for _, key in ipairs({
+                    'unit',
+                    'mesh',
+                    'material',
+                    'original',
+                    'current',
+                    'slot',
+                    'save_key',
+                    'weapon_slot',
+                    'weapon_resource',
+                    'unit_resource64',
+                }) do
+                    target[key] = binding and binding[key]
+                end
+                local function check()
+                    assert(
+                        entry.binding_provenance == nil
+                            and entry.kind == saved.kind
+                            and saved.kind == 'weapon'
+                            and entry.key == saved.key
+                            and entry.weapon_slot == saved.weapon_slot
+                            and entry.weapon_resource == saved.weapon_resource
+                            and entry.document == saved.document
+                            and pixels(entry.document) == saved.bytes
+                            and entry.original == saved.original
+                            and binding
+                            and binding.weapon_slot == entry.weapon_slot
+                            and binding.weapon_resource == entry.weapon_resource
+                            and binding.unit_resource64 == entry.weapon_resource
+                            and entry.key == (binding.slot == P.PATTERN and 'p:' or '') .. binding.save_key,
+                        'Saved weapon preset does not uniquely match the current weapon; assignments were not retargeted'
+                    )
+                    for key, value in pairs(target) do
+                        assert(binding[key] == value, 'Current weapon target changed during legacy export')
+                    end
+                    assert(
+                        discovery().present(binding) and discovery().binding(binding) == binding.current,
+                        'Current weapon binding changed before legacy export'
+                    )
+                    -- Read the current host snapshot, never a cached group document.
+                    local original = host.original(binding)
+                    assert(
+                        original
+                            and entry.original
+                            and original.resource == saved.resource
+                            and original.width == saved.width
+                            and original.height == saved.height
+                            and original.patch_source == saved.patch_source
+                            and entry.original.resource == saved.resource
+                            and entry.original.width == saved.width
+                            and entry.original.height == saved.height
+                            and entry.original.patch_source == saved.patch_source,
+                        'Saved weapon original differs from current installed sources; assignments were not retargeted'
+                    )
+                    local active = binding.current ~= binding.original and binding.document or original
+                    assert(
+                        active
+                            and active.width == entry.document.width
+                            and active.height == entry.document.height
+                            and pixels(active) == pixels(entry.document),
+                        'Apply this legacy weapon preset to its matching weapon first; saved colors differ from the active binding'
+                    )
+                    return original
+                end
+                local original = check()
+                local _, refs = self.capture(binding, { kind = 'weapon', key = entry.key, original = original })
+                check()
+                selected[entry], receipts[entry] = refs, check
+            end
+        end
+        local function refs_for(entry)
+            local refs = assert(selected[entry], 'Export entry is not in the verified weapon preset')
+            if receipts[entry] then
+                receipts[entry]()
+                return refs
+            end
+            return saved_refs(entry)
+        end
+        return selected, sources, refs_for
+    end
     function self.provider(preset)
         assert(
             type(preset) == 'table' and type(preset.entries) == 'table' and #preset.entries <= 4096,
             'Weapon preset source bounds'
         )
-        local selected, hydrated, preferences = {}, {}, {}
-        for _, entry in ipairs(preset.entries) do
-            if entry.kind == 'weapon' then
-                local stored = entry.binding_provenance
-                local refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
-                    or P.validate(stored, 'weapon', entry.key, entry.original)
-                assert(
-                    refs.weapon_resource == entry.weapon_resource and refs.weapon_slot == entry.weapon_slot,
-                    'Saved weapon configuration differs from assignment proof'
-                )
-                assert(
-                    not preferences[refs.unit.resource] or preferences[refs.unit.resource] == refs.unit.archive,
-                    'Conflicting saved weapon source archives'
-                )
-                preferences[refs.unit.resource] = refs.unit.archive
-                request_set[refs.unit.resource] = refs.unit.archive
-                selected[entry] = refs
-            end
-        end
-        assert(next(selected), 'Preset has no certified weapon assignments')
-        start_required(false)
+        local selected, _, refs_for = prepare_saved(preset.entries)
+        local hydrated = {}
         return function(entry)
             local refs = assert(selected[entry], 'Export entry is not in the certified weapon preset')
-            local stored = entry.binding_provenance
-            local current_refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
-                or P.validate(stored, 'weapon', entry.key, entry.original)
+            local current_refs = refs_for(entry)
             assert(
                 entry.kind == 'weapon'
                     and P.matches(refs, current_refs)
@@ -459,37 +606,8 @@ function W.new(m, host)
             'Invalid weapon export batch'
         )
         local batch = { records = {}, layouts = {}, selected = {}, hydrated = {}, record_count = 0, active = true }
-        local preferences, count = {}, 0
-        local function refs_for(entry)
-            assert(entry.kind == 'weapon', 'Export entry is not a weapon')
-            local stored = entry.binding_provenance
-            local refs = type(stored) == 'string' and P.decode(stored, 'weapon', entry.key, entry.original)
-                or P.validate(stored, 'weapon', entry.key, entry.original)
-            assert(
-                refs.weapon_resource == entry.weapon_resource and refs.weapon_slot == entry.weapon_slot,
-                'Weapon export configuration differs from assignment proof'
-            )
-            return refs
-        end
-        for _, entry in ipairs(entries) do
-            if entry.kind == 'weapon' then
-                local refs = refs_for(entry)
-                assert(
-                    not preferences[refs.unit.resource] or preferences[refs.unit.resource] == refs.unit.archive,
-                    'Conflicting saved weapon source archives'
-                )
-                preferences[refs.unit.resource], request_set[refs.unit.resource] = refs.unit.archive, refs.unit.archive
-                batch.selected[entry] = refs
-                count = count + 1
-            end
-        end
-        assert(count > 0, 'No weapon export bindings requested')
-        start_required(false)
-        local sources = ready(next(preferences))
-        local valid, why = sources.validate_scope()
-        if not valid then
-            error(why, 0)
-        end
+        local selected, sources, refs_for = prepare_saved(entries)
+        batch.selected = selected
         local stamp, scope = sources.index_stamp, sources.scope_sha256
         local function current()
             assert(batch.active, 'Weapon export batch has ended')

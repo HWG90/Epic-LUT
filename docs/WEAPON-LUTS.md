@@ -39,6 +39,12 @@ The R6 worktree adds independent local Primary, Secondary and Support discovery 
 
 Weapon patch encoding isolates its Unit/material assignment even for one palette; a Pattern texture may also be used by garments. Exact assignment and effective source proof are required before creating patch files. The containing DDS archive does not determine the export target.
 
+The integrated UI retains its workflow factories across addon activation. Apply, Restore and import mapping record global Undo/Redo. A material's quick Pattern controls target only that material's certified companion bindings, even when a sibling material shares the same original Pattern texture. The quick swatches read the selected companion's applied values.
+
+Save applied setup stores weapon DDS palettes with complete version 4 assignment proofs in a private setup snapshot. Startup matches configuration, named MeshID, SectionID, material slot, texture role and effective source digests before applying exact subsets. Discovery and cache waiting run cooperatively. Manual weapon edits cancel a queued restore; unavailable, changed or unresolved saved assignments retain the previous snapshot. A cold proof cache cannot silently turn a weapon save into a gear-only setup.
+
+Ordinary Armory palette saves remain available while assignment sources are loading. They report incomplete patch proof; export can reconstruct missing references only against the exact equipped weapon, original texture and unchanged applied palette. Existing complete references remain usable independently of the currently equipped weapon.
+
 ## Exact effective assignment sources
 
 Weapon export uses a separate `weapon_effective` cache mode. It resolves the requested Unit and its linked Materials from the current packed and loose-patch scope, preserving complete main/GPU/stream parts and TOC flags. Identical repeated global SectionID associations are deduplicated for identity lookup while their physical rows and offsets remain intact. Conflicting Material IDs or distinct loose overrides refuse; filename order is not treated as archive priority proof. Garment stock-mode caches remain separate.
@@ -49,8 +55,16 @@ On October 13, the same production helper proved all 25 material/Pattern assignm
 
 Weapon patch serialization preserves effective Unit/Material bytes and forks assignments at the verified mesh slot. The base archive target follows the SDK's `PatchBaseArchiveOnly` policy for Unit, Material and Texture records, independently of the archive that supplied each source. The exported weapon patch remains a candidate until installation and in-game rendering have been checked.
 
+## Native apply and restore pilot
+
+On October 13, the authorized two-second Adjudicator pilot changed first-row Base RGB to magenta on all five body LOD bindings using the production weapon runtime. It retained one 2,944-byte texture backing buffer, then restored all five exact original native texture pointers. Other captured primary/secondary material and Pattern bindings stayed unchanged, and the game remained running. The user confirmed the visible change and restoration.
+
+This proves the tested body apply/restore path. It does not identify the trigger of the earlier native crash, which occurred before any recorded texture allocations or binds.
+
+The private actual-data export audit also verified all 25 saved assignment references, distinct Pattern forks, preserved Unit/GPU/stream and Material bytes, collision-safe resource IDs and byte-identical repeat output. That archive was not installed as part of this audit.
+
 ## Remaining validation
 
-This result proves source and live native binding discovery for the tested Adjudicator. The editor candidate still needs live scoped writes/restoration, held/holstered checks, swaps, drops/replacements, death and respawn. Secondary/support rendering, remote sharing and winning archive/assignment-aware export behavior also require live proof. Serialized fixtures do not establish in-game results.
+The integrated editor, startup restoration, Pattern edits, held/holstered checks, swaps, drops/replacements, death and respawn still need live acceptance. Secondary/support rendering, remote sharing and winning archive/assignment-aware export behavior also require live proof. Serialized fixtures do not establish in-game results.
 
 Private captures, logs, screenshots, session identities and game data remain outside public source and packages. See [R6-CLEANUP.md](R6-CLEANUP.md) for the branch and feature plan.

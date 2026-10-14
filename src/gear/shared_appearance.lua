@@ -59,7 +59,8 @@ function S.new(deps)
             return true
         end
         peer.job = nil
-        if peer.bindings.restore() then
+        local ok, done = pcall(peer.bindings.restore)
+        if ok and done then
             self.peers[key] = nil
             return true
         end
@@ -178,7 +179,8 @@ function S.new(deps)
                                     if not old or old.text ~= member.text or old.units ~= unit_signature then
                                         if restore(key) then
                                             -- Recapture originals after removing the prior packet.
-                                            captured, targets = pcall(deps.targets, identity, appearance)
+                                            captured, targets, unit_signature =
+                                                pcall(deps.targets, identity, appearance)
                                         else
                                             captured = false
                                             targets = 'Previous Shared LUT restoration is pending'
@@ -286,12 +288,12 @@ function S.new(deps)
             end
         end
         -- One texture job slice per tick, never a whole squad's textures at once.
-        for _, peer in pairs(self.peers) do
+        for key, peer in pairs(self.peers) do
             if peer.job then
                 local ok, why = coroutine.resume(peer.job)
                 if not ok then
                     peer.job = nil
-                    peer.bindings.restore()
+                    restore(key)
                     deps.note('Shared appearance stopped safely: ' .. tostring(why))
                 elseif coroutine.status(peer.job) == 'dead' then
                     peer.job = nil
@@ -318,7 +320,7 @@ function S.new(deps)
         receive(enabled and members or nil)
         self.status = not enabled and 'Sharing: off' or publication_status or self.status
     end
-    function self.close()
+    function self.close(allow_quarantine)
         self.enabled = false
         local complete = true
         for key in pairs(self.peers) do
@@ -330,6 +332,15 @@ function S.new(deps)
         if not self.cleared then
             local ok, done = pcall(session.clear)
             self.cleared = ok and done
+        end
+        if not complete and allow_quarantine == true then
+            -- Full-addon retirement will refuse to destroy uncertified textures
+            -- and retain their GPU backing. Ordinary sharing toggles and packet
+            -- updates continue requiring exact restoration before proceeding.
+            self.quarantined = true
+            self.status = 'Sharing: remote texture restoration uncertified; backing retained'
+            self.peers = {}
+            return true
         end
         return complete
     end

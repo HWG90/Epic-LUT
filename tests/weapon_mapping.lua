@@ -134,6 +134,50 @@ assert(
     not pcall(dialog.on_map, 'source:1', 'weapon:1:material:1') and f.calls == 0,
     'Mapping silently used a runtime without exact subsets'
 )
+-- Real action history surrounds one complete mapping operation, including all
+-- selected weapon columns. Both the success flag and status survive the hook.
+do
+    f = populated()
+    local function capture()
+        local snapshot, signature = { documents = {}, bytes = 0 }, {}
+        for _, group in ipairs(f.groups) do
+            for _, binding in ipairs(group.bindings) do
+                local document = M.copy(binding.document or group.source_document)
+                snapshot.documents[binding] = document
+                local bytes = M.bytes(document)
+                signature[#signature + 1], snapshot.bytes = bytes, snapshot.bytes + #bytes
+            end
+        end
+        snapshot.signature = table.concat(signature)
+        return snapshot
+    end
+    local history = dofile('src/core/action_history.lua').new(capture, function(snapshot, expected)
+        assert(capture().signature == expected.signature, 'Mapping history ownership changed')
+        for binding, document in pairs(snapshot.documents) do
+            f.set_document(binding, M.copy(document))
+        end
+        return true
+    end)
+    f.host.mutate = function(fn)
+        local before = history.capture()
+        local ok, status = fn()
+        history.record(before, history.capture())
+        return ok, status
+    end
+    local before = capture().signature
+    dialog = M.new(f.host).open(f.groups)
+    local ok, status = dialog.on_auto_map({ primary = true, secondary = true })
+    assert(ok == true and status == 'Mapped 4 weapon LUT tables.' and #history.undo == 1)
+    local after = capture().signature
+    assert(before ~= after and history.undo_action() and capture().signature == before)
+    assert(history.redo_action() and capture().signature == after)
+    dialog = M.new(f.host).open(f.groups)
+    f.documents['lut000.dds'].data[0] = 99
+    assert(
+        not pcall(dialog.on_map, 'source:1', 'weapon:1:material:1') and #history.undo == 1,
+        'Rejected mapping polluted action history'
+    )
+end
 print(
     'PASS weapon mapping: 4-column chooser, sorted per-weapon rollover, exact Pattern subsets, repeated mapping receipts, whole-plan stale guards and atomic host contract'
 )

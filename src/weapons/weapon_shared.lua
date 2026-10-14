@@ -60,7 +60,15 @@ function S.new(deps)
             and type(deps.original) == 'function',
         'Shared weapon identity/source operations unavailable'
     )
-    local self, known = {}, {}
+    local self, known, signature_origins, signature_revisions = {}, {}, {}, {}
+    local function owned_object(object)
+        for _, keep in ipairs(deps.retain and deps.retain.records or {}) do
+            if keep.cohort == deps.cohort and keep.owned == true and keep.texture and keep.texture.object == object then
+                return true
+            end
+        end
+        return false
+    end
     local function authorize(binding)
         local allowed, why = deps.remote_authorized(
             peer({
@@ -80,8 +88,37 @@ function S.new(deps)
             binding.kind == 'weapon' and binding.remote == true and binding.peer_scope == 'remote',
             'Only certified remote weapon descriptors may be shared'
         )
-        known[key(binding)] = binding
-        return binding
+        local location = key(binding)
+        local previous, origin = known[location], signature_origins[location]
+        local stable = binding.original
+        if previous and previous.current ~= binding.original then
+            signature_revisions[location] = (signature_revisions[location] or 0) + 1
+        end
+        if
+            previous
+            and origin
+            and previous.current == binding.original
+            and owned_object(binding.original)
+            and previous.weapon_slot == binding.weapon_slot
+            and previous.weapon_resource == binding.weapon_resource
+            and previous.peer_player == binding.peer_player
+            and previous.peer_unit == binding.peer_unit
+            and previous.peer_low == binding.peer_low
+            and previous.peer_high == binding.peer_high
+            and previous.receipt.weapon_object == binding.receipt.weapon_object
+            and previous.receipt.unit_resource64 == binding.receipt.unit_resource64
+        then
+            local present = discovery.present(previous)
+            local ok, current = pcall(discovery.binding, previous)
+            if present and ok and current == previous.current then
+                -- A fresh descriptor sees our uploaded texture as its original.
+                -- Keep the source identity stable only for this exact still-owned
+                -- destination; foreign pointers and recycled receipts still drift.
+                stable = origin
+            end
+        end
+        known[location], signature_origins[location] = binding, stable
+        return binding, stable, ':' .. (signature_revisions[location] or 0)
     end
     local function captured(binding, registry)
         local value = registry[key(binding)]
@@ -248,8 +285,9 @@ function S.new(deps)
                                     'Remote weapon texture role is unbound'
                                 )
                                 authorize(binding)
+                                local _, source, drift = remember(binding)
                                 local original = assert(
-                                    deps.original(binding.original, binding, pattern and 'pattern' or 'material'),
+                                    deps.original(source, binding, pattern and 'pattern' or 'material'),
                                     'Remote weapon original LUT source is not ready'
                                 )
                                 assert(
@@ -262,10 +300,9 @@ function S.new(deps)
                                 )
                                 count = count + 1
                                 assert(count <= S.MAX_BINDINGS, 'Remote shared weapon target budget exceeded')
-                                remember(binding)
                                 targets[entry.document] = targets[entry.document] or {}
                                 targets[entry.document][#targets[entry.document] + 1] = binding
-                                marks[#marks + 1] = key(binding) .. ':' .. binding.original
+                                marks[#marks + 1] = key(binding) .. ':' .. source .. drift
                                 found[destination] = true
                             end
                         end
@@ -333,19 +370,6 @@ function S.new(deps)
             assert(type(discovery[name]) == 'function', 'Remote weapon restore proof unavailable: ' .. name)
         end
         local registry, active = {}, nil
-        local function owned_object(object)
-            for _, keep in ipairs(deps.retain.records or {}) do
-                if
-                    keep.cohort == deps.cohort
-                    and keep.owned == true
-                    and keep.texture
-                    and keep.texture.object == object
-                then
-                    return true
-                end
-            end
-            return false
-        end
         local function kept(binding)
             return captured(binding, registry)
         end

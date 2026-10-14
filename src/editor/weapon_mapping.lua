@@ -356,7 +356,7 @@ function M.new(host)
             end
             return paired
         end
-        local function run(assignments)
+        local function apply(assignments)
             assert(runtime.supports_target_subsets == true, 'Weapon runtime exact subset plans unavailable')
             assert(#assignments > 0, 'No compatible weapon LUTs selected')
             validate_sources()
@@ -434,6 +434,15 @@ function M.new(host)
             end
             menu.redraw_revision = (menu.redraw_revision or 0) + 1
             return true, 'Mapped ' .. #plan .. ' weapon LUT tables.'
+        end
+        local function run(assignments)
+            if host.mutate then
+                assert(type(host.mutate) == 'function', 'Weapon mapping history service unavailable')
+                return host.mutate(function()
+                    return apply(assignments)
+                end)
+            end
+            return apply(assignments)
         end
         dialog.on_map = function(source_id, target_id)
             local source, target = sources[source_id], targets[target_id]

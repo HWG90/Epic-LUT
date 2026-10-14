@@ -381,6 +381,94 @@ local function export_entries(f)
     end
     return entries, D
 end
+local function legacy_entries(f)
+    local entries, D = export_entries(f)
+    local by_key = {}
+    for _, binding in ipairs(f.host.groups()) do
+        by_key[(binding.slot == P.PATTERN and 'p:' or '') .. binding.save_key] = binding
+    end
+    for _, entry in ipairs(entries) do
+        entry.binding_provenance = nil
+        local binding = assert(by_key[entry.key])
+        binding.current, binding.document = binding.original + 0x100000, entry.document
+        f.textures[binding.material][binding.slot] = binding.current
+    end
+    return entries, D, by_key
+end
+test(
+    'ordinary saved weapon palettes repair exact assignments after the worker warms without rewriting the preset',
+    function()
+        local f = setup()
+        local entries, D = legacy_entries(f)
+        f.cache.state = 'loading'
+        local ok, why = pcall(f.sources.with_export_batch, entries, function()
+            error('Pending source reached serialization')
+        end)
+        assert(not ok and why == W.PENDING, tostring(why))
+        f.sources.poll()
+        f.scope_checks = 0
+        local patch = f.modules.patch_export.encode_set(D, entries, {
+            binding_writer = dofile('src/presets/binding_patch_export.lua'),
+            unit_layout = L,
+            id_available = f.cache.id_available,
+            original_patch = function(entry)
+                return f.modules.patch_export.encode(D, entry.original, entry.original)
+            end,
+            weapon_export_batch = f.sources.with_export_batch,
+        })
+        assert(patch.archive == f.modules.patch_export.BASE_ARCHIVE and patch.binding_aware)
+        assert(f.scope_checks == 2, 'Legacy repair did not share export scope validation')
+        for _, entry in ipairs(entries) do
+            assert(entry.binding_provenance == nil, 'Export silently rewrote saved assignment sidecars')
+        end
+        local provider = f.sources.provider({ entries = entries })
+        assert(provider(entries[1]).verified)
+        f.snapshots[1] = nil
+        assert(not pcall(provider, entries[1]), 'Legacy provider retained proof after its equipped weapon disappeared')
+    end
+)
+test('legacy weapon repair refuses changed loadouts originals colors missing and ambiguous targets', function()
+    for _, mutation in ipairs({
+        function(f, entries)
+            entries[1].weapon_resource = 'ffffffffffffffff'
+        end,
+        function(f, entries)
+            entries[1].original.resource = 'ffffffffffffffff'
+        end,
+        function(f, entries)
+            entries[1].document = { width = 23, height = 8, data = ffi.new('float[?]', 23 * 8 * 4) }
+        end,
+        function(f, entries)
+            entries[1].key = '3:1:63:0'
+        end,
+        function(f)
+            local groups = f.host.groups
+            f.host.groups = function()
+                local values = groups()
+                values[#values + 1] = values[1]
+                return values
+            end
+        end,
+        function(f)
+            f.snapshots[1] = nil
+        end,
+    }) do
+        local f = setup()
+        local entries = legacy_entries(f)
+        mutation(f, entries)
+        local serialized = false
+        assert(not pcall(f.sources.with_export_batch, entries, function()
+            serialized = true
+        end) and not serialized, 'Changed legacy context reached serialization')
+    end
+    local f = setup()
+    local entries = legacy_entries(f)
+    assert(not pcall(f.sources.with_export_batch, entries, function(batch)
+        batch.provenance(entries[1])
+        entries[1].document.data[0] = 99
+        return 'candidate'
+    end), 'Legacy saved bytes changed during serialization')
+end)
 test('pending and failed ready errors retain their exact unprefixed message', function()
     local f = setup()
     local b = f.runtime.groups(1)[1].bindings[1]

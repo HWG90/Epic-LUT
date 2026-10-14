@@ -285,3 +285,4 @@ assert(
 print(
     'PASS weapon sharing provider: exact local uploaded EL6 bytes, genuine-discovery peer/config targets, independent garment guard, consent/privacy/write checks and revoke-safe original cleanup'
 )
+dofile('tests/shared_weapon_lifecycle.lua')

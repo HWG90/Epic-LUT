@@ -345,10 +345,18 @@ local pending_source, hooks = source:gsub("(return {[%s]+name = 'Epic LUT')", fu
 end)
 assert(hooks == 1, 'Production pending fixture did not find the addon return')
 local pending_editor = assert(loadstring('local m=...\n' .. pending_source, '@weapon-editor-source-pending'))(m)
+local source_factories = 0
+m.weapon_provenance = {
+    PENDING = dofile('src/weapons/weapon_provenance.lua').PENDING,
+    new = function(_, host)
+        source_factories = source_factories + 1
+        assert(host.discovery and host.groups and host.original and host.paths and host.lua_engine)
+        return pending_sources.sources
+    end,
+}
 pending_editor.on_enable(ctx)
 local pending_operations, set_status = m.weapon_fixture_access()
-pending_operations.weapon_sources_service = pending_sources.sources
-m.weapon_provenance = dofile('src/weapons/weapon_provenance.lua')
+assert(pending_operations.weapon_sources() == pending_sources.sources and source_factories == 1)
 set_status(pending_status)
 local notes = #logs
 pending_editor.on_update(ctx, 0)
@@ -358,6 +366,301 @@ assert(
 )
 assert(pending_editor.on_disable(ctx))
 m.weapon_fixture_access = nil
+
+-- Preserve the lazy factories across activation resets and run the registered
+-- controller callbacks through actual mapping, storage, export and local sharing
+-- services. Only imported-file inputs and the lobby transport boundary are fake.
+m.weapon_provenance = dofile('src/weapons/weapon_provenance.lua')
+m.weapon_presets = dofile('src/presets/weapon_presets.lua')
+m.outfit_targets = dofile('src/presets/outfit_targets.lua')
+m.outfit_presets = dofile('src/presets/outfit_presets.lua')
+m.preset_export = dofile('src/presets/preset_export.lua')
+m.patch_export = dofile('src/presets/patch_export.lua')
+m.weapon_shared = dofile('src/weapons/weapon_shared.lua')
+local Workflow = dofile('src/editor/weapon_workflow.lua')
+local imported_paths = { 'lut000.dds', 'PatternLUT000.dds' }
+local imported = {
+    ['lut000.dds'] = m.weapon_mapping.copy(f.documents[f.A]),
+    ['PatternLUT000.dds'] = m.weapon_mapping.copy(f.documents[f.P]),
+}
+imported['lut000.dds'].data[0], imported['PatternLUT000.dds'].data[11] = 0.78125, 0.8125
+local workflow_factories, shared_entries = 0, {}
+m.weapon_workflow = {
+    new = function(modules, host)
+        workflow_factories = workflow_factories + 1
+        host.imports.palettes = function()
+            return imported_paths
+        end
+        host.imports.document = function(path)
+            return imported[path]
+        end
+        host.imports.resource = function(_, document)
+            return document.resource
+        end
+        return Workflow.new(modules, host)
+    end,
+}
+m.avatar.reader = function()
+    return function() end
+end
+m.avatar.resolve = function()
+    return { body = 1, armor = 2, helmet = 3 }
+end
+m.shared_lut_codec = {
+    new = function()
+        return {}
+    end,
+}
+m.shared_appearance = {
+    new = function(deps)
+        return {
+            tick = function(_, enabled)
+                if enabled then
+                    local identity = assert(deps.identity())
+                    shared_entries = deps.entries()
+                    for _, entry in ipairs(shared_entries) do
+                        if entry.kind == 'weapon' then
+                            assert(identity.weapons[entry.weapon_slot] == entry.weapon_resource)
+                        end
+                    end
+                end
+            end,
+            authorized = function()
+                return false
+            end,
+            close = function()
+                return true
+            end,
+        }
+    end,
+}
+local history_new, workflow_history = m.action_history.new
+m.action_history.new = function(...)
+    workflow_history = history_new(...)
+    return workflow_history
+end
+local workflow_editor = assert(loadstring('local m=...\n' .. source, '@weapon-editor-registered-workflows'))(m)
+for activation = 1, 2 do
+    workflow_editor.on_enable(ctx)
+    workflow_editor.on_update(ctx, 0)
+    mod, handle = base.api.mods.epic_direct_lut, base.api.mods.epic_direct_lut.handle
+    for _, candidate in ipairs(mod.pages) do
+        if candidate.id == 'weapons' then
+            page = candidate
+        end
+    end
+    assert(handle.activate('editor_load_weapon'))
+    local before = #workflow_history.undo
+    local applied, texture = buttons().weapon_apply()
+    assert(applied == 5 and texture.object, 'Weapon mutation lost its native count/texture return values')
+    assert(#workflow_history.undo == before + 1, 'Weapons Apply omitted global Undo history')
+    assert(handle.activate('global_undo'))
+    assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
+    assert(handle.activate('global_redo'))
+    before = #workflow_history.undo
+    assert(buttons().weapon_restore())
+    assert(#workflow_history.undo == before + 1, 'Weapons Restore omitted global Undo history')
+    assert(handle.activate('global_undo'))
+    assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] ~= f.A, 'Undo Restore lost its catalog')
+    assert(handle.activate('global_redo'))
+    assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
+    assert(handle.activate('editor_load_weapon'))
+    assert(buttons().weapon_map())
+    local mapping = assert(base.frontend().menu.lut_apply_dialog)
+    before = #workflow_history.undo
+    assert(mapping.on_map('source:1', 'weapon:1:material:1'))
+    assert(#workflow_history.undo == before + 1, 'Manual weapon mapping omitted global Undo history')
+    assert(handle.activate('global_undo'))
+    assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
+    assert(handle.activate('global_redo'))
+    assert(buttons().weapon_auto_map())
+    assert(workflow_factories == activation, 'Workflow service was recreated or erased during activation')
+    assert(buttons().weapon_preset())
+    local naming = assert(base.frontend().menu.outfit_dialog)
+    assert(naming.on_save('weapon-factory-fixture'))
+    local preset = m.outfit_presets.new(m, m.paths.new().presets).load('weapon-factory-fixture')
+    assert(#preset.weapon == 15 and preset.weapon[1].data[0] == 0.78125)
+    assert(buttons().weapon_export():find('Exported weapons', 1, true))
+    assert(buttons().weapon_share())
+    workflow_editor.on_update(ctx, 0)
+    assert(#shared_entries == 15 and shared_entries[1].kind == 'weapon', 'Weapon sharing factory lost local entries')
+    assert(workflow_editor.on_disable(ctx))
+end
+m.action_history.new = history_new
+
+-- Exercise the actual registered startup/save/history/close wiring. Only the
+-- persisted-file and completed source-cache boundaries are stubbed; the bridge,
+-- discovery, native ports, runtime writes and global history remain production.
+local storage = {
+    reads = 0,
+    saves = {},
+    clears = 0,
+    snapshot = {
+        entries = {
+            {
+                kind = 'weapon',
+                key = '3:1:0:0',
+                weapon_slot = 1,
+                weapon_resource = f.snapshots[1].weapon_resource64,
+                document = f.documents[f.A],
+            },
+        },
+    },
+}
+local startup_services, startup_factories, events = {}, 0, {}
+m.direct_setup = {
+    new = function()
+        return {
+            read = function()
+                storage.reads = storage.reads + 1
+                return {}, {}, storage.snapshot
+            end,
+            save = function(gear_bindings, defaults, entries)
+                assert(
+                    #gear_bindings == 0 and next(defaults) == nil and #entries > 0,
+                    'Weapon-only history save lost its snapshot or entered garment scope'
+                )
+                storage.saves[#storage.saves + 1] = entries
+                storage.snapshot = { entries = entries }
+                events[#events + 1] = 'storage-save'
+                return #entries
+            end,
+            clear = function()
+                storage.clears = storage.clears + 1
+                storage.snapshot = nil
+                events[#events + 1] = 'storage-clear'
+            end,
+        }
+    end,
+}
+m.weapon_provenance = {
+    PENDING = 'Fixture source pending',
+    new = function()
+        local sources = { closed = false }
+        sources.poll = function() end
+        sources.close = function()
+            sources.closed = true
+            events[#events + 1] = 'source-close'
+            return true
+        end
+        return sources
+    end,
+}
+m.weapon_setup = {
+    new = function(_, host)
+        startup_factories = startup_factories + 1
+        local service = { queued = false, starts = 0, explicit_cancels = 0 }
+        startup_services[startup_factories] = service
+        service.start = function(preset)
+            assert(preset == storage.snapshot and #preset.entries > 0)
+            assert(host.bridge().runtime() and host.bridge().discovery(), 'Startup factory lost the actual bridge')
+            service.starts, service.queued = service.starts + 1, true
+        end
+        service.tick = function() end -- Leave cooperative startup queued for manual cancellation.
+        service.cancel = function(discard)
+            service.queued = false
+            service.explicit_cancels = service.explicit_cancels + (discard and 1 or 0)
+        end
+        service.pending = function()
+            return service.queued
+        end
+        service.capture = function()
+            assert(not service.queued, 'Pending startup was persisted as an empty weapon snapshot')
+            assert(not host.sources().closed, 'Weapon snapshot capture occurred after source cache close')
+            events[#events + 1] = 'weapon-capture'
+            local entries = {}
+            for _, binding in ipairs(host.bridge().runtime().all_owned()) do
+                if binding.texture and binding.current == binding.texture.object then
+                    entries[#entries + 1] = {
+                        kind = 'weapon',
+                        key = binding.save_key,
+                        weapon_slot = binding.weapon_slot,
+                        weapon_resource = binding.weapon_resource,
+                        document = m.weapon_mapping.copy(binding.texture),
+                    }
+                end
+            end
+            return entries
+        end
+        return service
+    end,
+}
+local persistence_history
+m.action_history.new = function(...)
+    persistence_history = history_new(...)
+    return persistence_history
+end
+local persistence_editor = assert(loadstring('local m=...\n' .. source, '@weapon-editor-startup-persistence'))(m)
+local function activate_persistence()
+    persistence_editor.on_enable(ctx)
+    persistence_editor.on_update(ctx, 0)
+    mod, handle = base.api.mods.epic_direct_lut, base.api.mods.epic_direct_lut.handle
+    for _, candidate in ipairs(mod.pages) do
+        if candidate.id == 'weapons' then
+            page = candidate
+        end
+    end
+    local service = startup_services[startup_factories]
+    assert(
+        service and service.starts == 1 and service.pending(),
+        'Empty gear plan prevented the third-result weapon startup snapshot from loading'
+    )
+    assert(handle.activate('editor_load_weapon'))
+    local writes = #f.writes
+    assert(buttons().weapon_apply())
+    assert(
+        #f.writes == writes + 5 and not service.pending() and service.explicit_cancels > 0,
+        'Manual registered weapon apply did not cancel queued startup before native writes'
+    )
+    assert(
+        persistence_history.undo[#persistence_history.undo].after.remember_application == true,
+        'Weapon-only application did not enter remembered state in global history'
+    )
+    return service
+end
+local startup_service = activate_persistence()
+assert(buttons().weapon_editor())
+assert(handle.set('cell_r', 0.4375))
+persistence_editor.on_update(ctx, 0.1)
+local clears = storage.clears
+assert(
+    handle.activate('global_undo') and #storage.saves > 0 and storage.clears == clears,
+    'Weapon-only Undo cleared the saved snapshot instead of persisting applied weapon bindings'
+)
+local saves = #storage.saves
+assert(
+    handle.activate('global_redo') and #storage.saves == saves + 1 and storage.clears == clears,
+    'Weapon-only Redo cleared the saved snapshot'
+)
+events = {}
+assert(persistence_editor.on_disable(ctx))
+local captured_at, closed_at
+for index, event in ipairs(events) do
+    if event == 'weapon-capture' then
+        captured_at = index
+    end
+    if event == 'source-close' then
+        closed_at = index
+    end
+end
+assert(
+    captured_at and closed_at and captured_at < closed_at,
+    'Complete-addon close shut down source certification before capturing weapon persistence'
+)
+assert(startup_factories == 1 and storage.snapshot)
+startup_service = activate_persistence()
+assert(startup_factories == 2, 'Weapon startup factory did not survive repeated activation')
+clears = storage.clears
+assert(
+    handle.activate('restore') and storage.clears == clears + 1 and storage.snapshot == nil,
+    'Explicit global Restore retained the weapon startup pointer'
+)
+assert(not startup_service.pending())
+assert(persistence_editor.on_disable(ctx))
+m.action_history.new = history_new
 print(
-    'PASS production weapon editor integration: actual registered UI→bridge→discovery/runtime/sessions, main RGB/raw guards, roughness numeric/Alpha picker, all LOD writes, explicit gear isolation, independent garment cleanup, foreign/exception texture quarantine and exact provenance pending→ready notification'
+    'PASS registered weapon persistence: third-result startup, manual cancellation, remembered history, weapon-only Undo/Redo, global Restore and save-before-source-close across repeated activation'
+)
+print(
+    'PASS production weapon editor integration: registered UI→runtime, raw/roughness guards, LOD writes, scope isolation, quarantine, exact source pending→ready, repeated mapping/Auto-map/save/export/sharing activation and global Undo/Redo'
 )

@@ -47,7 +47,7 @@ function B.new(deps)
         local bytes = document.width * document.height * 16
         local key = document.width .. ':' .. document.height .. ':' .. ffi.string(document.data, bytes)
         local texture = retain.cache[key]
-        if texture and texture.retiring then
+        if texture and (texture.retiring or texture.cohort ~= cohort) then
             texture = nil
         end
         if not texture then
@@ -69,6 +69,7 @@ function B.new(deps)
             texture = assert(deps.create_texture(document.width, document.height, data))
             texture.data, texture.width, texture.height =
                 texture.data or data, texture.width or document.width, texture.height or document.height
+            texture.cohort = cohort
             keep.texture = texture
             keep.owned = true
             retain.cache[key] = texture

@@ -168,8 +168,11 @@ end
 assert(not bridge.close() and bridge.close(true), 'Weapon restoration exception escaped cleanup')
 fake.restore = restore
 local fixture = dofile('tests/weapon_fixture.lua')
-local function recovery_fixture()
+local function recovery_fixture(prepare)
     local f, invalidations = fixture(), {}
+    if prepare then
+        prepare(f)
+    end
     local adapter = {
         primary_identity = {
             new = function()
@@ -291,6 +294,77 @@ writes = #closed_recovery.writes
 assert(closed_bridge.close())
 closed_bridge.update(0.2)
 assert(#closed_recovery.writes == writes, 'Closed bridge retained a respawn replay job')
+local scoped, scoped_bridge = recovery_fixture(function(f)
+    for _, mesh in ipairs(f.units[100].meshes) do
+        f.textures[mesh.materials[2]][0x81d4c49d] = f.P
+    end
+end)
+local scoped_controller = scoped_bridge.controller()
+local companion = scoped_controller.state().pattern_target
+assert(#companion.bindings == 5 and #companion.group_bindings == 10)
+local body = scoped.runtime.load(1, 1, 'pattern', scoped.runtime.groups(1, 'pattern')[1].bindings)
+body.data[11] = 0.2
+assert(scoped_bridge.apply(companion, body) == 5)
+assert(
+    scoped_controller.state().pattern_document.data[11] == body.data[11],
+    'Body quick swatch lost its scoped Pattern value'
+)
+for _, mesh in ipairs(scoped.units[100].meshes) do
+    assert(scoped.textures[mesh.materials[1]][0x81d4c49d] ~= scoped.P)
+    assert(scoped.textures[mesh.materials[2]][0x81d4c49d] == scoped.P, 'Body Pattern edit recolored a sibling material')
+end
+assert(scoped_controller.choose_group(2))
+local sibling = scoped_controller.state().pattern_target
+assert(
+    scoped_controller.state().pattern_document.data[11] ~= body.data[11],
+    'Rail quick swatch displayed the sibling body palette'
+)
+local selected_members = {}
+for _, binding in ipairs(scoped.runtime.groups(1, 'pattern')[1].bindings) do
+    if binding.material_index == 1 then
+        selected_members[#selected_members + 1] = binding
+    end
+end
+local rail_doc = scoped.runtime.load(1, 1, 'pattern', selected_members)
+assert(rail_doc.data[11] ~= 0.2 and not rail_doc.mixed, 'Subset load used a sibling uploaded palette')
+rail_doc.data[11] = 0.8
+assert(scoped_bridge.apply(sibling, rail_doc) == 5)
+assert(
+    scoped_controller.state().pattern_document.data[11] == rail_doc.data[11],
+    'Rail quick swatch lost its scoped Pattern value'
+)
+local kept = {}
+for _, mesh in ipairs(scoped.units[100].meshes) do
+    kept[mesh.materials[2]] = scoped.textures[mesh.materials[2]][0x81d4c49d]
+end
+assert(scoped_bridge.restore(companion))
+for _, mesh in ipairs(scoped.units[100].meshes) do
+    assert(scoped.textures[mesh.materials[1]][0x81d4c49d] == scoped.P)
+    assert(
+        scoped.textures[mesh.materials[2]][0x81d4c49d] == kept[mesh.materials[2]],
+        'Subset restore cleared a sibling Pattern'
+    )
+    assert(scoped.textures[mesh.materials[1]][0x7e662968] ~= scoped.A, 'Pattern restore cleared material LUT edits')
+end
+local invalid = {}
+for key, value in pairs(companion) do
+    invalid[key] = value
+end
+invalid.group_bindings = nil
+local before_subset_writes = #scoped.writes
+assert(
+    not pcall(scoped_bridge.apply, invalid, body) and #scoped.writes == before_subset_writes,
+    'Uncertified partial group reached native apply'
+)
+scoped.textures[scoped.units[100].meshes[1].materials[2]][0x81d4c49d] = 0xdead00
+assert(
+    not pcall(scoped_bridge.apply, companion, body) and #scoped.writes == before_subset_writes,
+    'A foreign sibling writer escaped full-group scope validation'
+)
+assert(
+    not pcall(scoped.runtime.load, 1, 1, 'pattern', { selected_members[1], selected_members[1] }),
+    'Duplicate subset load was accepted'
+)
 print(
     'PASS weapon bridge: editor routing, raw values, stale guard, exact respawn recovery, pending cache retries, drop/configuration/foreign refusal and cleanup'
 )

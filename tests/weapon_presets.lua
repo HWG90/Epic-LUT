@@ -64,14 +64,15 @@ assert(not pcall(service.plan, { entries = uniform }, f.groups), 'Same weapon ad
 -- cache only after successful atomic manifest publication.
 f = F.new()
 material = f.group(1, 'material', 1, '0000000000000001', 2.75, 2)
-local store = Outfit.new(
-    { dds = DDS, file_io = dofile('src/core/file_io.lua'), windows = {
+local store = Outfit.new({
+    dds = DDS,
+    file_io = dofile('src/core/file_io.lua'),
+    windows = {
         files = function()
             return {}
         end,
-    } },
-    'tests/tmp/presets'
-)
+    },
+}, 'tests/tmp/presets')
 local invalidations = 0
 f.host.outfits, f.host.invalidate =
     store, function(name)
@@ -112,7 +113,11 @@ f.host.provenance = function(_, context)
     }
 end
 local certified, certified_summary = service.capture()
-assert(certified_summary.provenance_count == 2 and certified[1].binding_provenance.version == 4)
+assert(
+    certified_summary.provenance_count == 2
+        and not certified_summary.provenance_incomplete
+        and certified[1].binding_provenance.version == 4
+)
 f.host.provenance = function()
     error('Source cache still reading')
 end
@@ -120,6 +125,7 @@ local ordinary, ordinary_summary = service.capture()
 assert(
     #ordinary == 2
         and ordinary_summary.provenance_count == 0
+        and ordinary_summary.provenance_incomplete
         and ordinary_summary.provenance_error:find('Source cache still reading', 1, true)
 )
 -- Mixed application requires one host transaction, never two independent writes.

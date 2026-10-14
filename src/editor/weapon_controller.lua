@@ -45,6 +45,13 @@ function C.new(host)
         end
         local result = copy(bindings[1])
         result.bindings, result.group_id = bindings, group.id or group.label or group
+        result.group_bindings = bindings
+        local keys = {}
+        for _, binding in ipairs(bindings) do
+            keys[#keys + 1] = binding.save_key
+        end
+        table.sort(keys)
+        result.scope_id = table.concat(keys, '|')
         result.label, result.document = group.label, group.document
         return result
     end
@@ -76,12 +83,44 @@ function C.new(host)
                 keys[binding.save_key] = true
             end
             group = nil
+            local matching, remembered = {}, self.selected[self.weapon_slot .. ':pattern']
             for _, candidate in ipairs(groups_for(weapon, 'pattern')) do
+                local members = {}
                 for _, binding in ipairs(candidate.targets or {}) do
                     if keys[binding.save_key] then
-                        group = group or candidate
+                        members[#members + 1] = binding
                     end
                 end
+                if #members > 0 then
+                    matching[#matching + 1] = { group = candidate, members = members }
+                end
+            end
+            local chosen = matching[1]
+            for _, candidate in ipairs(matching) do
+                if (candidate.group.id or candidate.group.label or candidate.group) == remembered then
+                    chosen = candidate
+                end
+            end
+            if chosen then
+                group = chosen.group
+                local selected = target(group, self.weapon_slot, weapon, 'pattern')
+                local wanted, members, scope = {}, {}, {}
+                for _, binding in ipairs(chosen.members) do
+                    wanted[binding.save_key] = true
+                end
+                for _, binding in ipairs(selected.bindings) do
+                    if wanted[binding.save_key] then
+                        members[#members + 1], scope[#scope + 1] = binding, binding.save_key
+                    end
+                end
+                for key, value in pairs(members[1]) do
+                    selected[key] = value
+                end
+                selected.bindings = members
+                table.sort(scope)
+                selected.scope_id = table.concat(scope, '|')
+                selected.save_key = members[1].save_key
+                return group, selected
             end
         end
         if group then
@@ -120,6 +159,10 @@ function C.new(host)
             end
             state.pattern_group, state.pattern_target = pattern_for(state)
             state.pattern_document = state.pattern_group and state.pattern_group.document
+            if state.pattern_target and state.pattern_group.binding_documents then
+                local first = state.pattern_target.bindings[1]
+                state.pattern_document = state.pattern_group.binding_documents[first.save_key] or state.pattern_document
+            end
             local d, g = state.pattern_document, state.pattern_group
             state.pattern_ready = d
                 and d.width == 3
@@ -143,7 +186,8 @@ function C.new(host)
                 expected.weapon_slot == selected.weapon_slot
                     and expected.weapon_resource == selected.weapon_resource
                     and expected.family == selected.family
-                    and expected.group_id == selected.group_id,
+                    and expected.group_id == selected.group_id
+                    and (expected.scope_id == nil or expected.scope_id == selected.scope_id),
                 'Weapon selection changed'
             )
         end
@@ -205,16 +249,16 @@ function C.new(host)
     end
     function self.open_editor(row, column, expected)
         local state, selected, document = current(expected)
-        if state.family == 'pattern' then
-            assert(state.pattern_ready, 'Verified 3 x 1 Pattern LUT required')
-            return invoke('open_pattern', document, selected)
-        end
         assert(document and document.data, 'Weapon LUT data unavailable')
         if row ~= nil then
             assert(integer(row, document.height) and row >= 1, 'Invalid weapon LUT row')
         end
         if column ~= nil then
             assert(integer(column, document.width) and column >= 1, 'Invalid weapon LUT column')
+        end
+        if state.family == 'pattern' then
+            assert(state.pattern_ready, 'Verified 3 x 1 Pattern LUT required')
+            return invoke('open_pattern', document, selected, { row = row, column = column, target = selected })
         end
         local loaded, why = invoke('load_editor', document, selected)
         if loaded == false then

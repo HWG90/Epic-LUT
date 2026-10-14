@@ -941,9 +941,18 @@ for i = 1, 20 do
     restarted.on_update(ctx, 0.1)
 end
 assert(
-    bound[3] == armor_object and bound[6] == armor_object and bound[8] == helmet_object,
+    bound[3] ~= armor_object
+        and bound[6] == bound[3]
+        and bound[8] ~= helmet_object
+        and ffi.string(created_textures[bound[3]], 23 * 8 * 16) == ffi.string(
+            created_textures[armor_object],
+            23 * 8 * 16
+        )
+        and ffi.string(created_textures[bound[8]], 23 * 8 * 16)
+            == ffi.string(created_textures[helmet_object], 23 * 8 * 16),
     'Saved multi-target setup did not resume'
 )
+armor_object, helmet_object = bound[3], bound[8]
 local restart_handle = api.mods.epic_direct_lut.handle
 assert(restart_handle.activate('restore'))
 assert(bound[3] == 100 and bound[6] == 300 and bound[8] == 400)

@@ -59,10 +59,22 @@ function B.new(m, host)
             group.weapon_resource == target.weapon_resource and group.object == target.object,
             'Weapon LUT identity changed; load current weapons again'
         )
-        local expected = {}
-        for _, binding in ipairs(target.bindings or { target }) do
+        local expected, chosen, wanted = {}, {}, {}
+        local scope = target.group_bindings or target.bindings or { target }
+        assert(type(scope) == 'table' and #scope == #group.bindings, 'Weapon group scope changed')
+        for _, binding in ipairs(scope) do
+            assert(not expected[binding.save_key], 'Duplicate weapon group destination')
             expected[binding.save_key] = binding
         end
+        for _, binding in ipairs(target.bindings or { target }) do
+            assert(expected[binding.save_key] and not wanted[binding.save_key], 'Invalid weapon target subset')
+            local full = expected[binding.save_key]
+            for _, field in ipairs({ 'unit', 'mesh', 'material', 'original', 'slot' }) do
+                assert(binding[field] == full[field], 'Weapon target subset identity changed')
+            end
+            wanted[binding.save_key] = true
+        end
+        assert(next(wanted), 'Choose a weapon destination')
         for _, binding in ipairs(group.bindings) do
             local saved = assert(expected[binding.save_key], 'Weapon destination changed')
             assert(
@@ -77,8 +89,11 @@ function B.new(m, host)
                 discovery.present(binding) and discovery.binding(binding) == binding.current,
                 'Weapon LUT binding changed'
             )
+            if wanted[binding.save_key] then
+                chosen[#chosen + 1] = binding
+            end
         end
-        return active, group, index, kind
+        return active, group, index, kind, chosen
     end
     function self.check(target)
         source_group(target)
@@ -137,6 +152,7 @@ function B.new(m, host)
                             id = slot .. ':' .. kind .. ':' .. index .. ':' .. tostring(group.object),
                             label = label,
                             document = document,
+                            binding_documents = document and document.binding_documents or group.binding_documents,
                             reason = load_error,
                             targets = targets,
                             group_index = index,
@@ -170,35 +186,77 @@ function B.new(m, host)
         return count > 0
     end
     function self.apply(target, document)
-        local active, _, index, kind = source_group(target)
-        local count, texture = active.apply(document, target.weapon_slot, index, kind)
-        status = 'Applied ' .. names[target.weapon_slot] .. ' LUT to ' .. count .. ' bindings.'
-        host.message(status)
-        return count, texture
+        local function apply()
+            local active, group, index, kind, chosen = source_group(target)
+            local count, texture
+            if #chosen == #group.bindings then
+                count, texture = active.apply(document, target.weapon_slot, index, kind)
+            else
+                local result = active.apply_plan({
+                    {
+                        weapon_slot = target.weapon_slot,
+                        weapon_resource = target.weapon_resource,
+                        index = index,
+                        family = kind,
+                        document = document,
+                        targets = chosen,
+                    },
+                })
+                assert(result and #result == 1, 'Weapon runtime did not report the selected subset')
+                count, texture = result[1].count, result[1].texture
+            end
+            status = 'Applied ' .. names[target.weapon_slot] .. ' LUT to ' .. count .. ' bindings.'
+            host.message(status)
+            return count, texture
+        end
+        return (host.mutate or function(fn)
+            return fn()
+        end)(apply)
     end
     function self.restore(target)
-        if target then
-            source_group(target)
+        local function restore()
+            local active, restored = get_runtime()
+            if target and active.apply_plan and active.all_owned then
+                local _, _, _, _, chosen = source_group(target)
+                local owned, changed = {}, {}
+                for _, binding in ipairs(active.all_owned()) do
+                    owned[binding] = true
+                end
+                for _, binding in ipairs(chosen) do
+                    if owned[binding] and binding.current ~= binding.original then
+                        changed[#changed + 1] = binding
+                    end
+                end
+                active.apply_plan({}, changed)
+                restored = true
+            else
+                if target then
+                    source_group(target)
+                end
+                restored = active.restore(target and target.weapon_slot)
+            end
+            assert(restored, 'Weapon restoration is pending')
+            if target then
+                recovery[target.weapon_slot] = nil
+            else
+                recovery = {}
+            end
+            status = 'Restored original weapon LUTs.'
+            host.message(status)
+            if controller then
+                controller.sync()
+            end
+            return true
         end
-        local restored = get_runtime().restore(target and target.weapon_slot)
-        assert(restored, 'Weapon restoration is pending')
-        if target then
-            recovery[target.weapon_slot] = nil
-        else
-            recovery = {}
-        end
-        status = 'Restored original weapon LUTs.'
-        host.message(status)
-        if controller then
-            controller.sync()
-        end
-        return true
+        return (host.mutate or function(fn)
+            return fn()
+        end)(restore)
     end
     function self.open(document, target, cell)
         source_group(target)
         assert(document and document.data, 'Weapon LUT pixels are loading')
-        local active, _, index, kind = source_group(target)
-        local copy = active.load(target.weapon_slot, index, kind)
+        local active, group, index, kind, chosen = source_group(target)
+        local copy = active.load(target.weapon_slot, index, kind, #chosen < #group.bindings and chosen or nil)
         host.load_editor(copy, target)
         return host.open_editor(cell or { target = target })
     end
@@ -282,6 +340,9 @@ function B.new(m, host)
     function self.runtime()
         return get_runtime()
     end
+    function self.recovery_pending(slot)
+        return recovery[slot] ~= nil
+    end
     function self.discovery()
         get_runtime()
         return discovery
@@ -343,8 +404,8 @@ function B.new(m, host)
                 return true
             end,
             open_editor = host.open_editor,
-            open_pattern = function(document, target)
-                return self.open(document, target)
+            open_pattern = function(document, target, cell)
+                return self.open(document, target, cell)
             end,
             edit_rgb = function(row, target, document)
                 return self.open(document, target, { row = row, column = 1, target = target, picker = true })

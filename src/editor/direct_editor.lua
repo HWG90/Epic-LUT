@@ -131,6 +131,30 @@ local function action(fn, recover)
     end
     return why
 end
+function operations.weapon_mutation(fn, automatic)
+    if not automatic then
+        resume_done, resume_job = true, nil
+        if operations.weapon_setup_service then
+            operations.weapon_setup_service.cancel()
+        end
+    end
+    local function values(...)
+        return { n = select('#', ...), ... }
+    end
+    local result = action(function()
+        local result = values(fn())
+        assert(result[1] ~= false, result[2] or 'Weapon action refused')
+        if not automatic and operations.weapon_setup_service then
+            operations.weapon_setup_service.cancel(true)
+        end
+        edit.remember_application = true
+        return result
+    end)
+    if type(result) ~= 'table' then
+        error(result, 0)
+    end
+    return unpack(result, 1, result.n)
+end
 local function refresh(silent)
     local proof = appearance_proof and appearance_proof()
     local cape_proof = proof and proof.cape
@@ -703,6 +727,9 @@ local function apply(document, selected_kind)
     assert(document, 'Load a DDS first')
     resume_done = true
     resume_job = nil
+    if operations.weapon_setup_service then
+        operations.weapon_setup_service.cancel()
+    end
     if #groups == 0 then
         refresh()
     end
@@ -799,7 +826,8 @@ local function save_setup()
             end
         end
     end
-    if #active == 0 then
+    local weapons = operations.weapon_editor and m.weapon_setup and operations.weapon_startup().capture() or {}
+    if #active == 0 and #weapons == 0 then
         if appearance and (appearance.count() > 0 or next(appearance_pending)) then
             return message('Applied appearance retained while the player is temporarily unavailable.')
         end
@@ -819,8 +847,8 @@ local function save_setup()
     end
     return message(
         'Saved '
-            .. assert(setup, 'Setup storage unavailable').save(active, saved_defaults)
-            .. ' applied palettes. Armor, helmet and Pattern LUTs will resume on later launches.'
+            .. assert(setup, 'Setup storage unavailable').save(active, saved_defaults, weapons)
+            .. ' applied palettes. Gear and exactly matched weapon LUTs will resume on later launches.'
     )
 end
 local function save_palette()
@@ -1325,6 +1353,9 @@ end
 local function remove_lut()
     resume_done = true
     resume_job = nil
+    if operations.weapon_setup_service then
+        operations.weapon_setup_service.cancel()
+    end
     assert(restore(), 'Restoration pending')
     if pattern_editor then
         assert(pattern_editor.close(), 'Pattern restoration pending')
@@ -1340,6 +1371,9 @@ local function remove_lut()
         setup.clear()
         edit.remember_application = false
     end
+    if operations.weapon_setup_service then
+        operations.weapon_setup_service.cancel(true)
+    end
     return message('All applied LUTs removed; original bindings restored and saved application cleared.')
 end
 local function resume_setup()
@@ -1351,10 +1385,14 @@ local function resume_setup()
         if not identity then
             return
         end
-        local valid, plan, capes = pcall(setup.read)
+        local valid, plan, capes, weapons = pcall(setup.read)
         if not valid then
             resume_done = true
             return message('Saved setup is invalid: ' .. tostring(plan))
+        end
+        if weapons then
+            assert(m.weapon_setup, 'Weapon startup storage is unavailable in this build')
+            operations.weapon_startup().start(weapons)
         end
         if not next(plan) then
             resume_done = true
@@ -1560,6 +1598,11 @@ local function resume_setup()
     end
 end
 local function commit_history_snapshot(snapshot)
+    local remember_before = edit.remember_application
+    resume_done, resume_job = true, nil
+    if operations.weapon_setup_service then
+        operations.weapon_setup_service.cancel(true)
+    end
     edit.imported = snapshot.imported
     if appearance then
         appearance.replace(snapshot.appearance)
@@ -1610,11 +1653,10 @@ local function commit_history_snapshot(snapshot)
         import_view.selected = nil
     end
     refresh(true)
-    if edit.remember_application and setup then
-        if #bindings.owned > 0 or (operations.pattern_session and #operations.pattern_session.owned > 0) then
-            save_setup()
-        else
-            setup.clear()
+    if (edit.remember_application or remember_before) and setup then
+        local ok, why = pcall(save_setup)
+        if not ok then
+            message('Could not remember history state: ' .. tostring(why))
         end
     end
     return true
@@ -1889,7 +1931,15 @@ local function keep_outfit(name, save_kind)
         frontend.menu.outfit_dialog = nil
         frontend.menu.text_edit = nil
     end
-    return message('Saved ' .. name .. ' with ' .. scope_label .. ' LUTs in The Armory.')
+    local text = 'Saved ' .. name .. ' with ' .. scope_label .. ' LUTs in The Armory.'
+    for _, entry in ipairs(entries) do
+        if entry.kind == 'weapon' and summary.count < #entries then
+            text = text
+                .. ' Patch assignment proof is pending or unavailable; retry Export with matching gear and weapons equipped.'
+            break
+        end
+    end
+    return message(text)
 end
 function operations.outfit_documents(preset)
     if m.outfit_targets then
@@ -2033,6 +2083,9 @@ local function armory_actions()
             end,
             begin_application = function()
                 resume_done, resume_job = true, nil
+                if operations.weapon_setup_service then
+                    operations.weapon_setup_service.cancel()
+                end
             end,
             remember_basic = function(b, d)
                 basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] =
@@ -2178,6 +2231,9 @@ local function import_mapping()
                 end,
                 finish = function()
                     edit.remember_application, resume_done, resume_job = true, true, nil
+                    if operations.weapon_setup_service then
+                        operations.weapon_setup_service.cancel()
+                    end
                     save_setup()
                 end,
             },
@@ -2435,6 +2491,7 @@ weapon_editor = function()
             busy = function()
                 return pending ~= nil or index_job ~= nil
             end,
+            mutate = operations.weapon_mutation,
             message = message,
             weapon_name = function(slot, resource)
                 return m.weapon_names and m.weapon_names[resource] or ({ 'Primary', 'Secondary', 'Support' })[slot]
@@ -2525,6 +2582,7 @@ function operations.weapon_workflow()
                 sync_armory_export()
             end,
             message = message,
+            mutate = operations.weapon_mutation,
             imports = {
                 palettes = function()
                     return palettes
@@ -2583,6 +2641,31 @@ function operations.weapon_workflow()
         })
     end
     return operations.weapon_workflow_service
+end
+function operations.weapon_startup()
+    if not operations.weapon_setup_service then
+        operations.weapon_setup_service = m.weapon_setup.new(m, {
+            bridge = weapon_editor,
+            sources = operations.weapon_sources,
+            original = function(b)
+                return original_luts and original_luts.request_object(b.original)
+            end,
+            time = function()
+                return memory.time and memory.time() or os.clock()
+            end,
+            busy = function()
+                return edit.loaded and (edit.loaded.revision or 0) ~= edit.preview_revision
+                    or frontend.menu and (frontend.menu.color_picker ~= nil or frontend.menu.text_edit ~= nil)
+            end,
+            apply = function(plans)
+                return operations.weapon_mutation(function()
+                    return weapon_editor().runtime().apply_plan(plans)
+                end, true)
+            end,
+            message = message,
+        })
+    end
+    return operations.weapon_setup_service
 end
 function operations.weapon_sources()
     if not operations.weapon_sources_service then
@@ -3073,9 +3156,6 @@ local function close()
     if operations.binding_sources and not operations.binding_sources.close() then
         return false
     end
-    if operations.weapon_sources_service and not operations.weapon_sources_service.close() then
-        return false
-    end
     if armory_mirror and not armory_mirror.close() then
         return false
     end
@@ -3092,10 +3172,16 @@ local function close()
         end
         edit.remember_application = false
     end
+    if operations.weapon_setup_service then
+        operations.weapon_setup_service.cancel()
+    end
+    if operations.weapon_sources_service and not operations.weapon_sources_service.close() then
+        return false
+    end
     if pattern_editor and not pattern_editor.close() then
         return false
     end
-    if sharing and not sharing.close() then
+    if sharing and not sharing.close(operations.texture_lifetime ~= nil) then
         return false
     end
     if operations.import_picker and not operations.import_picker.close() then
@@ -3191,6 +3277,11 @@ local function reset_transient_state()
         ensure_binding_provenance = operations.ensure_binding_provenance,
         request_binding_sources = operations.request_binding_sources,
         binding_export_provider = operations.binding_export_provider,
+        weapon_workflow = operations.weapon_workflow,
+        weapon_sources = operations.weapon_sources,
+        weapon_sharing = operations.weapon_sharing,
+        weapon_mutation = operations.weapon_mutation,
+        weapon_startup = operations.weapon_startup,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
@@ -4039,6 +4130,9 @@ return {
             end
             if setup and not resume_done then
                 action(resume_setup)
+            end
+            if operations.weapon_setup_service then
+                operations.weapon_setup_service.tick()
             end
             if refresh_needed then
                 local now = memory.time and memory.time() or os.clock()

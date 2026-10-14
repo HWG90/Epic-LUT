@@ -32,6 +32,7 @@ function W.new(m, host)
                 menu = host.menu,
                 imports = host.imports,
                 message = host.message,
+                mutate = host.mutate,
             })
         end
         return mapper.open(descriptors, options)
@@ -43,6 +44,7 @@ function W.new(m, host)
                 menu = host.menu,
                 imports = host.imports,
                 message = host.message,
+                mutate = host.mutate,
             })
         end
         return mapper.open(descriptors, options)
@@ -65,7 +67,12 @@ function W.new(m, host)
                 validate()
                 local _, summary = presets().save(name, descriptors)
                 menu.outfit_dialog, menu.text_edit = nil, nil
-                return host.message('Saved ' .. name .. ' with ' .. summary.count .. ' weapon LUT bindings.')
+                local text = 'Saved ' .. name .. ' with ' .. summary.count .. ' weapon LUT bindings.'
+                if summary.provenance_incomplete then
+                    text = text
+                        .. ' Patch assignment proof is pending or unavailable; retry Export with these weapons equipped.'
+                end
+                return host.message(text)
             end,
         }
         menu.text_edit = { mod = mod, control = mod.controls.outfit_name, text = '', replace = true }

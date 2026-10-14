@@ -6,7 +6,7 @@ local f = F.new()
 local body = f.group(1, 'material', 1, 'babd338977faa2ff', 2.5, 3)
 local pattern = f.group(1, 'pattern', 1, 'cf0cc31b981786c9', -0.25, 3)
 local secondary = f.group(2, 'material', 1, '3333333333333333', 0.5, 1)
-local saved, invalidated, exported
+local saved, invalidated, exported, mutations
 local bridge = {
     runtime = function()
         return f.runtime
@@ -48,6 +48,10 @@ local workflow = Workflow.new(
         message = function(text)
             return text
         end,
+        mutate = function(fn)
+            mutations = (mutations or 0) + 1
+            return fn()
+        end,
         export_options = function()
             return 'Adjudicator', 1, 1
         end,
@@ -64,7 +68,8 @@ local workflow = Workflow.new(
 )
 assert(workflow.save({ body, pattern }))
 assert(f.menu.outfit_dialog.save_kind.weapon_slots[1] and not f.menu.outfit_dialog.save_kind.weapon_slots[2])
-f.menu.outfit_dialog.on_save('Adjudicator')
+local save_status = f.menu.outfit_dialog.on_save('Adjudicator')
+assert(save_status:find('Patch assignment proof is pending or unavailable', 1, true))
 assert(saved and #saved.entries == 6 and invalidated == 'Adjudicator' and not f.menu.outfit_dialog)
 assert(saved.entries[1].document.data[0] == 2.5)
 local preview = workflow.plan(saved, { preview = true })
@@ -73,6 +78,13 @@ local selected = { [preview.choices[1].id] = true }
 local plan = workflow.plan(saved, { selected = selected })
 assert(plan.count == 6 and plan.apply() == 6 and #f.plan == 2)
 assert(workflow.export({ body, pattern }) and #exported.entries == 6)
+f.import('lut000.dds', F.document(23, 8, 4))
+local mapped = workflow.map_prepared({ body, pattern })
+local map_ok, map_status = mapped.on_map('source:1', 'weapon:1:material:1')
+assert(
+    map_ok == true and map_status == 'Mapped 1 weapon LUT tables.' and mutations == 1,
+    'Workflow did not forward mapping history or preserve its result tuple'
+)
 assert(workflow.save({ secondary }))
 f.foreign(secondary.bindings[1])
 assert(not pcall(f.menu.outfit_dialog.on_save, 'Changed'))

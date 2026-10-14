@@ -240,9 +240,9 @@ function R.new(deps)
         )
         return assert(groups[selected_index], 'Weapon LUT selection is unavailable')
     end
-    local function group_documents(group)
+    local function group_documents(group, chosen)
         local first, signature, mixed, by_key = nil, nil, false, {}
-        for _, b in ipairs(group.bindings) do
+        for _, b in ipairs(chosen or group.bindings) do
             local source = b.current ~= b.original and b.document or group.source_document
             assert(source, 'Weapon binding pixels unavailable')
             local copy = document_copy(source)
@@ -258,15 +258,28 @@ function R.new(deps)
             first, signature = first or copy, signature or bytes
             by_key[b.save_key] = copy
         end
-        group.mixed, group.binding_documents = mixed, by_key
-        group.applied_document = not mixed and first or nil
+        if not chosen then
+            group.mixed, group.binding_documents = mixed, by_key
+            group.applied_document = not mixed and first or nil
+        end
         return first, by_key, mixed
     end
-    function self.load(weapon_slot, selected_index, kind)
+    function self.load(weapon_slot, selected_index, kind, chosen)
         kind = family(kind)
         local group = selected(slot(weapon_slot), selected_index, kind)
         for _, b in ipairs(group.bindings) do
             assert(discovery.present(b) and discovery.binding(b) == b.current, 'Weapon LUT changed before loading')
+        end
+        if chosen then
+            assert(type(chosen) == 'table' and #chosen > 0 and #chosen <= #group.bindings, 'Weapon load subset bounds')
+            local members, seen = {}, {}
+            for _, binding in ipairs(group.bindings) do
+                members[binding] = true
+            end
+            for _, binding in ipairs(chosen) do
+                assert(members[binding] and not seen[binding], 'Invalid weapon load subset')
+                seen[binding] = true
+            end
         end
         if not group.source_document then
             local original = deps.document(group.object, group.bindings[1], kind)
@@ -274,7 +287,7 @@ function R.new(deps)
             group.source_document = document_copy(original)
             group.source_resource = original.resource
         end
-        local source, by_key, mixed = group_documents(group)
+        local source, by_key, mixed = group_documents(group, chosen)
         local document = document_copy(source)
         assert(
             kind == 'pattern' and document.width == 3 and document.height == 1
@@ -288,7 +301,10 @@ function R.new(deps)
         if mixed then
             document.binding_documents = by_key
         end
-        group.document, group.width, group.height = not mixed and document or nil, document.width, document.height
+        if not chosen then
+            group.document = not mixed and document or nil
+        end
+        group.width, group.height = document.width, document.height
         for _, b in ipairs(group.bindings) do
             b.width, b.height = document.width, document.height
         end

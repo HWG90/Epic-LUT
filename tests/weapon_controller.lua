@@ -136,6 +136,33 @@ before = #f.order
 assert(c.apply() == false and #f.order == before and #f.errors > 0)
 assert(c.choose_slot(3) and c.state().weapon.status == 'loading' and c.state().target == nil)
 assert(c.choose_slot(1) and c.choose_family('main') and c.choose_group(1))
+local shared = fixture()
+local shared_pattern = shared.source.weapons[1].pattern[1]
+for _, binding in ipairs(shared.targets(1, 1)) do
+    shared_pattern.targets[#shared_pattern.targets + 1] = binding
+end
+local body_scope = shared.controller.state().pattern_target
+assert(#body_scope.bindings == 5 and #body_scope.group_bindings == 10)
+assert(shared.controller.choose_group(2))
+local rail_scope = shared.controller.state().pattern_target
+assert(#rail_scope.bindings == 5 and #rail_scope.group_bindings == 10)
+assert(rail_scope.material_index == 1 and rail_scope.save_key == '3:1:0:1')
+assert(shared.controller.edit_pattern(3, body_scope) == false, 'A stale sibling subset reused the shared Pattern group')
+assert(shared.controller.edit_pattern(3, rail_scope) and shared.hits.edit_pattern[2].scope_id == rail_scope.scope_id)
+local second_pattern = {
+    id = 'pattern-second',
+    label = 'Pattern LUT 2',
+    document = document(3, 1),
+    verified_shape = true,
+    targets = shared.targets(1, 1),
+}
+shared.source.weapons[1].pattern[2] = second_pattern
+assert(shared.controller.choose_family('pattern') and shared.controller.choose_group(2))
+assert(shared.controller.open_editor(1, 3))
+assert(shared.hits.open_pattern[3].row == 1 and shared.hits.open_pattern[3].column == 3)
+assert(shared.controller.open_editor(2, 3) == false and shared.controller.open_editor(1, 4) == false)
+assert(shared.controller.choose_family('main'))
+assert(shared.controller.state().pattern_group == second_pattern, 'Remembered companion Pattern choice was lost')
 f.source.busy = true
 assert(c.edit_rgb(1) == false and c.map_imports(true) == false)
 f.source.busy = false

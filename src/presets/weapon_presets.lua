@@ -102,6 +102,7 @@ function W.new(modules, host)
         end
         validate()
         summary.count = #entries
+        summary.provenance_incomplete = summary.provenance_count < summary.count
         return entries, summary
     end
     function self.save(name, descriptors)
