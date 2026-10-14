@@ -24,6 +24,22 @@ function P.new(storage)
                         { id = 'pattern_load_seen', type = 'toggle', label = 'Pattern load cue seen', default = false },
                         { id = 'tools_docked', type = 'toggle', label = 'Dock LUT Editor Tools', default = true },
                         {
+                            id = 'confirm_preset_overwrites',
+                            type = 'toggle',
+                            label = 'Confirm preset overwrites',
+                            default = true,
+                            description = 'Ask before replacing an Armory or row preset. Turn this back on to restore overwrite warnings.',
+                        },
+                        {
+                            id = 'cursor_mode',
+                            type = 'choice',
+                            presentation = 'dropdown',
+                            label = 'Cursor mode',
+                            default = 1,
+                            choices = { 'Helldivers (hardware)', 'Windows (hardware)' },
+                            description = 'Use the game-selected hardware cursor artwork, or the Windows arrow. Both retain hardware cursor movement.',
+                        },
+                        {
                             id = 'basic_key',
                             type = 'keybind',
                             label = 'Open Basic Mode',
@@ -124,6 +140,16 @@ function P.new(storage)
     end
     function self.load_seen(pattern)
         return self.handle and self.handle.get(pattern and 'pattern_load_seen' or 'load_current_seen') == true or false
+    end
+    function self.confirm_overwrites()
+        return not self.handle or self.handle.get('confirm_preset_overwrites') ~= false
+    end
+    function self.save_confirm_overwrites(value)
+        assert(self.handle, 'Preferences unavailable')
+        return self.handle.set('confirm_preset_overwrites', value)
+    end
+    function self.cursor_mode()
+        return ({ 'game', 'hardware' })[self.handle and self.handle.get('cursor_mode') or 1] or 'game'
     end
     function self.tools_docked()
         return not self.handle or self.handle.get('tools_docked') ~= false

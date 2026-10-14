@@ -103,6 +103,53 @@ class ManagedDevelopment(unittest.TestCase):
             (self.target/name).write_bytes(data)
         self.before = dev.installed_files(self.target)
 
+    def test_explicit_native_upgrade_retains_old_helper_and_settings(self):
+        (self.target/dev.NATIVE).rename(self.target/dev.LEGACY_NATIVE)
+        (self.target/'library.txt').write_bytes(dev.LEGACY_NATIVE.encode())
+        with patch.object(dev,'LEGACY_NATIVE_SHA',dev.sha(DLL)):
+            before=dev.installed_files(self.target)
+            candidate=dev.read_package(self.paths['static','lll'])
+            with self.assertRaisesRegex(RuntimeError,'upgrade-input-runtime'):
+                dev.deploy(self.root,candidate,'static',expect_installed=dev.sha(before['mod.lua']),install=True,target=self.target)
+            receipt=dev.deploy(self.root,candidate,'static',expect_installed=dev.sha(before['mod.lua']),install=True,target=self.target,upgrade_input=True)
+            self.assertEqual((self.target/dev.LEGACY_NATIVE).read_bytes(),DLL)
+            self.assertEqual((self.target/dev.NATIVE).read_bytes(),DLL)
+            self.assertEqual((self.target/'settings.ini').read_bytes(),b'keep settings')
+            self.assertIn(dev.NATIVE,receipt['changed_files'])
+
+    def test_modular_native_upgrade_preserves_old_dll(self):
+        self.install_modular_fixture()
+        old=(self.target/dev.NATIVE).read_bytes()
+        (self.target/dev.NATIVE).rename(self.target/dev.LEGACY_NATIVE)
+        (self.target/'library.txt').write_bytes(dev.LEGACY_NATIVE.encode())
+        index=self.target/'FILES-SHA256.txt'
+        entries=dev.checksum_inventory(index.read_bytes())
+        entries[dev.LEGACY_NATIVE]=entries.pop(dev.NATIVE)
+        entries['library.txt']=dev.sha(dev.LEGACY_NATIVE.encode())
+        index.write_bytes(''.join(d+'  '+n+'\n'for n,d in sorted(entries.items())).encode())
+        with patch.object(dev,'LEGACY_NATIVE_SHA',dev.sha(old)):
+            before=dev.installed_files(self.target)
+            path=modular_package(self.root/'new-helper.zip','static')
+            candidate=dev.read_package(path)
+            with self.assertRaisesRegex(RuntimeError,'upgrade-input-runtime'):
+                dev.deploy(self.root,candidate,'static',expect_installed=dev.sha(before['main.lua']),target=self.target)
+            receipt=dev.deploy(self.root,candidate,'static',expect_installed=dev.sha(before['main.lua']),target=self.target,install=True,upgrade_input=True)
+            self.assertEqual((self.target/dev.LEGACY_NATIVE).read_bytes(),old)
+            self.assertEqual((self.target/dev.NATIVE).read_bytes(),DLL)
+            self.assertEqual(receipt['installed_hashes'],dev.hashes(dev.installed_files(self.target)))
+
+    def test_requested_cursor_and_confirmation_defaults_are_additive_and_typed(self):
+        old=json.dumps({'preferences':{'font_size':16}}).encode()
+        good={'preferences':{'font_size':16,'cursor_mode':1,'confirm_preset_overwrites':True}}
+        dev.authorize_pattern_default(old,json.dumps(good).encode())
+        for key,bad in [('cursor_mode',True),('cursor_mode',2),('confirm_preset_overwrites',1),('confirm_preset_overwrites',False)]:
+            candidate={'preferences':dict(good['preferences'])};candidate['preferences'][key]=bad
+            with self.assertRaisesRegex(RuntimeError,'may only add'):
+                dev.authorize_pattern_default(old,json.dumps(candidate).encode())
+        good['preferences']['font_size']=12
+        with self.assertRaisesRegex(RuntimeError,'unrelated'):
+            dev.authorize_pattern_default(old,json.dumps(good).encode())
+
     def test_pair_and_unrelated_lua_rejection(self):
         receipt = dev.validate_pair(self.paths)
         self.assertEqual(len(receipt['archives']), 6)
@@ -203,7 +250,7 @@ class ManagedDevelopment(unittest.TestCase):
             dev.validate_pair(self.paths)
         package(self.paths['animation', 'mdl'], 'animation', 'mdl')
         change_member(self.paths['static', 'mdl'], dev.RUNTIME+'library.txt', b'unrelated DLL registration')
-        with self.assertRaisesRegex(RuntimeError, 'BSL/MDL runtime payload differs'):
+        with self.assertRaisesRegex(RuntimeError, 'BSL/MDL runtime payload differs|Unknown input runtime selector'):
             dev.validate_pair(self.paths)
         package(self.paths['static', 'mdl'], 'static', 'mdl')
         change_member(self.paths['static', 'mdl'], 'README.md', b'MDL changed shared documentation')

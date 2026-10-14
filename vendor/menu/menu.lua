@@ -4902,12 +4902,34 @@ function M.new(api, measure, Text)
                     white,
                     412
                 )
+                if dialog.on_suppress then
+                    local check_ui = M.custom_ui({
+                        rect = rect,
+                        bounded = bounded,
+                        hit = hit,
+                        hovering = hovering,
+                        text_y = text_y,
+                        epic_style = self.epic_typography,
+                        pixel_width = 1 / s,
+                    })
+                    check_ui.checkbox(px + 14, py + 58, 22, 26, dialog.dont_show_again == true, true, function(value)
+                        dialog.dont_show_again = value
+                    end)
+                    bounded(px + 42, py + 63, "Don't show this again", 12, white, 380)
+                end
                 rect(px + 14, py + 22, 198, 30, { 90, 45, 40 }, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Delete Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     local ok, why = pcall(dialog.on_save)
                     self.notice = tostring(why)
-                    if ok then
+                    if ok and why ~= false then
+                        if dialog.dont_show_again and dialog.on_suppress then
+                            local saved, reason = pcall(dialog.on_suppress)
+                            if not saved or reason == false then
+                                self.notice = 'Preset saved; warning preference could not be saved: '
+                                    .. tostring(reason)
+                            end
+                        end
                         cancel()
                     end
                 end)

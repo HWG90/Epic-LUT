@@ -8,8 +8,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = 'armor_lut_editor/'
-NATIVE = 'mcm_input_9bc2033ffbb3.dll'
-NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
+NATIVE = 'mcm_input_d630588870e5.dll'
+NATIVE_SHA = '2081329ca3f14f2975e4429284b541ddfd7d609321570a235f0f04f110efd0ea'
 SCRIPTS = (
     'tools/import_zip.ps1',
     'tools/original_snapshots.ps1',

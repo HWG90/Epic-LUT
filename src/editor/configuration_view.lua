@@ -6,7 +6,12 @@ local columns = {
     {
         {
             label = 'Appearance',
-            ids = { 'configuration_ui_scale', 'configuration_font_size', 'configuration_font_bold' },
+            ids = {
+                'configuration_ui_scale',
+                'configuration_font_size',
+                'configuration_font_bold',
+                'configuration_cursor_mode',
+            },
         },
         {
             label = 'Shortcuts',
@@ -24,6 +29,7 @@ local columns = {
             label = 'Gear and Player Preview',
             ids = { 'auto_populate_worn', 'disable_player_preview', 'resource_format' },
         },
+        { label = 'Preset saves', ids = { 'configuration_confirm_preset_overwrites' } },
         { label = 'Exports', ids = { 'include_capes_in_armor_exports', 'include_patterns_in_exports' } },
         { label = 'Squad sharing', ids = { 'share_appearance', 'sharing_status' } },
         { label = 'Updates', ids = { 'update_status', 'check_updates', 'auto_updates', 'open_updates' } },

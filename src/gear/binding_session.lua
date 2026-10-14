@@ -126,6 +126,28 @@ function B.new(deps)
         end
         return #targets, texture
     end
+    function self.reconcile()
+        assert(not cohort or not cohort.closing, 'Texture cohort is closing')
+        local repaired, foreign = 0, 0
+        for _, b in ipairs(self.owned) do
+            if deps.present(b) then
+                local current = deps.binding(b)
+                if
+                    current == b.original
+                    and b.current ~= b.original
+                    and b.texture
+                    and b.texture.object == b.current
+                then
+                    deps.bind(b, b.current)
+                    assert(deps.binding(b) == b.current, 'Shared LUT repair readback failed')
+                    repaired = repaired + 1
+                elseif current and current ~= 0 and current ~= b.current and current ~= b.original then
+                    foreign = foreign + 1 -- Never adopt or overwrite another writer's replacement.
+                end
+            end
+        end
+        return repaired, foreign
+    end
     function self.restore()
         local pending = {}
         for _, b in ipairs(self.owned) do

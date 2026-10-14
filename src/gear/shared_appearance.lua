@@ -1,10 +1,16 @@
 -- Epic LUT appearance sharing. Lobby transport is derived from CowboyBingus v1.3.
 -- Remote writes are scoped to that peer's live garment slots and matching equipped kits.
 local S = {}
+local function compatible(identity, appearance)
+    return identity.body == appearance.body
+        and identity.armor == appearance.armor
+        and identity.helmet == appearance.helmet
+end
 function S.new(deps)
     local self = { status = 'Sharing: waiting for lobby', elapsed = 0, frame = 0, peers = {} }
     local text, signature, current_kit, packet_kit, publication_status
     local decode_failures = {}
+    local target_failures = {}
     local function message(value)
         local line = tostring(value):match('^[^\r\n]*') or 'Appearance unavailable'
         for _ = 1, 4 do
@@ -145,31 +151,62 @@ function S.new(deps)
                     for _, player in ipairs(players) do
                         if not player['local'] and peer_key(player) == key then
                             local identity = deps.resolve(player)
-                            if
-                                identity
-                                and identity.body == appearance.body
-                                and identity.armor == appearance.armor
-                                and identity.helmet == appearance.helmet
-                            then
-                                seen[key] = true
-                                local targets, unit_signature = deps.targets(identity, appearance)
-                                if not old or old.text ~= member.text or old.units ~= unit_signature then
-                                    if restore(key) then
-                                        targets = deps.targets(identity, appearance) -- recapture originals after restoring our prior packet
-                                        local peer = {
-                                            text = member.text,
-                                            appearance = appearance,
-                                            units = unit_signature,
-                                            bindings = deps.bindings(),
-                                        }
-                                        self.peers[key] = peer
-                                        peer.job = coroutine.create(function()
-                                            for document, bindings in pairs(targets) do
-                                                peer.bindings.apply(document, bindings)
-                                                coroutine.yield()
+                            if identity and compatible(identity, appearance) then
+                                local captured, targets, unit_signature = pcall(deps.targets, identity, appearance)
+                                if captured then
+                                    seen[key], target_failures[key] = true, nil
+                                    if
+                                        not old
+                                        or old.retry
+                                        or old.text ~= member.text
+                                        or old.units ~= unit_signature
+                                    then
+                                        if restore(key) then
+                                            -- Recapture originals after removing the prior packet.
+                                            captured, targets, unit_signature =
+                                                pcall(deps.targets, identity, appearance)
+                                        else
+                                            captured = false
+                                            targets = 'Previous Shared LUT restoration is pending'
+                                        end
+                                        if captured then
+                                            local peer = {
+                                                text = member.text,
+                                                appearance = appearance,
+                                                units = unit_signature,
+                                                bindings = deps.bindings(),
+                                            }
+                                            self.peers[key] = peer
+                                            peer.job = coroutine.create(function()
+                                                for document, bindings in pairs(targets) do
+                                                    peer.bindings.apply(document, bindings)
+                                                    coroutine.yield()
+                                                end
+                                            end)
+                                        end
+                                    elseif not old.job and old.bindings.reconcile then
+                                        -- A map load can restore stock LUT pointers without replacing the Unit.
+                                        -- Repair only the exact original bindings retained by this peer session.
+                                        local repaired, why = pcall(old.bindings.reconcile)
+                                        if not repaired then
+                                            local refused = message(why)
+                                            if old.repair_failure ~= refused then
+                                                deps.note('Shared LUT repair deferred: ' .. refused)
                                             end
-                                        end)
+                                            old.repair_failure = refused
+                                        else
+                                            old.repair_failure = nil
+                                        end
                                     end
+                                end
+                                if not captured then
+                                    seen[key] = nil
+                                    local refused = message(targets)
+                                    if target_failures[key] ~= refused then
+                                        deps.note('Shared LUT peer deferred: ' .. refused)
+                                    end
+                                    target_failures[key] = refused
+                                    restore(key)
                                 end
                             end
                             break
@@ -181,6 +218,11 @@ function S.new(deps)
         for key in pairs(self.peers) do
             if not seen[key] then
                 restore(key)
+            end
+        end
+        for key in pairs(target_failures) do
+            if not present[key] then
+                target_failures[key] = nil
             end
         end
         for key in pairs(decode_failures) do
@@ -204,12 +246,13 @@ function S.new(deps)
             end
         end
         -- One texture job slice per tick, never a whole squad's textures at once.
-        for _, peer in pairs(self.peers) do
+        for key, peer in pairs(self.peers) do
             if peer.job then
                 local ok, why = coroutine.resume(peer.job)
                 if not ok then
                     peer.job = nil
-                    peer.bindings.restore()
+                    peer.retry = true
+                    restore(key)
                     deps.note('Shared appearance stopped safely: ' .. tostring(why))
                 elseif coroutine.status(peer.job) == 'dead' then
                     peer.job = nil

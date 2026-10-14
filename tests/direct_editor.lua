@@ -1189,8 +1189,11 @@ m.shared_lut_codec = {
 }
 m.lobby_sync = {}
 local sharing_ticked = false
+local sharing_deps
+m.shared_targets = dofile('src/gear/shared_targets.lua')
 m.shared_appearance = {
-    new = function()
+    new = function(deps)
+        sharing_deps = deps
         return {
             status = 'ready',
             tick = function(dt, enabled)
@@ -1215,6 +1218,22 @@ assert(
     'Material controls removed from registry'
 )
 assert(sharing_ticked, 'Sharing was not enabled through Configuration')
+local remote_doc = { width = 23, height = 8, data = ffi.new('float[736]') }
+local remote_appearance = { entries = { ['0:1:0:0'] = { document = remote_doc } } }
+local target_batches, target_signature = sharing_deps.targets({}, remote_appearance)
+assert(
+    target_batches[remote_doc] and #target_batches[remote_doc] == 1,
+    'Remote target host did not route a matching LUT'
+)
+local original_bound = bound[3]
+bound[3] = original_bound + 100000
+local _, own_signature = sharing_deps.targets({}, remote_appearance)
+assert(own_signature == target_signature, 'A changed texture pointer invalidated unchanged target identity')
+bound[3] = 0
+local _, missing_signature = sharing_deps.targets({}, remote_appearance)
+assert(missing_signature ~= target_signature, 'A missing live texture slot did not change remote target readiness')
+bound[3] = original_bound
+
 assert(sharing_editor.on_disable(ctx))
 
 -- The real binding-only avatar contract has no body/armor/helmet kit fields.
