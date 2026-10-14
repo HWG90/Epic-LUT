@@ -1,6 +1,6 @@
-# Epic LUT R6.0.0 Alpha 1 development candidate
+# Epic LUT R6.0.0 Alpha 1 experimental prerelease
 
-Weapon LUT editing is under development on `r6/weapon-lut-editing`. R5 maintenance remains on `main`. This candidate is not a published release.
+Weapon LUT editing is under development on `r6/weapon-lut-editing`. R5 maintenance remains on `main`. This is an experimental GitHub prerelease for people who want to try weapon LUT editing. **No support offered.** Use stable R5.7.2 for supported garment editing.
 
 - Primary, Secondary and Support have independent weapon and LUT selectors. Material tables reuse the full LUT table and Value Editor; compatible quick color/camo controls preserve exact float values. Pattern controls include color, material/opacity and roughness Alpha.
 - Weapon import mapping supports individual destinations, ordered Auto-map and rollover. Certified Pattern companions follow their exact material destinations.
