@@ -19,10 +19,10 @@ Press [b]F10[/b]. Load your current gear. Pick a LUT. Edit its colors and materi
 
 Rebind menu controls in the Configuration Menu.
 
-[size=4][b]ARMORY PRESETS, CUSTOM MODELS & PATTERN EDITING[/b][/size]
-Select a saved preset and use [b]Save[/b] to update it after an overwrite confirmation. To create a separate preset, select [b]Save a New Preset[/b] at the top of the dropdown when a LUT is loaded.
+[size=4][b]PRESET SAVES, CUSTOM MODELS & PATTERN EDITING[/b][/size]
+Select a saved preset and use [b]Save[/b] to update it after an overwrite confirmation. To create a separate preset, choose [b]Save a New Preset[/b] at the top of the dropdown when a LUT is loaded. There is no separate new-preset button.
 
-Updated Photo Mode companion builds can lend input to Epic LUT while retaining the camera. This requires the companion update and a normal game restart; older Photo Mode builds do not provide this handoff.
+Updated Photo Mode companion builds can lend input to Epic LUT while retaining the camera. This requires the companion update and a normal game restart; older Photo Mode builds do not provide this handoff. Both staying open together was confirmed in-game after restart.
 
 [list]
 [*]Custom model LUTs load the effective installed patch colors instead of stock colors under reused IDs. Highest numeric layers resolve within each archive. Identical effective LUTs across multiple archives now load normally; different palettes report the competing files. Highlighting preserves their other rows.[/*]
