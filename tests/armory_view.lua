@@ -128,6 +128,7 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
         labels[c.full_text or c.text] = c
     end
 end
+assert(not labels['Save a New Preset'], 'Removed new-preset button remains in the Armory layout')
 assert(
     labels['Palette Preview'].text_role == 'heading'
         and labels['Palette Preview'].size > labels['Save Current Gear Preset'].size

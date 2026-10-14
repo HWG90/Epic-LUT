@@ -1,4 +1,8 @@
 local actions = dofile('src/editor/editor_actions.lua')
+local view_source = assert(io.open('src/editor/armory_view.lua', 'rb'))
+local body = view_source:read('*a')
+view_source:close()
+assert(not body:find('save_new_preset', 1, true), 'Armory retains an unregistered new-preset action')
 local selected = { name = 'Existing', entries = { { kind = 'armor' }, { kind = 'helmet' }, { kind = 'cape' } } }
 local menu = {}
 local saves = 0

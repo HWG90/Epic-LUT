@@ -9,7 +9,7 @@ R5.7.5 adds confirmed saves to the selected preset and a seamless new-preset dro
 - Add cooperative input handoff support for updated War Journalist Photo Mode builds. Photo retains the camera while Epic LUT borrows input; closing Epic LUT returns the lease. Older Photo Mode builds do not provide this bridge, and its installed camera hooks require a normal game restart after updating.
 - Carry the shared changes into R6 without removing weapon-specific save scopes.
 
-The Photo Mode bridge requires an updated companion build; it is not supplied by this Epic LUT package. Offline save, input lifecycle and package tests passed. Fresh live coexistence verification is pending.
+The Photo Mode bridge requires an updated companion build; it is not supplied by this Epic LUT package. Offline save, input lifecycle and package tests passed. David confirmed that Epic LUT and Photo Mode both stay open after a normal restart with the updated companion.
 
 ## Maintenance fixes in this release
 
