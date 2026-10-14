@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## R5.7.4 - 2026-10-14
+
+- Fix false Pattern/LUT conflicts across mod archives: compare the effective highest numeric layer in each family before refusing. Byte-identical native metadata, pixels and flags can load normally. Differing palettes and conflicting equal-index records remain refused, with the competing filenames reported.
+- Keep color agreement separate from archive provenance. Do not invent a single archive source for patch export; retain the alias list and refresh older caches with schema v6.
+- Identify the exact missing binding-cache part and I/O reason, invalidate the failed cache, and provide Load Current Gear as a recovery action.
+- User confirmed the archive-alias test build resolves the reported custom-model loading failure. The maintenance fix is also carried into R6.
+
 ## R5.7.3 - 2026-10-14
 
 - Resolve installed custom LUT layers by numeric patch precedence within their exact archive family. Higher layers replace lower layers for the same texture; equal-layer conflicts and competing archive families remain explicit errors. Invalidate older source caches.

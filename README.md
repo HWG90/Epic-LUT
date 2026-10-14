@@ -1,18 +1,18 @@
-# Epic LUT R5.7.3
+# Epic LUT R5.7.4
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 
-Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.7.3 expands **Shared LUT** appearances for compatible squadmates and adds checked-region camo, one-click gear mapping, an embedded Pattern editor and patch exports that preserve verified assignments. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups. [What's new](docs/RELEASE-R5.7.3.md).
+Paint your Helldiver in-game. Match your helmet to your armor, build a color scheme from scratch, or get into the full material table. R5.7.4 fixes false conflicts when mod archives contain identical Pattern LUTs, and retains expanded **Shared LUT** appearances for compatible squadmates and adds checked-region camo, one-click gear mapping, an embedded Pattern editor and patch exports that preserve verified assignments. Player Preview keeps its default idle pose. Saved presets support up to 4,096 bindings for Transmog setups. [What's new](docs/RELEASE-R5.7.4.md).
 
-[Download R5.7.3](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.3) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
+[Download R5.7.4](https://www.nexusmods.com/helldivers2/mods/17039?tab=files) | [All three packages on GitHub](https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.4) | [Report bugs](https://github.com/HWG90/Epic-LUT/issues)
 
 ## Install
 
 Choose one package:
 
-- **BSL (Nexus Main File):** import `Epic-LUT-R5.7.3-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
-- **LLL (GitHub only):** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.7.3-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
-- **MDL (Nexus Optional File):** use `Epic-LUT-R5.7.3-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
+- **BSL (Nexus Main File):** import `Epic-LUT-R5.7.4-BSL.zip` through Arsenal/HD2MM and enable the startup option with **Bingus Shared Loader v15+**.
+- **LLL (GitHub only):** extract the complete `armor_lut_editor` folder from `Epic-LUT-R5.7.4-LLL.zip` into your loader's Mods directory. LLL R30+ uses `%LOCALAPPDATA%/LLL/Helldivers2/Mods`. Enable Epic LUT. [Modular installation details](docs/LLL-MODULAR.md).
+- **MDL (Nexus Optional File):** use `Epic-LUT-R5.7.4-MDL.zip` with its bundled API-2 `mod.lua` entrypoint. Place the complete `armor_lut_editor` folder in MDL's configured Mods directory. [MDL installation details](docs/MDL-LLL.md).
 
 The modular LLL package uses `main.lua` and requires LLL R30+. LLL can also load the MDL-compatible bundled package. MDL needs the bundled package; it cannot use the modular LLL package.
 
@@ -24,7 +24,7 @@ No Python or MCM installation required. Windows PowerShell/.NET handles file pic
 
 **Shared Lobby LUT** shares your currently applied Armor, Helmet and associated Pattern edits with compatible Epic LUT squadmates. Apply a saved Armory preset to share that look. Supported tables retain their exact RGBA, material, camo and emissive channels. Improved lossless compression and table/value deduplication fit larger appearances, with support for up to 4,096 bindings within the lobby budget.
 
-Both players need R5.7.3, with **Configuration > Share full LUT appearance with Epic LUT users** enabled. Its current default is On; the same toggle controls sending and receiving. Turning it Off removes your advertisement and restores received appearances still owned by Epic LUT. Updates wait for a stable squad lobby and settled edits, then apply only to the sender's matching body, Armor and Helmet kits. Your own outfit can be different from theirs.
+Both players need R5.7.4, with **Configuration > Share full LUT appearance with Epic LUT users** enabled. Its current default is On; the same toggle controls sending and receiving. Turning it Off removes your advertisement and restores received appearances still owned by Epic LUT. Updates wait for a stable squad lobby and settled edits, then apply only to the sender's matching body, Armor and Helmet kits. Your own outfit can be different from theirs.
 
 Cape material LUTs are excluded from sharing in this build. Unmodified games and Match Your Colors-only clients do not interpret the packets. Oversized appearances stay local with a visible status while receiving remains available. **Shared Lobby LUT remains in testing; two-player visual confirmation is still required for this build.** [Sharing details](docs/UPSTREAM-MYC-INTEGRATION.md).
 

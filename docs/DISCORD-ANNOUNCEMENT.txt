@@ -1,11 +1,11 @@
-# EPIC LUT R5.7.3 :goose:
+# EPIC LUT R5.7.4 :goose:
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
 Share exact Armor, Helmet and Pattern colors/materials/camo/emissives with compatible Epic LUT squadmates. Apply an Armory preset to share it. Both players need Epic LUT with **Configuration > Share full LUT appearance** enabled (On by default). Cape materials are excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
 
 **CUSTOM MODEL HOTFIX + MAINTENANCE**
-- Read the effective custom LUT from numeric patch layers, instead of reporting a false conflict between patch_0 and patch_2.
+- **Custom-model hotfix:** identical effective Pattern/LUT copies across mod archives now load. Highest numeric layers resolve per archive; genuinely different copies name the conflicting files.
 - Basic Apply Preset matches Armory assignments, including valid material-only targets.
 - Preview gore filtering and large-font Apply clipping fixed.
 - Three Pattern quick swatches: **Color / Mat/Opac / Roughness**. Roughness uses Alpha; other channels stay intact.
@@ -16,7 +16,7 @@ Checked-region camo and custom tints; **Map LUTs to Gear / Auto-map** in Basic a
 
 Massive thanks to **Scarpheon** for testing, patch help and 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex and the community.
 
-**R5 downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.3
+**R5 downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.4
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **R6 weapon prerelease:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha2
 Experimental. **No support offered.**

@@ -1,3 +1,10 @@
+# Epic LUT R5.7.4
+
+- Fix false Pattern/LUT conflicts across mod archives: compare the effective highest numeric layer in each family before refusing. Byte-identical native metadata, pixels and flags can load normally. Differing palettes and conflicting equal-index records remain refused, with the competing filenames reported.
+- Keep color agreement separate from archive provenance. Do not invent a single archive source for patch export; retain the alias list and refresh older caches with schema v6.
+- Identify the exact missing binding-cache part and I/O reason, invalidate the failed cache, and provide Load Current Gear as a recovery action.
+- User confirmed the archive-alias test build resolves the reported custom-model loading failure. The maintenance fix is also carried into R6.
+
 # Epic LUT R5.7.2
 
 - Read installed custom-model LUT patches instead of stock pixels under reused texture IDs. Recheck patch-sensitive caches on Load Current Gear; highlighting retains the custom palette's other rows.
