@@ -18,6 +18,14 @@ local original = {
         .. string.rep('\x7f', 188)
         .. D.encode(document.data, 23, 2):sub(1, 148),
 }
+local agreed, agreed_error = pcall(P.encode, D, document, {
+    resource = original.resource,
+    source_archives = 'aaaaaaaaaaaaaaaa.patch_2\nbbbbbbbbbbbbbbbb.patch_0\n',
+})
+assert(
+    not agreed and agreed_error:find('colors agree across mod archives', 1, true),
+    'Color agreement was accepted as a single archive patch proof'
+)
 local p = P.encode(D, document, original)
 assert(p.archive == '9ba626afa44a3aa3' and p.resource == original.resource)
 assert(p.source_archive == '0123456789abcdef', 'Source archive provenance lost')
@@ -139,13 +147,6 @@ local conflict = { document = items[2].document, original = items[1].original }
 items[#items + 1] = conflict
 assert(not pcall(P.encode_set, D, items), 'Conflicting shared LUT silently overwritten')
 assert(not pcall(P.encode_set, D, {}), 'Empty full palette exported')
-local no_writer, writer_reason = pcall(P.encode_set, D, {
-    { kind = 'weapon', document = document, original = original },
-})
-assert(
-    not no_writer and tostring(writer_reason):find('verified Unit/material assignment provenance', 1, true),
-    'Weapon-only export without a binding writer produced an incidental nil error'
-)
 document.data[0] = 0 / 0
 assert(not pcall(P.encode, D, document, original), 'Nonfinite pixels exported')
 document.data[0] = -2

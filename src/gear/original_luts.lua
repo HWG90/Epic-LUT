@@ -75,7 +75,16 @@ function O.new(m, paths, native, targets)
                                     patch_source = nil
                                 end
                             end
-                            return { data = data, width = w, height = h, resource = hash, patch_source = patch_source }
+                            local source_archives =
+                                exists(snapshot_folder .. '/' .. name:gsub('%.dds$', '.source-archives'))
+                            return {
+                                data = data,
+                                width = w,
+                                height = h,
+                                resource = hash,
+                                patch_source = patch_source,
+                                source_archives = source_archives,
+                            }
                         end)
                         if ok then
                             snapshots[object] = document
@@ -304,14 +313,6 @@ function O.new(m, paths, native, targets)
         if not object then
             return nil
         end
-        self.requested[object] = true
-        return self.get(object)
-    end
-    function self.request_object(object)
-        assert(
-            type(object) == 'number' and object >= 65536 and object < 2 ^ 47 and object % 1 == 0,
-            'Invalid original texture object request'
-        )
         self.requested[object] = true
         return self.get(object)
     end
