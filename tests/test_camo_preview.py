@@ -112,7 +112,7 @@ class CamoPreviewTest(unittest.TestCase):
         self.addCleanup(link.rmdir)
         result = subprocess.run(command(game,link),capture_output=True,text=True,timeout=30)
         self.assertNotEqual(result.returncode,0)
-        self.assertIn('cache path is redirected',result.stderr)
+        self.assertIn('cache path is redirected',' '.join(result.stderr.split()))
         self.assertFalse((game/'error.txt').exists())
 
     def test_missing_owner_heartbeat_publishes_no_mips(self):
