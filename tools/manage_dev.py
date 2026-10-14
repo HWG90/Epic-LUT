@@ -24,13 +24,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.runtime_guard import blocked_path, require_physical_runtime
 
-NATIVE = 'mcm_input_9bc2033ffbb3.dll'
-NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
+NATIVE = 'mcm_input_d630588870e5.dll'
+NATIVE_SHA = '2081329ca3f14f2975e4429284b541ddfd7d609321570a235f0f04f110efd0ea'
+LEGACY_NATIVE = 'mcm_input_9bc2033ffbb3.dll'
+LEGACY_NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
 RUNTIME = 'armor_lut_editor/'
 LOADERS = ('bsl', 'lll', 'mdl')
 # The loader watches Lua. Publish matching metadata before its watched file.
 PAIR_FILES = ('manifest.json', 'mod.lua')
-COMPANIONS = (NATIVE, 'library.txt', 'LICENSE-CowboyBingus.txt', 'runtime-manifest.json')
+COMPANIONS = (NATIVE, LEGACY_NATIVE, 'library.txt', 'LICENSE-CowboyBingus.txt', 'runtime-manifest.json')
 PATCH = 'data/9ba626afa44a3aa3.patch_0'
 HELPERS = {'debug_lut_dds_hex': 'assets/debug-lut.dds',
            'original_snapshot_script': 'tools/original_snapshots.ps1',
@@ -133,7 +135,7 @@ def read_package(path):
     require(gate == ['true' if mode == 'animation' else 'false'], 'Archive animation gate differs from metadata')
     require(manifest.get('author') == 'Goose', 'Unexpected runtime author')
     require(('Preview Animation Test' in manifest.get('name', '')) == (mode == 'animation'), 'Manifest mode differs from Lua')
-    require(sha(files[RUNTIME+NATIVE]) == NATIVE_SHA, 'Archive native DLL differs from reviewed runtime')
+    reviewed_input(files,RUNTIME)
     if entry == 'main.lua':
         require(manifest.get('id') == 'armor_lut_editor' and manifest.get('lll', {}).get('entry') == entry, 'Modular manifest entry differs')
         runtime = {name[len(RUNTIME):]: data for name, data in files.items() if name.startswith(RUNTIME)}
@@ -301,6 +303,14 @@ def select_package(root, mode):
     return read_package(pair_paths(root)[mode, 'lll'])
 
 
+def reviewed_input(files, prefix=''):
+    name = files.get(prefix+'library.txt', b'').decode('ascii').strip()
+    require(name in (NATIVE, LEGACY_NATIVE), 'Unknown input runtime selector')
+    digest = NATIVE_SHA if name == NATIVE else LEGACY_NATIVE_SHA
+    require(prefix+name in files and sha(files[prefix+name]) == digest, 'Input runtime differs from reviewed bytes')
+    return name
+
+
 def installed_files(target):
     require(target.is_dir() and target.resolve() == target.absolute(), 'Existing physical LLL editor directory required')
     require(not blocked_path(target), 'Virtualized installed path is unsupported')
@@ -311,8 +321,8 @@ def installed_files(target):
     if inventory is not None:
         names.add('FILES-SHA256.txt')
     files = {name: data for name, data in runtime_state(target, names).items() if data is not None}
-    require(all(name in files for name in ('manifest.json', entry, NATIVE)), 'Installed Lua, manifest and reviewed DLL required')
-    require(sha(files[NATIVE]) == NATIVE_SHA, 'Installed native DLL differs; it will not be replaced')
+    require(all(name in files for name in ('manifest.json', entry)), 'Installed Lua and manifest required')
+    reviewed_input(files)
     if inventory is not None:
         require(all(name in files and sha(files[name]) == digest for name, digest in inventory.items()), 'Installed FILES-SHA256 inventory differs from actual bytes')
         require(json.loads(files['manifest.json']).get('lll', {}).get('entry') == entry, 'Installed modular manifest entry differs')
@@ -365,9 +375,10 @@ def authorize_pattern_default(before, candidate):
             and type(previous.get('preferences')) is dict and type(updated.get('preferences')) is dict,
             'Protected modular defaults lack the preferences schema')
     additions = updated['preferences'].keys() - previous['preferences'].keys()
-    require(additions and additions <= {'include_patterns_in_exports', 'tools_docked'}
-            and all(updated['preferences'][key] is True for key in additions),
-            'Protected modular defaults may only add requested preferences.include_patterns_in_exports=true or preferences.tools_docked=true')
+    allowed={'include_patterns_in_exports':True,'tools_docked':True,'confirm_preset_overwrites':True,'cursor_mode':1}
+    require(additions and additions <= allowed.keys()
+            and all(same_typed(updated['preferences'][key],allowed[key])for key in additions),
+            'Protected modular defaults may only add requested preference defaults with exact values and types')
     remaining = dict(updated)
     remaining['preferences'] = dict(updated['preferences'])
     for key in additions:
@@ -421,7 +432,7 @@ def replace_pair(target, desired, before, backup, replace=os.replace, entry='mod
             path.unlink(missing_ok=True)
 
 
-def deploy(root, package, mode, expect_installed=None, install=False, target=None):
+def deploy(root, package, mode, expect_installed=None, install=False, target=None, upgrade_input=False):
     target = target or Path(os.environ['LOCALAPPDATA'])/'LLL/Helldivers2/Mods/armor_lut_editor'
     before = installed_files(target)
     expected = hashes(before)
@@ -447,16 +458,23 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
         # A release transition may stop shipping its predecessor's public notes.
         # Preserve those exact bytes on disk; runtime code/assets may not disappear.
         for name in removed:
+            if name==LEGACY_NATIVE:
+                continue # The reviewed old helper stays on disk as an inactive rollback.
             require(re.fullmatch(r'docs/RELEASE-R\d+\.\d+\.\d+(?:-(?:alpha|rc)\d+)?\.md', name) is not None,
                     'Modular candidate removes installed runtime files; migration is not authorized')
             retained_documents[name] = before[name]
-        for name in (NATIVE, 'library.txt'):
-            require(name in before and runtime[name] == before[name], 'Protected modular runtime differs: '+name)
+        current_input=reviewed_input(before)
+        candidate_input=reviewed_input(runtime)
+        native_changed=current_input!=candidate_input
+        require(not native_changed or upgrade_input,'Input helper upgrade requires --upgrade-input-runtime')
+        if not native_changed:
+            require(runtime[candidate_input]==before[current_input] and runtime['library.txt']==before['library.txt'],'Protected modular input runtime differs')
         writable = set(package['manifest']['lll']['modules']) | {'main.lua', 'manifest.json', 'FILES-SHA256.txt'}
         writable |= {name for name in runtime if name.startswith('tools/') and name.endswith(('.ps1', '.cs'))}
         # Only the public documents shipped by build_lll.py may accompany a
         # code update. Other non-code payloads remain protected.
         writable |= {'README.md', 'CHANGELOG.md'}
+        if native_changed and upgrade_input:writable |= {candidate_input,'library.txt'}
         if re.fullmatch(r'R\d+\.\d+\.\d+(?:-(?:alpha|rc)\d+)?', package['version']):
             writable.add('docs/RELEASE-'+package['version']+'.md')
         defaults = 'config/defaults.cfg'
@@ -471,7 +489,11 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
                 desired[name] = data
     else:
         desired = {name: runtime[name] for name in PAIR_FILES}
-    require(package['files'][RUNTIME+NATIVE] == before[NATIVE], 'Candidate DLL differs from installed DLL')
+    candidate_input=reviewed_input(package['files'],RUNTIME)
+    current_input=reviewed_input(before)
+    require(candidate_input==current_input or upgrade_input,'Input helper upgrade requires --upgrade-input-runtime')
+    if entry!='main.lua' and candidate_input!=current_input:
+        desired[candidate_input]=runtime[candidate_input];desired['library.txt']=runtime['library.txt']
     receipt = {'mode': mode, 'version': package['version'], 'archive': package['path'],
                'entry': entry, 'format': package['format'], 'changed_files': sorted(desired),
                'development_build_id': package['development_build_id'],
@@ -516,6 +538,7 @@ def main(argv=None):
     modes.add_argument('--static', action='store_true', help='Select current verified static development build (default)')
     modes.add_argument('--animation', action='store_true', help='Explicitly select the experimental animation development build')
     modes.add_argument('--rollback', action='store_true', help='Select immutable static R5.5.4 release')
+    parser.add_argument('--upgrade-input-runtime',action='store_true',help='Explicitly authorize an additive reviewed input DLL and selector upgrade; retain the old DLL')
     parser.add_argument('--expect-installed', help='Required first-install/adoption current main.lua or mod.lua SHA-256')
     args = parser.parse_args(argv)
     require_physical_runtime()
@@ -526,7 +549,7 @@ def main(argv=None):
             print('PASS paired development builds; published release archives unchanged')
         if args.build and not args.install:
             return
-        receipt = deploy(ROOT, select_package(ROOT, mode), mode, args.expect_installed, args.install)
+        receipt = deploy(ROOT, select_package(ROOT, mode), mode, args.expect_installed, args.install, **({'upgrade_input':True}if args.upgrade_input_runtime else {}))
         print(json.dumps(receipt, indent=2))
         print('Installed files verified; next normal loader lifecycle/game launch activates them.' if args.install else 'Preflight only; installed files unchanged.')
     if args.build or args.install:

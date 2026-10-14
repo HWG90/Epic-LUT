@@ -50,7 +50,7 @@ if version.startswith('R6.'):
     extra[name]=(ROOT/name).read_bytes()
 for field,path in [('debug_lut_dds_hex','assets/debug-lut.dds'),('original_snapshot_script','tools/original_snapshots.ps1'),('original_snapshot_reader','tools/original_snapshots.cs'),('binding_provenance_script','tools/binding_provenance.ps1'),('binding_provenance_reader','tools/binding_provenance_reader.cs'),('camo_preview_script','tools/camo_preview.ps1'),('camo_preview_reader','tools/camo_preview_reader.cs'),('authored_preview_script','tools/authored_preview.ps1'),('authored_preview_reader','tools/authored_preview_reader.cs'),('zip_import_script','tools/import_zip.ps1')]:
     extra[path]=(ROOT/path).read_bytes();main.append('m.'+field+'=mod.read("'+path+'"):gsub(".",function(c)return string.format("%02x",string.byte(c))end)')
-native='mcm_input_9bc2033ffbb3.dll';data=(ROOT.parent/'DBF-MCM/native/build'/native).read_bytes();assert hashlib.sha256(data).hexdigest()=='7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
+native='mcm_input_d630588870e5.dll';data=(ROOT.parent/'DBF-MCM/native/build'/native).read_bytes();assert hashlib.sha256(data).hexdigest()=='2081329ca3f14f2975e4429284b541ddfd7d609321570a235f0f04f110efd0ea'
 extra[native]=data;extra['library.txt']=native.encode();extra['LICENSE-CowboyBingus.txt']=(ROOT/'vendor/LICENSE').read_bytes();main.append('m.frontend_native_name='+json.dumps(native))
 for name in inv.MENU:
     path='vendor/menu/'+name+'.lua';modules[path]=(ROOT/path).read_bytes();main.append('m.ui_'+name+'=mod.require("'+path+'")')

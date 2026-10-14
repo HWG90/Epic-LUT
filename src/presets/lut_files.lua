@@ -33,8 +33,8 @@ function L.new(folder, deps)
         )
         return folder .. '/' .. (prefix or '') .. name .. '.dds'
     end
-    function self.exists(name)
-        local f = io.open(path(name), 'rb')
+    function self.exists(name, prefix)
+        local f = io.open(path(name, prefix), 'rb')
         if not f then
             return false
         end

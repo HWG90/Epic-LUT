@@ -438,7 +438,14 @@ function A.new(deps)
                         scope.weapon_slots[entry.weapon_slot] = true
                     end
                 end
+                local prefs = deps.preferences and deps.preferences()
+                if prefs and prefs.confirm_overwrites and not prefs.confirm_overwrites() then
+                    return deps.keep_outfit(name, scope)
+                end
                 frontend.menu.outfit_dialog = {
+                    on_suppress = prefs and prefs.save_confirm_overwrites and function()
+                        return prefs.save_confirm_overwrites(false)
+                    end,
                     phase = 'delete',
                     title = 'Overwrite Current Preset?',
                     preset_name = name,

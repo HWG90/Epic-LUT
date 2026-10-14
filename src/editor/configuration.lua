@@ -7,6 +7,8 @@ local preference_ids = {
     'ui_scale',
     'font_size',
     'font_bold',
+    'cursor_mode',
+    'confirm_preset_overwrites',
     'window_width',
     'window_height',
     'reset_key',

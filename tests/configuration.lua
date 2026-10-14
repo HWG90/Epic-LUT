@@ -7,6 +7,19 @@ local owner = {
     controls = {
         menu_key = { id = 'menu_key', type = 'keybind', label = 'Open Advanced' },
         font_size = { id = 'font_size', type = 'slider', label = 'Font size' },
+        cursor_mode = {
+            id = 'cursor_mode',
+            type = 'choice',
+            label = 'Cursor mode',
+            choices = { 'Helldivers (hardware)', 'Windows (hardware)' },
+            default = 1,
+        },
+        confirm_preset_overwrites = {
+            id = 'confirm_preset_overwrites',
+            type = 'toggle',
+            label = 'Confirm preset overwrites',
+            default = true,
+        },
         include_capes_in_armor_exports = {
             id = 'include_capes_in_armor_exports',
             type = 'toggle',
@@ -78,6 +91,12 @@ assert(controls.configuration_menu_key.default == 121)
 controls.configuration_menu_key.on_change(45)
 controls.configuration_font_size.on_change(14)
 assert(stored.menu_key == 45 and stored.font_size == 14, 'Configuration writes missed authoritative preference store')
+controls.configuration_cursor_mode.on_change(2)
+controls.configuration_confirm_preset_overwrites.on_change(false)
+assert(
+    stored.cursor_mode == 2 and stored.confirm_preset_overwrites == false,
+    'New preferences bypassed their authoritative store'
+)
 assert(owner.controls.menu_key.id == 'menu_key', 'Preference definition mutated by aliasing')
 assert(controls.include_capes_in_armor_exports.default == true)
 controls.include_capes_in_armor_exports.on_change(false)

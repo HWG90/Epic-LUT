@@ -327,9 +327,22 @@ function C.new(deps)
                         on_activate = function()
                             local d = assert(document(), 'Import first')
                             local name = self.handle.get('row_preset')
-                            preset_files.save_row(name, d, self.handle.get('edit_row'))
-                            self.refresh_presets()
-                            return note('Row preset saved: ' .. name)
+                            local row = self.handle.get('edit_row')
+                            assert(
+                                type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= d.height,
+                                'Invalid preset row'
+                            )
+                            local snapshot = { width = d.width, height = 1, data = ffi.new('float[?]', d.width * 4) }
+                            ffi.copy(snapshot.data, d.data + (row - 1) * d.width * 4, d.width * 16)
+                            local function commit()
+                                preset_files.save_row(name, snapshot, 1)
+                                self.refresh_presets()
+                                return note('Row preset saved: ' .. name)
+                            end
+                            if self.confirm_overwrite and preset_files.exists(name, 'row-') then
+                                return self.confirm_overwrite(name, commit)
+                            end
+                            return commit()
                         end,
                     },
                     {

@@ -44,8 +44,8 @@ from tools.module_inventory import VENDOR, MENU, OWN as EDITOR_MODULES, PREVIEW,
 OWN = list(EDITOR_MODULES)
 if args.player_preview:
     OWN.extend(PREVIEW)
-NATIVE_NAME = 'mcm_input_9bc2033ffbb3.dll'
-NATIVE_SHA = '7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
+NATIVE_NAME = 'mcm_input_d630588870e5.dll'
+NATIVE_SHA = '2081329ca3f14f2975e4429284b541ddfd7d609321570a235f0f04f110efd0ea'
 native_path = Path(os.environ['EPIC_LUT_INPUT_LIBRARY']) if os.environ.get('EPIC_LUT_INPUT_LIBRARY') else ROOT.parent/'DBF-MCM/native/build'/NATIVE_NAME
 native = native_path.read_bytes()
 assert hashlib.sha256(native).hexdigest() == NATIVE_SHA, 'Input DLL differs from the reviewed build'

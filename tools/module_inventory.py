@@ -28,3 +28,6 @@ SOURCE_GROUPS.update({'gear_edit': 'editor', 'editor_actions': 'editor', 'gear_e
 
 OWN.append('weapon_pattern_quick')
 SOURCE_GROUPS['weapon_pattern_quick'] = 'editor'
+
+OWN.append('shared_targets')
+SOURCE_GROUPS['shared_targets']='gear'

@@ -4504,7 +4504,9 @@ function M.new(api, measure, Text)
                 end
                 if preview then
                     local kinds = { 'armor', 'helmet' }
-                    if preview.weapon and #preview.weapon > 0 then kinds[#kinds + 1] = 'weapon' end
+                    if preview.weapon and #preview.weapon > 0 then
+                        kinds[#kinds + 1] = 'weapon'
+                    end
                     local lane = 108 / #kinds
                     local strip_width = lane - 6
                     for n, kind in ipairs(kinds) do
@@ -4514,12 +4516,28 @@ function M.new(api, measure, Text)
                             rect(sx, y, strip_width, 12, { 65, 76, 85 }, nil, 'swatch_fill')
                         else
                             for i, color in ipairs(colors) do
-                                rect(sx + (i - 1) * strip_width / #colors, y, math.max(0, strip_width / #colors - 1), 12, color, nil, 'swatch_fill')
+                                rect(
+                                    sx + (i - 1) * strip_width / #colors,
+                                    y,
+                                    math.max(0, strip_width / #colors - 1),
+                                    12,
+                                    color,
+                                    nil,
+                                    'swatch_fill'
+                                )
                             end
                         end
                     end
                     for n = 1, #kinds - 1 do
-                        rect(x + dw - 122 - delete_width + n * lane - 2, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
+                        rect(
+                            x + dw - 122 - delete_width + n * lane - 2,
+                            y - 2,
+                            1,
+                            16,
+                            { 145, 156, 165 },
+                            nil,
+                            'swatch_fill'
+                        )
                     end
                 end
                 if pattern_preview then
@@ -4916,12 +4934,34 @@ function M.new(api, measure, Text)
                     white,
                     412
                 )
+                if dialog.on_suppress then
+                    local check_ui = M.custom_ui({
+                        rect = rect,
+                        bounded = bounded,
+                        hit = hit,
+                        hovering = hovering,
+                        text_y = text_y,
+                        epic_style = self.epic_typography,
+                        pixel_width = 1 / s,
+                    })
+                    check_ui.checkbox(px + 14, py + 58, 22, 26, dialog.dont_show_again == true, true, function(value)
+                        dialog.dont_show_again = value
+                    end)
+                    bounded(px + 42, py + 63, "Don't show this again", 12, white, 380)
+                end
                 rect(px + 14, py + 22, 198, 30, { 90, 45, 40 }, nil, 'control_fill')
                 bounded(px + 22, py + 30, dialog.action_label or 'Delete Preset', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     local ok, why = pcall(dialog.on_save)
                     self.notice = tostring(why)
-                    if ok then
+                    if ok and why ~= false then
+                        if dialog.dont_show_again and dialog.on_suppress then
+                            local saved, reason = pcall(dialog.on_suppress)
+                            if not saved or reason == false then
+                                self.notice = 'Preset saved; warning preference could not be saved: '
+                                    .. tostring(reason)
+                            end
+                        end
                         cancel()
                     end
                 end)
@@ -4975,14 +5015,23 @@ function M.new(api, measure, Text)
                     self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
                 end, { enabled = any, accent = any and accent, ink = T.background })
             elseif dialog.phase == 'confirm' then
-                bounded(px + 14, py + 116, dialog.description or 'Save the current gear as a named preset.', 14, white, 412)
+                bounded(
+                    px + 14,
+                    py + 116,
+                    dialog.description or 'Save the current gear as a named preset.',
+                    14,
+                    white,
+                    412
+                )
                 rect(px + 14, py + 22, 198, 30, T.field, nil, 'control_fill')
                 bounded(px + 22, py + 30, 'Yes', 14, white, 180)
                 hit(px + 14, py + 22, 198, 30, function()
                     if dialog.on_confirm then
                         local ok, why = pcall(dialog.on_confirm)
                         self.notice = tostring(why or 'Preset saved')
-                        if ok and why ~= false then cancel() end
+                        if ok and why ~= false then
+                            cancel()
+                        end
                         return
                     end
                     dialog.phase = 'name'

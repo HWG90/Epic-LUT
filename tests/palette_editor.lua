@@ -124,6 +124,28 @@ end
 assert(selected, 'New row preset did not appear in the dropdown')
 local saved_preset = m.file_io.read('tests/tmp/presets/row-new-test-row.dds', m.dds.MAX_BYTES)
 local saved_row = ffi.string(d.data + (h.get('edit_row') - 1) * d.width * 4, d.width * 16)
+-- Existing row writes wait for confirmation and retain the originally chosen pixels.
+local pending_write
+editor.confirm_overwrite = function(name, commit)
+    assert(name == 'new-test-row')
+    pending_write = commit
+    return 'Waiting'
+end
+assert(h.activate('save_row') and pending_write)
+assert(
+    m.file_io.read('tests/tmp/presets/row-new-test-row.dds', m.dds.MAX_BYTES) == saved_preset,
+    'Confirmation wrote before approval'
+)
+pending_write = nil -- Cancel: no callback, no writes.
+assert(h.activate('save_row') and pending_write)
+local row_offset = (h.get('edit_row') - 1) * d.width * 4
+local captured_value = d.data[row_offset]
+d.data[row_offset] = 77
+pending_write()
+local written = m.dds.decode(m.file_io.read('tests/tmp/presets/row-new-test-row.dds', m.dds.MAX_BYTES), 23, 1)
+assert(ffi.string(written, d.width * 16) == saved_row, 'Overwrite saved a changed selection instead of the snapshot')
+d.data[row_offset] = captured_value
+editor.confirm_overwrite = nil
 local before_new = ffi.string(d.data, d.width * d.height * 16)
 local undo_before_new, redo_before_new = #editor.undo, #editor.redo
 assert(h.set('row_preset', 'different-name'))

@@ -3569,39 +3569,20 @@ return {
                         return m.weapon_shared and operations.weapon_sharing().remote_identity(identity) or identity
                     end,
                     targets = function(identity, appearance)
-                        local targets, marks, seen = {}, {}, {}
                         local compatible = not m.weapon_shared
                             or m.weapon_shared.garment_compatible(identity, appearance)
-                        for _, unit in ipairs(compatible and m.avatar.units(memory, identity, nil, 0, 9) or {}) do
-                            marks[#marks + 1] = unit.unit
-                            for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
-                                local key = (unit.type or 0)
-                                    .. ':'
-                                    .. unit.slot
-                                    .. ':'
-                                    .. (material.mesh_index or 0)
-                                    .. ':'
-                                    .. (material.material_index or i - 1)
-                                for _, pattern in ipairs({ false, true }) do
-                                    local entry = appearance.entries[(pattern and 'p:' or '') .. key]
-                                    local b = {
-                                        unit = unit.unit,
-                                        mesh = material.mesh,
-                                        material = material.material,
-                                        slot = pattern and m.engine.PATTERN_SLOT or m.engine.LUT_SLOT,
-                                    }
-                                    local bound = entry and binding(b)
-                                    local tag = material_key(b) .. ':' .. b.slot
-                                    if bound and bound ~= 0 and not seen[tag] then
-                                        seen[tag] = true
-                                        b.original, b.current = bound, bound
-                                        local document = entry.document
-                                        targets[document] = targets[document] or {}
-                                        targets[document][#targets[document] + 1] = b
-                                    end
-                                end
-                            end
-                        end
+                        local targets, signature = m.shared_targets.garments(
+                            compatible and m.avatar.units(memory, identity, nil, 0, 9) or {},
+                            appearance,
+                            function(unit)
+                                return m.engine.unit_materials(native, unit)
+                            end,
+                            binding,
+                            material_key,
+                            m.engine.LUT_SLOT,
+                            m.engine.PATTERN_SLOT
+                        )
+                        local marks = { signature }
                         if m.weapon_shared then
                             local weapons, signature = operations.weapon_sharing().targets(identity, appearance)
                             marks[#marks + 1] = signature
@@ -3651,6 +3632,7 @@ return {
                                     weapons.apply(document, weapon)
                                 end
                             end,
+                            reconcile = garments.reconcile,
                             restore = function()
                                 local gear_done, weapon_done = garments.restore(), weapons.restore()
                                 return gear_done and weapon_done
@@ -4150,6 +4132,23 @@ return {
                     end)
                 end
             )
+            palette_editor.confirm_overwrite = function(name, commit)
+                if not preferences.confirm_overwrites() then
+                    return commit()
+                end
+                frontend.menu.outfit_dialog = {
+                    phase = 'delete',
+                    title = 'Overwrite Row Preset?',
+                    preset_name = name,
+                    description = 'Replace this saved row with the selected row?',
+                    action_label = 'Overwrite Row',
+                    on_save = commit,
+                    on_suppress = function()
+                        return preferences.save_confirm_overwrites(false)
+                    end,
+                }
+                return message('Confirm overwriting row preset ' .. name .. '.')
+            end
         end
         local owner = frontend
         ctx.on_cleanup(function()

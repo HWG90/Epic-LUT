@@ -17,11 +17,11 @@ function F.new(m,ctx,deps)
                 int epic_front_rect(void *,long *) __asm__("GetClientRect");
                 uint32_t epic_front_window_pid(void *,uint32_t *) __asm__("GetWindowThreadProcessId");
                 uint32_t epic_front_pid(void) __asm__("GetCurrentProcessId");
-                int mcm_install(void *);int mcm_capture(int);int mcm_captured(void);void mcm_release(void);int mcm_wheel(void);
+                int mcm_set_cursor_mode(int);int mcm_install(void *);int mcm_capture(int);int mcm_captured(void);void mcm_release(void);int mcm_wheel(void);
             ]])
             local user=ffi.load('user32');local kernel=ffi.load('kernel32')
             local native=ffi.load(ctx.dir..'/'..assert(m.frontend_native_name,'Packaged input runtime missing'))
-            for _,name in ipairs({'mcm_install','mcm_capture','mcm_captured','mcm_release','mcm_wheel'})do assert(native[name],'Input runtime interface missing '..name)end
+            for _,name in ipairs({'mcm_set_cursor_mode','mcm_install','mcm_capture','mcm_captured','mcm_release','mcm_wheel'})do assert(native[name],'Input runtime interface missing '..name)end
             local sr=assert(rawget(_G,'stingray'));local process=kernel.epic_front_pid();local foreground;local process_out=ffi.new('uint32_t[1]');local point=ffi.new('epic_front_point[1]');local rect=ffi.new('long[4]')
             self.capture=m.ui_capture.new(native,assert(sr.Window),ctx.log)
             self.view=m.ui_view.new(sr,nil,ctx.log)
@@ -148,7 +148,7 @@ function F.new(m,ctx,deps)
             elseif self.photo_input_bridge and not self.capture.active then
                 self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil
             end
-            local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window())
+            local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window(),self.preferences and self.preferences.cursor_mode and self.preferences.cursor_mode()or 'hardware')
             if not acquired then
                 local text=tostring(reason)
                 if text:find('Cannot acquire input capture',1,true)or text:find('Input capture lost',1,true)or text:find('Window capture unavailable',1,true)then self.view.release();return end

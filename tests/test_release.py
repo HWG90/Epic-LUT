@@ -14,8 +14,8 @@ with zipfile.ZipFile(candidate)as z:
     kind,body=resources[hash_name(entry)];length,version=struct.unpack_from('<II',body)
     assert kind==LUA_TYPE and version==2 and length==len(body)-8
     assert body[8:].startswith(('-- HD2-Addon: '+entry+'\n').encode())
-    library=z.read('armor_lut_editor/mcm_input_9bc2033ffbb3.dll')
-    assert hashlib.sha256(library).hexdigest()=='7e9a41484881fa851184b64a7b09f568b2f42637646bc85426a89fb5fb182350'
+    library=z.read('armor_lut_editor/mcm_input_d630588870e5.dll')
+    assert hashlib.sha256(library).hexdigest()=='2081329ca3f14f2975e4429284b541ddfd7d609321570a235f0f04f110efd0ea'
     assert library.hex().encode()in body and re.search(rb"author\s*=\s*[\"']Goose[\"']", z.read('armor_lut_editor/mod.lua'))
     assert not any(name.endswith(('.dds','.exr','.ini','.rar','.dbflut'))for name in z.namelist()if not name.startswith('armor_lut_editor/runtime/')) # Official runtime files are validated against its pinned manifest below.
     direct=b'direct_lut=true'in body

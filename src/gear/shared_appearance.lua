@@ -176,7 +176,12 @@ function S.new(deps)
                                 local captured, targets, unit_signature = pcall(deps.targets, identity, appearance)
                                 if captured then
                                     seen[key], target_failures[key] = true, nil
-                                    if not old or old.text ~= member.text or old.units ~= unit_signature then
+                                    if
+                                        not old
+                                        or old.retry
+                                        or old.text ~= member.text
+                                        or old.units ~= unit_signature
+                                    then
                                         if restore(key) then
                                             -- Recapture originals after removing the prior packet.
                                             captured, targets, unit_signature =
@@ -200,6 +205,19 @@ function S.new(deps)
                                                 end
                                             end)
                                         end
+                                    elseif not old.job and old.bindings.reconcile then
+                                        -- A map load can restore stock LUT pointers without replacing the Unit.
+                                        -- Repair only the exact original bindings retained by this peer session.
+                                        local repaired, why = pcall(old.bindings.reconcile)
+                                        if not repaired then
+                                            local refused = message(why)
+                                            if old.repair_failure ~= refused then
+                                                deps.note('Shared LUT repair deferred: ' .. refused)
+                                            end
+                                            old.repair_failure = refused
+                                        else
+                                            old.repair_failure = nil
+                                        end
                                     end
                                 end
                                 if not captured then
@@ -221,6 +239,11 @@ function S.new(deps)
         for key in pairs(self.peers) do
             if not seen[key] then
                 restore(key)
+            end
+        end
+        for key in pairs(target_failures) do
+            if not present[key] then
+                target_failures[key] = nil
             end
         end
         for key in pairs(decode_failures) do
@@ -293,6 +316,7 @@ function S.new(deps)
                 local ok, why = coroutine.resume(peer.job)
                 if not ok then
                     peer.job = nil
+                    peer.retry = true
                     restore(key)
                     deps.note('Shared appearance stopped safely: ' .. tostring(why))
                 elseif coroutine.status(peer.job) == 'dead' then

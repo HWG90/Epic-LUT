@@ -299,7 +299,9 @@ local prior_photo, prior_sync = rawget(_G, 'DBF_PHOTO_EDITOR_INPUT'), capture.sy
 _G.DBF_PHOTO_EDITOR_INPUT = {
     acquire = function(owner)
         assert(owner == 'Epic LUT')
-        if not photo_ready then return false, 'Photo restoration pending' end
+        if not photo_ready then
+            return false, 'Photo restoration pending'
+        end
         photo_lent = true
         return true
     end,
@@ -310,7 +312,9 @@ _G.DBF_PHOTO_EDITOR_INPUT = {
     end,
 }
 capture.sync = function(visible, focus)
-    if visible and focus then assert(photo_lent, 'Editor captured input before Photo yielded') end
+    if visible and focus then
+        assert(photo_lent, 'Editor captured input before Photo yielded')
+    end
     return prior_sync(visible, focus)
 end
 assert(f.open_advanced())

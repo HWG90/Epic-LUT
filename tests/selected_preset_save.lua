@@ -49,3 +49,27 @@ selected = nil
 a.save_setup_activate()
 assert(menu.outfit_dialog.phase == 'scope' and saves == 1)
 print('PASS selected preset save: confirmation, cancellation, stable target, new preset fallback')
+
+local warnings = true
+deps.preferences = function()
+    return {
+        confirm_overwrites = function()
+            return warnings
+        end,
+        save_confirm_overwrites = function(v)
+            warnings = v
+            return true
+        end,
+    }
+end
+selected = { name = 'Existing', entries = { { kind = 'armor' }, { kind = 'helmet' }, { kind = 'cape' } } }
+a.save_setup_activate()
+assert(menu.outfit_dialog.on_suppress and saves == 1)
+menu.outfit_dialog.on_suppress()
+menu.outfit_dialog = nil
+a.save_setup_activate()
+assert(saves == 2 and target == 'Existing' and not menu.outfit_dialog)
+warnings = true
+a.save_setup_activate()
+assert(menu.outfit_dialog and saves == 2)
+print('PASS overwrite suppression and re-enabling preserve normal preset saving')
