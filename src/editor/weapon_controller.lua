@@ -350,7 +350,11 @@ function C.new(host)
                 default = 1,
                 on_change = function(value)
                     if not syncing then
-                        return self.choose_group(value)
+                        local ok, why = self.choose_group(value)
+                        if ok and host.selection_changed then
+                            return host.selection_changed(self.state())
+                        end
+                        return ok, why
                     end
                 end,
             },

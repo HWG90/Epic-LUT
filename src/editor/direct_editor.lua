@@ -2529,6 +2529,11 @@ weapon_editor = function()
             weapon_name = function(slot, resource)
                 return m.weapon_names and m.weapon_names[resource] or ({ 'Primary', 'Secondary', 'Support' })[slot]
             end,
+            follow_selection = function()
+                local menu, mod = frontend.menu, api.mods[handle.id]
+                local page = menu and mod.pages[menu.page]
+                return palette_editor.gear == 'weapon' and page and page.id == 'colors'
+            end,
             load_editor = function(document, target)
                 assert(stop_identification(), 'Highlight restoration pending')
                 editor_pending, populate_request = nil, nil
@@ -2542,6 +2547,9 @@ weapon_editor = function()
                 basic_selected, identify_kind, edit.quick_selection = nil, nil, nil
                 if palette_editor then
                     palette_editor.gear = 'weapon'
+                    if m.weapon_pattern_quick and not palette_editor.weapon_pattern then
+                        palette_editor.weapon_pattern = m.weapon_pattern_quick.new(weapon_editor().controller())
+                    end
                     palette_editor.sync()
                 end
             end,

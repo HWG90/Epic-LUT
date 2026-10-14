@@ -46,7 +46,9 @@ function V.new(deps)
             end
         end
         local h = self.handle
-        local pattern = self.gear ~= 'weapon' and self.pattern_editor or nil
+        local pattern = self.gear == 'weapon' and d and d.width == 23 and self.weapon_pattern
+            or self.gear ~= 'weapon' and self.pattern_editor
+            or nil
         local pattern_host = not self.embedded and pattern and pattern.workspace and pattern.quick
         if pattern_host and pattern.set_workspace_host then
             pattern.set_workspace_host(true)
@@ -371,7 +373,11 @@ function V.new(deps)
                         if target == 'load' then
                             ui.activate('populate_worn')
                         elseif target == 'pattern' then
-                            ui.activate('pattern_open')
+                            if self.gear == 'weapon' then
+                                pattern.show()
+                            else
+                                ui.activate('pattern_open')
+                            end
                         else
                             if pattern_full and pattern.dismiss then
                                 if pattern.dismiss() == false then
@@ -407,14 +413,18 @@ function V.new(deps)
                 ui.rect(ui.x + 16, selector_y, 2, 26, theme.focus, nil, 'control_accent')
                 local resource, hash
                 if self.gear == 'weapon' then
-                    ui.bounded(
-                        selector_x + 6,
-                        selector_y + 7,
-                        d and d.source or 'Weapon LUT',
-                        14,
-                        theme.text,
-                        selector_width - 12
-                    )
+                    if pattern_document(d) then
+                        ui.bounded(
+                            selector_x + 6,
+                            selector_y + 7,
+                            d.source or 'Pattern LUT',
+                            14,
+                            theme.text,
+                            selector_width - 12
+                        )
+                    else
+                        ui.choice('weapon_lut', selector_x, selector_y, selector_width)
+                    end
                     hash = d and d.resource
                     resource = hash and ('[0x' .. hash .. ']')
                 else
@@ -592,7 +602,11 @@ function V.new(deps)
                     26,
                     'Pattern LUT Editor',
                     function()
-                        ui.activate('pattern_open')
+                        if self.gear == 'weapon' then
+                            pattern.show()
+                        else
+                            ui.activate('pattern_open')
+                        end
                     end,
                     {
                         help = 'Edit separate 3x1 Pattern LUTs.',

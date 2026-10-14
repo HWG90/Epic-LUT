@@ -678,7 +678,9 @@ function R.new(deps)
                         for _, kind in ipairs({ 'material', 'pattern' }) do
                             for _, group in ipairs(catalog[kind]) do
                                 for _, b in ipairs(group.bindings) do
-                                    if not discovery.present(b) or discovery.binding(b) ~= b.current then
+                                    -- binding() already proves the complete locator and identity.
+                                    -- A separate present() repeated that native work for every cell.
+                                    if discovery.binding(b) ~= b.current then
                                         valid, why = false, 'Weapon material or LUT changed'
                                     end
                                 end

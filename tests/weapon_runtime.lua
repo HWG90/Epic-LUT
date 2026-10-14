@@ -5,6 +5,11 @@ local cases = 0
 do
     local poll = fixture()
     poll.runtime.refresh(1)
+    local locator_checks, meshes = 0, poll.native.meshes
+    poll.native.meshes = function(...)
+        locator_checks = locator_checks + 1
+        return meshes(...)
+    end
     local snapshots = 0
     poll.identity_hook = function()
         snapshots = snapshots + 1
@@ -13,6 +18,13 @@ do
         #poll.runtime.update() == 0 and snapshots == 2,
         'Idle polling repeated full identity/World searches for every binding'
     )
+    local targets = 0
+    for _, kind in ipairs({ 'material', 'pattern' }) do
+        for _, group in ipairs(poll.runtime.groups(1, kind)) do
+            targets = targets + #group.bindings
+        end
+    end
+    assert(locator_checks == targets, 'Polling checked each native locator more than once')
     snapshots = 0
     poll.identity_hook = function()
         snapshots = snapshots + 1

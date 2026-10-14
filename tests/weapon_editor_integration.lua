@@ -22,6 +22,7 @@ m.weapon_discovery = dofile('src/weapons/weapon_discovery.lua')
 m.weapon_controller = dofile('src/editor/weapon_controller.lua')
 m.weapon_view = dofile('src/editor/weapon_view.lua')
 m.weapon_bridge = dofile('src/editor/weapon_bridge.lua')
+m.weapon_pattern_quick = dofile('src/editor/weapon_pattern_quick.lua')
 m.weapon_mapping = dofile('src/editor/weapon_mapping.lua')
 m.primary_identity = {
     new = function()
@@ -148,6 +149,17 @@ local function buttons()
     return result
 end
 assert(buttons().weapon_editor())
+local selected_page = base.frontend().menu.page
+for index, candidate in ipairs(mod.pages) do
+    if candidate.id == 'colors' then base.frontend().menu.page = index end
+end
+local selection_writes = #f.writes
+assert(handle.set('weapon_lut', 2))
+assert(base.info().editor.kind == 'weapon' and base.info().editor.data[0] == f.documents[f.B].data[0],
+    'Weapon LUT dropdown did not load its selected group into the shared table')
+assert(#f.writes == selection_writes, 'Selecting a weapon LUT applied it to live bindings')
+assert(handle.set('weapon_lut', 1))
+base.frontend().menu.page = selected_page
 local loaded = base.info().editor
 assert(loaded.kind == 'weapon' and loaded.family == 'material' and loaded.weapon_slot == 1 and loaded.width == 23)
 assert(
@@ -182,6 +194,14 @@ local function weapon_footer()
         end
     end
     assert(found, 'Rendered weapon editor changed the Apply footer back to garment scope')
+    if base.info().editor.width == 23 then
+        local quick, roughness = false, false
+        for _, command in ipairs(commands) do
+            quick = quick or command.text == 'Quick Editor: Pattern LUT'
+            roughness = roughness or command.text == 'Roughness'
+        end
+        assert(quick and roughness, 'Shared weapon table omitted its Pattern quick controls')
+    end
     assert(
         header['Helmet LUT'] and header['Armor LUT'] and header['Weapon LUT'],
         'Shared LUT header omitted Weapon LUT'

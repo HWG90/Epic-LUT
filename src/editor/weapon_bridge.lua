@@ -510,6 +510,13 @@ function B.new(m, host)
         end
         local actions = {
             snapshot = self.snapshot,
+            selection_changed = function(state)
+                if host.follow_selection and host.follow_selection() then
+                    assert(state.target and state.document, 'Selected weapon LUT pixels are not ready')
+                    return self.open(state.document, state.target)
+                end
+                return true
+            end,
             load_current = self.load_current,
             apply = self.apply,
             restore = self.restore,

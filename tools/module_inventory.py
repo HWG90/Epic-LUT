@@ -25,3 +25,6 @@ def source_path(name):
     return f'src/{SOURCE_GROUPS[actual]}/{actual}.lua'
 
 SOURCE_GROUPS.update({'gear_edit': 'editor', 'editor_actions': 'editor', 'gear_export': 'presets', 'outfit_capture': 'presets', 'import_summary': 'editor', 'editor_composition': 'editor', 'armory_apply': 'presets', 'export_provenance': 'presets', 'import_mapping': 'editor', 'session_history': 'editor'})
+
+OWN.append('weapon_pattern_quick')
+SOURCE_GROUPS['weapon_pattern_quick'] = 'editor'
