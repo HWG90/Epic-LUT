@@ -136,6 +136,42 @@ before = #f.order
 assert(c.apply() == false and #f.order == before and #f.errors > 0)
 assert(c.choose_slot(3) and c.state().weapon.status == 'loading' and c.state().target == nil)
 assert(c.choose_slot(1) and c.choose_family('main') and c.choose_group(1))
+local camo = fixture()
+camo.host.apply_camo = function(...)
+    camo.hits.apply_camo = { ... }
+    return true
+end
+local camo_controller = camo.controller
+assert(camo_controller.toggle_camo_row(3, true))
+assert(camo_controller.apply_camo(2, 'colorway'))
+assert(camo.hits.apply_camo[3][3] and not camo.hits.apply_camo[3][1])
+assert(camo_controller.choose_group(2) and next(camo_controller.camo_selection()) == nil)
+assert(camo_controller.choose_group(1) and camo_controller.camo_selection()[3])
+camo.source.weapons[2] = {
+    status = 'ready',
+    resource = camo.source.weapons[1].resource,
+    name = 'Same resource in second slot',
+    main = {
+        {
+            id = 'body',
+            label = 'Body LUT 1',
+            document = camo.body,
+            verified_shape = true,
+            targets = camo.targets(2, 0),
+        },
+    },
+    pattern = {},
+}
+assert(
+    camo_controller.choose_slot(2) and next(camo_controller.camo_selection()) == nil,
+    'Checked rows leaked between weapon slots sharing a resource and group ID'
+)
+assert(camo_controller.select_camo_rows(true) and camo_controller.camo_selection()[8])
+assert(
+    camo_controller.choose_slot(1) and camo_controller.camo_selection()[3] and not camo_controller.camo_selection()[8]
+)
+assert(camo_controller.select_camo_rows(false) and next(camo_controller.camo_selection()) == nil)
+assert(camo_controller.apply_camo(2, 'colorway') == false)
 local shared = fixture()
 local shared_pattern = shared.source.weapons[1].pattern[1]
 for _, binding in ipairs(shared.targets(1, 1)) do

@@ -179,7 +179,8 @@ function C.new(host)
     end
     local camo_rows = {}
     local function camo_key(state)
-        return state.target and state.target.weapon_resource .. ':' .. state.target.group_id
+        return state.target
+            and state.target.weapon_slot .. ':' .. state.target.weapon_resource .. ':' .. state.target.group_id
     end
     function self.camo_selection()
         local state = self.state()
