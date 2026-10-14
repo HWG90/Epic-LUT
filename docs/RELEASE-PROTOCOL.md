@@ -33,15 +33,22 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 - Keep the three entrypoints clearly labeled and explain that users enable one copy. Retain older downloads for rollback rather than deleting history.
 - Verify public rendering, version/file IDs, categories, download availability and file identity where available. Record the Nexus scan state separately: pending, completed or failed. Upload success does not prove the scan finished or the public download is available.
 
-## 5. Discord
+## 5. AyakaMods
+
+- Publish or update the existing [Epic LUT listing](https://ayakamods.com/mods/epic-lut-an-ingame-lut-editor-importer-and-exporter.4925/). Keep the version aligned with the published GitHub release.
+- Use that version's **GitHub release page** as the External download URL. Do not use the repository homepage or a single package's direct download URL.
+- Copy David's current edited Nexus description and feature image, preserving his wording, formatting, links and credits. Adapt only incompatible presentation markup, such as Nexus's closing list-item tags. The live Nexus page takes precedence over an older repository copy.
+- Verify the public description, version and feature image, then follow the download button and confirm it reaches the intended GitHub release page. Retain the listing URL and publication evidence in the receipt.
+
+## 6. Discord
 
 - Update the title and opening post of the [existing Epic LUT thread](https://discord.com/channels/1260111500522295377/1557790003206037527/1557790003206037527).
 - Use the current announcement, concise changes, correct download links and loader choices. Retain credits and the Shared Lobby LUT testing notice. Keep within the surface's message limit.
 - Verify the rendered title/body and links. Edit the existing post; do not create duplicate announcements or message unrelated channels unless requested.
 
-## 6. Record and report
+## 7. Record and report
 
-Store a scoped publication receipt with the source commit, tag/release URL, asset names and SHA-256 hashes, Nexus file IDs/categories/scan state, Discord thread/message links, checks performed, and any pending item. Keep private runtime evidence outside public packages and source.
+Store a scoped publication receipt with the source commit, tag/release URL, asset names and SHA-256 hashes, Nexus file IDs/categories/scan state, Ayaka listing/version/external URL, Discord thread/message links, checks performed, and any pending item. Keep private runtime evidence outside public packages and source.
 
 For documentation corrections after publication, preserve the tagged source snapshot and uploaded ZIPs. Commit the correction separately, update the public copy, and record the follow-up documentation commit without replacing release assets or moving the tag.
 

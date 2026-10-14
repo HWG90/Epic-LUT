@@ -72,15 +72,25 @@ function pattern.close()
 end
 function pattern.quick_height(ui, cell_height)
     return (ui.text_size and ui.text_size(13, 'heading') or 13)
-        + (ui.spacing and ui.spacing(6) or 6) * 2
+        + (ui.text_size and ui.text_size(11, 'hint') or 11)
+        + (ui.spacing and ui.spacing(6) or 6) * 3
         + math.max(0, math.min(40, cell_height or 28))
 end
 function pattern.quick(ui, bounds, kind)
     quick_bounds, quick_kind = bounds, kind
     local gap = ui.spacing and ui.spacing(6) or 6
-    local width = math.min(40, bounds.cell_width, (bounds.w - gap) / 2)
+    local width = math.min(40, bounds.cell_width, (bounds.w - gap * 2) / 3)
     ui.bounded(bounds.x, bounds.y + bounds.h - 18, 'Quick Pattern Host', 13, ui.theme.white, bounds.w, 'heading')
-    for column = 1, 2 do
+    for column = 1, 3 do
+        ui.bounded(
+            bounds.x + (column - 1) * (width + gap),
+            bounds.y + 2 + bounds.row_height + gap,
+            ({ 'Color', 'Mat/Opac', 'Roughness' })[column],
+            11,
+            ui.theme.white,
+            width,
+            'hint'
+        )
         ui.rect(
             bounds.x + (column - 1) * (width + gap),
             bounds.y + 2,
@@ -324,7 +334,7 @@ for _, c in ipairs(commands) do
         swatches = swatches + 1
     end
 end
-assert(swatches == 2 and quick_kind == 'armor')
+assert(swatches == 3 and quick_kind == 'armor')
 assert(quick_bounds.x == editor.grid_bounds.x + 82, 'Quick Pattern does not align with the first material cell')
 assert(
     math.abs(quick_bounds.w - quick_bounds.cell_width * 23) < 0.01,

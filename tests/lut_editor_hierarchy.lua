@@ -10,6 +10,12 @@ local api = Core.new({
         return true
     end,
 })
+local copied_id, clipboard_mode, last_note
+api.clipboard = {
+    set = function()
+        error('Stale API clipboard used')
+    end,
+}
 local doc = { width = 23, height = 8, data = ffi.new('float[?]', 23 * 8 * 4), source = 'current-armor.dds' }
 for i = 0, 23 * 8 * 4 - 1 do
     doc.data[i] = (i % 13) / 12
@@ -25,6 +31,7 @@ local m = {
     scratch_tool = dofile('src/editor/scratch_tool.lua'),
     semantics = dofile('src/core/semantics.lua'),
     palette = dofile('src/core/palette.lua'),
+    resource_ids = dofile('src/core/resource_ids.lua'),
     dds = dofile('src/core/dds.lua'),
     ui_core = Core,
     windows = {
@@ -39,6 +46,7 @@ local editor = dofile('src/editor/lut_editor.lua').new(
         return doc
     end,
     function(v)
+        last_note = v
         return v
     end,
     function()
@@ -133,6 +141,18 @@ mod.controls.basic_armor_lut.choice_hashes = { '032abc9d5c9040ed', '032abc9d5c90
 local menu = Menu.new(api, function(value, size)
     return #value * size * 0.5
 end)
+menu.clipboard = {
+    set = function(text)
+        if clipboard_mode == 'busy' then
+            return false, 'Clipboard is busy.'
+        end
+        if clipboard_mode == 'throw' then
+            error('Clipboard write failed', 0)
+        end
+        copied_id = text
+        return true
+    end,
+}
 menu.visible = true
 for i, page in ipairs(mod.pages) do
     if page.id == 'colors' then
@@ -184,10 +204,10 @@ end
 local function overlaps(a, b)
     return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
 end
-local function input(x, y, down)
+local function input(x, y, down, button)
     menu.tick({
         down = function(key)
-            return down and key == 1
+            return down and key == (button or 1)
         end,
         mouse = function()
             return x, y
@@ -315,6 +335,36 @@ for _, width in ipairs({ 860, 1100, 1600 }) do
                 end
             end
             assert(hash_help, 'Named LUT tooltip lost the exact texture ID')
+            local rename_count = calls.rename_lut_activate
+            local previous_pixels = ffi.string(doc.data, doc.width * doc.height * 16)
+            local previous_revision = doc.revision
+            local function copy_id()
+                input(alias.x + 5, alias.y + 2, true, 2)
+                input(alias.x + 5, alias.y + 2, false, 2)
+            end
+            assert(handle.set('resource_format', 2)) -- Preference changes after the hit was composed.
+            copy_id()
+            assert(copied_id == '18364758544493064720', 'Named LUT copy lost its exact unsigned 64-bit decimal ID')
+            assert(handle.set('resource_format', 1))
+            copy_id()
+            assert(copied_id == '0xfedcba9876543210', 'LUT ID copy included an alias, SDK label or display brackets')
+            for _, failure in ipairs({ 'busy', 'throw' }) do
+                clipboard_mode = failure
+                copy_id()
+                assert(
+                    menu.visible and not last_note:find('Copied', 1, true),
+                    'Clipboard failure closed the menu or reported success'
+                )
+                assert(copied_id == '0xfedcba9876543210')
+            end
+            clipboard_mode = nil
+            assert(calls.rename_lut_activate == rename_count, 'Right-click opened LUT renaming')
+            assert(mod.controls.basic_armor_lut.choice_details[3] == 'CapeSwirl')
+            assert(
+                doc.revision == previous_revision
+                    and ffi.string(doc.data, doc.width * doc.height * 16) == previous_pixels,
+                'Copying a resource ID edited LUT values or history'
+            )
             input(alias.x + 5, alias.y + 2, true)
             input(alias.x + 5, alias.y + 2, false)
             assert(calls.rename_lut_activate, 'Clicking the LUT name did not open the naming action')

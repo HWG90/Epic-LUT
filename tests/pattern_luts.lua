@@ -232,7 +232,7 @@ assert(
     labels['Pattern LUT Editor']
         and labels['1: Accent color']
         and labels['2: Material / opacity']
-        and labels['3: Unknown']
+        and labels['3: Roughness (A)']
 )
 local unchanged = ffi.string(pattern.document.data, 48)
 assert(handle.set('show_alpha', true))
@@ -335,12 +335,15 @@ local pattern_before = ffi.string(pattern.document.data, 48)
 local pattern_history = #pattern.undo
 pattern.column, pattern.raw = 3, false
 assert(
-    picker.can_open_picker() == false and not pcall(picker.picker_begin),
-    'Unknown Pattern channels opened without the Advanced raw gate'
+    picker.can_open_picker() == true and picker.picker_channel_enabled(4),
+    'Roughness alpha is unavailable without the Advanced raw gate'
 )
+for channel = 1, 3 do
+    assert(not picker.picker_channel_enabled(channel), 'Roughness picker exposed unknown RGB without Advanced')
+end
 assert(
     ffi.string(pattern.document.data, 48) == pattern_before and #pattern.undo == pattern_history,
-    'Protected Pattern picker mutated pixels/history'
+    'Checking Roughness picker permissions mutated pixels/history'
 )
 pattern.raw = true
 assert(picker.can_open_picker() == true, 'Advanced raw gate did not enable Pattern picker')
@@ -878,7 +881,7 @@ do
     assert(writes == 0 and reads == 0 and discovery == 0, 'Quick initialization wrote gear or started discovery')
     colors = {}
     quick.quick(ui, bounds, 'armor')
-    assert(#colors == 2 and colors[1][3] == 255 and colors[2][2] == 128)
+    assert(#colors == 3 and colors[1][3] == 255 and colors[2][2] == 128)
     assert(h.set('pattern_color', '#FFFF00'))
     local edited, undo = quick.document, quick.undo
     quick.tick(0.5)
@@ -904,4 +907,140 @@ do
 end
 print(
     'PASS Pattern Quick initialization: cached snapshots, async readiness, selected slot/gear, edits/history and no draw discovery'
+)
+
+-- Roughness is column 3 Alpha. Its normal picker must preserve every other
+-- float bit, including HDR/out-of-range RGB and signed zero in unknown RGB.
+do
+    local stock = { width = 3, height = 1, data = ffi.new('float[12]') }
+    for index = 0, 11 do
+        stock.data[index] = (index - 5) * 0.37
+    end
+    stock.data[3], stock.data[7] = 2.75, -0.25
+    stock.data[8], stock.data[9], stock.data[11] = 3.125, -2.5, 0.6
+    ffi.cast('uint32_t *', stock.data)[10] = 0x80000000
+    local target = { original = 900, current = 900, material = 901, armor = true }
+    local current, writes = 900, 0
+    local roughness = dofile('src/editor/pattern_luts.lua').new({
+        session = {
+            owned = {},
+            apply = function(document, bindings)
+                assert(current == target.current, 'Foreign Roughness binding')
+                writes = writes + 1
+                current, target.current = 1000 + writes, 1000 + writes
+                target.texture = { object = current, width = 3, height = 1, data = document.data }
+                target.document = document
+            end,
+            restore = function()
+                return true
+            end,
+        },
+        discover = function()
+            return { target }
+        end,
+        key = function(binding)
+            return binding.material
+        end,
+        binding = function()
+            return current
+        end,
+        present = function()
+            return true
+        end,
+        original = function()
+            return stock
+        end,
+        resource_id = function(object)
+            return tostring(object)
+        end,
+        rgb = dofile('src/core/palette.lua').rgb,
+        note = function(value)
+            return value
+        end,
+    })
+    local definitions = roughness.controls()
+    definitions[#definitions + 1] = { id = 'show_alpha', type = 'toggle', label = 'Show Alpha', default = false }
+    local h = api.register({
+        id = 'roughness_regression',
+        name = 'Roughness',
+        pages = { { id = 'p', name = 'Pattern', controls = definitions } },
+    })
+    local controls = api.mods[h.id].controls
+    roughness.attach(h, controls)
+    assert(roughness.prime('armor'))
+    roughness.column, roughness.raw = 3, false
+    local picker = controls.pattern_picker
+    assert(picker.can_open_picker() and picker.picker_channel_enabled(4), 'Roughness Alpha requires Advanced')
+    for channel = 1, 3 do
+        assert(not picker.picker_channel_enabled(channel), 'Roughness exposes unknown RGB channels')
+    end
+    local before = ffi.string(roughness.document.data, 48)
+    local before_history = #roughness.undo
+    picker.picker_begin()
+    assert(writes == 0 and #roughness.undo == before_history, 'Opening Roughness changed the document/history')
+    picker.picker_preview({ 255, 0, 127 }, 0.2)
+    assert(
+        ffi.string(roughness.document.data, 48):sub(1, 44) == before:sub(1, 44),
+        'Roughness preview changed RGB or other Alpha'
+    )
+    assert(math.abs(roughness.document.data[11] - 0.2) < 0.00001)
+    picker.picker_end(false)
+    assert(
+        ffi.string(roughness.document.data, 48) == before and #roughness.undo == before_history,
+        'Roughness cancel did not restore exact pixels/history'
+    )
+
+    picker.picker_begin()
+    picker.picker_preview({ 0, 255, 0 }, 0.3)
+    picker.picker_preview({ 1, 2, 3 }, 0.4)
+    picker.picker_end(true)
+    local committed = ffi.string(roughness.document.data, 48)
+    assert(
+        committed:sub(1, 44) == before:sub(1, 44) and committed ~= before,
+        'Roughness commit changed channels besides Alpha'
+    )
+    assert(#roughness.undo == before_history + 1, 'Continuous Roughness preview did not produce exactly one Undo')
+    assert(ffi.cast('uint32_t *', roughness.document.data)[10] == 0x80000000, 'Roughness erased signed-zero RGB')
+    assert(h.activate('pattern_undo') and ffi.string(roughness.document.data, 48) == before)
+    assert(h.activate('pattern_redo') and ffi.string(roughness.document.data, 48) == committed)
+
+    local unchanged_writes, unchanged_history = writes, #roughness.undo
+    assert(picker.picker_commit({ 254, 253, 252 }, picker.picker_alpha()))
+    assert(
+        writes == unchanged_writes and #roughness.undo == unchanged_history,
+        'Unchanged Roughness allocated/uploaded a texture or added history'
+    )
+    picker.picker_begin()
+    picker.picker_preview({ 0, 0, 0 }, picker.picker_alpha())
+    picker.picker_end(true)
+    assert(
+        writes == unchanged_writes and #roughness.undo == unchanged_history,
+        'Unchanged Roughness preview added writes/history'
+    )
+
+    assert(picker.picker_commit({ 0, 255, 255 }, 0))
+    assert(roughness.document.data[11] == 0 and ffi.string(roughness.document.data, 48):sub(1, 44) == before:sub(1, 44))
+    assert(h.set('pattern_unknown_a', 2.75), 'Roughness scalar lost finite raw-value support')
+    assert(
+        roughness.document.data[11] == 2.75 and ffi.string(roughness.document.data, 48):sub(1, 44) == before:sub(1, 44)
+    )
+
+    roughness.document.read_only = true
+    assert(not picker.can_open_picker() and not pcall(picker.picker_begin))
+    roughness.document.read_only = nil
+    roughness.document.stale = true
+    assert(not picker.can_open_picker() and not pcall(picker.picker_begin))
+    roughness.document.stale = nil
+    picker.picker_begin()
+    local foreign_before = ffi.string(roughness.document.data, 48)
+    current = 7777
+    assert(not pcall(picker.picker_preview, { 20, 30, 40 }, 0.1), 'Roughness overwrote a foreign native binding')
+    assert(
+        current == 7777 and ffi.string(roughness.document.data, 48) == foreign_before,
+        'Failed Roughness preview changed CPU pixels or claimed a foreign texture'
+    )
+    picker.picker_end(false)
+end
+print(
+    'PASS Roughness Alpha: exact other-channel bits, live preview/cancel, one Undo, zero/raw numeric values, no-op and ownership guards'
 )

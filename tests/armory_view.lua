@@ -714,6 +714,39 @@ for _, font in ipairs({ 12, 20 }) do
         assert(not menu.outfit_dialog and scope_saves == count, 'Native scope cancellation saved a preset')
     end
 end
+-- Apply uses the same scaled inner padding as its rendered button. Every
+-- checkbox label retains the requested font even when the target row wraps.
+for _, font in ipairs({ 12, 16, 20, 28, 36 }) do
+    for _, scale in ipairs({ 0.7, 1, 1.15 }) do
+        for _, width in ipairs({ 1100, 1500, 2000 }) do
+            menu.font_size, menu.ui_scale, menu.window_width, menu.window_height = font, scale, width, 1000
+            view.sidebar_scroll = font == 36 and 200 or 0
+            menu.compose(1920, 1080)
+            local armor = assert(sidebar_label('Armor'))
+            local apply = assert(
+                sidebar_label('Apply Preset'),
+                'Missing Armory Apply at font ' .. font .. ', width ' .. width .. ', scale ' .. scale
+            )
+            local resolved = font * menu.window_bounds.scale
+            for _, label in ipairs({ 'Armor', 'Helmet', 'Cape', 'Apply Preset' }) do
+                local text = assert(sidebar_label(label))
+                assert(
+                    text.text == label and math.abs(text.size - resolved) < 0.01,
+                    'Armory target/apply label was truncated or shrunk at font ' .. font .. ', width ' .. width
+                )
+                local side, window = view.sidebar_bounds, menu.window_bounds
+                assert(
+                    text.x + #label * text.size * 0.5 <= window.x + (side.x + side.w - 12) * window.scale + 0.01,
+                    'Armory ' .. label .. ' label escapes its sidebar at font ' .. font .. ', width ' .. width
+                )
+            end
+            if font == 36 and width == 1100 then
+                local cape = assert(sidebar_label('Cape'))
+                assert(cape.y < armor.y and apply.y < cape.y, 'Narrow Armory did not wrap targets before Apply')
+            end
+        end
+    end
+end
 -- Preview compaction is exact and confined to the preview: the 169 stored
 -- bindings, unknown columns, alpha/HDR floats and gear identity are retained.
 local function make_document(width, height, seed)

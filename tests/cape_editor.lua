@@ -62,6 +62,16 @@ local native = {
 }
 local fixture = assert(os.getenv('EPIC_LUT_TEST_ROOT')) .. '/tests/tmp/presets'
 local m = {
+    gear_edit = dofile('src/editor/gear_edit.lua'),
+    editor_actions = dofile('src/editor/editor_actions.lua'),
+    gear_export = dofile('src/presets/gear_export.lua'),
+    outfit_capture = dofile('src/presets/outfit_capture.lua'),
+    import_summary = dofile('src/editor/import_summary.lua'),
+    editor_composition = dofile('src/editor/editor_composition.lua'),
+    armory_apply = dofile('src/presets/armory_apply.lua'),
+    export_provenance = dofile('src/presets/export_provenance.lua'),
+    import_mapping = dofile('src/editor/import_mapping.lua'),
+    session_history = dofile('src/editor/session_history.lua'),
     appearance_state = dofile('src/gear/appearance_state.lua'),
     binding_session = dofile('src/gear/binding_session.lua'),
     gear_catalog = dofile('src/gear/gear_catalog.lua'),
@@ -1516,6 +1526,138 @@ do
         same_native(before)
         assert(bound[other][1] == extra_before[1] and bound[other][2] == extra_before[2])
         assert(frontend.menu.lut_apply_dialog == dialog)
+        -- Basic and Armory resolve actual Pattern destinations the same way.
+        -- A saved companion does not imply every live LOD has that slot.
+        activate('restore')
+        bound[other][2] = 0
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        assert(extra.enabled and extra.detail == nil, 'Missing live Pattern disabled a valid material LUT')
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(uploads[bound[other][1]] == ffi.string(extra_material.data, 23 * 8 * 16) and bound[other][2] == 0)
+        activate('restore')
+        select_targets(1)
+        activate('outfit_apply_selected')
+        assert(uploads[bound[other][1]] == ffi.string(extra_material.data, 23 * 8 * 16) and bound[other][2] == 0)
+        activate('restore')
+        bound[other][2] = 5011
+        materials[units[1].unit][3] =
+            { mesh = extra_member + 10, material = extra_member, mesh_index = 2, material_index = 1 }
+        bound[extra_member] = { [1] = 5010, [2] = 0, [3] = 0 }
+        activate('outfit_choose_luts')
+        dialog = assert(frontend.menu.lut_apply_dialog)
+        for _, item in ipairs(dialog.columns[1].items) do
+            if item.label == 'Armor LUT 2' then
+                extra = item
+            end
+        end
+        assert(extra.enabled and extra.detail == 'Pattern included', 'One Pattern-free LOD disabled the whole LUT')
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(uploads[bound[other][1]] == ffi.string(extra_material.data, 23 * 8 * 16))
+        assert(uploads[bound[extra_member][1]] == ffi.string(extra_material.data, 23 * 8 * 16))
+        assert(uploads[bound[other][2]] == ffi.string(extra_pattern.data, 48) and bound[extra_member][2] == 0)
+        activate('restore')
+        -- This LOD has a different original Pattern with no certified match.
+        originals[5012] = m.basic_state.clone(pattern_original)
+        originals[5012].resource = '6666666666666666'
+        bound[extra_member][2] = 5012
+        activate('outfit_choose_luts')
+        dialog = assert(frontend.menu.lut_apply_dialog)
+        for _, item in ipairs(dialog.columns[1].items) do
+            if item.label == 'Armor LUT 2' then
+                extra = item
+            end
+        end
+        assert(extra.enabled, 'Unmatched Pattern disabled its valid mesh-family material')
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(uploads[bound[extra_member][1]] == ffi.string(extra_material.data, 23 * 8 * 16))
+        assert(bound[extra_member][2] == 5012, 'Basic invented a Pattern assignment Armory would skip')
+        activate('restore')
+        materials[units[1].unit][3] = nil
+        -- Pattern-only presets are valid on the Armory page and in Basic.
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = {
+            name = 'Cape fixture',
+            armor = { extra_pattern },
+            helmet = {},
+            cape = {},
+            entries = { { kind = 'armor', key = 'p:0:2:1:1', document = extra_pattern } },
+        }
+        assert(h.set('outfit_preset', 2))
+        dialog, items = chooser()
+        extra = items['Armor LUT 2']
+        assert(extra.enabled and extra.detail == 'Pattern only', 'Basic cannot apply a matched Pattern-only preset')
+        local material_before = bound[other][1]
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(bound[other][1] == material_before and uploads[bound[other][2]] == ffi.string(extra_pattern.data, 48))
+        activate('restore')
+        select_targets(1)
+        activate('outfit_apply_selected')
+        assert(bound[other][1] == material_before and uploads[bound[other][2]] == ffi.string(extra_pattern.data, 48))
+        activate('restore')
+        -- Pattern slots can also exist on materials with no 23-column LUT.
+        materials[units[1].unit][3] =
+            { mesh = extra_member + 10, material = extra_member, mesh_index = 2, material_index = 1 }
+        bound[extra_member] = { [1] = 0, [2] = 5011, [3] = 0 }
+        saved_outfit.entries[#saved_outfit.entries + 1] =
+            { kind = 'armor', key = 'p:0:2:2:1', document = extra_pattern }
+        local function pattern_choices()
+            activate('outfit_choose_luts')
+            local dialog, all, standalone = assert(frontend.menu.lut_apply_dialog), {}, nil
+            for _, column in ipairs(dialog.columns) do
+                for _, item in ipairs(column.items) do
+                    all[item.id] = item.enabled == true
+                    if item.label == 'Armor Pattern LUT 1' then
+                        standalone = item
+                    end
+                end
+            end
+            assert(standalone and standalone.enabled and standalone.detail == 'Pattern only')
+            return dialog, all, standalone
+        end
+        dialog, all, extra = pattern_choices()
+        local unchanged_pattern = bound[other][2]
+        assert(dialog.on_apply({ [extra.id] = true }))
+        assert(bound[extra_member][1] == 0 and uploads[bound[extra_member][2]] == ffi.string(extra_pattern.data, 48))
+        assert(bound[other][2] == unchanged_pattern, 'Standalone Pattern checkbox applied an unchecked destination')
+        activate('restore')
+        local function pixels(target, slot)
+            local object = bound[target][slot]
+            local original = originals[object]
+            return uploads[object]
+                or original and ffi.string(original.data, original.width * original.height * 16)
+                or tostring(object)
+        end
+        local function appearance()
+            local result = {}
+            for _, target in ipairs({ armor, helmet, cape, other, extra_member }) do
+                for slot = 1, 2 do
+                    result[target .. ':' .. slot] = pixels(target, slot)
+                end
+            end
+            return result
+        end
+        dialog, all = pattern_choices()
+        assert(dialog.on_apply(all))
+        local basic_result = appearance()
+        activate('restore')
+        select_targets(1)
+        activate('outfit_apply_selected')
+        for key, value in pairs(appearance()) do
+            assert(value == basic_result[key], 'Basic Select All and Armory produced different per-binding bytes')
+        end
+        activate('restore')
+        dialog, all, extra = pattern_choices()
+        local original_identity = originals[5011]
+        originals[5011] = nil
+        local texture_count = created
+        local accepted, reason = pcall(dialog.on_apply, { [extra.id] = true })
+        assert(not accepted and reason:find('Current LUT resource changed', 1, true) and created == texture_count)
+        originals[5011] = original_identity
+        materials[units[1].unit][3] = nil
+        assert(h.set('outfit_preset', 1))
+        saved_outfit = chooser_preset
+        assert(h.set('outfit_preset', 2))
         -- Legacy material-only presets have no companion to invent or opt out.
         local saved_pattern_entry = table.remove(chooser_preset.entries)
         local saved_pattern_document = table.remove(chooser_preset.armor)

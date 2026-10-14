@@ -1,4 +1,5 @@
--- Pattern LUTs are 3x1 accent tables, bound through PATTERN_SLOT, never the material LUT slot.
+-- Pattern LUTs are 3x1 tables, bound through PATTERN_SLOT, never the material LUT slot.
+-- Column 3 Alpha controls roughness; its unmapped RGB values remain intact.
 local P = {}
 function P.new(deps)
     local ffi = require('ffi')
@@ -329,6 +330,9 @@ function P.new(deps)
                 label = 'Pattern RGBA',
                 default = '#FFFFFF',
                 on_change = function(hex)
+                    if self.column == 3 and not self.raw then
+                        return
+                    end
                     return edit(function(data)
                         local at = ((self.column or 1) - 1) * 4
                         local r, g, b = deps.rgb(hex)
@@ -353,7 +357,7 @@ function P.new(deps)
                 children = {
                     {
                         type = 'text',
-                        label = '3 columns x 1 row. Column 1: color. Column 2: metallic RGB and opacity A (provisional mapping). Column 3: unknown.',
+                        label = '3 columns x 1 row. Column 1: color. Column 2: metallic RGB and opacity A (provisional mapping). Column 3: roughness in Alpha; RGB remains unmapped.',
                     },
                     {
                         id = 'pattern_load',
@@ -401,6 +405,7 @@ function P.new(deps)
             { 'pattern_metal_g', 'Column 2 - Metallic G', 5 },
             { 'pattern_metal_b', 'Column 2 - Metallic B', 6 },
             { 'pattern_opacity', 'Column 2 - Pattern opacity A', 7 },
+            { 'pattern_unknown_a', 'Column 3 - Roughness A', 11 },
         }) do
             local index = spec[3]
             children[#children + 1] = {
@@ -509,7 +514,6 @@ function P.new(deps)
             { 'pattern_unknown_r', 'Column 3 - Unknown R', 8 },
             { 'pattern_unknown_g', 'Column 3 - Unknown G', 9 },
             { 'pattern_unknown_b', 'Column 3 - Unknown B', 10 },
-            { 'pattern_unknown_a', 'Column 3 - Unknown A', 11 },
         }) do
             local index = spec[3]
             raw.children[#raw.children + 1] = {
@@ -787,7 +791,9 @@ function P.new(deps)
         end
         local at, color = (column - 1) * 4, {}
         for channel = 1, 3 do
-            color[channel] = math.floor(math.max(0, math.min(1, self.document.data[at + channel - 1])) * 255 + 0.5)
+            local value = column == 3 and not self.raw and self.document.data[at + 3]
+                or self.document.data[at + channel - 1]
+            color[channel] = math.floor(math.max(0, math.min(1, value)) * 255 + 0.5)
         end
         self.busy = true
         local ok, message = handle.set('pattern_picker', string.format('#%02X%02X%02X', color[1], color[2], color[3]))
@@ -803,7 +809,8 @@ function P.new(deps)
         local color = quick and not d and (ui.theme.disabled or ui.theme.muted) or { 0, 0, 0 }
         if d then
             for channel = 1, 3 do
-                color[channel] = math.floor(math.max(0, math.min(1, d.data[at + channel - 1])) * 255 + 0.5)
+                local value = column == 3 and d.data[at + 3] or d.data[at + channel - 1]
+                color[channel] = math.floor(math.max(0, math.min(1, value)) * 255 + 0.5)
             end
         end
         ui.rect(
@@ -823,8 +830,8 @@ function P.new(deps)
             math.max(0, width - inset * 2),
             math.max(0, height - inset * 2),
             color,
-            d and d.data[at + 3] or 1,
-            handle.get('show_alpha')
+            column == 3 and 1 or d and d.data[at + 3] or 1,
+            column ~= 3 and handle.get('show_alpha')
         )
         ui.hit(
             x,
@@ -834,7 +841,7 @@ function P.new(deps)
             function()
                 self.column = column
                 if quick then
-                    if not d or column == 3 and not self.raw then
+                    if not d then
                         self.show(kind or self.gear)
                     else
                         picker(ui, column)
@@ -843,7 +850,9 @@ function P.new(deps)
             end,
             nil,
             nil,
-            quick and 'Edit this Pattern LUT swatch.' or 'Double-click to edit this Pattern LUT swatch.',
+            column == 3 and 'Roughness is controlled by Alpha. Edit Alpha; unmapped RGB values are retained.'
+                or quick and 'Edit this Pattern LUT swatch.'
+                or 'Double-click to edit this Pattern LUT swatch.',
             function()
                 if quick and not d then
                     self.show(kind or self.gear)
@@ -860,16 +869,42 @@ function P.new(deps)
     function self.quick_height(ui, cell_height)
         local gap = ui.spacing and ui.spacing(6) or 6
         cell_height = math.max(0, math.min(40, tonumber(cell_height) or 28))
-        return metric(ui, 13, 'Quick Editor: Pattern LUT', 'heading').height + gap * 2 + cell_height
+        return metric(ui, 13, 'Quick Editor: Pattern LUT', 'heading').height
+            + metric(ui, 11, 'Roughness', 'hint').height
+            + gap * 3
+            + cell_height
     end
-    local function quick_cells(ui, bounds, heading)
+    local quick_labels = { 'Color', 'Mat/Opac', 'Roughness' }
+    local quick_abbreviations = { { 'Color', 'Clr' }, { 'Mat/Opac', 'Mat/Op', 'M/O' }, { 'Roughness', 'Rough', 'Rgh' } }
+    local function caption_width(ui, text)
+        return ui.text_width and ui.text_width(text, 11, 'hint')
+            or #text * (ui.text_size and ui.text_size(11, 'hint') or 11) * 0.6
+    end
+    local function quick_cells(ui, bounds, heading, caption)
         local gap = ui.spacing and ui.spacing(6) or 6
-        local available = math.max(1, (bounds.w - gap) / 2)
+        local available = math.max(1, (bounds.w - gap * 2) / 3)
         local width =
             math.max(1, math.min(40, tonumber(bounds.cell_width) or tonumber(bounds.row_height) or 28, available))
-        local height =
-            math.max(1, math.min(40, tonumber(bounds.row_height) or width, bounds.h - heading.height - gap * 2))
-        return gap, width, height
+        local height = math.max(
+            1,
+            math.min(40, tonumber(bounds.row_height) or width, bounds.h - heading.height - caption.height - gap * 3)
+        )
+        local lane = width
+        for _, text in ipairs(quick_labels) do
+            lane = math.max(lane, caption_width(ui, text))
+        end
+        return gap, width, height, math.min(lane, available)
+    end
+    local function quick_caption(ui, x, y, width, column, color)
+        local label = quick_labels[column]
+        for _, candidate in ipairs(quick_abbreviations[column]) do
+            label = candidate
+            if caption_width(ui, label) <= width then
+                break
+            end
+        end
+        local ink = metric(ui, 11, label, 'hint')
+        ui.bounded(x, y - ink.min_y, label, 11, color, width, 'hint')
     end
     function self.quick(ui, bounds, kind)
         if not bounds or bounds.w <= 0 or bounds.h <= 0 or not handle then
@@ -881,7 +916,8 @@ function P.new(deps)
             -- targets are Armor/Helmet. Do not expose an Armor picker here.
             local title = 'Quick Editor: Pattern LUT - Armor / Helmet only'
             local heading = metric(ui, 13, title, 'heading')
-            local gap, width, height = quick_cells(ui, bounds, heading)
+            local caption = metric(ui, 11, 'Roughness', 'hint')
+            local gap, width, height, lane = quick_cells(ui, bounds, heading, caption)
             ui.bounded(
                 bounds.x,
                 bounds.y + bounds.h - heading.height - heading.min_y,
@@ -891,16 +927,10 @@ function P.new(deps)
                 bounds.w,
                 'heading'
             )
-            for column = 1, 2 do
-                ui.rect(
-                    bounds.x + (column - 1) * (width + gap),
-                    bounds.y + gap,
-                    width,
-                    height,
-                    ui.theme.disabled or ui.theme.muted,
-                    nil,
-                    'swatch_fill'
-                )
+            for column = 1, 3 do
+                local x = bounds.x + (column - 1) * (lane + gap)
+                quick_caption(ui, x, bounds.y + gap * 2 + height, lane, column, ui.theme.disabled or ui.theme.muted)
+                ui.rect(x, bounds.y + gap, width, height, ui.theme.disabled or ui.theme.muted, nil, 'swatch_fill')
             end
             return
         end
@@ -909,7 +939,8 @@ function P.new(deps)
         -- native gear or turn an unavailable snapshot into a black palette.
         local title = 'Quick Editor: Pattern LUT'
         local heading = metric(ui, 13, title, 'heading')
-        local gap, width, height = quick_cells(ui, bounds, heading)
+        local caption = metric(ui, 11, 'Roughness', 'hint')
+        local gap, width, height, lane = quick_cells(ui, bounds, heading, caption)
         local top = bounds.y + bounds.h
         local title_y = top - heading.height
         ui.bounded(bounds.x, title_y - heading.min_y, title, 13, ui.theme.white, bounds.w, 'heading')
@@ -918,8 +949,9 @@ function P.new(deps)
             self.show(kind)
         end, nil, nil, 'Open the Pattern LUT workspace.')
         local bottom = bounds.y + gap
-        for column = 1, 2 do
-            local x = bounds.x + (column - 1) * (width + gap)
+        for column = 1, 3 do
+            local x = bounds.x + (column - 1) * (lane + gap)
+            quick_caption(ui, x, bottom + height + gap, lane, column, ui.theme.white)
             swatch(ui, x, bottom, width, height, column, true, kind)
         end
     end
@@ -1064,7 +1096,7 @@ function P.new(deps)
                 ui.theme.brass
             )
             local sw = (width - gap * 2) / 3
-            local names = { '1: Accent color', '2: Material / opacity', '3: Unknown' }
+            local names = { '1: Accent color', '2: Material / opacity', '3: Roughness (A)' }
             local caption = metric(ui, 12, names[2], 'hint')
             y = take(caption.height)
             if visible(y, caption.height) then
@@ -1105,11 +1137,12 @@ function P.new(deps)
                         { 'pattern_opacity', 'Opacity A' },
                     })
                 else
+                    number('pattern_unknown_a', 'Roughness A')
                     button(
                         x,
                         take(bh),
                         width,
-                        (self.raw and 'v ' or '> ') .. 'Advanced: raw unknown values',
+                        (self.raw and 'v ' or '> ') .. 'Advanced: unmapped RGB values',
                         nil,
                         true,
                         function()
@@ -1121,7 +1154,6 @@ function P.new(deps)
                             { 'pattern_unknown_r', 'Unknown R' },
                             { 'pattern_unknown_g', 'Unknown G' },
                             { 'pattern_unknown_b', 'Unknown B' },
-                            { 'pattern_unknown_a', 'Unknown A' },
                         })
                     end
                 end
@@ -1277,7 +1309,13 @@ function P.new(deps)
             local sw = (w - 36) / 3
             for col = 1, 3 do
                 local px = x + 12 + (col - 1) * (sw + 6)
-                label(px, y + h - 150, ({ '1: Accent color', '2: Material / opacity', '3: Unknown' })[col], sw, 'hint')
+                label(
+                    px,
+                    y + h - 150,
+                    ({ '1: Accent color', '2: Material / opacity', '3: Roughness (A)' })[col],
+                    sw,
+                    'hint'
+                )
                 swatch(ui, px, y + h - 210, sw, 48, col, false)
             end
             self.column = self.column or 1
@@ -1322,11 +1360,12 @@ function P.new(deps)
                     number('pattern_metal_b', 'Metallic B')
                     number('pattern_opacity', 'Opacity A')
                 else
+                    number('pattern_unknown_a', 'Roughness A')
                     button(
                         x + 12,
                         cursor,
                         w - 24,
-                        (self.raw and 'v ' or '> ') .. 'Advanced: raw unknown values',
+                        (self.raw and 'v ' or '> ') .. 'Advanced: unmapped RGB values',
                         nil,
                         true,
                         function()
@@ -1338,7 +1377,6 @@ function P.new(deps)
                         number('pattern_unknown_r', 'Unknown R')
                         number('pattern_unknown_g', 'Unknown G')
                         number('pattern_unknown_b', 'Unknown B')
-                        number('pattern_unknown_a', 'Unknown A')
                     end
                 end
             else
@@ -1407,14 +1445,14 @@ function P.new(deps)
     function self.attach(h, c)
         handle, controls = h, c
         controls.pattern_picker.can_open_picker = function()
-            return self.document ~= nil
-                and not self.document.read_only
-                and not self.document.stale
-                and ((self.column or 1) <= 2 or self.raw == true),
-                'Enable Advanced raw values to edit this Pattern channel.'
+            return self.document ~= nil and not self.document.read_only and not self.document.stale,
+                'Load a current editable Pattern LUT first.'
         end
         controls.pattern_picker.picker_channel_enabled = function(channel)
-            return channel <= 3 or (self.column == 2 or self.raw == true)
+            if channel <= 3 then
+                return self.column ~= 3 or self.raw == true
+            end
+            return self.column == 2 or self.column == 3 or self.raw == true
         end
         controls.pattern_picker.picker_begin = function()
             assert(controls.pattern_picker.can_open_picker())
@@ -1438,11 +1476,13 @@ function P.new(deps)
             local at = (session.column - 1) * 4
             local original = ffi.new('float[12]')
             ffi.copy(original, session.before, 48)
-            for ch = 1, 3 do
-                local displayed = math.floor(math.max(0, math.min(1, original[at + ch - 1])) * 255 + 0.5)
-                d.data[at + ch - 1] = color[ch] == displayed and original[at + ch - 1] or color[ch] / 255
+            if session.column ~= 3 or self.raw then
+                for ch = 1, 3 do
+                    local displayed = math.floor(math.max(0, math.min(1, original[at + ch - 1])) * 255 + 0.5)
+                    d.data[at + ch - 1] = color[ch] == displayed and original[at + ch - 1] or color[ch] / 255
+                end
             end
-            if session.column == 2 or self.raw then
+            if session.column == 2 or session.column == 3 or self.raw then
                 d.data[at + 3] = alpha
             end
             if pixels(d) ~= current_pixels then
@@ -1493,13 +1533,15 @@ function P.new(deps)
             end
             return edit(function(data)
                 local at = ((self.column or 1) - 1) * 4
-                for ch = 1, 3 do
-                    local before = math.floor(math.max(0, math.min(1, data[at + ch - 1])) * 255 + 0.5)
-                    if color[ch] ~= before then
-                        data[at + ch - 1] = color[ch] / 255
+                if self.column ~= 3 or self.raw then
+                    for ch = 1, 3 do
+                        local before = math.floor(math.max(0, math.min(1, data[at + ch - 1])) * 255 + 0.5)
+                        if color[ch] ~= before then
+                            data[at + ch - 1] = color[ch] / 255
+                        end
                     end
                 end
-                if self.column == 2 or self.raw then
+                if self.column == 2 or self.column == 3 or self.raw then
                     data[at + 3] = alpha
                 end
             end)

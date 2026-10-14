@@ -93,6 +93,16 @@ local pattern_doc = { width = 3, height = 1, data = ffi.new('float[12]') }
 pattern_doc.data[0], pattern_doc.data[3], pattern_doc.data[7], pattern_doc.data[11] = 0.875, -0.125, 0.75, 17.5
 local files = { material = D.encode(material_doc.data, 23, 8), pattern = D.encode(pattern_doc.data, 3, 1) }
 local m = {
+    gear_edit = dofile('src/editor/gear_edit.lua'),
+    editor_actions = dofile('src/editor/editor_actions.lua'),
+    gear_export = dofile('src/presets/gear_export.lua'),
+    outfit_capture = dofile('src/presets/outfit_capture.lua'),
+    import_summary = dofile('src/editor/import_summary.lua'),
+    editor_composition = dofile('src/editor/editor_composition.lua'),
+    armory_apply = dofile('src/presets/armory_apply.lua'),
+    export_provenance = dofile('src/presets/export_provenance.lua'),
+    import_mapping = dofile('src/editor/import_mapping.lua'),
+    session_history = dofile('src/editor/session_history.lua'),
     appearance_state = dofile('src/gear/appearance_state.lua'),
     direct_setup = {
         new = function()

@@ -410,8 +410,8 @@ E.Unit.resource_name = function()
 end
 E.Mesh = {
     has_material = function(mesh, slot)
-        assert(mesh == 'copied-mesh' and slot == 'm_gibs')
-        return true
+        assert(mesh == 'copied-mesh')
+        return slot == 'm_gibs'
     end,
     material = function()
         return ffi.cast('void *', 110000)
@@ -446,7 +446,157 @@ assert(
     writes[#writes][1] == 110000 and writes[#writes][2] == 0x3aa8b87e and writes[#writes][3] == 444444,
     'Transparent texture was not assigned to copied gib material'
 )
+local previous_factory = engine.create_texture
+local masks_created = 0
 retained_probes.black = nil
+engine.create_texture = function(_, width, height, data)
+    assert(width == 1 and height == 1)
+    for channel = 0, 3 do
+        assert(data[channel] == 0, 'Gore mask is not zero RGBA')
+    end
+    masks_created = masks_created + 1
+    return { object = 445444, handle = 12, data = data }
+end
+a.create_model('owned', { plan = { pieces = { piece } } })
+a.create_model('owned', { plan = { pieces = { piece } } })
+assert(
+    masks_created == 1 and retained_probes.black.object == 445444,
+    'Transparent mask storage was not retained/reused'
+)
+assert(writes[#writes][2] == 0x3aa8b87e and writes[#writes][3] == 445444)
+engine.create_texture = previous_factory
+retained_probes.black = { object = 444444 }
+-- Every cataloged numbered gib section uses the same transparent treatment.
+-- Material replacement may recreate clothing handles; retain live LUT sync.
+local gore_calls, copy_handles, gore_name = {}, {}, nil
+local function indexed_materials(id, count)
+    local out = {}
+    for index = 0, count - 1 do
+        out[#out + 1] = {
+            material = id == 1 and 100000 + index * 1000 or copy_handles[index],
+            mesh = 120000,
+            mesh_index = 0,
+            material_index = index,
+        }
+    end
+    return out
+end
+E.Mesh.has_material = function(mesh, slot)
+    assert(mesh == 'copied-mesh')
+    return slot == gore_name
+end
+E.Mesh.material = function(mesh, slot)
+    assert(mesh == 'copied-mesh' and slot == gore_name)
+    return ffi.cast('void *', copy_handles[1])
+end
+for variant = 1, 6 do
+    gore_name, copy_handles = 'm_gibs' .. variant, { [0] = 110000, [1] = 111000 }
+    engine.unit_materials = function(_, id)
+        return indexed_materials(id, 2)
+    end
+    local before, replaced_at = #writes, nil
+    E.Unit.set_material = function(unit, slot, resource)
+        assert(unit == piece.unit and unit ~= piece.source and slot == gore_name)
+        assert(resource == 'content/ui/shared/material/gui_diffuse_map')
+        gore_calls[#gore_calls + 1] = slot
+        replaced_at = #writes
+        copy_handles = { [0] = 140000, [1] = 141000 }
+    end
+    local numbered = a.create_model('owned', { plan = { pieces = { piece } } })
+    local kept = numbered.pieces[1].materials
+    assert(#kept == 1 and kept[1].source == 100000 and kept[1].material == 140000)
+    local masked, rehydrated = false, false
+    for i = before + 1, #writes do
+        local material, slot, object = unpack(writes[i])
+        assert(material ~= 100000 and material ~= 101000, 'Numbered gore masking changed equipped material')
+        if i > replaced_at then
+            assert(material ~= 110000 and material ~= 111000, 'Retired copied material was written')
+        end
+        masked = masked or (material == 141000 and slot == 0x3aa8b87e and object == 444444)
+        rehydrated = rehydrated or (material == 140000 and slot == 123 and object == 300004)
+    end
+    assert(masked and rehydrated, 'Numbered gore or replacement clothing lost its required texture')
+    local writes_before = #writes
+    a.apply_luts(numbered, { helmet = true })
+    assert(#writes == writes_before, 'Unchanged replacement clothing caused stale LUT sync writes')
+end
+assert(#gore_calls == 6)
+
+-- Replacing one slot may recreate all copied handles, including earlier masks.
+local roles = { m_gibs = 1, m_gibs3 = 2, m_gibs6 = 3 }
+local generation = 0
+copy_handles = { [0] = 110000, [1] = 111000, [2] = 112000, [3] = 113000 }
+blocks[102024], blocks[103024] = blocks[100024], blocks[100024]
+engine.unit_materials = function(_, id)
+    return indexed_materials(id, 4)
+end
+E.Mesh.has_material = function(mesh, slot)
+    assert(mesh == 'copied-mesh')
+    return roles[slot] ~= nil
+end
+E.Mesh.material = function(mesh, slot)
+    assert(mesh == 'copied-mesh' and roles[slot])
+    return ffi.cast('void *', copy_handles[roles[slot]])
+end
+E.Unit.set_material = function(unit, slot, resource)
+    assert(unit == piece.unit and unit ~= piece.source and roles[slot])
+    assert(resource == 'content/ui/shared/material/gui_diffuse_map')
+    generation = generation + 1
+    for index = 0, 3 do
+        copy_handles[index] = 150000 + generation * 1000 + index * 100
+    end
+end
+local multiple = a.create_model('owned', { plan = { pieces = { piece } } })
+assert(generation == 3 and #multiple.pieces[1].materials == 1)
+assert(multiple.pieces[1].materials[1].material == copy_handles[0])
+for index = 1, 3 do
+    local masked = false
+    for _, write in ipairs(writes) do
+        masked = masked or (write[1] == copy_handles[index] and write[2] == 0x3aa8b87e and write[3] == 444444)
+    end
+    assert(masked, 'A later replacement exposed an earlier copied gore slot')
+end
+local writes_before = #writes
+blocks[200000] = pack32(123) .. pack32(0) .. pack64(300008)
+a.apply_luts(multiple, { helmet = true })
+assert(#writes == writes_before + 1 and writes[#writes][1] == copy_handles[0])
+assert(writes[#writes][2] == 123 and writes[#writes][3] == 300008, 'Copied clothing stopped following live LUT edits')
+
+-- A second named alias of an already masked owned slot needs no replacement.
+roles = { m_gibs = 1, m_gibs1 = 1 }
+generation, copy_handles = 0, { [0] = 110000, [1] = 111000 }
+engine.unit_materials = function(_, id)
+    return indexed_materials(id, 2)
+end
+local aliased = a.create_model('owned', { plan = { pieces = { piece } } })
+assert(generation == 1 and #aliased.pieces[1].materials == 1, 'Known copied gore aliases were mishandled')
+
+-- Never bind a replacement that aliases another equipped source slot.
+roles, copy_handles = { m_gibs4 = 1 }, { [0] = 110000, [1] = 111000 }
+local replaced_at
+E.Unit.set_material = function(unit, slot)
+    assert(unit == piece.unit and slot == 'm_gibs4')
+    replaced_at = #writes
+    copy_handles[1] = 100000 -- Borrowed clothing, not the original gore pointer.
+end
+local permitted, refusal = pcall(a.create_model, 'owned', { plan = { pieces = { piece } } })
+assert(not permitted and tostring(refusal):find('Shared transparent material refused', 1, true))
+assert(#writes == replaced_at, 'Borrowed replacement material received a texture write')
+
+-- Distinct copied locations must not share a pointer across gore/clothing roles.
+copy_handles = { [0] = 110000, [1] = 111000 }
+E.Unit.set_material = function(unit, slot)
+    assert(unit == piece.unit and slot == 'm_gibs4')
+    replaced_at = #writes
+    copy_handles = { [0] = 140000, [1] = 140000 }
+end
+permitted, refusal = pcall(a.create_model, 'owned', { plan = { pieces = { piece } } })
+assert(not permitted and tostring(refusal):find('Copied gore material aliases clothing', 1, true))
+assert(#writes == replaced_at, 'Gore/clothing alias received a texture write')
+retained_probes.black = nil
+print(
+    'PASS preview gore: all numbered sections, recreated handles, name aliases, clothing LUT sync and source/clothing alias refusal'
+)
 -- Pose integration retains the session until rendering drains, without
 -- letting a driver error discard the copied garments or native fence.
 local animation_events, sessions = {}, {}

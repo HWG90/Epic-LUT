@@ -118,3 +118,118 @@ assert(
     'Preserving original emissives truncated custom rows'
 )
 assert(retained.data[13 * 4] == eight.data[13 * 4], 'Known original emissives changed for custom rows')
+
+-- Existing base-game cache markers cannot authorize current colors until the
+-- worker has validated the installed patch scope. Explicit reload repeats it.
+do
+    local open = io.open
+    local ok, why = pcall(function()
+        local prefix, hash = 'snapshot-fixture/', '0123456789abcdef'
+        local old_stamp, custom_stamp, updated_stamp = string.rep('a', 64), string.rep('b', 64), string.rep('c', 64)
+        local files = {
+            [prefix .. 'originals/index-complete.txt'] = old_stamp .. '\n1',
+            [prefix .. 'originals/complete.txt'] = old_stamp .. '\n1',
+            [prefix .. 'originals/' .. old_stamp .. '/game-' .. hash .. '-original.dds'] = 'stock',
+        }
+        local source, running, indexed, captures, listed = {}, true, 0, 0, 0
+        source.stock, source.custom, source.updated = original, eight, custom
+        io.open = function(path, mode)
+            if path:sub(1, #prefix) ~= prefix then
+                return open(path, mode)
+            end
+            if mode == 'rb' then
+                if not files[path] then
+                    return nil
+                end
+                return {
+                    read = function()
+                        return files[path]
+                    end,
+                    close = function()
+                        return true
+                    end,
+                }
+            end
+            return {
+                write = function(_, text)
+                    files[path] = text
+                    return true
+                end,
+                close = function()
+                    return true
+                end,
+            }
+        end
+        local modules = {
+            original_snapshot_script = '23',
+            original_snapshot_reader = '23',
+            dds = {
+                MAX_BYTES = 65536,
+                decode = function(bytes)
+                    local d = assert(source[bytes])
+                    return d.data, d.width, d.height
+                end,
+            },
+            engine = m.engine,
+            windows = {
+                files = function(path)
+                    listed = listed + 1
+                    assert(path ~= prefix .. 'originals/' .. old_stamp, 'Unvalidated stock cache was read')
+                    return { 'game-' .. hash .. '-original.dds' }
+                end,
+                verify_interface = fake.windows.verify_interface,
+                launch_worker = function(arguments)
+                    if arguments:find('-IndexOnly', 1, true) then
+                        indexed = indexed + 1
+                    else
+                        captures = captures + 1
+                    end
+                    running = true
+                    return {
+                        running = function()
+                            return running
+                        end,
+                        close = function() end,
+                        stop = function() end,
+                    }
+                end,
+            },
+        }
+        local reader = O.new(modules, { originals = prefix .. 'originals', cache = prefix .. 'cache' }, {}, function()
+            return { [123] = true }
+        end)
+        assert(
+            reader.get(123) == nil and not reader.loaded and indexed == 1 and listed == 0,
+            'Startup exposed a stock snapshot before installed custom sources were checked'
+        )
+        local function complete(stamp, pixels)
+            files[prefix .. 'originals/index-complete.txt'] = stamp .. '\n1'
+            files[prefix .. 'originals/' .. stamp .. '/catalog.txt'] = hash .. '\n'
+            running = false
+            reader.tick()
+            assert(not reader.loaded and reader.worker, 'Index validation skipped current LUT capture')
+            files[prefix .. 'originals/complete.txt'] = stamp .. '\n1'
+            files[prefix .. 'originals/' .. stamp .. '/game-' .. hash .. '-original.dds'] = pixels
+            running = false
+            reader.tick()
+        end
+        complete(custom_stamp, 'custom')
+        assert(reader.get(123).data == eight.data and captures == 1)
+        reader.retry()
+        assert(
+            indexed == 2 and reader.get(123) == nil and not reader.loaded,
+            'Load Current Gear reused pixels from an earlier custom patch scope'
+        )
+        complete(updated_stamp, 'updated')
+        assert(
+            reader.get(123).data == custom.data and captures == 2,
+            'Current custom source did not replace the previous snapshot at the same texture object'
+        )
+        reader.close()
+    end)
+    io.open = open
+    assert(ok, why)
+end
+print(
+    'PASS installed snapshot scope: no unvalidated stock cache, explicit source recheck and changed custom pixels at one live object'
+)

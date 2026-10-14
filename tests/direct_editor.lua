@@ -46,6 +46,16 @@ local pattern_deps
 local bulk_entries, bulk_naming
 local Pattern = dofile('src/editor/pattern_luts.lua')
 local m = {
+    gear_edit = dofile('src/editor/gear_edit.lua'),
+    editor_actions = dofile('src/editor/editor_actions.lua'),
+    gear_export = dofile('src/presets/gear_export.lua'),
+    outfit_capture = dofile('src/presets/outfit_capture.lua'),
+    import_summary = dofile('src/editor/import_summary.lua'),
+    editor_composition = dofile('src/editor/editor_composition.lua'),
+    armory_apply = dofile('src/presets/armory_apply.lua'),
+    export_provenance = dofile('src/presets/export_provenance.lua'),
+    import_mapping = dofile('src/editor/import_mapping.lua'),
+    session_history = dofile('src/editor/session_history.lua'),
     export_pairing = dofile('src/presets/export_pairing.lua'),
     pattern_luts = {
         new = function(deps)

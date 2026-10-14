@@ -1,4 +1,4 @@
--- Read cached game-original snapshots and match their resource IDs to the original live object.
+-- Read installed-source snapshots and match resource IDs to the original live object.
 -- No identity guesses, zero-value guesses, GPU probing or archive decoding on the game thread.
 local O = {}
 function O.new(m, paths, native, targets)
@@ -22,11 +22,19 @@ function O.new(m, paths, native, targets)
     local function begin_scan()
         self.job = coroutine.create(function()
             local snapshots = {}
-            for object, document in pairs(self.snapshots or {}) do
-                snapshots[object] = document
-            end
             local stamp = exists(folder .. '/index-complete.txt') or exists(folder .. '/complete.txt')
             stamp = stamp and stamp:match('^([%x]+)')
+            if m.original_snapshot_script then
+                assert(
+                    self.validated_stamp and stamp == self.validated_stamp,
+                    'Installed LUT sources have not been validated'
+                )
+            end
+            if self.snapshot_stamp == stamp then
+                for object, document in pairs(self.snapshots or {}) do
+                    snapshots[object] = document
+                end
+            end
             local snapshot_folder = m.original_snapshot_script and stamp and #stamp == 64 and folder .. '/' .. stamp
                 or folder
             local files = m.windows.files(snapshot_folder, '*-original.dds')
@@ -77,8 +85,9 @@ function O.new(m, paths, native, targets)
                 coroutine.yield()
             end
             self.snapshots = snapshots
+            self.snapshot_stamp = stamp
             self.loaded = true
-            self.status = 'Original game LUT snapshots ready: 100%'
+            self.status = 'Installed LUT snapshots ready: 100%'
             if targets then
                 for object in pairs(targets() or {}) do
                     self.attempted[object] = true
@@ -103,13 +112,8 @@ function O.new(m, paths, native, targets)
         write('original_snapshots.cs', m.original_snapshot_reader)
         os.remove(folder .. '/error.txt')
         self.launch(true)
-        -- A replacement index worker may remove its marker before completing.
-        -- Previously captured DDS files remain valid and can be matched while
-        -- indexing recovers; begin_scan falls back to the capture marker.
-        local completed = exists(folder .. '/complete.txt')
-        if completed and completed:match('^[%x]+') and #completed:match('^[%x]+') == 64 then
-            begin_scan()
-        end
+        -- A previous base-only cache is not proof of the installed mod scope.
+        -- Wait for this index worker before exposing any cached pixels.
     end
     function self.start()
         local ok, why = pcall(start)
@@ -196,7 +200,7 @@ function O.new(m, paths, native, targets)
                 end
                 coroutine.yield()
             end
-            assert(#matched > 0, 'No equipped LUT resource IDs matched the base game index')
+            assert(#matched > 0, 'No equipped LUT resource IDs matched the installed source index')
             self.wanted = matched
             local out = assert(io.open(folder .. '/wanted.txt', 'wb'))
             assert(out:write(table.concat(matched, '\n')))
@@ -222,6 +226,12 @@ function O.new(m, paths, native, targets)
                 if error then
                     self.status = 'Original snapshot failed: ' .. error
                 elseif self.phase == 'index' and exists(folder .. '/index-complete.txt') then
+                    local stamp = exists(folder .. '/index-complete.txt'):match('^([%x]+)')
+                    assert(stamp and #stamp == 64, 'Installed LUT source stamp invalid')
+                    self.validated_stamp = stamp
+                    if self.snapshot_stamp ~= stamp then
+                        self.snapshots, self.attempted = {}, {}
+                    end
                     self.waiting_match = true
                 elseif self.phase == 'capture' and exists(folder .. '/complete.txt') then
                     begin_scan()
@@ -283,7 +293,7 @@ function O.new(m, paths, native, targets)
             self.attempted[object] = true
             self.waiting_match = true
         end
-        return self.snapshots[object]
+        return self.loaded and self.snapshots[object] or nil
     end
     function self.get_resource(resource)
         assert(
@@ -300,7 +310,12 @@ function O.new(m, paths, native, targets)
     function self.retry()
         self.attempted = {}
         if not self.worker and not self.job then
-            self.waiting_match = true
+            if m.original_snapshot_script then
+                self.started, self.loaded, self.waiting_match, self.validated_stamp = true, false, false, nil
+                self.launch(true)
+            else
+                self.scan()
+            end
         end
     end
     function self.close()

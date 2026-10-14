@@ -111,7 +111,8 @@ pattern.attach(handle, controls)
 -- This renderer exercises real custom button drawing while modeling the
 -- native viewport's intersections. Every returned hit is actually reachable.
 local function renderer(font)
-    local output = { labels = {}, rects = {}, hits = {}, numbers = {}, choices = {}, bars = {}, floats = 0 }
+    local output =
+        { labels = {}, label_bounds = {}, rects = {}, hits = {}, numbers = {}, choices = {}, bars = {}, floats = 0 }
     local clip
     local function intersects(x, y, w, h)
         return not clip or x + w > clip.x and x < clip.x + clip.w and y + h > clip.y and y < clip.y + clip.h
@@ -142,9 +143,10 @@ local function renderer(font)
                 output.rects[#output.rects + 1] = { x = x, y = y, w = w, h = h, color = color, role = role }
             end
         end,
-        bounded = function(x, y, text, size)
+        bounded = function(x, y, text, size, _, width)
             if intersects(x, y - 2, 1, size * font / 12) then
                 output.labels[text] = true
+                output.label_bounds[text] = { x = x, y = y - 2, w = width, h = size * font / 12 }
                 output.current_label = text
             end
         end,
@@ -204,7 +206,7 @@ end
 pattern.set_workspace_host(true)
 local ui, output = renderer(12)
 local quick = { x = 40, y = 50, w = 660, h = pattern.quick_height(ui) }
-assert(quick.h <= 60, 'Quick Pattern strip consumes too many material row heights')
+assert(quick.h <= 80, 'Captioned Quick Pattern strip consumes too many material row heights')
 pattern.quick(ui, quick, 'helmet')
 assert(scans == 0 and uploads == 0 and pattern.document == nil and pattern.gear == nil)
 local swatches = {}
@@ -215,11 +217,22 @@ for _, rectangle in ipairs(output.rects) do
     end
 end
 assert(
-    #swatches == 2 and output.labels['Quick Editor: Pattern LUT'],
-    'Quick strip must show only Accent and Material swatches'
+    #swatches == 3
+        and output.labels['Quick Editor: Pattern LUT']
+        and output.labels.Color
+        and output.labels['Mat/Opac']
+        and output.labels.Roughness,
+    'Quick strip must label Color, Mat/Opac and Roughness above their three swatches'
 )
 for _, rectangle in ipairs(swatches) do
     assert(rectangle.w == 28 and rectangle.h == 28, 'Quick swatches stretched to fill the pane')
+end
+for index, caption in ipairs({ 'Color', 'Mat/Opac', 'Roughness' }) do
+    local text = assert(output.label_bounds[caption])
+    local rectangle = swatches[index]
+    assert(text.y >= rectangle.y + rectangle.h, 'Quick caption overlaps its swatch')
+    assert(text.y + text.h <= quick.y + quick.h, 'Quick caption exceeds its strip height')
+    assert(text.x >= quick.x and text.x + text.w <= quick.x + quick.w, 'Quick caption lane exceeds its table width')
 end
 local sized_ui, sized_output = renderer(20)
 local sized_bounds =
@@ -239,7 +252,7 @@ for _, rectangle in ipairs(sized_output.rects) do
         )
     end
 end
-assert(sized_count == 2 and scans == 0 and uploads == 0)
+assert(sized_count == 3 and scans == 0 and uploads == 0)
 local capped_ui, capped_output = renderer(20)
 pattern.quick(capped_ui, {
     x = quick.x,
@@ -256,7 +269,28 @@ for _, rectangle in ipairs(capped_output.rects) do
         assert(rectangle.w == 40 and rectangle.h == 40, 'Quick painted borders bypassed the40px clamp')
     end
 end
-assert(capped_count == 2 and scans == 0 and uploads == 0)
+assert(capped_count == 3 and scans == 0 and uploads == 0)
+for _, font in ipairs({ 12, 20 }) do
+    local narrow_ui, narrow_output = renderer(font)
+    local bounds =
+        { x = 40, y = 50, w = 100, h = pattern.quick_height(narrow_ui, 28), cell_width = 28, row_height = 28 }
+    pattern.quick(narrow_ui, bounds, 'helmet')
+    local count = 0
+    for _, rectangle in ipairs(narrow_output.rects) do
+        if rectangle.role == 'swatch_border' then
+            count = count + 1
+            assert(rectangle.w <= 28 and rectangle.h <= 28, 'Narrow Quick strip enlarged its cells')
+            assert(
+                rectangle.x >= bounds.x and rectangle.x + rectangle.w <= bounds.x + bounds.w,
+                'Quick swatch exceeds narrow table width'
+            )
+        end
+    end
+    assert(count == 3 and scans == 0 and uploads == 0, 'Narrow Quick strip hid Roughness or discovered gear')
+    for _, item in ipairs(narrow_output.hits) do
+        assert(item.x >= bounds.x and item.x + item.w <= bounds.x + bounds.w, 'Quick hit exceeds its narrow table')
+    end
+end
 hit(output, 'Quick Editor: Pattern LUT').callback()
 assert(pattern.is_open() and scans == 0, 'Opening workspace bypassed the manual load gate')
 pattern.popup(ui)
@@ -275,11 +309,31 @@ ui, output = renderer(12)
 pattern.quick(ui, quick, 'helmet')
 local quick_hits = {}
 for _, item in ipairs(output.hits) do
-    if item.help == 'Edit this Pattern LUT swatch.' then
+    if
+        item.help == 'Edit this Pattern LUT swatch.'
+        or item.help == 'Roughness is controlled by Alpha. Edit Alpha; unmapped RGB values are retained.'
+    then
         quick_hits[#quick_hits + 1] = item
     end
 end
-assert(#quick_hits == 2, 'Quick strip exposes the hidden Unknown channel')
+assert(#quick_hits == 3, 'Quick strip omits the Roughness alpha channel')
+quick_hits[3].callback()
+assert(
+    pattern.column == 3
+        and not pattern.raw
+        and not pattern.is_open()
+        and activations[#activations] == 'pattern_picker'
+        and controls.pattern_picker.can_open_picker()
+        and controls.pattern_picker.picker_channel_enabled(4),
+    'Quick Roughness did not open its alpha editor without opening the full workspace'
+)
+for channel = 1, 3 do
+    assert(not controls.pattern_picker.picker_channel_enabled(channel), 'Quick Roughness exposes unknown RGB')
+end
+assert(
+    ffi.string(pattern.document.data, 48) == before and #pattern.undo == undo and uploads == 0,
+    'Opening Quick Roughness wrote a texture or changed history'
+)
 quick_hits[2].callback()
 assert(pattern.column == 2 and activations[#activations] == 'pattern_picker')
 assert(
@@ -337,15 +391,21 @@ ui, output = renderer(12)
 pattern.workspace(ui, { x = 40, y = 50, w = 900, h = 1000 })
 local workspace_swatches = {}
 for _, item in ipairs(output.hits) do
-    if item.help == 'Double-click to edit this Pattern LUT swatch.' then
+    if
+        item.help == 'Double-click to edit this Pattern LUT swatch.'
+        or item.help == 'Roughness is controlled by Alpha. Edit Alpha; unmapped RGB values are retained.'
+    then
         workspace_swatches[#workspace_swatches + 1] = item
     end
 end
-assert(#workspace_swatches == 3, 'Full workspace lost the stored Unknown channel')
+assert(#workspace_swatches == 3, 'Full workspace lost the Roughness channel')
 workspace_swatches[3].callback()
 assert(
-    pattern.is_open() and pattern.column == 3 and not controls.pattern_picker.can_open_picker(),
-    'Full workspace Unknown swatch bypassed Advanced raw protection'
+    pattern.is_open()
+        and pattern.column == 3
+        and controls.pattern_picker.can_open_picker()
+        and controls.pattern_picker.picker_channel_enabled(4),
+    'Full workspace Roughness is unavailable without Advanced raw mode'
 )
 pattern.quick(ui, quick, 'armor')
 assert(
@@ -392,7 +452,7 @@ for _, label in ipairs({
     '[0x101]',
     '1: Accent color',
     '2: Material / opacity',
-    '3: Unknown',
+    '3: Roughness (A)',
     'Edit accent color',
     '> Advanced: unknown alpha',
     'Flash Pattern',
@@ -428,8 +488,15 @@ end
 pattern.column, pattern.raw = 3, false
 ui, output = renderer(12)
 pattern.workspace(ui, { x = 40, y = 50, w = 900, h = 1000 })
-assert(next(output.numbers) == nil, 'Unknown Pattern controls ignore Advanced gate')
-hit(output, '> Advanced: raw unknown values').callback()
+assert(
+    output.numbers.pattern_unknown_a and output.numbers.pattern_unknown_a.enabled,
+    'Roughness alpha is hidden behind the Advanced gate'
+)
+for _, id in ipairs({ 'pattern_unknown_r', 'pattern_unknown_g', 'pattern_unknown_b' }) do
+    assert(not output.numbers[id], 'Unknown Pattern RGB controls ignore Advanced gate')
+end
+assert(output.labels['Roughness A'], 'Full workspace omitted the Roughness alpha label')
+hit(output, '> Advanced: unmapped RGB values').callback()
 ui, output = renderer(12)
 pattern.workspace(ui, { x = 40, y = 50, w = 900, h = 1000 })
 for _, id in ipairs({ 'pattern_unknown_r', 'pattern_unknown_g', 'pattern_unknown_b', 'pattern_unknown_a' }) do

@@ -395,9 +395,13 @@ function V.new(deps)
                             function()
                                 ui.activate('rename_lut')
                             end,
+                            function()
+                                return self.copy_resource_id(hash, ui.clipboard)
+                            end,
                             nil,
-                            nil,
-                            '[0x' .. hash .. ']\nClick to name this LUT. Clear its name to show the texture ID again.'
+                            '[0x'
+                                .. hash
+                                .. ']\nClick to name this LUT. Clear its name to show the texture ID again.\nRight-click to copy the ID in the configured format.'
                         )
                     end
                     ui.bounded(

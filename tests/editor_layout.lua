@@ -253,7 +253,12 @@ for _, item in ipairs({ { 'Select', 'grid_tool' }, { 'RGB', 'grid_channel' }, { 
     menu.key(27)
     commands = compose()
 end
-assert(editor.grid_bounds and editor.grid_bounds.h >= 480, 'Removed tool panels did not return usable grid height')
+-- The labelled Pattern strip reserves its own height. Usable grid space still
+-- means all eight material rows are visible, rather than a fixed pixel budget.
+assert(
+    editor.grid_bounds and editor.grid_max == 0 and label(commands, 'Row 8'),
+    'Removed tool panels did not return space for all eight material rows'
+)
 assert(editor.value_bounds and label(commands, 'Value Editor'), 'Value editor missing initially')
 assert(not label(commands, 'Scratch Pixel'), 'Closed Scratch still occupies the editor')
 local initial_width = editor.grid_bounds.w
