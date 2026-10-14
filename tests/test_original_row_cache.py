@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='epic-original-row-cache-') as temp:
                '-GameData', str(folder / 'game'), '-Output', str(output)]
     indexed = subprocess.run(command + ['-IndexOnly'], capture_output=True, text=True)
     assert indexed.returncode == 0, (indexed.stderr, (output / 'error.txt').read_text() if (output / 'error.txt').exists() else '')
-    assert (version / 'patch-source-v5.txt').read_text() == '3x1 and 23x1-64; numeric patch layers within exact archive families'
+    assert (version / 'patch-source-v6.txt').read_text() == '3x1 and 23x1-64; numeric layers and byte-identical archive aliases'
     assert (version / 'catalog.txt').read_text().splitlines() == ['3333333333333333'], 'Old row-limit index was reused'
 
     wanted = folder / 'wanted.txt'

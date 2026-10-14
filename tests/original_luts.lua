@@ -32,12 +32,19 @@ local m = {
         end,
     },
 }
+local aliases = 'tests/tmp/files/armor-00000001-0-0123456789abcdef-original.source-archives'
+local alias_file = assert(io.open(aliases, 'wb'))
+assert(alias_file:write('aaaaaaaaaaaaaaaa.patch_2\nbbbbbbbbbbbbbbbb.patch_0\n'))
+assert(alias_file:close())
 local resolver = O.new(m, { files = 'tests/tmp/files' }, {})
 local found = resolver.get(123)
 assert(
     found and found.data[(23 + 13) * 4] == original.data[(23 + 13) * 4] and not resolver.get(456),
     'Original snapshot was assigned to the wrong live resource'
 )
+assert(found.source_archives and found.source_archives:find('aaaaaaaaaaaaaaaa.patch_2', 1, true))
+assert(not found.patch_source, 'Color agreement fabricated archive provenance')
+os.remove(aliases)
 print(
     'PASS game-original emissives: resource ID/object match, valid zero and nonzero strengths, original mode retained, imported colors untouched and missing-reference rejection'
 )

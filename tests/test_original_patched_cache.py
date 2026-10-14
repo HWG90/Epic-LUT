@@ -144,6 +144,22 @@ class PatchedOriginalSnapshots(unittest.TestCase):
         output = self.capture()
         self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), (self.custom+2).tobytes())
 
+    def test_identical_cross_archive_aliases_load_colors_without_fabricated_archive_proof(self):
+        override(self.game, self.custom)
+        override(self.game, self.custom, name='bbbbbbbbbbbbbbbb.patch_999')
+        output = self.capture()
+        self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), self.custom.tobytes())
+        self.assertFalse((output/f'game-{ID}-original.patch-source').exists())
+        self.assertEqual((output/f'game-{ID}-original.source-archives').read_text().splitlines(),
+                         ['aaaaaaaaaaaaaaaa.patch_0', 'bbbbbbbbbbbbbbbb.patch_999'])
+
+    def test_cross_archive_aliases_compare_each_familys_effective_layer(self):
+        override(self.game, self.custom+1)
+        override(self.game, self.custom, name='aaaaaaaaaaaaaaaa.patch_2')
+        override(self.game, self.custom+2, name='bbbbbbbbbbbbbbbb.patch_1')
+        override(self.game, self.custom, name='bbbbbbbbbbbbbbbb.patch_10')
+        self.assertEqual(load(self.capture()/f'game-{ID}-original.dds').tobytes(), self.custom.tobytes())
+
     def test_cross_archive_conflict_still_requires_exact_source_proof(self):
         override(self.game, self.custom)
         override(self.game, self.custom+1, name='bbbbbbbbbbbbbbbb.patch_999')

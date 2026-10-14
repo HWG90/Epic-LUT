@@ -30,7 +30,13 @@ local function uint(s, at)
     return a + b * 256 + c * 65536 + d * 16777216
 end
 function P.encode(dds, document, original)
-    assert(original and original.patch_source, 'Original patch metadata unavailable; refresh original LUT snapshots')
+    assert(
+        original and original.patch_source,
+        original
+                and original.source_archives
+                and 'LUT colors agree across mod archives; a single patch source is not proven'
+            or 'Original patch metadata unavailable; refresh original LUT snapshots'
+    )
     local source = original.patch_source
     assert(#source == 357 and source:sub(17, 17) == '\n', 'Invalid original patch metadata')
     local source_archive, template = source:sub(1, 16):lower(), source:sub(18)

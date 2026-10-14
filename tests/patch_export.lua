@@ -18,6 +18,14 @@ local original = {
         .. string.rep('\x7f', 188)
         .. D.encode(document.data, 23, 2):sub(1, 148),
 }
+local agreed, agreed_error = pcall(P.encode, D, document, {
+    resource = original.resource,
+    source_archives = 'aaaaaaaaaaaaaaaa.patch_2\nbbbbbbbbbbbbbbbb.patch_0\n',
+})
+assert(
+    not agreed and agreed_error:find('colors agree across mod archives', 1, true),
+    'Color agreement was accepted as a single archive patch proof'
+)
 local p = P.encode(D, document, original)
 assert(p.archive == '9ba626afa44a3aa3' and p.resource == original.resource)
 assert(p.source_archive == '0123456789abcdef', 'Source archive provenance lost')

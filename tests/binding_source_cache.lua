@@ -196,6 +196,22 @@ cache.tick()
 files[folder .. '/' .. unit_id .. '.' .. P.UNIT .. '.main'] = 'bad bytes'
 assert(not pcall(cache.unit, unit_id), 'Tampered pristine source bytes passed recorded SHA256')
 cache.close()
+cache = new()
+assert(cache.start(units))
+dataset()
+time = time + 1
+cache.tick()
+local missing_part = unit_id .. '.' .. P.UNIT .. '.main'
+files[folder .. '/' .. missing_part] = nil
+local readable, missing_error = pcall(cache.unit, unit_id)
+assert(not readable and cache.state == 'stale' and missing_error:find(missing_part, 1, true))
+assert(missing_error:find('Load Current Gear', 1, true), 'Unavailable part had no recovery action')
+assert(cache.start(units, true), 'Unavailable part could not request a fresh capture')
+dataset()
+time = time + 1
+cache.tick()
+assert(cache.state == 'ready' and cache.unit(unit_id).main == 'unit bytes')
+cache.close()
 invalid(function()
     files['C:/fixture/binding-sources/error.txt'] = 'Worker rejected ambiguous resources'
 end, 'ambiguous')

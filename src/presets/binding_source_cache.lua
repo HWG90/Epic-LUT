@@ -12,9 +12,9 @@ function C.new(m, host)
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {} }
     local loaded_bytes = 0
     local function read(path, limit)
-        local f = io_api.open(path, 'rb')
+        local f, why = io_api.open(path, 'rb')
         if not f then
-            return nil
+            return nil, why
         end
         local value = f:read(limit + 1)
         assert(f:close())
@@ -234,12 +234,21 @@ function C.new(m, host)
         if not spec.main then
             local parts, bytes = {}, 0
             for _, part in ipairs({ 'main', 'gpu', 'stream' }) do
-                local data = spec[part .. '_file']
-                        and assert(
-                            read(self.path .. '/' .. spec[part .. '_file'], C.MAX_PART),
-                            'Binding source part unavailable'
-                        )
-                    or ''
+                local data = ''
+                local filename = spec[part .. '_file']
+                if filename then
+                    local why
+                    data, why = read(self.path .. '/' .. filename, C.MAX_PART)
+                    if not data then
+                        self.state = 'stale'
+                        self.error = 'Binding source '
+                            .. filename
+                            .. ' unavailable: '
+                            .. tostring(why or 'file could not be opened')
+                        self.status = self.error .. '; press Load Current Gear to retry'
+                        error(self.status, 0)
+                    end
+                end
                 assert(
                     not spec[part .. '_file'] or m.binding_provenance.digest(data) == spec[part .. '_sha256'],
                     'Pristine binding source digest differs'

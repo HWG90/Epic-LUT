@@ -75,7 +75,16 @@ function O.new(m, paths, native, targets)
                                     patch_source = nil
                                 end
                             end
-                            return { data = data, width = w, height = h, resource = hash, patch_source = patch_source }
+                            local source_archives =
+                                exists(snapshot_folder .. '/' .. name:gsub('%.dds$', '.source-archives'))
+                            return {
+                                data = data,
+                                width = w,
+                                height = h,
+                                resource = hash,
+                                patch_source = patch_source,
+                                source_archives = source_archives,
+                            }
                         end)
                         if ok then
                             snapshots[object] = document
