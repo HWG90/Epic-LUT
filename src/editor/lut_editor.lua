@@ -217,6 +217,23 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         end
         return note('Pasted one value; other channels are unchanged.')
     end
+    function self.copy_resource_id(hash, clipboard)
+        local formatted = m.resource_ids
+            and m.resource_ids.format(hash, self.handle and self.handle.get('resource_format') == 2)
+        if not formatted or formatted == 'unavailable' then
+            return false, note('Load a LUT with a known texture ID first.')
+        end
+        clipboard = clipboard or self.clipboard or self.api and self.api.clipboard
+        if not clipboard or not clipboard.set then
+            return false, note('System clipboard unavailable.')
+        end
+        local text = formatted:sub(2, -2)
+        local called, copied, why = pcall(clipboard.set, text)
+        if not called or not copied then
+            return false, note(tostring(called and (why or 'System clipboard unavailable.') or copied))
+        end
+        return true, note('Copied LUT ID: ' .. text)
+    end
     function self.scratch_copy()
         local hex = self.handle.get('scratch_color')
         assert(self.clipboard and self.clipboard.set, 'System clipboard unavailable')

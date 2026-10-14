@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Right-click a LUT ID or its local name to copy the underlying texture ID using the configured hexadecimal or exact unsigned decimal format. Keep left-click naming and LUT values unchanged.
 - Include weapon palettes in Save applied setup with complete named assignment proofs, atomic private snapshot publication and cooperative startup restore. Preserve unresolved snapshots and refuse changed configurations, effective sources or foreign bindings.
 - Preserve weapon workflow factories across activation and record Apply, Restore and import mapping in global Undo/Redo. Scope quick Pattern controls and previews to the selected material's companions, retaining different palettes on sibling materials sharing one stock LUT.
 - Keep Shared LUT's captured source identity stable across its own uploads without masking another writer. Retain fresh post-restore signatures and quarantine uncertain remote allocations during full addon cleanup.

@@ -164,6 +164,13 @@ for index, candidate in ipairs(mod.pages) do
         rendered_menu.page = index
     end
 end
+local copied_weapon_id
+rendered_menu.clipboard = {
+    set = function(text)
+        copied_weapon_id = text
+        return true
+    end,
+}
 local function weapon_footer()
     local commands = rendered_menu.compose(2400, 1600)
     local found, header = false, {}
@@ -185,9 +192,38 @@ local function weapon_footer()
             and header['Helmet LUT'].y == header['Weapon LUT'].y,
         'Weapon LUT is not beside Armor and Helmet'
     )
+    return commands
 end
 weapon_footer()
-weapon_footer() -- Repeated layout must retain its weapon context.
+local header_commands = weapon_footer() -- Repeated layout must retain its weapon context.
+local weapon_id_text
+for _, command in ipairs(header_commands) do
+    if (command.full_text or command.text) == '[0x' .. loaded.resource .. ']' then
+        weapon_id_text = command
+    end
+end
+assert(weapon_id_text, 'Weapon header omitted its raw texture ID')
+local before_copy_writes = #f.writes
+assert(handle.set('resource_format', 2))
+for _, down in ipairs({ true, false }) do
+    rendered_menu.tick({
+        down = function(key)
+            return down and key == 2
+        end,
+        mouse = function()
+            return weapon_id_text.x + 2, weapon_id_text.y + 2
+        end,
+        wheel = function()
+            return 0
+        end,
+    })
+end
+assert(
+    copied_weapon_id == m.resource_ids.format(loaded.resource, true):sub(2, -2),
+    'Weapon ID copy used the garment naming resolver or ignored the format preference: ' .. tostring(copied_weapon_id)
+)
+assert(#f.writes == before_copy_writes and rendered_menu.visible, 'Weapon ID copy changed native LUT bindings')
+assert(handle.set('resource_format', 1))
 local gear = {}
 for material, value in pairs(base.bound) do
     gear[material] = value
