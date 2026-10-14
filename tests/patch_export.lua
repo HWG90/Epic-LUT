@@ -147,6 +147,13 @@ local conflict = { document = items[2].document, original = items[1].original }
 items[#items + 1] = conflict
 assert(not pcall(P.encode_set, D, items), 'Conflicting shared LUT silently overwritten')
 assert(not pcall(P.encode_set, D, {}), 'Empty full palette exported')
+local no_writer, writer_reason = pcall(P.encode_set, D, {
+    { kind = 'weapon', document = document, original = original },
+})
+assert(
+    not no_writer and tostring(writer_reason):find('verified Unit/material assignment provenance', 1, true),
+    'Weapon-only export without a binding writer produced an incidental nil error'
+)
 document.data[0] = 0 / 0
 assert(not pcall(P.encode, D, document, original), 'Nonfinite pixels exported')
 document.data[0] = -2

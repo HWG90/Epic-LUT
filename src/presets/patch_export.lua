@@ -105,13 +105,14 @@ function P.encode(dds, document, original)
         stream = '',
     }
 end
-function P.encode_set(dds, documents, options)
+local function encode_set(dds, documents, options)
     assert(
         type(documents) == 'table' and #documents > 0 and #documents <= P.MAX_BINDINGS,
         'No complete palette to export or too many LUTs'
     )
-    local unique, ordered, patches, conflict = {}, {}, {}, nil
+    local unique, ordered, patches, conflict, weapon = {}, {}, {}, nil, false
     for _, item in ipairs(documents) do
+        weapon = weapon or item.kind == 'weapon'
         local patch = P.encode(dds, item.document, item.original)
         patches[#patches + 1] = patch
         local previous = unique[patch.resource]
@@ -124,9 +125,20 @@ function P.encode_set(dds, documents, options)
             ordered[#ordered + 1] = patch
         end
     end
-    if conflict then
+    if conflict or weapon then
         if options and options.binding_writer then
-            return options.binding_writer.encode(P.BASE_ARCHIVE, documents, patches, options)
+            local archive = P.BASE_ARCHIVE
+            if weapon then
+                assert(type(options.weapon_patch_archive) == 'function', 'Weapon patch destination is not yet verified')
+                local target, why = options.weapon_patch_archive(documents)
+                assert(target, why or 'Weapon patch destination is not yet verified')
+                hash(target)
+                archive = target
+            end
+            return options.binding_writer.encode(archive, documents, patches, options)
+        end
+        if weapon then
+            error('Weapon patch export requires verified Unit/material assignment provenance and a binding writer', 0)
         end
         error(
             'Shared texture has conflicting applied palettes: '
@@ -182,6 +194,45 @@ function P.encode_set(dds, documents, options)
         gpu = table.concat(gpu),
         stream = '',
     }
+end
+function P.encode_set(dds, documents, options)
+    assert(
+        type(documents) == 'table' and #documents > 0 and #documents <= P.MAX_BINDINGS,
+        'No complete palette to export or too many LUTs'
+    )
+    local weapon = false
+    for _, entry in ipairs(documents) do
+        weapon = weapon or entry.kind == 'weapon'
+    end
+    if weapon and options and options.weapon_export_batch then
+        assert(type(options.weapon_export_batch) == 'function', 'Weapon export batch service unavailable')
+        return options.weapon_export_batch(documents, function(batch)
+            assert(
+                type(batch) == 'table'
+                    and type(batch.provenance) == 'function'
+                    and type(batch.patch_archive) == 'function'
+                    and type(batch.material_source) == 'function',
+                'Weapon export batch callbacks unavailable'
+            )
+            local scoped = {}
+            for key, value in pairs(options) do
+                scoped[key] = value
+            end
+            scoped.weapon_patch_archive = batch.patch_archive
+            scoped.provenance = function(entry)
+                if entry.kind == 'weapon' then
+                    return batch.provenance(entry)
+                end
+                return options.provenance and options.provenance(entry) or entry.binding_source
+            end
+            scoped.material_source = function(resource)
+                local weapon_source = batch.material_source(resource)
+                return weapon_source or options.material_source and options.material_source(resource)
+            end
+            return encode_set(dds, documents, scoped)
+        end)
+    end
+    return encode_set(dds, documents, options)
 end
 function P.new(folder, deps)
     local self = {}
