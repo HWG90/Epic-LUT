@@ -1027,6 +1027,10 @@ import_state = function()
             sdk_catalog = m.sdk_catalog,
         }, {
             frame = function()
+                local selector = api.mods[handle.id].controls.outfit_preset
+                if selector and selector.choices then
+                    selector.choices[1] = edit.loaded and 'Save a New Preset' or 'Choose saved outfit...'
+                end
                 return {
                     groups = groups,
                     palettes = palettes,

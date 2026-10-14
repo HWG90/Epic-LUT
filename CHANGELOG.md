@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## R5.7.5 - 2026-10-14
+
+- Save updates the selected Armory preset after a confirmation naming the overwrite target. Capture and storage failures leave the existing preset intact.
+- Select **Save a New Preset** at the top of the preset dropdown when a LUT is loaded to create a separate preset through the existing Save workflow. No extra button is required.
+- Add cooperative input handoff support for updated War Journalist Photo Mode builds. Photo retains the camera while Epic LUT borrows input; closing Epic LUT returns the lease. Older Photo Mode builds do not provide this bridge, and its installed camera hooks require a normal game restart after updating.
+- Carry the shared changes into R6 without removing weapon-specific save scopes.
+
 ## R5.7.4 - 2026-10-14
 
 - Fix false Pattern/LUT conflicts across mod archives: compare the effective highest numeric layer in each family before refusing. Byte-identical native metadata, pixels and flags can load normally. Differing palettes and conflicting equal-index records remain refused, with the competing filenames reported.
