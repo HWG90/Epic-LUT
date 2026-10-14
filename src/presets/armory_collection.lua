@@ -2,9 +2,9 @@
 local A = {}
 local function type_label(preset)
     local labels = {}
-    for _, kind in ipairs({ 'armor', 'helmet', 'cape' }) do
+    for _, kind in ipairs({ 'armor', 'helmet', 'cape', 'weapon' }) do
         if #(preset[kind] or {}) > 0 then
-            labels[#labels + 1] = kind:sub(1, 1):upper() .. kind:sub(2)
+            labels[#labels + 1] = kind == 'weapon' and 'Weapons' or kind:sub(1, 1):upper() .. kind:sub(2)
         end
     end
     return #labels == 1 and (labels[1] .. ' Only') or (#labels > 0 and table.concat(labels, ' + ') or 'No LUTs')
@@ -48,6 +48,7 @@ function A.new(storage, control, handle)
                 previews[#choices] = {
                     armor = first_strip(#preset.armor > 0 and preset.armor or preset.cape or {}),
                     helmet = first_strip(preset.helmet),
+                    weapon = first_strip(preset.weapon or {}),
                 }
                 details[#choices] = type_label(preset)
             end

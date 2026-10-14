@@ -145,8 +145,24 @@ function W.new(m, host)
                         companion = companion or selected_keys[binding.save_key]
                     end
                 end
-                if entire or direct or companion then
+                if entire then
                     chosen[#chosen + 1] = descriptor
+                elseif direct or companion then
+                    -- Narrow before capture, not after: unrelated mixed Pattern
+                    -- members must not block or inflate a selected-LUT export.
+                    local subset = {}
+                    for key, value in pairs(descriptor) do
+                        subset[key] = value
+                    end
+                    subset.bindings = {}
+                    for _, binding in ipairs(descriptor.bindings) do
+                        if selected_keys[binding.save_key] then
+                            subset.bindings[#subset.bindings + 1] = binding
+                        end
+                    end
+                    if #subset.bindings > 0 then
+                        chosen[#chosen + 1] = subset
+                    end
                 end
             end
         end

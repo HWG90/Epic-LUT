@@ -85,6 +85,8 @@ do
         { armor = {}, helmet = { document }, cape = { document }, label = 'Helmet + Cape' },
         { armor = { document }, helmet = { document }, cape = { document }, label = 'Armor + Helmet + Cape' },
         { armor = {}, helmet = {}, cape = {}, label = 'No LUTs' },
+        { armor = {}, helmet = {}, cape = {}, weapon = { document }, label = 'Weapons Only' },
+        { armor = { document }, helmet = {}, cape = {}, weapon = { document }, label = 'Armor + Weapons' },
     }
     for _, preset in ipairs(labels) do
         preset.name = 'Combo'
@@ -103,6 +105,7 @@ do
         local previews = selector.choice_previews[choice]
         assert(#previews.armor == ((#preset.armor > 0 or #preset.cape > 0) and 1 or 0))
         assert(#previews.helmet == (#preset.helmet > 0 and 1 or 0))
+        assert(#previews.weapon == (#(preset.weapon or {}) > 0 and 1 or 0), 'Weapon dropdown swatches were omitted')
     end
     presets.Combo = nil
     collection.refresh()

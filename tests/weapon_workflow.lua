@@ -104,6 +104,80 @@ assert(
     Mapping.bytes(existing.entries[1].document) == existing_pixels,
     'Testing a preset on weapons modified the saved garment palette'
 )
+do
+    local scoped = F.new()
+    local main = scoped.group(1, 'material', 1, 'babd338977faa2ff', 0.5, 2)
+    local companion = scoped.group(1, 'pattern', 1, 'cf0cc31b981786c9', 0.75, 2)
+    companion.bindings[2].document = { width = 3, height = 1, data = 'unavailable unselected pixels' }
+    local captured
+    local scoped_bridge = {
+        runtime = function()
+            return scoped.runtime
+        end,
+        descriptors = function()
+            return scoped.groups
+        end,
+        check = function()
+            return scoped.runtime.target(1, 1, 'material')
+        end,
+    }
+    local scoped_workflow = Workflow.new(
+        {
+            weapon_mapping = Mapping,
+            weapon_presets = Presets,
+            outfit_targets = dofile('src/presets/outfit_targets.lua'),
+        },
+        {
+            bridge = function()
+                return scoped_bridge
+            end,
+            outfits = function()
+                return storage
+            end,
+            message = function(value)
+                return value
+            end,
+            exporter = function(preset)
+                return {
+                    save = function(_, _, format)
+                        captured = preset.entries
+                        assert(format == 2, 'Selected weapon export changed its format')
+                        return 'output', 'subset', 'subset.zip'
+                    end,
+                }
+            end,
+        }
+    )
+    local target =
+        { kind = 'weapon', weapon_slot = 1, group_index = 1, family = 'material', bindings = { main.bindings[1] } }
+    local draft = F.document(23, 8, 0.25)
+    assert(scoped_workflow.export_editor(target, draft, 'Subset', false))
+    assert(
+        #captured == 2 and captured[1].key == '3:1:0:0' and captured[2].key == 'p:3:1:0:0',
+        'Selected export captured unselected material or Pattern destinations'
+    )
+    assert(captured[1].document.data[0] == 0.25 and captured[2].document.data[0] == 0.75)
+    assert(
+        not pcall(scoped_workflow.export_editor, target, draft, 'Entire', true),
+        'Entire export silently omitted unavailable required Pattern pixels'
+    )
+    local descriptor = {}
+    for key, value in pairs(companion) do
+        descriptor[key] = value
+    end
+    descriptor.bindings = { companion.bindings[1] }
+    local _, validate = Mapping.freeze(scoped.runtime, { descriptor })
+    local old_mesh = companion.bindings[2].mesh
+    companion.bindings[2].mesh = old_mesh + 1
+    assert(not pcall(validate), 'Subset capture stopped checking the full group identity')
+    companion.bindings[2].mesh = old_mesh
+    assert(validate())
+    scoped.foreign(companion.bindings[2])
+    assert(
+        not pcall(scoped_workflow.export_editor, target, draft, 'Subset', false),
+        'Subset export bypassed whole-group native ownership validation'
+    )
+end
 f.foreign(secondary.bindings[1])
 assert(not pcall(f.menu.outfit_dialog.on_save, 'Changed'))
 assert(invalidated == 'Adjudicator')

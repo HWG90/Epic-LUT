@@ -225,9 +225,12 @@ function A.new(info, preview)
         button('Search: ' .. (state.armory_query or 'all presets'), 'armory_search')
         choice('armory_sort')
         choice('outfit_preset')
-        label('Saved outfit swatches: Armor / Cape | Helmet')
-        button('Save Current Gear Preset', 'save_setup')
         local outfit = state.raw and state.raw.outfit
+        label(
+            outfit and #(outfit.weapon or {}) > 0 and 'Saved preset swatches: Armor / Cape | Helmet | Weapons'
+                or 'Saved outfit swatches: Armor / Cape | Helmet'
+        )
+        button('Save Current Gear Preset', 'save_setup')
         local armor_count = outfit and #(outfit.armor or {}) or 0
         local cape_count = outfit and #(outfit.cape or {}) or 0
         local weapon_count = outfit and #(outfit.weapon or {}) or 0
@@ -442,7 +445,8 @@ function A.new(info, preview)
                     local cy = body_top + scroll - card.depth
                     if cy > body.y and cy - card.h < body_top then
                         local name = (
-                            item.kind == 'weapon' and (weapon_titles[item.weapon_slot] or 'Weapon') or titles[item.kind]
+                            item.kind == 'weapon' and (weapon_titles[item.weapon_slot] or 'Weapon')
+                            or titles[item.kind]
                         )
                             .. (doc.width == 3 and doc.height == 1 and ' Pattern LUT ' or ' LUT ')
                             .. item.index

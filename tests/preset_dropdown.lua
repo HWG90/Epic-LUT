@@ -230,6 +230,19 @@ regular = label(commands, 'Alpha')
 arrows = row_arrows(commands, regular)
 click(arrows['>'].x - 9 * scale, arrows['>'].y + 2 * scale)
 assert(h.get('regular') == 2 and not menu.dropdown, 'Expanded standard step button did not step')
+local weapon_color = { 247, 36, 91 }
+mod.controls.saved.choice_previews = { [3] = { armor = {}, helmet = {}, weapon = { weapon_color } } }
+mod.controls.saved.choice_details = { [3] = 'Weapons Only' }
+menu.open_dropdown({ mod = mod, control = mod.controls.saved, selected = 3, scroll = 0, x = 30, top = 500, width = 400 })
+local weapon_swatch = false
+for _, command in ipairs(compose()) do
+    if command.type == 'rect' and command.ui_role == 'swatch_fill' and command.c == weapon_color then
+        assert(command.w > 0 and command.w <= 48 * menu.window_bounds.scale)
+        weapon_swatch = true
+    end
+end
+assert(weapon_swatch, 'Preset dropdown did not render its weapon palette')
+menu.key(27)
 print(
     'PASS preset dropdown: content-sized editable hit area, pending-name commit, large open/step targets, bounded long names, scale/font variants and disabled controls'
 )

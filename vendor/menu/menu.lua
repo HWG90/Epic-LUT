@@ -4500,18 +4500,24 @@ function M.new(api, measure, Text)
                     )
                 end
                 if preview then
-                    for n, kind in ipairs({ 'armor', 'helmet' }) do
+                    local kinds = { 'armor', 'helmet' }
+                    if preview.weapon and #preview.weapon > 0 then kinds[#kinds + 1] = 'weapon' end
+                    local lane = 108 / #kinds
+                    local strip_width = lane - 6
+                    for n, kind in ipairs(kinds) do
                         local colors = preview[kind] or {}
-                        local sx = x + dw - 122 - delete_width + (n - 1) * 54
+                        local sx = x + dw - 122 - delete_width + (n - 1) * lane
                         if #colors == 0 then
-                            rect(sx, y, 48, 12, { 65, 76, 85 }, nil, 'swatch_fill')
+                            rect(sx, y, strip_width, 12, { 65, 76, 85 }, nil, 'swatch_fill')
                         else
                             for i, color in ipairs(colors) do
-                                rect(sx + (i - 1) * 48 / #colors, y, 48 / #colors - 1, 12, color, nil, 'swatch_fill')
+                                rect(sx + (i - 1) * strip_width / #colors, y, math.max(0, strip_width / #colors - 1), 12, color, nil, 'swatch_fill')
                             end
                         end
                     end
-                    rect(x + dw - 70 - delete_width, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
+                    for n = 1, #kinds - 1 do
+                        rect(x + dw - 122 - delete_width + n * lane - 2, y - 2, 1, 16, { 145, 156, 165 }, nil, 'swatch_fill')
+                    end
                 end
                 if pattern_preview then
                     M.pattern_thumbnail(pattern_preview, rect, x + dw - 44 - delete_width, y - 1, 24)

@@ -125,6 +125,17 @@ function M.freeze(runtime, descriptors)
         assert(original.width == (kind == 'pattern' and 3 or 23), 'Weapon group family differs from source shape')
         dense(group.bindings, M.MAX_BINDINGS, 'Weapon group bindings')
         assert(#group.bindings > 0, 'Weapon LUT group has no bindings')
+        local wanted = {}
+        local subset = descriptor.bindings or group.bindings
+        dense(subset, M.MAX_BINDINGS, 'Weapon target subset')
+        assert(#subset > 0, 'Choose at least one weapon binding')
+        for _, binding in ipairs(subset) do
+            assert(
+                type(binding) == 'table' and type(binding.save_key) == 'string' and not wanted[binding.save_key],
+                'Invalid or duplicate weapon subset'
+            )
+            wanted[binding.save_key] = binding
+        end
         local saved = {
             id = 'weapon:' .. key,
             group = group,
@@ -138,6 +149,7 @@ function M.freeze(runtime, descriptors)
             width = original.width,
             height = original.height,
             members = {},
+            scope_members = {},
         }
         for _, binding in ipairs(group.bindings) do
             count = count + 1
@@ -148,13 +160,23 @@ function M.freeze(runtime, descriptors)
                     and resource(binding.weapon_resource or binding.weapon_resource64) == id,
                 'Weapon binding configuration differs from group'
             )
-            local current = binding.document or group.applied_document or original
-            local member = { binding = binding, fields = {}, document = current, bytes = M.bytes(current) }
+            local member = { binding = binding, fields = {} }
             for _, field in ipairs(fields) do
                 member.fields[field] = binding[field]
             end
-            saved.members[#saved.members + 1] = member
+            saved.scope_members[#saved.scope_members + 1] = member
+            local requested = wanted[binding.save_key]
+            if requested then
+                for _, field in ipairs(fields) do
+                    assert(requested[field] == binding[field], 'Weapon subset receipt changed: ' .. field)
+                end
+                local current = binding.document or group.applied_document or original
+                member.document, member.bytes = current, M.bytes(current)
+                saved.members[#saved.members + 1] = member
+                wanted[binding.save_key] = nil
+            end
         end
+        assert(not next(wanted), 'Weapon subset contains an unknown destination')
         frozen[#frozen + 1] = saved
     end
     local function validate()
@@ -166,17 +188,19 @@ function M.freeze(runtime, descriptors)
                     and group.source_resource == saved.source_resource
                     and group.source_document == saved.source_document
                     and M.bytes(group.source_document) == saved.source_bytes
-                    and #group.bindings == #saved.members,
+                    and #group.bindings == #saved.scope_members,
                 'Weapon/source LUT changed; reopen the operation'
             )
-            for index, member in ipairs(saved.members) do
+            for index, member in ipairs(saved.scope_members) do
                 local binding = group.bindings[index]
                 assert(binding == member.binding, 'Weapon group members changed; reopen the operation')
                 for _, field in ipairs(fields) do
                     assert(binding[field] == member.fields[field], 'Weapon target receipt changed: ' .. field)
                 end
-                local current = binding.document or group.applied_document or group.source_document
-                assert(M.bytes(current) == member.bytes, 'Current weapon LUT pixels changed; reopen the operation')
+                if member.bytes then
+                    local current = binding.document or group.applied_document or group.source_document
+                    assert(M.bytes(current) == member.bytes, 'Current weapon LUT pixels changed; reopen the operation')
+                end
             end
         end
         return true
