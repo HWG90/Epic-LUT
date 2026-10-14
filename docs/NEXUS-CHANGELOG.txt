@@ -1,3 +1,13 @@
+# Epic LUT R5.7.2
+
+- Read installed custom-model LUT patches instead of stock pixels under reused texture IDs. Recheck patch-sensitive caches on Load Current Gear; highlighting retains the custom palette's other rows.
+- Basic Apply Preset uses the same live assignments as The Armory. Valid material LUTs remain applicable without a matching Pattern; actual companions and Pattern-only destinations remain explicit.
+- Filter numbered gore caps and named gore/LOD meshes from Player Preview while preserving clothing and live LUT synchronization.
+- Restore the third quick Pattern swatch as Roughness, with Color and Mat/Opac labels. Roughness edits change Alpha and preserve all other channels; Cancel and Undo/Redo remain available.
+- Prevent Armory Apply Preset clipping at larger font sizes, wrapping controls when needed.
+- Right-click the LUT ID or renamed label to copy its underlying texture ID in the configured hexadecimal or exact unsigned decimal format.
+- Split the large direct editor into focused workflow modules without changing its public editing behavior.
+
 # Epic LUT R5.7.1
 
 - Expanded Shared LUT appearances for compatible squadmates: currently applied Armor, Helmet and associated Patterns retain exact RGBA, material, camo and emissive values. Apply an Armory preset to share it.

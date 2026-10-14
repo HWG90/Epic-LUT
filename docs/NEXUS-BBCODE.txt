@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.7.1[/b][/size]
+[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.7.2[/b][/size]
 [size=5][b][color=#f1c232]STYLISH[/color] FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
@@ -19,14 +19,23 @@ Press [b]F10[/b]. Load your current gear. Pick a LUT. Edit its colors and materi
 
 Rebind menu controls in the Configuration Menu.
 
-[size=4][b]R5.7.1 - SHARED LUT, CAMO & COMPACT EDITING[/b][/size]
+[size=4][b]R5.7.2 MAINTENANCE[/b][/size]
+[list]
+[*]Custom model LUTs now load installed patch colors instead of stock colors under reused IDs; highlighting preserves their other rows.[/*]
+[*]Basic Apply Preset now matches The Armory, including valid material LUTs without a live Pattern and exact resolved companions.[/*]
+[*]Player Preview filters numbered gore caps and keeps clothing LUT sync.[/*]
+[*]Pattern quick controls identify Color, Mat/Opac and Roughness. Roughness edits Alpha and preserves the other channels.[/*]
+[*]Armory Apply labels fit larger fonts. Right-click a LUT ID or renamed label to copy its real ID in the configured hex or decimal format.[/*]
+[/list]
+
+[size=4][b]SHARED LUT, CAMO & COMPACT EDITING[/b][/size]
 [list]
 [*][b]Shared LUT. Show your squad the look.[/b] Compatible Epic LUT users can see your applied Armor, Helmet and Pattern edits with exact color, alpha, material, camo and emissive values. Improved lossless compression fits larger appearances. Apply an Armory preset to share that look.[/*]
 [*][b]Patches keep the look.[/b] Export preserves verified material, mesh and kit assignments when palettes share a texture ID. Fixed the export crash and large-patch cache failures. The tested presets exported and their installed patch worked in-game.[/*]
 [*][b]More editor. Less sprawl.[/b] Basic prioritizes all eight regions. Grid cells, buttons and previews stay compact as the window expands. Docked Tools starts open; undocked Tools starts closed.[/*]
 [*][b]Camo where you want it.[/b] Check the regions, then choose a pattern, colorway or tint. Boxes start unchecked; the four colors sit above the selectors. Custom tints switch to Current / custom without closing the menu.[/*]
 [*][b]Map LUTs to Gear.[/b] One dialog in Basic and Advanced for Armor, Helmet and Cape. Auto-map follows numbered imports and repeats them across each checked gear column. Imported-texture Apply buttons include a source dropdown.[/*]
-[*][b]Patterns, right here.[/b] Two quick swatches initialize below the LUT table. The full Pattern editor replaces that table, retaining raw channels, import/export, flash and Undo/Redo.[/*]
+[*][b]Patterns, right here.[/b] Three quick swatches initialize below the LUT table, labeled Color, Mat/Opac and Roughness. The third column Alpha controls roughness; other channels remain intact. The full Pattern editor replaces that table, retaining raw channels, import/export, flash and Undo/Redo.[/*]
 [*][b]A tidier Armory.[/b] Save and apply Armor, Helmet and Cape with checkboxes. Basic adds individual LUT checks and Select All with associated Patterns. Compact preview lanes show all gear and Patterns with scrollbars.[/*]
 [*][b]Small fixes that matter.[/b] Values commit on click-away. Delete resets selected cells with Undo. Preset names complete with Tab; Cancel works before typing. Row previews and Paydex JSON import are in Tools.[/*]
 [*][b]Three loader choices.[/b] Nexus has BSL as the Main File and MDL as an Optional File. LLL is available on GitHub only. All three come from the same source snapshot and include Player Preview.[/*]
@@ -50,7 +59,7 @@ Rebind menu controls in the Configuration Menu.
 [size=4][b]SHARED LUT - YOUR LOOK, VISIBLE TO YOUR SQUAD[/b][/size]
 Share your currently applied [b]Armor, Helmet and associated Pattern[/b] edits with compatible Epic LUT squadmates. Apply a saved Armory preset to share that look. Complete supported tables keep exact RGBA, material, camo and emissive channels, rather than reducing your appearance to a few color swatches.
 
-Both players need [b]R5.7.1[/b] and [b]Configuration > Share full LUT appearance with Epic LUT users[/b] enabled. The current default is [b]On[/b]; that one setting controls [b]both sending and receiving[/b]. Turn it Off to remove your advertised look and restore received appearances still owned by Epic LUT.
+Both players need [b]R5.7.2[/b] and [b]Configuration > Share full LUT appearance with Epic LUT users[/b] enabled. The current default is [b]On[/b]; that one setting controls [b]both sending and receiving[/b]. Turn it Off to remove your advertised look and restore received appearances still owned by Epic LUT.
 
 Updates wait for a stable squad lobby and settled edits. A received look applies only while the sender's visible body, Armor and Helmet kits match; your own outfit can be different. Improved lossless compression and deduplication support larger appearances, including up to 4,096 bindings within the lobby limit. Oversized looks stay local with an explanatory status while receiving remains available.
 
@@ -58,9 +67,9 @@ Updates wait for a stable squad lobby and settled edits. A received look applies
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.7.1-BSL.zip[/b] and enable its BSL startup option.[/*]
-[*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
-[*][b]GitHub only - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.1-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
+[*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.7.2-BSL.zip[/b] and enable its BSL startup option.[/*]
+[*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.2-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
+[*][b]GitHub only - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.7.2-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].[/*]
 [/list]
 [center][b]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/b]
@@ -88,7 +97,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Nexus BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.1]GitHub BSL / LLL / MDL[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Nexus BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.2]GitHub BSL / LLL / MDL[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## R5.7.2 - 2026-10-14
+
 - Right-click a LUT ID or its local name to copy the underlying texture ID using the configured hexadecimal or exact unsigned decimal format. Keep left-click naming and LUT values unchanged.
 - Load current LUT pixels from installed custom texture patches instead of reusing stock pixels under the same resource ID. Validate the patch-sensitive snapshot scope before exposing cached colors and recheck it on Load Current Gear; highlighting retains the custom model's other rows and original bindings.
 - Match Basic Apply Preset to Armory's live assignments: apply valid material LUTs when a mesh has no matching Pattern, include every resolved companion, and offer Pattern-only destinations without inventing assignments. Preserve checked targets, stale-state checks, rollback and one-action Undo.
