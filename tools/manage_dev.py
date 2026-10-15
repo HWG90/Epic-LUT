@@ -464,7 +464,7 @@ def deploy(root, package, mode, expect_installed=None, install=False, target=Non
         writable |= {name for name in runtime if name.startswith('tools/') and name.endswith(('.ps1', '.cs'))}
         # Only the public documents shipped by build_lll.py may accompany a
         # code update. Other non-code payloads remain protected.
-        writable |= {'README.md', 'CHANGELOG.md'}
+        writable |= {'README.md', 'CHANGELOG.md', 'docs/PRESET-PATCH-RESTORE.md', 'docs/SHARING-COMPRESSION.md'}
         if native_changed and upgrade_input:writable |= {candidate_input,'library.txt'}
         if re.fullmatch(r'R\d+\.\d+\.\d+', package['version']):
             writable.add('docs/RELEASE-'+package['version']+'.md')

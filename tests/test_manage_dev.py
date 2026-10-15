@@ -477,6 +477,19 @@ class ManagedDevelopment(unittest.TestCase):
                 self.assertEqual(dev.installed_files(self.target), before)
                 self.assertFalse((self.root/'dist/deployment/active.json').exists())
 
+    def test_scoped_release_help_docs_are_backed_up_without_settings_changes(self):
+        before = self.install_modular_fixture()
+        docs = {'docs/PRESET-PATCH-RESTORE.md': b'public restore help',
+                'docs/SHARING-COMPRESSION.md': b'public compression help'}
+        candidate = dev.read_package(modular_package(self.root/'release-help.zip', 'static',
+                                                     extra=docs))
+        receipt = dev.deploy(self.root, candidate, 'static', dev.sha(before['main.lua']), True, self.target)
+        for name, content in docs.items():
+            self.assertEqual((self.target/name).read_bytes(), content)
+            self.assertIn(name, receipt['changed_files'])
+        self.assertEqual((self.target/'config/defaults.cfg').read_bytes(), before['config/defaults.cfg'])
+        self.assertEqual(dev.hashes(dev.installed_files(self.target)), receipt['installed_hashes'])
+
     def test_public_modular_docs_partial_failure_restores_updates_and_removes_additions(self):
         before = self.install_modular_fixture(extra={'README.md': b'old readme'})
         docs = {'README.md': b'updated readme', 'CHANGELOG.md': b'new changelog',
