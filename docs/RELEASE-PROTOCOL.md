@@ -11,6 +11,12 @@ When David requests an Epic LUT update or release, complete this sequence. Finis
 
 ## 2. Prepare one public snapshot
 
+Public release copy must be simple, direct, and written in David's voice, as if he posted it himself. Apply this to GitHub, Nexus, Ayaka, Discord, changelogs and packaged release notes.
+
+- Describe what changed and how to use it. Keep major features visible without technical detail that users do not need.
+- Leave out tester names, private conversations, payload sizes, compression benchmarks, source hashes and debugging/testing narratives. Keep that evidence in technical documentation or publication receipts.
+- Keep necessary compatibility, installation and experimental/no-support notices brief. Never claim live verification that has not happened.
+
 - Update VERSION, README, CHANGELOG, `docs/RELEASE-<version>.md`, Nexus BBCode/changelog and the Discord announcement. Explain major new features and how to use them, not only the latest fix. Check feature scope, defaults and consent controls against current source; distinguish tested capabilities from live confirmation still pending. Preserve credits, discovery attribution and vendor/LICENSE.
 - Commit and push all relevant public Epic-LUT changes. Exclude game assets and binaries, saved presets/settings, screenshots, logs, private cache/evidence, unrelated work and private research. Check staged paths and the diff before committing.
 - Build **BSL**, **modular LLL R30+ (`main.lua`)**, and **bundled API-2 MDL (`mod.lua`)** from the same committed source snapshot. Shared changes require parity across all three. Use standard idle-preview packages; continuous-animation candidates remain separate unless explicitly requested.
