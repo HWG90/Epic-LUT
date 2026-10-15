@@ -541,7 +541,7 @@ function V.new(info, tables, select_color, core, help, swatch_tooltip)
             right_cursor = right_cursor - right_gap
             return bounds
         end
-        self.import_header = { browse = right_button('Choose file - DDS / ZIP / RAR...', 'browse') }
+        self.import_header = { browse = right_button('Choose file - DDS / ZIP / RAR / Patch...', 'browse') }
         if state.loaded then
             local path = (state.loaded.source or 'Imported LUT'):gsub('\\', '/')
             local relative = path:match('/Epic LUT/(.*)') or path:match('[^/]+$') or path

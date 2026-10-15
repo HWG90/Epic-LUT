@@ -304,7 +304,7 @@ function T.new(deps)
         end
         if self.tab == 'import' then
             label(top, 'Import a palette, then choose the table to edit or apply.', muted, 'hint')
-            local first = { { 'Import DDS / ZIP / RAR...', 'browse', true } }
+            local first = { { 'Import DDS / ZIP / RAR / Patch...', 'browse', true } }
             if controls.populate_worn then
                 first[#first + 1] = {
                     'Load Current Gear',
@@ -417,6 +417,13 @@ function T.new(deps)
             cursor = action_row(cursor, {
                 { 'Reset row', 'reset_row', d ~= nil },
                 { 'Reset cell', 'reset_cell', d ~= nil },
+            })
+            cursor = action_row(cursor, {
+                { 'Arrowhead: LUT', 'restore_arrowhead_lut', d ~= nil },
+                { 'Arrowhead: row', 'restore_arrowhead_row', d ~= nil },
+            })
+            cursor = action_row(cursor, {
+                { 'Arrowhead: selection', 'restore_arrowhead_selection', d ~= nil },
             })
             action(cursor, 'Import Paydex JSON...', 'import_paydex_rows', true)
             local preview_top = beside and top or cursor - step - gap

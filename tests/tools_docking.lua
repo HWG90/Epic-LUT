@@ -710,7 +710,7 @@ for _, font in ipairs({ 12, 20 }) do
                 end
             end
             if tab == 'import' then
-                local import = assert(body_label('Import DDS / ZIP / RAR...'))
+                local import = assert(body_label('Import DDS / ZIP / RAR / Patch...'))
                 local load = assert(body_label('Load Current Gear'))
                 if canvas_width == 2200 then
                     assert(

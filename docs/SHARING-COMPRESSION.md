@@ -1,0 +1,7 @@
+# Automatic lossless sharing compression
+
+The encoder compares native LZNT1/XPRESS results for the existing full, sparse, XOR, and dictionary layouts. Dictionary layouts now compare lexical, first-use and frequency word order. EL7 adds exact destination masks grouped by kind, slot and document, retaining every mesh/material address. It competes with existing formats automatically; the shortest finished packet wins. The 3,600-character transport limit is unchanged. There is no float quantization, partial appearance publication, or assignment removal.
+
+Both squadmates need this updated build to receive an EL7 packet. New decoders retain all previous supported formats. R5 refuses weapon-bearing packets; R6 preserves exact weapon IDs and authorization. Oversized high-entropy data still remains local; no lossless algorithm can guarantee that arbitrary random floats fit this channel.
+
+A deterministic public stress fixture uses the maximum 32 distinct LUTs and 4,096 shuffled destination records: 17,081 -> 1,113 characters on the tested Windows compressor, with exact decoded F32 bytes and all assignments. Its random-data control is refused without truncation. Measurements vary with the native compressor. The supplied Desert preset measured 3,437 -> 2,889 characters for all nine tables and 176 assignments; those private user assets are not included in source or packages. The sender's 4,953-character live payload remains unreproduced, so that exact case is not claimed fixed.

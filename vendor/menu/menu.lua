@@ -4539,14 +4539,23 @@ function M.new(api, measure, Text)
                     -- Register after the option body so removal cannot select or
                     -- apply the row first. Keep the chooser open after refresh.
                     hit(dx, y - 4, 30, 30, function()
-                        local called, ok, notice = pcall(d.control.on_delete_choice, choice, choice_label)
-                        self.notice = called and (notice or (ok and 'Preset removed' or 'Could not remove preset'))
-                            or tostring(ok)
-                        if called and ok then
-                            d.selected = (d.mod.handle.preview or d.mod.handle.get)(d.control.id)
-                            d.scroll = math.max(0, math.min(d.scroll, math.max(0, #d.control.choices - 8)))
-                            self.redraw_revision = (self.redraw_revision or 0) + 1
-                        end
+                        self.dropdown = nil
+                        self.outfit_dialog = {
+                            phase = 'delete',
+                            title = 'Delete Preset?',
+                            preset_name = choice_label,
+                            description = 'Delete this saved preset? Applied colors stay unchanged.',
+                            on_save = function()
+                                assert(
+                                    d.control.choices[choice] == choice_label,
+                                    'Preset list changed; reopen it before deleting'
+                                )
+                                local ok, notice = d.control.on_delete_choice(choice, choice_label)
+                                assert(ok, notice or 'Could not remove preset')
+                                self.redraw_revision = (self.redraw_revision or 0) + 1
+                                return notice or 'Preset removed'
+                            end,
+                        }
                     end, nil, nil, 'Remove this saved preset. Applied colors stay unchanged.')
                 end
             end

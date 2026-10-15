@@ -105,21 +105,31 @@ for _, c in ipairs(commands) do
 end
 assert(buttons == 2, 'Placeholder received a removal button, or a saved item lost it')
 local delete = remove_button(commands, 'Beta')
+click(delete.x + 3, delete.y + 2)
+assert(menu.outfit_dialog and #removed == 0 and applied == 0, 'X deleted before confirmation')
+local function dialog_click(value)
+    for _, c in ipairs(compose()) do
+        if c.type == 'text' and c.text == value then
+            click(c.x + 3, c.y + 2)
+            return
+        end
+    end
+    error('Missing dialog action ' .. value)
+end
+dialog_click('Cancel')
+assert(not menu.outfit_dialog and #removed == 0)
+chosen = label(compose(), 'Alpha', false)
+click(chosen.x + 3, chosen.y + 3)
+delete = remove_button(compose(), 'Beta')
+click(delete.x + 3, delete.y + 2)
 reject = true
-click(delete.x + 3, delete.y + 2)
-assert(
-    #removed == 0 and h.get('preset') == 2 and applied == 0 and menu.dropdown,
-    'Failed removal selected/applied a preset'
-)
+dialog_click('Delete Preset')
+assert(menu.outfit_dialog and #removed == 0 and h.get('preset') == 2 and applied == 0)
 reject = false
-commands = compose()
-delete = remove_button(commands, 'Beta')
-click(delete.x + 3, delete.y + 2)
-assert(
-    removed[1] == 'Beta' and #control.choices == 2 and h.get('preset') == 2 and applied == 0,
-    'X selected/applied the removed item or removed another preset'
-)
-assert(menu.dropdown and menu.notice == 'Removed Beta', 'Removal lost the chooser/status')
+dialog_click('Delete Preset')
+assert(not menu.outfit_dialog and removed[1] == 'Beta' and #control.choices == 2 and applied == 0)
+chosen = label(compose(), 'Alpha', false)
+click(chosen.x + 3, chosen.y + 3)
 commands = compose()
 delete = remove_button(commands, 'Alpha')
 local preview_end
@@ -128,12 +138,12 @@ for _, c in ipairs(commands) do
         preview_end = math.max(preview_end or 0, c.x + c.w)
     end
 end
-assert(preview_end and preview_end < delete.x - 8, 'Removal button overlaps saved LUT swatch previews')
+assert(preview_end and preview_end < delete.x - 8, 'Removal overlaps swatches')
 click(delete.x + 3, delete.y + 2)
-assert(removed[2] == 'Alpha' and h.get('preset') == 1 and applied == 0 and menu.dropdown)
-for _, c in ipairs(compose()) do
-    assert(not (c.text == 'X' and (c.paint_plane or 0) >= 300), 'Empty chooser retained a deletion button')
-end
-print(
-    'PASS preset removal UI: right-side X, protected placeholders, correct labels, no selection/apply, visible preview separation, failure isolation and refreshed open chooser'
-)
+control.choices[2] = 'Changed'
+dialog_click('Delete Preset')
+assert(menu.outfit_dialog and #removed == 1, 'Stale confirmation deleted another preset')
+control.choices[2] = 'Alpha'
+dialog_click('Delete Preset')
+assert(removed[2] == 'Alpha' and h.get('preset') == 1 and applied == 0)
+print('PASS dropdown deletion confirmation: cancellation, failure, stale identity, correct target, no apply')

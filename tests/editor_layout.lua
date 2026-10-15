@@ -612,7 +612,7 @@ assert(not label(compose(), 'Preview Materials / Meshes'), 'Removed preview debu
 tap_label('Import')
 commands = compose()
 assert(
-    editor.tools.is_open() and editor.tools.tab == 'import' and label(commands, 'Import DDS / ZIP / RAR...'),
+    editor.tools.is_open() and editor.tools.tab == 'import' and label(commands, 'Import DDS / ZIP / RAR / Patch...'),
     'Empty editor returned before composing Import tools'
 )
 pattern.show('armor')

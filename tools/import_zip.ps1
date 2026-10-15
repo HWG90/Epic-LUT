@@ -54,6 +54,7 @@ function Finish-Process($Process) {
     if($Process) {if(-not $Process.HasExited) {$Process.Kill();$Process.WaitForExit(3000)|Out-Null};$Process.Dispose()}
 }
 function Open-Member($Entry) {
+    if($Entry.Local) {return @{Stream=[IO.File]::OpenRead($Entry.Local);Process=$null}}
     if($Entry.Zip) {return @{Stream=$Entry.Zip.Open();Process=$null}}
     $info=New-Object Diagnostics.ProcessStartInfo
     $info.FileName=$SevenZip;$info.Arguments='x -so -y -spd -- "'+$Package+'" "'+$Entry.Name+'"'
@@ -233,7 +234,7 @@ try {
     if($Pick) {
         Add-Type -AssemblyName System.Windows.Forms
         $dialog=New-Object Windows.Forms.OpenFileDialog
-        $dialog.Filter=if($RowPresets){'Paydex row presets (*.json)|*.json'}else{'LUT palettes or mod archives (*.dds;*.zip;*.rar)|*.dds;*.zip;*.rar'}
+        $dialog.Filter=if($RowPresets){'Paydex row presets (*.json)|*.json'}else{'LUT palettes or mod archives (*.dds;*.zip;*.rar;*.patch_*)|*.dds;*.zip;*.rar;*.patch_*'}
         $dialog.Title=if($RowPresets){'Epic LUT - Import Paydex row presets'}else{'Epic LUT - Choose a palette or mod archive'}
         $timer=New-Object Windows.Forms.Timer
         $timer.Interval=500
@@ -254,7 +255,16 @@ try {
     Pulse 'reading'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $entries=@()
-    if([IO.Path]::GetExtension($Package) -ieq '.rar') {
+    if([IO.Path]::GetFileName($Package) -match '^[0-9a-fA-F]{16}\.patch_[0-9]+$') {
+        foreach($suffix in @('', '.gpu_resources', '.stream')) {
+            $part=$Package+$suffix
+            if([IO.File]::Exists($part)) {
+                $item=Get-Item -LiteralPath $part
+                if($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Redirected patch files are unsupported'}
+                $entries+=@{Name=$item.Name;Length=$item.Length;Local=$item.FullName;Zip=$null}
+            }
+        }
+    } elseif([IO.Path]::GetExtension($Package) -ieq '.rar') {
         if(-not $SevenZip) {
             $command=Get-Command 7z.exe -ErrorAction SilentlyContinue
             if($command) {$SevenZip=$command.Source}

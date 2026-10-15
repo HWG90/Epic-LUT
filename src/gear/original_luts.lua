@@ -77,7 +77,18 @@ function O.new(m, paths, native, targets)
                             end
                             local source_archives =
                                 exists(snapshot_folder .. '/' .. name:gsub('%.dds$', '.source-archives'))
+                            local arrowhead
+                            local base = io.open(snapshot_folder .. '/arrowhead/' .. name, 'rb')
+                            if base then
+                                local raw = base:read(m.dds.MAX_BYTES + 1)
+                                base:close()
+                                local valid, pixels, bw, bh = pcall(m.dds.decode, raw)
+                                if valid then
+                                    arrowhead = { data = pixels, width = bw, height = bh, resource = hash }
+                                end
+                            end
                             return {
+                                arrowhead = arrowhead,
                                 data = data,
                                 width = w,
                                 height = h,

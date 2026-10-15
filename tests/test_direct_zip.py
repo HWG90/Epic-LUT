@@ -42,6 +42,20 @@ with tempfile.TemporaryDirectory(prefix='epic-direct-zip-') as temp:
     assert (folder/'out/resources.tsv').read_text()=='lut001.dds\t0000000000000001'
     assert len(list((folder/'out').iterdir()))==3
 
+    # Loose patch import follows the same extraction and resource-ID mapping path.
+    loose=folder/'0123456789abcdef.patch_0'
+    loose.write_bytes(PATCH)
+    loose.with_name(loose.name+'.gpu_resources').write_bytes(PIXELS)
+    result=folder/'loose.txt'
+    completed=run(loose,folder/'loose',result)
+    assert completed.returncode==0,(completed.stderr,result.read_text())
+    assert (folder/'loose/lut001.dds').read_bytes()==data
+    assert (folder/'loose/resources.tsv').read_text()=='lut001.dds\t0000000000000001'
+    loose.with_name(loose.name+'.gpu_resources').unlink()
+    result=folder/'missing.txt'
+    completed=run(loose,folder/'missing',result)
+    assert completed.returncode!=0 and 'sidecar missing' in result.read_text()
+
     for index, unsafe in enumerate(('../escape.dds','/absolute.dds','file:stream.dds')):
         with zipfile.ZipFile(package,'w')as archive:archive.writestr(unsafe,data)
         result=folder/f'bad{index}.txt'

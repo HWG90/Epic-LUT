@@ -275,6 +275,30 @@ function C.new(deps)
                         end,
                     },
                     {
+                        id = 'restore_arrowhead_lut',
+                        type = 'button',
+                        label = 'Restore Arrowhead: this LUT',
+                        on_activate = function()
+                            return self.restore_arrowhead('lut')
+                        end,
+                    },
+                    {
+                        id = 'restore_arrowhead_row',
+                        type = 'button',
+                        label = 'Restore Arrowhead: row',
+                        on_activate = function()
+                            return self.restore_arrowhead('row')
+                        end,
+                    },
+                    {
+                        id = 'restore_arrowhead_selection',
+                        type = 'button',
+                        label = 'Restore Arrowhead: selection',
+                        on_activate = function()
+                            return self.restore_arrowhead('selection')
+                        end,
+                    },
+                    {
                         id = 'reset_row',
                         type = 'button',
                         label = 'Reset selected row',

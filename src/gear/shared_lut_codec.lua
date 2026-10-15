@@ -201,39 +201,83 @@ function C.new(compression, original)
                 if not index then words[#words+1]=value;index=#words;word_ids[value]=index end
             end
         end
-        local word_count=#words
-        assert(word_count<=decoded_bytes/4,'Shared word dictionary exceeds reconstructed budget')
-        table.sort(words) -- Opaque four-byte strings, never numeric float order.
-        for i,value in ipairs(words)do word_ids[value]=i-1 end
-        local word_planes={}
-        for lane=1,4 do
-            local plane={}
-            for i,value in ipairs(words)do plane[i]=value:sub(lane,lane)end
-            word_planes[lane]=table.concat(plane)
-        end
-        local low,high={},{}
-        for _,doc in ipairs(docs)do
-            for at=3,#doc,4 do
-                local index=word_ids[doc:sub(at,at+3)]
-                low[#low+1]=string.char(index%256)
-                if word_count>256 then high[#high+1]=string.char(math.floor(index/256))end
+        local word_count = #words
+        assert(word_count <= decoded_bytes / 4, 'Shared word dictionary exceeds reconstructed budget')
+        local first, frequencies = {}, {}
+        for i, value in ipairs(words) do first[i] = value end
+        for _, doc in ipairs(docs) do
+            for at = 3, #doc, 4 do
+                local value = doc:sub(at, at + 3)
+                frequencies[value] = (frequencies[value] or 0) + 1
             end
         end
-        local dictionary_header=word(identity.body or 0)..word(identity.armor or 0)..word(identity.helmet or 0)
-            ..string.char(#docs)..short(#bindings)..short(word_count)
-        packed_candidate('5','dictionary','EL5'..dictionary_header..table.concat(shapes)..table.concat(word_planes)
-            ..table.concat(low)..table.concat(high)..table.concat(packed_bindings))
+        -- Exact sparse destination masks retain every mesh/material assignment.
+        -- One 64x64 bit mask per (kind, slot, document), independent of input order.
+        local mask_groups, mask_order = {}, {}
+        for _, b in ipairs(bindings) do
+            local key = string.char(b.t + (b.pattern and 4 or 0), b.slot, b.index)
+            local group = mask_groups[key]
+            if not group then group = {}; mask_groups[key] = group; mask_order[#mask_order + 1] = key end
+            local at = b.mesh * 64 + b.material
+            local byte = math.floor(at / 8) + 1
+            group[byte] = (group[byte] or 0) + 2 ^ (at % 8)
+        end
+        table.sort(mask_order)
+        local masks = { short(#mask_order) }
+        for _, key in ipairs(mask_order) do
+            local bytes, group = {}, mask_groups[key]
+            for i = 1, 512 do bytes[i] = string.char(group[i] or 0) end
+            masks[#masks + 1] = key .. table.concat(bytes)
+        end
+        local mask_tail = table.concat(masks)
+        local function dictionary_candidate(order)
+            local ids, planes, low, high = {}, {}, {}, {}
+            for i, value in ipairs(order) do ids[value] = i - 1 end
+            for lane = 1, 4 do
+                local plane = {}
+                for i, value in ipairs(order) do plane[i] = value:sub(lane, lane) end
+                planes[lane] = table.concat(plane)
+            end
+            for _, doc in ipairs(docs) do
+                for at = 3, #doc, 4 do
+                    local index = ids[doc:sub(at, at + 3)]
+                    low[#low + 1] = string.char(index % 256)
+                    if word_count > 256 then high[#high + 1] = string.char(math.floor(index / 256)) end
+                end
+            end
+            local dictionary_header = word(identity.body or 0) .. word(identity.armor or 0)
+                .. word(identity.helmet or 0)
+                .. string.char(#docs) .. short(#bindings)  .. short(word_count)
+            packed_candidate('5', 'dictionary', 'EL5' .. dictionary_header
+                .. table.concat(shapes) .. table.concat(planes) .. table.concat(low)
+                .. table.concat(high) .. table.concat(packed_bindings))
+            local mask_header = word(identity.body or 0) .. word(identity.armor or 0)
+                .. word(identity.helmet or 0) .. string.char(0)
+                .. string.char(#docs) .. short(#bindings) .. short(word_count)
+            packed_candidate('7', 'masked_dictionary', 'EL7' .. mask_header
+                .. table.concat(shapes) .. table.concat(planes) .. table.concat(low)
+                .. table.concat(high) .. mask_tail)
+        end
+        table.sort(words) -- Keep the established lexical candidate first on ties.
+        dictionary_candidate(words)
+        dictionary_candidate(first)
+        table.sort(words, function(a, b)
+            if frequencies[a] == frequencies[b] then return a < b end
+            return frequencies[a] > frequencies[b]
+        end)
+        dictionary_candidate(words)
         assert(text, 'Shared LUT raw budget exceeded; local edits are kept')
         assert(#text <= C.MAX_TEXT, 'Full LUT appearance needs ' .. #text .. ' bytes; lobby budget is ' .. C.MAX_TEXT .. '; local edits are kept')
         return text
     end
     function self.decode(text)
         assert(type(text) == 'string' and #text <= C.MAX_TEXT, 'Invalid shared LUT packet size')
-        local version, tag, size, encoded = text:match('^([12345])(x?)|(%d+)|(.+)$')
+        local version, tag, size, encoded = text:match('^([123457])(x?)|(%d+)|(.+)$')
         size = tonumber(size)
         assert(size and size >= (version == '5' and 20 or version == '4' and 18 or 17) and size <= C.MAX_RAW, 'Unsupported shared LUT packet')
         local raw = compression.decompress(unbase64(encoded), size, tag)
         assert(#raw == size and raw:sub(1,3) == 'EL' .. version, 'Invalid shared LUT header')
+        assert(version ~= '7' or size >= 23, 'Truncated masked LUT header')
         local at = 4
         local function take(n)
             assert(at + n - 1 <= #raw, 'Truncated shared appearance')
@@ -243,12 +287,19 @@ function C.new(compression, original)
             local data = ffi.new('uint32_t[1]'); ffi.copy(data, take(4), 4); return tonumber(data[0])
         end
         local result = {body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {}}
+        local masked_weapons
+        if version == '7' then
+            masked_weapons = take(1):byte()
+            assert(masked_weapons == 0 or masked_weapons == 1, 'Invalid masked weapon flag')
+        end
+        assert(not masked_weapons or masked_weapons == 0, 'Weapon sharing requires R6')
+
         local docs, bindings = take(1):byte(), take(1):byte()
-        local packed_bindings=version=='4' or version=='5'
+        local packed_bindings=version=='4' or version=='5' or version=='7'
         if packed_bindings then bindings = bindings + take(1):byte() * 256 end
         local decoded_bytes = 0
         assert(docs <= C.MAX_DOCS and bindings <= (packed_bindings and C.MAX_BINDINGS or C.LEGACY_BINDINGS), 'Shared appearance count exceeds budget')
-        if version=='5' then
+        if version=='5' or version=='7' then
             local lo,hi=take(2):byte(1,2)
             local count=lo+hi*256
             local shapes={}
@@ -333,11 +384,45 @@ function C.new(compression, original)
             finite(doc); result.documents[i] = doc
         end
         end
+        local masked_bindings
+        if version == '7' then
+            local a, b = take(2):byte(1, 2)
+            local groups = a + b * 256
+            assert(groups <= bindings and groups * 515 <= #raw - at + 1, 'Invalid binding mask count')
+            masked_bindings = {}
+            local groups_seen = {}
+            for _ = 1, groups do
+                local key = take(3)
+                assert(not groups_seen[key], 'Duplicate binding mask group')
+                groups_seen[key] = true
+                local kind, slot, index = key:byte(1, 3)
+                assert(kind <= 7 and slot <= 9 and index >= 1 and index <= docs, 'Invalid binding mask group')
+                local mask, count = take(512), 0
+                for byte = 1, 512 do
+                    local value = mask:byte(byte)
+                    if value ~= 0 then
+                        for lane = 0, 7 do
+                            if math.floor(value / 2 ^ lane) % 2 == 1 then
+                                local cell = (byte - 1) * 8 + lane
+                                local mesh, material = math.floor(cell / 64), cell % 64
+                                local packed = index - 1 + material * 32 + mesh * 2048 + slot * 131072 + kind * 2097152
+                                masked_bindings[#masked_bindings + 1] = string.char(packed % 256,
+                                    math.floor(packed / 256) % 256, math.floor(packed / 65536))
+                                count = count + 1
+                                assert(#masked_bindings <= bindings, 'Binding mask exceeds declared count')
+                            end
+                        end
+                    end
+                end
+                assert(count > 0, 'Empty binding mask group')
+            end
+            assert(#masked_bindings == bindings, 'Binding mask count disagrees')
+        end
         local seen = {}
         for i = 1, bindings do
             local t, slot, mesh, material, index, pattern
             if packed_bindings then
-                local a, b, c = take(3):byte(1,3)
+                local a, b, c = (masked_bindings and masked_bindings[i] or take(3)):byte(1, 3)
                 local packed = a + b * 256 + c * 65536
                 local kind = math.floor(packed / 2097152)
                 t, pattern = kind % 4, kind >= 4
