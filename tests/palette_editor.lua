@@ -731,3 +731,44 @@ assert(
     'Hidden/floating preview still reserved width or stopped lifecycle signaling'
 )
 package.loaded['epic.player_preview.v1'] = preview_before
+
+-- Localized stock restore must preserve unrelated edits and the loaded mod baseline.
+local count = d.width * d.height * 4
+local baseline = ffi.new('float[?]', count)
+for i = 0, count - 1 do
+    baseline[i] = -0.5 + i / 17
+end
+editor.arrowhead_source = function(doc)
+    assert(doc == d)
+    return { data = baseline, width = d.width, height = d.height }
+end
+local loaded_baseline = ffi.string(d.original, count * 4)
+local before = ffi.string(d.data, count * 4)
+editor.selection = { r1 = 2, r2 = 3, c1 = 4, c2 = 5 }
+editor.restore_arrowhead('selection')
+for row = 1, d.height do
+    for col = 1, d.width do
+        local at = m.semantics.index(row, col, 1, d.width, d.height)
+        local expected = row >= 2 and row <= 3 and col >= 4 and col <= 5 and ffi.string(baseline + at, 16)
+            or before:sub(at * 4 + 1, at * 4 + 16)
+        assert(ffi.string(d.data + at, 16) == expected)
+    end
+end
+assert(ffi.string(d.original, count * 4) == loaded_baseline)
+local restored_selection = ffi.string(d.data, count * 4)
+assert(editor.handle.activate('undo'))
+assert(ffi.string(d.data, count * 4) == before)
+assert(editor.handle.activate('redo'))
+assert(ffi.string(d.data, count * 4) == restored_selection)
+assert(editor.handle.set('edit_row', 4))
+editor.restore_arrowhead('row')
+assert(ffi.string(d.data + 3 * d.width * 4, d.width * 16) == ffi.string(baseline + 3 * d.width * 4, d.width * 16))
+editor.restore_arrowhead('lut')
+assert(ffi.string(d.data, count * 4) == ffi.string(baseline, count * 4))
+local current = ffi.string(d.data, count * 4)
+editor.arrowhead_source = function()
+    return nil
+end
+assert(not pcall(editor.restore_arrowhead, 'lut'))
+assert(ffi.string(d.data, count * 4) == current)
+print('PASS localized Arrowhead restoration: selection, row, LUT, loaded baseline retained, missing source refused')

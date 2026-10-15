@@ -742,6 +742,44 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
                 .. ' (full RGBA, including material and camo controls)'
         )
     end
+    function self.restore_arrowhead(scope)
+        local d = assert(document(), 'Load a current LUT first')
+        assert(self.document == d and d.data and not d.read_only and not d.stale, 'Load an editable current LUT first')
+        local source = assert(
+            self.arrowhead_source and self.arrowhead_source(d),
+            'Arrowhead source unavailable for this LUT; Load Current Gear and wait for snapshots'
+        )
+        assert(
+            source.width == d.width and source.height == d.height,
+            'Arrowhead LUT dimensions differ; loaded colors were retained'
+        )
+        local s
+        if scope == 'lut' then
+            s = { r1 = 1, r2 = d.height, c1 = 1, c2 = d.width }
+        elseif scope == 'row' then
+            local row = self.handle.get('edit_row')
+            s = { r1 = row, r2 = row, c1 = 1, c2 = d.width }
+        else
+            assert(scope == 'selection', 'Invalid restoration scope')
+            s = self.selection
+                or {
+                    r1 = self.handle.get('edit_row'),
+                    r2 = self.handle.get('edit_row'),
+                    c1 = self.handle.get('edit_column'),
+                    c2 = self.handle.get('edit_column'),
+                }
+        end
+        assert(s.r1 <= s.r2 and s.c1 <= s.c2, 'Invalid restoration bounds')
+        m.semantics.index(s.r1, s.c1, 1, d.width, d.height)
+        m.semantics.index(s.r2, s.c2, 4, d.width, d.height)
+        d = remember()
+        for row = s.r1, s.r2 do
+            local at = m.semantics.index(row, s.c1, 1, d.width, d.height)
+            ffi.copy(d.data + at, source.data + at, (s.c2 - s.c1 + 1) * 16)
+        end
+        self.sync()
+        return note('Restored Arrowhead ' .. scope .. ' values (full RGBA); other edits retained.')
+    end
     function self.reset_part(full_row)
         local d = assert(document(), 'Load a LUT first')
         local row, column = self.handle.get('edit_row'), self.handle.get('edit_column')

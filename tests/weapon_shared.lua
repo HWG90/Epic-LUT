@@ -177,7 +177,7 @@ local codec = Codec.new(nil, function(resource)
     return resource == f.original.resource and f.original or nil
 end)
 local packet = codec.encode(local_identity, local_entries)
-assert(packet:match('^6x?|'))
+assert(packet:match('^[67]x?|'))
 local appearance = codec.decode(packet)
 local remote_identity = f.provider.remote_identity(f.peer)
 local targets, signature = f.provider.targets(remote_identity, appearance)

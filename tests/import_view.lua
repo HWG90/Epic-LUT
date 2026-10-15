@@ -147,7 +147,7 @@ assert(
     texts.Armor and texts.Helmet and texts['Armor LUT 1'] and texts['Helmet LUT 2'],
     'Target color previews were not grouped'
 )
-assert(texts['LUT 1'].x < texts['Choose file - DDS / ZIP / RAR...'].x, 'LUT selectors are not on the left')
+assert(texts['LUT 1'].x < texts['Choose file - DDS / ZIP / RAR / Patch...'].x, 'LUT selectors are not on the left')
 assert(not texts['Refresh live LUTs'], 'Advanced refresh visible by default')
 -- Compose and click real header targets at small/large fonts and reduced window scale.
 local function button_rectangle(commands, value)

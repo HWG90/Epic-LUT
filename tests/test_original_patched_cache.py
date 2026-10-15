@@ -84,6 +84,7 @@ class PatchedOriginalSnapshots(unittest.TestCase):
         before = {p.name: hashlib.sha256(p.read_bytes()).digest() for p in self.game.iterdir()}
         output = self.capture()
         self.assertEqual(load(output/f'game-{ID}-original.dds').tobytes(), self.custom.tobytes())
+        self.assertEqual(load(output/'arrowhead'/f'game-{ID}-original.dds').tobytes(), self.stock.tobytes())
         self.assertEqual((output/f'game-{ID}-original.patch-source').read_bytes(),
                          b'aaaaaaaaaaaaaaaa\n'+main)
         self.assertEqual((output/f'game-{ID}-original.patch-source').stat().st_size, 357)

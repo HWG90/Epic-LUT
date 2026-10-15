@@ -4132,6 +4132,22 @@ return {
                     end)
                 end
             )
+            palette_editor.arrowhead_source = function(document)
+                if not original_luts then
+                    return
+                end
+                local source
+                if document.resource_object then
+                    source = original_luts.get(document.resource_object)
+                elseif
+                    type(document.resource) == 'string'
+                    and document.resource:match('^%x+$')
+                    and #document.resource == 16
+                then
+                    source = original_luts.get_resource(document.resource)
+                end
+                return source and source.arrowhead
+            end
             palette_editor.confirm_overwrite = function(name, commit)
                 if not preferences.confirm_overwrites() then
                     return commit()

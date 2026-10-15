@@ -86,7 +86,7 @@ function R.pages(callbacks, defaults)
                 {
                     id = 'browse',
                     type = 'button',
-                    label = 'Import DDS / ZIP / RAR...',
+                    label = 'Import DDS / ZIP / RAR / Patch...',
                     on_activate = callbacks.browse_activate,
                 },
                 {

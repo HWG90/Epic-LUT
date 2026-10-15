@@ -1,0 +1,9 @@
+# Preset deletion, patch import and localized restore
+
+The X beside any saved preset now asks for confirmation. Cancel leaves the preset and applied colors unchanged. Confirmation checks the original list entry again so a changed list cannot delete another preset. This applies to Armory, Basic palette and row preset lists.
+
+The ordinary Import picker accepts a loose 16-digit resource archive name ending in .patch_NUMBER, as well as DDS, ZIP and RAR. Keep its .gpu_resources and .stream files beside it. ZIP/RAR packages already support patches and variant folders. Imported LUTs retain resource IDs from archive records. Choose Apply Matching LUTs to apply exact IDs to currently loaded gear; unmatched or duplicated IDs are left for manual mapping. Importing alone does not apply colors or install a patch. Material and Pattern LUTs use their separate existing apply paths.
+
+LUT Editor Tools > Rows provides Arrowhead: LUT, Arrowhead: row and Arrowhead: selection. These restore full RGBA from the bundled game source for the current LUT, with Undo/Redo, retaining other edited cells. Existing Reset row/cell and Delete restore loaded values instead, including custom-model colors. Restore requires a known LUT identity and a stock table of exactly matching dimensions. Unknown or custom-only resources are refused without changing pixels. The installed-source reader retains modded colors separately from the bundled Arrowhead snapshot. Restore edits the current table; normal live-preview/apply settings determine when it reaches gear. Shared material bindings can affect more than one visible armor piece.
+
+Offline fixtures cover deletion cancellation/failure/stale identity, loose patch sidecars and resource IDs, separate mod/stock pixels, and localized HDR/alpha restoration. In-game verification remains pending.

@@ -68,7 +68,7 @@ function P.new(deps)
         return deps.message(
             rows_mode and 'Choose a Paydex row-presets JSON file.'
                 or (
-                    pick and 'Choose a DDS or ZIP in the Windows file picker.'
+                    pick and 'Choose a DDS, ZIP, RAR or patch in the Windows file picker.'
                     or 'Extracting ZIP palettes. No Python is used.'
                 )
         )

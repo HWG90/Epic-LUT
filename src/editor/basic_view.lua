@@ -408,7 +408,7 @@ function B.new(info, select_row, help, select_camo_row)
         end
         paragraph('Click a region color to edit; its label flashes the region.', 'hint', muted)
         paragraph('Import a palette (optional)', 'heading')
-        buttons({ { 'Import DDS / ZIP / RAR...', 'browse' } })
+        buttons({ { 'Import DDS / ZIP / RAR / Patch...', 'browse' } })
         local plan = state.raw and state.raw.matching
         if state.busy then
             paragraph(

@@ -85,7 +85,7 @@ menu.window_width, menu.window_height = 1800, 1000
 local actions = {
     import = {
         { 'Load Current Gear', 'populate_worn' },
-        { 'Import DDS / ZIP / RAR...', 'browse' },
+        { 'Import DDS / ZIP / RAR / Patch...', 'browse' },
         { 'Send to LUT Editor', 'save_palette' },
         { 'Apply to Armor LUT 1', 'editor_apply_armor' },
         { 'Apply to All Armor LUTs', 'editor_all_armor' },

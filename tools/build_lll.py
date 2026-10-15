@@ -41,7 +41,7 @@ label=Path(args.output).stem.removesuffix('-LLL') if args.output else 'Epic-LUT-
 title='Epic LUT '+version+(' Preview Animation Test' if args.preview_animation else '')
 main=['local m={direct_menu_keys=true,direct_lut=true}','mod.scope.m=m','m.version='+json.dumps(version),'m.preview_animation='+json.dumps(mode),'m.dev_build_id='+json.dumps(args.dev_stamp or 'release'),'m.description='+json.dumps(title+' modular LLL package'),'m.build_label='+json.dumps(label)]
 extra={};modules={}
-for name in ('README.md','CHANGELOG.md','docs/RELEASE-'+version+'.md'):
+for name in ('README.md','CHANGELOG.md','docs/RELEASE-'+version+'.md','docs/SHARING-COMPRESSION.md','docs/PRESET-PATCH-RESTORE.md'):
     extra[name]=(ROOT/name).read_bytes()
 # Keep the public notes shipped by the R5 maintenance baseline during the R6
 # development upgrade. The guarded installer preserves every installed member.

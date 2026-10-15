@@ -185,7 +185,7 @@ for n = 1, 172 do
 end
 local transmog_packet = small.encode(identity, transmog)
 assert(
-    transmog_packet:match('^4x?|') and #transmog_packet <= C.MAX_TEXT,
+    transmog_packet:match('^[47]x?|') and #transmog_packet <= C.MAX_TEXT,
     '172 destination packet did not use compact EL4'
 )
 local transmog_result = small.decode(transmog_packet)
@@ -210,7 +210,7 @@ assert(
 assert(not transmog_packet:match('^([123])|'), 'EL4 incorrectly advertised compatibility with old decoders')
 -- Small appearances retain the old raw layout. Tagged optional compression
 -- never changes that layout and all untagged old versions still read.
-assert(codec.encode(identity, entries):match('^[1235]x?|'), 'Small appearance used large-count-only EL4')
+assert(codec.encode(identity, entries):match('^[12357]x?|'), 'Small appearance used large-count-only EL4')
 local function word(value)
     return ffi.string(ffi.new('uint32_t[1]', value), 4)
 end
@@ -503,14 +503,14 @@ local failed_optional = C.new(fallback)
 local tiny_entries = { { key = 'p:0:1:0:0', document = pattern } }
 local legacy_tiny = failed_optional.encode(identity, tiny_entries)
 assert(
-    legacy_tiny:match('^[12345]|') and failed_optional.decode(legacy_tiny),
+    legacy_tiny:match('^[123457]|') and failed_optional.decode(legacy_tiny),
     'Optional compression failure blocked valid legacy appearance'
 )
 api, calls = fake_native('ok', 'ok')
 local tagged = C.compression(api)
 local x_only = C.new({ formats = { 'x' }, compress = tagged.compress, decompress = tagged.decompress })
 local tagged_tiny = x_only.encode(identity, tiny_entries)
-assert(tagged_tiny:match('^[12345]x|') and x_only.decode(tagged_tiny), 'Explicit optional compression tag failed')
+assert(tagged_tiny:match('^[123457]x|') and x_only.decode(tagged_tiny), 'Explicit optional compression tag failed')
 assert(not pcall(x_only.decode, tagged_tiny:gsub('^([12345])x|', '%1|')), 'Untagged XPRESS was decoded as legacy')
 assert(not pcall(x_only.decode, legacy_tiny:gsub('^([12345])|', '%1x|')), 'Legacy bytes were decoded as XPRESS')
 for _, bad in ipairs({
@@ -586,7 +586,7 @@ assert(
 )
 local improved = codec.encode(identity, generated_entries)
 assert(
-    improved:match('^[12345]x?|') and #improved <= C.MAX_TEXT,
+    improved:match('^[123457]x?|') and #improved <= C.MAX_TEXT,
     'Repeated exact palette did not fit with tagged XPRESS'
 )
 local generated_result = codec.decode(improved)
@@ -627,7 +627,7 @@ do
         local d = { width = 23, height = 3, data = ffi.new('float[276]') }
         ffi.copy(d.data, values, 1104)
         local packet = dictionary_codec.encode(identity, { { key = '0:1:0:0', document = d } })
-        assert(packet:match('^5x?|'), 'Forced word dictionary did not select EL5')
+        assert(packet:match('^[57]x?|'), 'Forced word dictionary did not select EL5')
         boundary_raw[size] = dictionary_raw
         local lo, hi = dictionary_raw:byte(19, 20)
         assert(
@@ -782,7 +782,7 @@ do
     local packet = codec.encode(identity, entries)
     local earlier = math.min(codec.packet_sizes.full, codec.packet_sizes.sparse, codec.packet_sizes.xor)
     assert(
-        earlier > C.MAX_TEXT and packet:match('^5x?|') and #packet <= C.MAX_TEXT,
+        earlier > C.MAX_TEXT and packet:match('^[57]x?|') and #packet <= C.MAX_TEXT,
         'Public overbudget appearance did not fit the planar word dictionary'
     )
     local result = codec.decode(packet)
@@ -820,10 +820,10 @@ local weapon_entries = {
 }
 ffi.cast('uint32_t *', doc.data)[1] = 0x80000000
 local weapon_packet = codec.encode(weapon_identity, weapon_entries)
-assert(weapon_packet:match('^6x?|') and #weapon_packet <= C.MAX_TEXT)
+assert(weapon_packet:match('^[67]x?|') and #weapon_packet <= C.MAX_TEXT)
 local garment_only_packet = codec.encode(weapon_identity, { weapon_entries[1] })
 assert(
-    garment_only_packet:match('^[12345]x?|') and codec.decode(garment_only_packet).weapons == nil,
+    garment_only_packet:match('^[123457]x?|') and codec.decode(garment_only_packet).weapons == nil,
     'Equipped weapon identity forced garment-only packets onto EL6'
 )
 local weapon_result = codec.decode(weapon_packet)
@@ -853,7 +853,7 @@ assert(weapon_result.weapons[1] == weapon_ids[1]:lower() and weapon_result.weapo
 local one_weapon = { weapons = { [1] = weapon_ids[1] } }
 local only_primary = { weapon_entries[2] }
 assert(codec.decode(codec.encode(one_weapon, only_primary)).weapons[2] == nil)
-assert(codec.encode(identity, entries):match('^[1235]x?|'), 'Weapon support changed garment-only protocol selection')
+assert(codec.encode(identity, entries):match('^[12357]x?|'), 'Weapon support changed garment-only protocol selection')
 for _, bad_ids in ipairs({
     { 'bad' },
     { string.rep('0', 16) },
@@ -897,7 +897,7 @@ local function forced_weapon(mode, entry, baseline)
     local copied =
         { key = '3:1:0:0', weapon_resource = weapon_ids[1], document = entry.document, original = entry.original }
     local packet = selected_codec.encode(one_weapon, { copied })
-    assert(packet:match('^6x?|'))
+    assert(packet:match('^[67]x?|'))
     local decoded = selected_codec.decode(packet)
     assert(
         ffi.string(decoded.entries[copied.key].document.data, copied.document.width * copied.document.height * 16)

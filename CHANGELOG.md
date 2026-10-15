@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## R6.0.0-alpha3 - 2026-10-15
+
+- Shared LUT automatically compares full tables, sparse deltas, XOR, native LZNT1/XPRESS and dictionary layouts. New dictionary orderings and exact destination masks reduce packet size without quantization or lost assignments. Both players need R5.8.2 or R6 Alpha 3 for the new EL7 packets; older supported packets remain readable.
+- Deterministic stress fixture: 32 distinct LUTs and 4,096 shuffled assignments shrink from 17,081 to 1,113 characters, with every F32 bit and assignment verified. Supplied Desert preset: 3,437 to 2,889 characters across all 176 assignments. Truly random oversized data remains local rather than being truncated. The reported 4,953-character sender payload has not been reproduced exactly.
+- Shared LUT recovery handles late material readiness, game-reset bindings and failed applies while preserving independent armor/helmet Pattern palettes. Stable-lobby and ownership checks remain.
+- Preset-list X buttons now confirm deletion. Existing row/Armory overwrite warnings can be suppressed after saving and restored in Configuration.
+- Import loose .patch_NUMBER archives with adjacent .gpu_resources/.stream sidecars. Existing ZIP/RAR extraction and Apply Matching LUTs retain resource IDs; importing alone does not recolor gear.
+- LUT Editor Tools > Rows offers Arrowhead restore for this LUT, row or selected cells, with Undo/Redo. Loaded mod colors and bundled Arrowhead snapshots stay distinct; unknown or mismatched originals are refused.
+- Hardware cursor selection supports Helldivers and Windows modes through the reviewed helper. Helldivers artwork appearance still needs visual confirmation.
+
 ## R6.0.0-alpha2 - 2026-10-14
 
 - Resolve installed custom LUT layers by numeric patch precedence within their exact archive family. Higher layers replace lower layers for the same texture; equal-layer conflicts and competing archive families remain explicit errors. Invalidate older source caches.
