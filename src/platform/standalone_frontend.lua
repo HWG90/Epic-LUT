@@ -75,6 +75,57 @@ function F.new(m,ctx,deps)
         local valid=type(w)=='number'and type(h)=='number'and w>0 and h>0 and w<math.huge and h<math.huge
         return valid,w,h
     end
+    local function release_capture()
+        local called,ready,why=pcall(self.capture.release)
+        if not called then return false,tostring(ready)end
+        if ready~=true then return false,why or 'Epic LUT input restoration is pending'end
+        if self.capture.active then return false,'Epic LUT input capture is still active'end
+        if self.capture.status then
+            local checked,status=pcall(self.capture.status)
+            if not checked or type(status)~='table' then return false,'Epic LUT input status is unavailable'end
+            if status.active or status.pending_restore or status.owner then return false,'Epic LUT cursor restoration is pending'end
+        end
+        return true
+    end
+    local function release_input()
+        self.input_cleanup_pending=true
+        local ready,why=release_capture()
+        if ready and self.photo_input_bridge then
+            local called,ack,reason=pcall(self.photo_input_release,'Epic LUT')
+            if not called then ready,why=false,tostring(ack)
+            elseif ack~=true then ready,why=false,reason or 'Photo input handoff is pending'
+            else self.photo_input_bridge=nil;self.photo_input_release=nil;self.photo_input_acquire=nil end
+        end
+        self.input_cleanup_reason=why
+        if ready then self.input_cleanup_pending=nil end
+        return ready,why
+    end
+    local function borrow_photo(photo)
+        if self.photo_input_bridge and (self.photo_input_bridge~=photo or self.photo_input_release~=photo.release or self.photo_input_acquire~=photo.acquire)then
+            local ready,why=release_input();if not ready then return false,why end
+        end
+        if self.photo_input_bridge or photo==nil then return true end
+        if type(photo)~='table' or type(photo.acquire)~='function' or type(photo.release)~='function'then return false,'Photo input handoff is unavailable'end
+        -- A late Photo provider must yield before this editor captures again.
+        -- Release only our own snapshot; never force another owner's flags.
+        local ready,why=release_capture();if not ready then self.input_cleanup_pending=true;self.input_cleanup_reason=why;return false,why end
+        local acquire,release=photo.acquire,photo.release
+        local called,ack,reason=pcall(acquire,'Epic LUT')
+        if not called then return false,tostring(ack)end
+        if ack~=true then return false,reason or 'Photo input restoration is pending'end
+        self.photo_input_bridge=photo;self.photo_input_release=release;self.photo_input_acquire=acquire
+        return true
+    end
+    function self.is_open()return not self.closed and self.menu.visible==true end
+    function self.input_status()
+        local status={};local ready=true
+        if self.capture.status then ready,status=pcall(self.capture.status)end
+        if not ready or type(status)~='table'then status={pending_restore=true}end
+        return {open=self.menu.visible==true,active=self.capture.active==true,
+            pending_restore=self.input_cleanup_pending==true or status.pending_restore==true,
+            photo_borrowed=self.photo_input_bridge~=nil,owner=status.owner,
+            reason=self.input_cleanup_reason,closed=self.closed==true}
+    end
     self.api.focus_page=function(id,page_id)
         for index,mod in ipairs(self.api.list())do if mod.id==id then
             for at,page in ipairs(mod.pages)do if page.id==page_id then self.menu.selected=index;self.menu.page=at;self.menu.focus='settings';return true end end
@@ -100,12 +151,16 @@ function F.new(m,ctx,deps)
             end
             if self.mcm_settings then self.mcm_settings.tick() end
             self.input.poll();local focused=self.input.focused()
+            if self.input_cleanup_pending then
+                local ready,reason=release_input();if not ready then self.menu.notice=tostring(reason);return end
+            end
             local can_draw,w,h=self.render_ready();self.view.suspended=not can_draw
             local process_input=self.menu.input_focus(focused and can_draw,self.input)
             if not can_draw then
                 -- Keep the open page and retained GUI intact while Windows is
                 -- switching/minimizing. Native text and renderer cleanup wait.
-                self.capture.sync(self.menu.visible,false,self.input.window())
+                if self.menu.visible then self.capture.sync(true,false,self.input.window())
+                else release_input()end
                 return
             end
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
@@ -141,12 +196,11 @@ function F.new(m,ctx,deps)
             end
             local photo=rawget(_G,'DBF_PHOTO_EDITOR_INPUT')
             local opening=focused and process_input and (full_down or basic_down)
-            if photo and type(photo.acquire)=='function' and (self.menu.visible or opening)then
-                local ready,why=photo.acquire('Epic LUT')
+            if self.menu.visible or opening then
+                local ready,why=borrow_photo(photo)
                 if not ready then self.menu.notice=tostring(why);return end
-                self.photo_input_bridge=photo
             elseif self.photo_input_bridge and not self.capture.active then
-                self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil
+                local ready,why=release_input();if not ready then self.menu.notice=tostring(why);return end
             end
             local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window(),self.preferences and self.preferences.cursor_mode and self.preferences.cursor_mode()or 'hardware')
             if not acquired then
@@ -171,8 +225,9 @@ function F.new(m,ctx,deps)
             end
             -- Retiring preview resources keep their own receipt. They must not
             -- reopen the editor or hold its cursor lease after a close shortcut.
-            if not self.menu.visible and self.capture.active then assert(self.capture.release())end
-            if not self.menu.visible and not self.capture.active and not opening and self.photo_input_bridge then self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil end
+            if not self.menu.visible and (self.capture.active or self.photo_input_bridge)then
+                local ready,why=release_input();if not ready then self.menu.notice=tostring(why);return end
+            end
             if self.menu.visible and not self.was_visible and self.default_mod_id and not self.opened_once then
                 self.api.focus_page(self.default_mod_id,'direct');self.opened_once=true
             end
@@ -182,7 +237,11 @@ function F.new(m,ctx,deps)
             self.menu.advance(dt)
             self.view.draw(self.menu.compose(w,h))
         end)
-        if not ok then self.menu.recover();self.capture.release();if self.render_ready()then self.view.release()end;ctx.log('Epic LUT menu closed safely: '..tostring(why))end
+        if not ok then
+            pcall(self.menu.recover);release_input()
+            local checked,ready=pcall(self.render_ready);if checked and ready then pcall(self.view.release)end
+            ctx.log('Epic LUT menu closed safely: '..tostring(why))
+        end
     end
     function self.dismiss()
         if self.closed then return true end
@@ -193,8 +252,7 @@ function F.new(m,ctx,deps)
             if not saved then ctx.log('Menu size save failed: '..tostring(why))end
         end
         local polled,poll_error=pcall(self.input.poll)
-        local attempted,released,why=pcall(self.capture.release)
-        if not attempted then why=released;released=false end
+        local released,why=release_input()
         local checked,can_draw,w,h=pcall(self.render_ready)
         can_draw=polled and checked and can_draw;self.view.suspended=not can_draw
         local cleared=false
@@ -205,13 +263,22 @@ function F.new(m,ctx,deps)
             if not composed then return false,reason end
             if not retired then return false,result end
         end
-        if released and self.photo_input_bridge then self.photo_input_bridge.release('Epic LUT');self.photo_input_bridge=nil end
         if not released then return false,why end
         if not polled then return false,poll_error end
         if not cleared then return false,'Menu GUI retirement waits for game focus and valid display dimensions'end
         -- Keep the frontend registered and render-ready until the preview and
         -- material cleanup stages acknowledge their native resource retirement.
         return true
+    end
+    function self.recover_input()
+        -- Seed the menu's existing held-key latch on its next focused tick.
+        -- Ctrl+Shift+F10 must not immediately replay the normal F10 opener;
+        -- the same rule covers a rebound Basic shortcut and repeated recovery.
+        self.menu.input_focus(false,self.input)
+        local ready,why=self.dismiss()
+        local status=self.input_status()
+        if not status.active and not status.pending_restore and not status.photo_borrowed and not status.owner then return true end
+        return false,why or self.input_cleanup_reason or 'Epic LUT input restoration is pending'
     end
     function self.close()
         if self.closed then return true end
