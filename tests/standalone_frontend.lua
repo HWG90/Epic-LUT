@@ -343,6 +343,332 @@ assert(
 )
 assert(package.loaded['dbf.epic_lut.frontend.v1'] == nil)
 _G.DBFMCM = prior
+-- Exercise the real capture implementation: a native release or window restore
+-- must finish before returning the pinned Photo provider's lease.
+local real_capture = dofile('vendor/menu/capture.lua')
+local function handoff_fixture()
+    local s = {
+        keys = {},
+        focused = true,
+        native = false,
+        acquired = 0,
+        released = 0,
+        flags = { focus = true, cursor = false, clip = true },
+    }
+    local native = {
+        mcm_install = function()
+            return 1
+        end,
+        mcm_set_cursor_mode = function()
+            return 1
+        end,
+        mcm_capture = function()
+            s.native = true
+            return 1
+        end,
+        mcm_captured = function()
+            return s.native and 1 or 0
+        end,
+        mcm_release = function()
+            if not s.native_pending then
+                s.native = false
+            end
+        end,
+    }
+    local window = {}
+    for name, field in pairs({ mouse_focus = 'focus', show_cursor = 'cursor', clip_cursor = 'clip' }) do
+        window[name] = function()
+            return s.flags[field]
+        end
+    end
+    for name, field in pairs({ set_mouse_focus = 'focus', set_show_cursor = 'cursor', set_clip_cursor = 'clip' }) do
+        window[name] = function(value)
+            if s.restore_pending and field == 'focus' and value == true then
+                return false
+            end
+            s.flags[field] = value
+            return true
+        end
+    end
+    local c = real_capture.new(native, window, function() end)
+    local v = {
+        measure = view.measure,
+        clear = function() end,
+        release = function()
+            return true
+        end,
+        draw = function()
+            if s.draw_error then
+                error('draw failed')
+            end
+        end,
+    }
+    local i = {
+        poll = function() end,
+        focused = function()
+            return s.focused
+        end,
+        window = function()
+            return 1
+        end,
+        down = function(key)
+            return s.keys[key] == true
+        end,
+        wheel = function()
+            return 0
+        end,
+        mouse = function() end,
+    }
+    s.front = F.new(m, {
+        settings_dir = 'tests/tmp',
+        log = function(message)
+            s.log = message
+        end,
+    }, {
+        input = i,
+        capture = c,
+        view = v,
+        resolution = function()
+            return 1920, 1080
+        end,
+    })
+    s.front
+        .resolve()
+        .register({ id = 'handoff', name = 'Editor', pages = { { id = 'colors', name = 'Colors', controls = {} } } })
+    s.front.default_mod_id = 'handoff'
+    s.capture = c
+    function s.provider()
+        return {
+            acquire = function(owner)
+                assert(
+                    owner == 'Epic LUT' and not c.active and not s.native and s.flags.focus,
+                    'Photo handoff preceded editor native restoration'
+                )
+                s.acquired = s.acquired + 1
+                if s.acquire_error then
+                    error('Photo acquire failed')
+                end
+                if s.acquire_pending then
+                    return false, 'Photo acquire pending'
+                end
+                s.lent = true
+                return true
+            end,
+            release = function(owner)
+                assert(
+                    owner == 'Epic LUT' and not c.active and not s.native and s.flags.focus,
+                    'Photo resumed before native capture and cursor readback'
+                )
+                s.released = s.released + 1
+                if s.release_error then
+                    error('Photo release failed')
+                end
+                if s.release_pending then
+                    return false, 'Photo release pending'
+                end
+                if s.release_nil then
+                    return nil
+                end
+                s.lent = false
+                return true
+            end,
+        }
+    end
+    return s
+end
+do
+    local s = handoff_fixture()
+    local photo = s.provider()
+    _G.DBF_PHOTO_EDITOR_INPUT = photo
+    s.front.open_advanced()
+    s.front.tick(0.1)
+    s.front.tick(0.1)
+    assert(
+        s.front.is_open() and s.capture.active and s.acquired == 1,
+        'Held editor lease was reacquired instead of retained: ' .. tostring(s.log)
+    )
+    s.native_pending = true
+    assert(
+        s.front.recover_input() == false and s.released == 0 and s.front.photo_input_bridge == photo,
+        'Native release failure lost the Photo provider'
+    )
+    s.native_pending = false
+    s.restore_pending = true
+    assert(
+        s.front.recover_input() == false and s.released == 0 and s.capture.status().pending_restore,
+        'Window readback failure released Photo early'
+    )
+    s.restore_pending = false
+    s.release_pending = true
+    assert(s.front.recover_input() == false and not s.native and s.front.input_status().photo_borrowed)
+    s.front.tick(0.1)
+    assert(
+        s.front.photo_input_bridge == photo and s.acquired == 1 and s.front.input_status().pending_restore,
+        'Pending Photo acknowledgment was forgotten'
+    )
+    s.release_pending = false
+    s.release_nil = true
+    assert(
+        s.front.recover_input() == false and s.front.photo_input_bridge == photo,
+        'Nil Photo release acknowledgment was accepted'
+    )
+    s.release_nil = false
+    s.focused = false
+    assert(
+        s.front.recover_input() and not s.lent and not s.front.input_status().pending_restore,
+        'Input recovery unnecessarily waited for GUI focus'
+    )
+    s.focused = true
+    assert(s.front.close())
+end
+do
+    local s = handoff_fixture()
+    local first = s.provider()
+    _G.DBF_PHOTO_EDITOR_INPUT = first
+    s.front.open_advanced()
+    s.front.tick(0.1)
+    local second_acquires = 0
+    local second = {
+        acquire = function()
+            second_acquires = second_acquires + 1
+            return true
+        end,
+        release = function()
+            return true
+        end,
+    }
+    s.release_pending = true
+    _G.DBF_PHOTO_EDITOR_INPUT = second
+    s.front.tick(0.1)
+    assert(
+        s.front.photo_input_bridge == first and not s.capture.active and second_acquires == 0,
+        'Replacement overwrote the original provider before acknowledgment'
+    )
+    s.release_pending = false
+    s.front.tick(0.1)
+    assert(
+        s.front.photo_input_bridge == second and s.capture.active and second_acquires == 1 and s.front.is_open(),
+        'Provider replacement lost the open composition'
+    )
+    assert(s.front.close())
+end
+do
+    local s = handoff_fixture()
+    local photo = s.provider()
+    _G.DBF_PHOTO_EDITOR_INPUT = photo
+    s.front.open_advanced()
+    s.front.tick(0.1)
+    local replaced = 0
+    photo.release = function()
+        replaced = replaced + 1
+        return true
+    end
+    s.front.tick(0.1)
+    assert(
+        s.released == 1 and replaced == 0 and s.acquired == 2,
+        'Mutated provider bypassed its captured original release function'
+    )
+    assert(s.front.close() and replaced == 1)
+end
+do
+    local s = handoff_fixture()
+    _G.DBF_PHOTO_EDITOR_INPUT = nil
+    s.front.open_advanced()
+    s.front.tick(0.1)
+    assert(s.capture.active)
+    local photo = s.provider()
+    _G.DBF_PHOTO_EDITOR_INPUT = photo
+    s.front.tick(0.1)
+    assert(
+        s.acquired == 1 and s.capture.active and s.front.is_open(),
+        'Late Photo provider could not transfer an already-open editor safely'
+    )
+    _G.DBF_PHOTO_EDITOR_INPUT = nil
+    s.front.tick(0.1)
+    assert(
+        s.released == 1 and not s.front.photo_input_bridge and s.capture.active,
+        'Removed global provider orphaned its saved lease'
+    )
+    assert(s.front.close())
+end
+do
+    local s = handoff_fixture()
+    local photo = s.provider()
+    _G.DBF_PHOTO_EDITOR_INPUT = photo
+    s.acquire_pending = true
+    s.front.open_advanced()
+    s.front.tick(0.1)
+    assert(not s.native and not s.capture.active and not s.front.photo_input_bridge)
+    s.acquire_pending = false
+    s.acquire_error = true
+    s.front.tick(0.1)
+    assert(not s.native and s.front.menu.notice:find('Photo acquire failed', 1, true))
+    s.acquire_error = false
+    s.release_error = true
+    s.draw_error = true
+    s.front.tick(0.1)
+    assert(
+        not s.front.is_open()
+            and not s.native
+            and s.front.photo_input_bridge == photo
+            and s.front.input_status().pending_restore,
+        'Draw error dropped pending Photo cleanup'
+    )
+    s.draw_error = false
+    s.release_error = false
+    s.front.tick(0.1)
+    assert(
+        not s.front.photo_input_bridge and not s.front.input_status().pending_restore and not s.lent,
+        'Error cleanup did not retry on subsequent ticks'
+    )
+    assert(s.front.close())
+end
+do
+    local s = handoff_fixture()
+    _G.DBF_PHOTO_EDITOR_INPUT = nil
+    local token = assert(s.capture.acquire('foreign preview'))
+    local focus = s.flags.focus
+    assert(
+        s.front.recover_input() == false and s.capture.owns(token) and s.flags.focus == focus,
+        'Recovery forced flags across a foreign capture owner'
+    )
+    assert(s.capture.release(token))
+    assert(s.front.recover_input())
+    assert(s.front.close())
+end
+for _, key in ipairs({ 121, 120 }) do
+    local s = handoff_fixture()
+    _G.DBF_PHOTO_EDITOR_INPUT = nil
+    s.front.resolve().mods.handoff.pages[#s.front.resolve().mods.handoff.pages + 1] = {
+        id = 'basic',
+        name = 'Basic',
+        controls = {},
+        actions = {},
+        pending = {},
+        require_confirmation = false,
+        render_layout = function() end,
+    }
+    s.front.tick(0.01) -- Match recovery running before the normal editor tick.
+    s.keys[17], s.keys[16], s.keys[key] = true, true, true
+    assert(s.front.recover_input())
+    s.front.tick(0.01)
+    s.front.tick(0.01)
+    assert(not s.front.is_open() and not s.capture.active, 'Held recovery chord reopened the editor')
+    assert(s.front.recover_input())
+    s.front.tick(0.01)
+    assert(not s.front.is_open(), 'Repeated recovery replayed its held opener')
+    s.keys[key] = false
+    s.front.tick(0.01)
+    s.keys[17], s.keys[16] = false, false
+    s.keys[key] = true
+    s.front.tick(0.01)
+    assert(
+        s.front.is_open() and (key ~= 120 or s.front.basic_mode),
+        'Fresh shortcut did not reopen after recovery key release: ' .. key .. ' ' .. tostring(s.log)
+    )
+    assert(s.front.close())
+end
+_G.DBF_PHOTO_EDITOR_INPUT = prior_photo
 print(
     'PASS standalone frontend: shared Basic minimum, Advanced size preservation, independent UI dismissal, pending/failed preview retirement, reopening and retryable cleanup'
 )
