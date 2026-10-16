@@ -336,6 +336,10 @@ local source = f:read('*a')
 f:close()
 local runtime = assert(loadstring('local m=...\n' .. source))(m)
 local ctx = { log = function() end, on_cleanup = function() end }
+local function recovery_tick(dt)
+    runtime.on_update(ctx, dt)
+    for _ = 1, 5 do runtime.on_update(ctx, 0) end
+end
 runtime.on_enable(ctx)
 runtime.on_update(ctx, 0)
 local h = api.mods.epic_direct_lut.handle
@@ -583,7 +587,7 @@ assert(h.set('cell_r', 0.75))
 runtime.on_update(ctx, 0)
 custom = bound[cape][1]
 actor(2)
-runtime.on_update(ctx, 0.5)
+recovery_tick(0.5)
 armor, cape, helmet = current()
 assert(bound[cape][1] == custom and bound[armor][1] == 2001, 'Same Cape actor recovery repainted Armor or lost colors')
 assert(h.set('cell_r', 0.625))
@@ -592,7 +596,7 @@ custom = bound[cape][1]
 assert(custom ~= 2001 and bound[armor][1] == 2001, 'Loaded Cape draft could not resolve its rebuilt actor')
 activate('global_undo')
 kits.cape = 99
-runtime.on_update(ctx, 0.5)
+recovery_tick(0.5)
 local redone, refusal = h.activate('global_redo')
 assert(
     not redone and refusal:find('Cape kit changed', 1, true) and bound[cape][1] == 2001,
@@ -608,7 +612,7 @@ assert(h.set('cell_color', '#FF0000'))
 kits.cape = 98
 runtime.on_update(ctx, 0)
 assert(bound[cape][1] == 2001, 'Basic Cape edit repainted a changed kit while refresh was deferred')
-runtime.on_update(ctx, 0.5)
+recovery_tick(0.5)
 proof_ready = false
 assert(not pcall(basic_select, 1, 'armor'), 'Basic Cape selection accepted unavailable identity')
 proof_ready = true
@@ -617,7 +621,7 @@ api.focus_page(h.id, 'colors')
 activate('restore')
 bound[cape][1] = 777777
 kits.cape = 97
-runtime.on_update(ctx, 0.5)
+recovery_tick(0.5)
 assert(bound[cape][1] == 777777, 'Cape kit swap overwrote a foreign writer')
 activate('restore')
 assert(bound[cape][1] == 777777, 'Restore overwrote a foreign Cape writer')
@@ -1341,7 +1345,7 @@ do
                 'Failed grouped apply retained a partial Basic draft'
             )
         end
-        runtime.on_update(ctx, 0.5)
+        recovery_tick(0.5)
         same_native(before)
         select_targets(0)
         texture_count = created

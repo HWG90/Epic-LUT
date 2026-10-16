@@ -1,26 +1,28 @@
-# EPIC LUT R5.7.5 :goose:
+# EPIC LUT R5.8.6 
+🪿
+
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
-Share exact Armor, Helmet and Pattern colors/materials/camo/emissives with compatible Epic LUT squadmates. Apply an Armory preset to share it. Both players need Epic LUT with **Configuration > Share full LUT appearance** enabled (On by default). Cape materials are excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
+Share Armor, Helmet and Pattern colors, materials, camo and emissives with compatible Epic LUT squadmates. Apply an Armory preset and leave **Configuration > Share full LUT appearance** enabled. Cape materials excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
 
-**PRESET SAVE WORKFLOW + MAINTENANCE**
-- Select a preset and Save to update it after confirmation. Choose **Save a New Preset** in the dropdown to create a separate one.
-- Cooperative input handoff supports updated Photo Mode companion builds; older Photo Mode versions require their own update.
-- **Custom-model hotfix:** identical effective Pattern/LUT copies across mod archives now load. Highest numeric layers resolve per archive; genuinely different copies name the conflicting files.
-- Basic Apply Preset matches Armory assignments, including valid material-only targets.
-- Preview gore filtering and large-font Apply clipping fixed.
-- Three Pattern quick swatches: **Color / Mat/Opac / Roughness**. Roughness uses Alpha; other channels stay intact.
-- Right-click a LUT ID/name to copy its real ID in your configured format.
+**R5.8.6**
+- Reduced background CPU use while Epic LUT is closed.
+- Reduced stutters when restoring applied colors and Patterns.
+- Improved Photo Mode input handoffs and menu reopening.
+- Improved Shared LUT compression and sync. Both players need R5.8.2 or newer, or R6 Alpha 3.
+- Added confirmation before deleting presets from the dropdown.
+- Added loose patch import. Keep the sidecar files beside the patch.
+- Added Arrowhead restore for the selected LUT, row or cells, with Undo/Redo.
+- Added hardware cursor options and preset overwrite safeguards.
 
-**MORE COLOR. LESS CLUTTER.**
-Checked-region camo and custom tints; **Map LUTs to Gear / Auto-map** in Basic and Advanced; scrolling Armory previews; checkbox Save/Apply + Select All; binding-aware patch exports. Values commit on click-away, Delete resets with Undo, Tab completes preset names.
+Edit colors, materials and camo in game, save Armory presets, import LUTs, map them to gear and export binding-aware patches. Pattern quick swatches show **Color / Mat/Opac / Roughness**. Photo Mode coexistence and custom-model LUT fixes are included.
 
 Massive thanks to **Scarpheon** for testing, patch help and 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex and the community.
 
-**R5 downloads:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.7.5
+**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.8.6
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
-**R6 weapon prerelease:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha2
-Experimental. **No support offered.**
+**R6 weapon preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha3
+R6 is experimental. **No support offered.**
 
-BSL Main / MDL Optional on Nexus; LLL GitHub only. Enable one copy. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.
+BSL Main / MDL Optional on Nexus; LLL GitHub only. Enable one copy. Keep your presets and settings. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.

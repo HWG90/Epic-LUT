@@ -873,6 +873,8 @@ do
     assert(discovery == 0 and reads == 0 and not quick.requested and quick.document == nil)
     assert(colors[1][1] == 80, 'Unloaded Quick strip showed a fake black palette')
     ready = true
+    quick.tick(1, true)
+    assert(not quick.requested and quick.document == nil, 'Deferred Quick hydration competed with recovery work')
     quick.tick(0)
     assert(quick.waiting and not quick.document and not quick.is_open())
     cached[20] = blue

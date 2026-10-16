@@ -149,13 +149,8 @@ end
 -- The texture object bound to a material's texture slot (Engine.LUT_SLOT, Engine.PATTERN_SLOT,
 -- Engine.CAPE_LUT_SLOT), or nil.
 -- read(address number, size, buffer) -> true; buffer: >= 16 bytes, big: >= 64 x 16 bytes.
-function Engine.binding(read, material, slot, buffer, big)
-    if not read(material + 24, 16, buffer) then return nil end
-    local count = buffer[0] + buffer[1] * 256 + buffer[2] * 65536 + buffer[3] * 16777216
-    local array = (buffer[8] + buffer[9] * 256 + buffer[10] * 65536 + buffer[11] * 16777216)
-        + (buffer[12] + buffer[13] * 256) * HIGH
-    if count == 0 or count > MAX_BINDINGS or array < 0x10000 then return nil end
-    if not read(array, count * 16, big) then return nil end
+-- Pure decoding is kept outside cold native wrappers so LuaJIT can compile it.
+local function decode_binding(big, count, slot)
     for i = 0, count - 1 do
         local o = i * 16
         local at = big[o] + big[o + 1] * 256 + big[o + 2] * 65536 + big[o + 3] * 16777216
@@ -165,6 +160,54 @@ function Engine.binding(read, material, slot, buffer, big)
         end
     end
     return nil
+end
+
+function Engine.binding(read, material, slot, buffer, big)
+    if not read(material + 24, 16, buffer) then return nil end
+    local count = buffer[0] + buffer[1] * 256 + buffer[2] * 65536 + buffer[3] * 16777216
+    local array = (buffer[8] + buffer[9] * 256 + buffer[10] * 65536 + buffer[11] * 16777216)
+        + (buffer[12] + buffer[13] * 256) * HIGH
+    if count == 0 or count > MAX_BINDINGS or array < 0x10000 then return nil end
+    if not read(array, count * 16, big) then return nil end
+    return decode_binding(big, count, slot)
+end
+
+-- Read-only discovery only: one copied slot table per material and operation.
+-- Callers create this reader inside a scan and discard it before any native
+-- write. Mutation/restore/readback callers continue to use Engine.binding.
+local function u32(bytes, offset)
+    return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536
+        + bytes[offset + 3] * 16777216
+end
+local function pointer(bytes, offset)
+    return u32(bytes, offset) + (bytes[offset + 4] + bytes[offset + 5] * 256) * HIGH
+end
+local function decode_slots(entries, count)
+    local slots = {}
+    for i = 0, count - 1 do
+        local offset = i * 16
+        local key = u32(entries, offset)
+        -- Preserve the first matching entry, including zero.
+        if slots[key] == nil then slots[key] = pointer(entries, offset + 8) end
+    end
+    return slots
+end
+
+function Engine.binding_snapshot(read)
+    local header, entries = ffi.new('uint8_t[16]'), ffi.new('uint8_t[1024]')
+    local materials = {}
+    return function(material, slot)
+        local slots = materials[material]
+        if slots == nil then
+            if not read(material + 24, 16, header) then return nil end
+            local count, array = u32(header, 0), pointer(header, 8)
+            if count == 0 or count > MAX_BINDINGS or array < 0x10000 then return nil end
+            if not read(array, count * 16, entries) then return nil end
+            slots = decode_slots(entries, count)
+            materials[material] = slots
+        end
+        return slots[slot]
+    end
 end
 
 -- A runtime texture, updatable: {handle, object, data, view, width, height, format, mips, size}. spec: {width,
@@ -211,7 +254,7 @@ end
 -- Code that runs once or rarely (jobs, startup, events) stays interpreted, sub-functions included: it must not
 -- add traces to the LuaJIT code cache the game and every mod share. Only the hot loops stay compiled.
 if type(jit) == 'table' and type(jit.off) == 'function' then
-    for _, fn in ipairs({Engine.open, Engine.name64, Engine.texture_object, Engine.unit_materials, Engine.binding,
+    for _, fn in ipairs({Engine.open, Engine.name64, Engine.texture_object, Engine.unit_materials, Engine.binding, Engine.binding_snapshot,
         Engine.create_texture, Engine.update_texture, Engine.bind}) do
         jit.off(fn, true)
     end

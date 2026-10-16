@@ -291,6 +291,21 @@ assert(
     saved_width == advanced_width and saved_height == advanced_height,
     'Basic API dismissal saved its temporary dimensions'
 )
+-- Initialized-but-closed gameplay frames retain input handling without font/GUI work.
+f.tick(0.01)
+local idle_draws,idle_releases=draws,cleared
+local font_refreshes,hidden_compositions=0,0
+local old_refresh_font,old_compose=view.refresh_font,f.menu.compose
+view.refresh_font=function()font_refreshes=font_refreshes+1;return false end
+f.menu.compose=function(...)hidden_compositions=hidden_compositions+1;return old_compose(...)end
+for frame=1,6000 do f.tick(1/120)end
+assert(draws==idle_draws and cleared==idle_releases and font_refreshes==0 and hidden_compositions==0,
+    'Closed Epic LUT must skip font refresh, composition, drawing and repeated GUI release')
+f.menu.compose=old_compose
+assert(f.open_advanced());f.tick(.01)
+assert(font_refreshes>0 and draws>idle_draws,'Reopen must resume fonts and rendering')
+view.refresh_font=old_refresh_font
+assert(f.dismiss())
 assert(not f.closed and f.render_ready(), 'UI dismissal closed the frontend needed by native cleanup')
 assert(package.loaded['dbf.epic_lut.frontend.v1'] == f, 'UI dismissal discarded its cleanup owner')
 -- Photo owns capture until its cooperative release has completed.

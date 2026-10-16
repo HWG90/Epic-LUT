@@ -96,10 +96,24 @@ function P.new(deps)
         if deps.indicator then
             assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
         end
+        local binding = deps.discovery_binding and assert(deps.discovery_binding(), 'Pattern binding reader unavailable')
+            or deps.binding
+        local inventories, enumerate = {}, nil
+        if type(deps.materials) == 'function' then
+            enumerate = function(unit)
+                local list = inventories[unit]
+                if list == nil then
+                    list = deps.materials(unit)
+                    assert(type(list) == 'table', 'Pattern material inventory unavailable')
+                    inventories[unit] = list
+                end
+                return list
+            end
+        end
         local existing = {}
         local kept = {}
         for _, b in ipairs(deps.session.owned) do
-            if (not deps.present or deps.present(b)) and deps.binding(b) == b.current then
+            if (not deps.present or deps.present(b, enumerate)) and binding(b) == b.current then
                 existing[deps.key(b)] = b
                 kept[#kept + 1] = b
             end
@@ -112,21 +126,21 @@ function P.new(deps)
             end
         end
         local groups, ordered, seen = {}, {}, {}
-        for _, b in ipairs(discovered or deps.discover()) do
+        for _, b in ipairs(discovered or deps.discover(enumerate, deps.discovery_binding and binding or nil)) do
             local key = deps.key(b)
             local prior = existing[key]
-            if prior and deps.binding(b) == prior.current then
+            if prior and binding(b) == prior.current then
                 b = prior
-            elseif editable[key] and deps.binding(b) == editable[key].original then
+            elseif editable[key] and binding(b) == editable[key].original then
                 -- Keep the active editor and session on the same record when
                 -- the game resets this material to its verified original.
                 b = editable[key]
                 b.current, b.previous, b.texture, b.document = b.original, nil, nil, nil
             end
-            local object = b.original or deps.binding(b)
+            local object = b.original or binding(b)
             if object and object ~= 0 and not seen[key] then
                 seen[key] = true
-                b.original, b.current = object, deps.binding(b)
+                b.original, b.current = object, binding(b)
                 local group = groups[object]
                 if not group then
                     group = { object = object, bindings = {}, helmet = b.helmet, armor = b.armor }
@@ -615,7 +629,7 @@ function P.new(deps)
         self.load(false, true)
         return self.document ~= nil
     end
-    function self.tick(dt)
+    function self.tick(dt, defer_background)
         dt = math.max(0, tonumber(dt) or 0)
         if self.open then
             self.cue_time = (self.cue_time or 0) + dt
@@ -625,7 +639,7 @@ function P.new(deps)
         end
         if not self.open and deps.quick_bindings then
             self.quick_elapsed = (self.quick_elapsed or 0) + dt
-            if not self.requested or self.quick_elapsed >= 0.5 then
+            if not defer_background and (not self.requested or self.quick_elapsed >= 0.5) then
                 self.quick_elapsed = 0
                 local kind, discovered, focus = deps.quick_bindings()
                 if kind and discovered then
