@@ -57,11 +57,12 @@ end
 local function binding(b)
     return m.engine.binding(read, b.material, b.slot or m.engine.LUT_SLOT, small, big)
 end
-local function present(b)
+local function present(b, enumerate)
     if native.alive(b.unit) == 0 then
         return false
     end
-    for _, v in ipairs(m.engine.unit_materials(native, b.unit)) do
+    local materials = enumerate and enumerate(b.unit) or m.engine.unit_materials(native, b.unit)
+    for _, v in ipairs(materials) do
         if v.mesh == b.mesh and v.material == b.material then
             return true
         end
@@ -3889,11 +3890,15 @@ return {
                     end
                     return kind, out, focus
                 end,
-                discover = function()
+                materials = function(unit)
+                    return m.engine.unit_materials(native, unit)
+                end,
+                discover = function(enumerate)
                     local identity = assert(m.avatar.resolve_live(memory, game), 'Worn gear not ready')
                     local out = {}
                     for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
-                        for i, material in ipairs(m.engine.unit_materials(native, unit.unit)) do
+                        local materials = enumerate and enumerate(unit.unit) or m.engine.unit_materials(native, unit.unit)
+                        for i, material in ipairs(materials) do
                             local cape_object = m.engine.CAPE_LUT_SLOT
                                 and m.engine.binding(read, material.material, m.engine.CAPE_LUT_SLOT, small, big)
                             local is_cape = cape_object ~= nil and cape_object ~= 0

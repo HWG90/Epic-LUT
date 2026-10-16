@@ -96,10 +96,22 @@ function P.new(deps)
         if deps.indicator then
             assert(deps.indicator.stop(), 'Pattern highlight restoration pending')
         end
+        local inventories, enumerate = {}, nil
+        if type(deps.materials) == 'function' then
+            enumerate = function(unit)
+                local list = inventories[unit]
+                if list == nil then
+                    list = deps.materials(unit)
+                    assert(type(list) == 'table', 'Pattern material inventory unavailable')
+                    inventories[unit] = list
+                end
+                return list
+            end
+        end
         local existing = {}
         local kept = {}
         for _, b in ipairs(deps.session.owned) do
-            if (not deps.present or deps.present(b)) and deps.binding(b) == b.current then
+            if (not deps.present or deps.present(b, enumerate)) and deps.binding(b) == b.current then
                 existing[deps.key(b)] = b
                 kept[#kept + 1] = b
             end
@@ -112,7 +124,7 @@ function P.new(deps)
             end
         end
         local groups, ordered, seen = {}, {}, {}
-        for _, b in ipairs(discovered or deps.discover()) do
+        for _, b in ipairs(discovered or deps.discover(enumerate)) do
             local key = deps.key(b)
             local prior = existing[key]
             if prior and deps.binding(b) == prior.current then

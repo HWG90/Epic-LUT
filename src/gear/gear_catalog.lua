@@ -11,9 +11,21 @@ function G.new(deps)
     function self.refresh(owned, previous_object)
         local identity, why = deps.identity()
         assert(identity, why)
+        -- Discovery may inspect many bindings on one Unit. Reuse only this
+        -- operation's inventory; mutation/restore callers keep fresh present().
+        local inventories = {}
+        local function materials(unit)
+            local list = inventories[unit]
+            if list == nil then
+                list = deps.materials(unit)
+                assert(type(list) == 'table', 'Local material inventory unavailable')
+                inventories[unit] = list
+            end
+            return list
+        end
         local found, seen, kept, active = {}, {}, {}, {}
         for _, b in ipairs(owned) do
-            if deps.present(b) and deps.binding(b) == b.current then
+            if deps.present(b, materials) and deps.binding(b) == b.current then
                 kept[deps.key(b)] = b
                 active[#active + 1] = b
             end
@@ -21,7 +33,7 @@ function G.new(deps)
         owned = active
         for _, u in ipairs(deps.units(identity)) do
             local unit_name = deps.resource_name and deps.resource_name(u.unit)
-            for vi, v in ipairs(deps.materials(u.unit)) do
+            for vi, v in ipairs(materials(u.unit)) do
                 local b = { unit = u.unit, mesh = v.mesh, material = v.material }
                 local existing = kept[deps.key(b)]
                 local object = existing and existing.original or deps.binding(b)
