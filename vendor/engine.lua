@@ -167,6 +167,39 @@ function Engine.binding(read, material, slot, buffer, big)
     return nil
 end
 
+-- Read-only discovery only: one copied slot table per material and operation.
+-- Callers create this reader inside a scan and discard it before any native
+-- write. Mutation/restore/readback callers continue to use Engine.binding.
+function Engine.binding_snapshot(read)
+    local header, entries = ffi.new('uint8_t[16]'), ffi.new('uint8_t[1024]')
+    local materials = {}
+    local function u32(bytes, offset)
+        return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536
+            + bytes[offset + 3] * 16777216
+    end
+    local function pointer(bytes, offset)
+        return u32(bytes, offset) + (bytes[offset + 4] + bytes[offset + 5] * 256) * HIGH
+    end
+    return function(material, slot)
+        local slots = materials[material]
+        if slots == nil then
+            if not read(material + 24, 16, header) then return nil end
+            local count, array = u32(header, 0), pointer(header, 8)
+            if count == 0 or count > MAX_BINDINGS or array < 0x10000 then return nil end
+            if not read(array, count * 16, entries) then return nil end
+            slots = {}
+            for i = 0, count - 1 do
+                local offset = i * 16
+                local key = u32(entries, offset)
+                -- Engine.binding returns the first matching entry, including 0.
+                if slots[key] == nil then slots[key] = pointer(entries, offset + 8) end
+            end
+            materials[material] = slots
+        end
+        return slots[slot]
+    end
+end
+
 -- A runtime texture, updatable: {handle, object, data, view, width, height, format, mips, size}. spec: {width,
 -- height, data, format, mips, size}: a LUT is RGBA32F of one mip (data: width x height x 4 floats; format, mips and
 -- size left out); a cape's decal sheet copy is BC3 with its mip chain (format Engine.BC3, mips, size: its bytes, mips
@@ -211,7 +244,7 @@ end
 -- Code that runs once or rarely (jobs, startup, events) stays interpreted, sub-functions included: it must not
 -- add traces to the LuaJIT code cache the game and every mod share. Only the hot loops stay compiled.
 if type(jit) == 'table' and type(jit.off) == 'function' then
-    for _, fn in ipairs({Engine.open, Engine.name64, Engine.texture_object, Engine.unit_materials, Engine.binding,
+    for _, fn in ipairs({Engine.open, Engine.name64, Engine.texture_object, Engine.unit_materials, Engine.binding, Engine.binding_snapshot,
         Engine.create_texture, Engine.update_texture, Engine.bind}) do
         jit.off(fn, true)
     end

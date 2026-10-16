@@ -7,12 +7,12 @@ local prefix=text:sub(1,at-1)
 local checks=[=[
 local Pattern=dofile('src/editor/pattern_luts.lua')
 local f=assert(io.open('src/editor/direct_editor.lua','rb'));local editor=f:read('*a');f:close()
-local begin=assert(editor:find('                discover = function(enumerate)',1,true))
+local begin=assert(editor:find('                discover = function(enumerate, observe)',1,true))
 local finish=assert(editor:find('                export = function(name, document)',begin,true))
 local code=editor:sub(begin,finish-1):gsub('^%s*discover = ',''):gsub(',%s*$','')
 local make=assert(loadstring('return function(m,native,memory,game,read,small,big,binding) return '..code..' end'))()
 local function current(v)return bound[v.material]end
-local modules={engine={PATTERN_SLOT=2,unit_materials=function(_,unit)return enumerate(unit)end},
+local modules={engine={PATTERN_SLOT=2,binding=function(_,material)return bound[material]end,unit_materials=function(_,unit)return enumerate(unit)end},
  avatar={resolve_live=function()return{}end,units=function()return{{unit=1,type=0,slot=1},{unit=2,type=0,slot=0}}end}}
 local discover=make(modules,native,{},1,nil,nil,nil,current)
 local discoveries=0

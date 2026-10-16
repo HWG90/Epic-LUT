@@ -11,6 +11,8 @@ function G.new(deps)
     function self.refresh(owned, previous_object)
         local identity, why = deps.identity()
         assert(identity, why)
+        local binding = deps.discovery_binding and assert(deps.discovery_binding(), 'Discovery binding reader unavailable')
+            or deps.binding
         -- Discovery may inspect many bindings on one Unit. Reuse only this
         -- operation's inventory; mutation/restore callers keep fresh present().
         local inventories = {}
@@ -25,7 +27,7 @@ function G.new(deps)
         end
         local found, seen, kept, active = {}, {}, {}, {}
         for _, b in ipairs(owned) do
-            if deps.present(b, materials) and deps.binding(b) == b.current then
+            if deps.present(b, materials) and binding(b) == b.current then
                 kept[deps.key(b)] = b
                 active[#active + 1] = b
             end
@@ -36,7 +38,7 @@ function G.new(deps)
             for vi, v in ipairs(materials(u.unit)) do
                 local b = { unit = u.unit, mesh = v.mesh, material = v.material }
                 local existing = kept[deps.key(b)]
-                local object = existing and existing.original or deps.binding(b)
+                local object = existing and existing.original or binding(b)
                 if object and object ~= 0 then
                     local key = v.material .. ':' .. v.mesh
                     if not seen[key] then
@@ -45,7 +47,7 @@ function G.new(deps)
                             group = { object = object, bindings = {}, helmet = false, armor = false, cape = false }
                             found[object] = group
                         end
-                        local cape = deps.is_cape and deps.is_cape(b) or false
+                        local cape = deps.is_cape and deps.is_cape(b, deps.discovery_binding and binding or nil) or false
                         local kind = cape and 'cape' or u.slot == 0 and 'helmet' or 'armor'
                         group[kind] = true
                         b = existing or b

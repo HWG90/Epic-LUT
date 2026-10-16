@@ -57,6 +57,14 @@ end
 local function binding(b)
     return m.engine.binding(read, b.material, b.slot or m.engine.LUT_SLOT, small, big)
 end
+function operations.discovery_binding()
+    local snapshot = m.engine.binding_snapshot and m.engine.binding_snapshot(read)
+    return function(b, slot)
+        local selected = slot or b.slot or m.engine.LUT_SLOT
+        if snapshot then return snapshot(b.material, selected) end
+        return m.engine.binding(read, b.material, selected, small, big)
+    end
+end
 local function present(b, enumerate)
     if native.alive(b.unit) == 0 then
         return false
@@ -596,12 +604,15 @@ local function initialize_editor_state()
         end,
         present = present,
         binding = binding,
+        discovery_binding = operations.discovery_binding,
         key = material_key,
-        is_cape = function(b)
+        is_cape = function(b, observe)
             if not m.engine.CAPE_LUT_SLOT then
                 return false
             end
-            local object = m.engine.binding(read, b.material, m.engine.CAPE_LUT_SLOT, small, big)
+            local object
+            if observe then object = observe(b, m.engine.CAPE_LUT_SLOT)
+            else object = m.engine.binding(read, b.material, m.engine.CAPE_LUT_SLOT, small, big) end
             return object ~= nil and object ~= 0
         end,
     })
@@ -3893,14 +3904,18 @@ return {
                 materials = function(unit)
                     return m.engine.unit_materials(native, unit)
                 end,
-                discover = function(enumerate)
+                discovery_binding = operations.discovery_binding,
+                discover = function(enumerate, observe)
                     local identity = assert(m.avatar.resolve_live(memory, game), 'Worn gear not ready')
                     local out = {}
+                    local current = observe or function(b, slot)
+                        return m.engine.binding(read, b.material, slot or b.slot or m.engine.LUT_SLOT, small, big)
+                    end
                     for _, unit in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
                         local materials = enumerate and enumerate(unit.unit) or m.engine.unit_materials(native, unit.unit)
                         for i, material in ipairs(materials) do
                             local cape_object = m.engine.CAPE_LUT_SLOT
-                                and m.engine.binding(read, material.material, m.engine.CAPE_LUT_SLOT, small, big)
+                                and current(material, m.engine.CAPE_LUT_SLOT)
                             local is_cape = cape_object ~= nil and cape_object ~= 0
                             local b = {
                                 unit = unit.unit,
@@ -3918,7 +3933,7 @@ return {
                                     .. ':'
                                     .. (material.material_index or i - 1),
                             }
-                            if binding(b) then
+                            if current(b) then
                                 out[#out + 1] = b
                             end
                         end
