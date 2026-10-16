@@ -629,7 +629,7 @@ function P.new(deps)
         self.load(false, true)
         return self.document ~= nil
     end
-    function self.tick(dt)
+    function self.tick(dt, defer_background)
         dt = math.max(0, tonumber(dt) or 0)
         if self.open then
             self.cue_time = (self.cue_time or 0) + dt
@@ -639,7 +639,7 @@ function P.new(deps)
         end
         if not self.open and deps.quick_bindings then
             self.quick_elapsed = (self.quick_elapsed or 0) + dt
-            if not self.requested or self.quick_elapsed >= 0.5 then
+            if not defer_background and (not self.requested or self.quick_elapsed >= 0.5) then
                 self.quick_elapsed = 0
                 local kind, discovered, focus = deps.quick_bindings()
                 if kind and discovered then

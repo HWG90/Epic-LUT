@@ -18,6 +18,7 @@ local kits = { body = 7, armor = 21, helmet = 22 }
 local units, materials, live, bound, metadata = {}, {}, {}, {}, {}
 local created, binds, history, pattern, frontend = 0, 0, nil, nil, nil
 local saved_defaults
+local recovery_scans = 0
 api.focus_page = function(id, page_id)
     for index, page in ipairs(api.mods[id].pages) do
         if page.id == page_id then
@@ -232,6 +233,11 @@ local m = {
     pattern_luts = {
         new = function(deps)
             pattern = Pattern.new(deps)
+            local original_scan = pattern.scan
+            pattern.scan = function(...)
+                recovery_scans = recovery_scans + 1
+                return original_scan(...)
+            end
             return pattern
         end,
     },
@@ -257,12 +263,31 @@ local m = {
         end,
     },
 }
+local original_catalog_new = m.gear_catalog.new
+m.gear_catalog.new = function(deps)
+    local catalog = original_catalog_new(deps)
+    local refresh = catalog.refresh
+    catalog.refresh = function(...)
+        recovery_scans = recovery_scans + 1
+        return refresh(...)
+    end
+    return catalog
+end
 local source = assert(io.open('src/editor/direct_editor.lua', 'rb'))
 local runtime = assert(loadstring('local m=...\n' .. source:read('*a')))(m)
 source:close()
 local ctx = { log = function() end, on_cleanup = function() end }
 runtime.on_enable(ctx)
-runtime.on_update(ctx, 0)
+local function frame(dt)
+    recovery_scans = 0
+    runtime.on_update(ctx, dt)
+    assert(recovery_scans <= 1, 'Material and Pattern recovery scans collided in one frame')
+end
+local function recover()
+    frame(0.5)
+    for _ = 1, 5 do frame(0) end
+end
+frame(0)
 local h = api.mods.epic_direct_lut.handle
 local function activate(id)
     local called, ok, value = pcall(h.activate, id)
@@ -320,49 +345,58 @@ scene = false
 live = {}
 local before_binds = binds
 for _ = 1, 5 do
-    runtime.on_update(ctx, 0.5)
+    recover()
 end
 assert(binds == before_binds and not frontend.menu.visible, 'Actor gap wrote stale bindings or opened the menu')
 actor(2)
 scene = true
-runtime.on_update(ctx, 0.5)
+local before_recovery = binds
+frame(0.5) -- Material discovery only.
+assert(binds == before_recovery, 'Discovery stage also replayed palettes')
+frame(0) -- Freshly checked Material replay.
+local phase_armor, phase_helmet = current()
+assert(bound[phase_armor][1] == owned_material and bound[phase_armor][2] == 20003,
+    'Material and Pattern replay must occupy separate frames')
+frame(0) -- Pattern discovery only.
+assert(bound[phase_armor][2] == 20003, 'Pattern scan also replayed palettes')
+frame(0) -- Freshly checked Pattern replay.
 expect_custom()
 unchanged_counts()
 -- Pattern slots recover independently if material LUT discovery is temporarily empty.
 actor(7)
 local pattern_armor, pattern_helmet = current()
 bound[pattern_armor][1], bound[pattern_helmet][1] = 0, 0
-runtime.on_update(ctx, 0.5)
+recover()
 assert(
     bound[pattern_armor][2] == owned_pattern and bound[pattern_helmet][2] == owned_pattern,
     'Pattern recovery was blocked by unavailable material LUTs'
 )
 unchanged_counts()
 actor(2)
-runtime.on_update(ctx, 0.5)
+recover()
 expect_custom()
 unchanged_counts()
 -- The same material objects can have their bindings reset by game code.
 local armor, helmet = current()
 bound[armor][1], bound[armor][2] = 20001, 20003
 bound[helmet][1], bound[helmet][2] = 20002, 20004
-runtime.on_update(ctx, 0.5)
+recover()
 expect_custom()
 unchanged_counts()
 local stable_binds = binds
 for _ = 1, 6 do
-    runtime.on_update(ctx, 0.5)
+    recover()
 end
 assert(binds == stable_binds, 'Stable owned appearance was rebound on every recovery poll')
 -- Foreign writers are preserved, even with identical gear and slot numbers.
 bound[armor][1], bound[armor][2] = 777777, 888888
-runtime.on_update(ctx, 0.5)
+recover()
 assert(bound[armor][1] == 777777 and bound[armor][2] == 888888, 'Recovery replaced a foreign writer')
 unchanged_counts()
 -- New material instances with a shared original ID still require the original kit proof.
 actor(3)
 kits.armor = 99
-runtime.on_update(ctx, 0.5)
+recover()
 armor, helmet = current()
 assert(bound[armor][1] == 30001 and bound[armor][2] == 30003, 'Previous armor colors were applied to a changed kit')
 assert(
@@ -376,13 +410,13 @@ assert(
     'Saving after a gear change retained the previous Armor blanket default'
 )
 kits.armor = 21
-runtime.on_update(ctx, 0.5)
+recover()
 expect_custom()
 unchanged_counts()
 -- Explicit Restore Original clears intent so future actor recreations stay original.
 activate('restore')
 actor(4)
-runtime.on_update(ctx, 0.5)
+recover()
 armor, helmet = current()
 assert(
     bound[armor][1] == 40001 and bound[helmet][1] == 40002 and bound[armor][2] == 40003 and bound[helmet][2] == 40004,
@@ -397,25 +431,25 @@ activate('load')
 activate('apply_file_armor')
 assert(bound[armor][1] == owned_material, 'User apply failed while source metadata was pending')
 metadata[40001] = delayed
-runtime.on_update(ctx, 0.5)
+recover()
 -- Undo clears the desired application too; background polls must not resurrect it.
 activate('global_undo')
 assert(bound[armor][1] == 40001, 'Undo did not restore the original live binding')
 local undo_binds = binds
 for _ = 1, 4 do
-    runtime.on_update(ctx, 0.5)
+    recover()
 end
 assert(bound[armor][1] == 40001 and binds == undo_binds, 'Recovery reapplied an undone appearance')
 activate('global_redo')
-runtime.on_update(ctx, 0.5)
+recover()
 assert(bound[armor][1] == owned_material, 'Redo failed to restore desired application')
 history_count, pattern_undo = #history.undo, #pattern.undo
 scene = false
 live = {}
-runtime.on_update(ctx, 0.5)
+recover()
 actor(5)
 scene = true
-runtime.on_update(ctx, 0.5)
+recover()
 armor, helmet = current()
 assert(bound[armor][1] == owned_material, 'Delayed Armor metadata failed to survive actor replacement after Redo')
 assert(
@@ -425,11 +459,11 @@ assert(
 unchanged_counts()
 activate('restore')
 actor(6)
-runtime.on_update(ctx, 0.5)
+recover()
 armor, helmet = current()
 assert(bound[armor][1] == 60001 and bound[helmet][1] == 60002, 'Explicit Restore failed to clear redo/recovery intent')
 actor(8, 256)
-runtime.on_update(ctx, 0.5)
+recover()
 assert(h.set('file', 'material'))
 activate('load')
 activate('apply_file_armor')
@@ -440,16 +474,28 @@ assert(created == allocations, 'Duplicate Transmog destinations allocated duplic
 history_count, pattern_undo = #history.undo, #pattern.undo
 scene = false
 live = {}
-runtime.on_update(ctx, 0.5)
+recover()
 actor(9, 256)
 scene = true
-runtime.on_update(ctx, 0.5)
+recover()
 for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Large Armor recovery lost a Transmog destination')
 end
 armor, helmet = current()
 assert(bound[helmet][1] == 90002, 'Large Armor recovery recolored an unmatched Helmet')
 unchanged_counts()
+-- A kit change between stages must cancel the old cycle before any write.
+actor(10, 256)
+frame(0.5)
+local before_drift = binds
+kits.armor = 99
+frame(0)
+assert(binds == before_drift, 'Mid-cycle gear-proof change wrote an old palette')
+kits.armor = 21
+recover()
+for _, material in ipairs(materials[units[1].unit]) do
+    assert(bound[material.material][1] == owned_material, 'Canceled recovery failed to restart with fresh proof')
+end
 assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Carry R5.8.6 background performance, staged appearance recovery and Photo Mode input improvements forward.
+
 ## R6.0.0-alpha3 - 2026-10-15
 
 - Improved Shared LUT compression and sync.

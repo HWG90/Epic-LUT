@@ -164,14 +164,6 @@ function F.new(m,ctx,deps)
                 return
             end
             local basic_key=self.preferences and self.preferences.basic_key and self.preferences.basic_key()or 120
-            if self.view.refresh_font then
-                if self.view.refresh_font()then self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1 end
-                self.menu.font_metric_key=self.view.metric_key or self.view.font_key
-                if self.font_logged_key~=self.view.font_key then
-                    self.font_logged_key=self.view.font_key
-                    ctx.log('Epic LUT UI font: '..(self.view.font_key=='core/performance_hud/debug'and 'stock debug' or 'game HUD'))
-                end
-            end
             local basic_down=self.input.down(basic_key)
             if focused and process_input and basic_down and not self.basic_held and not self.menu.text_edit and not self.menu.capture then
                 if self.basic_mode and self.menu.visible then self.menu.visible=false
@@ -209,6 +201,14 @@ function F.new(m,ctx,deps)
                 error(text,0)
             end
             if process_input then self.menu.tick(self.input,dt)end
+            if self.menu.visible and self.view.refresh_font then
+                if self.view.refresh_font()then self.menu.redraw_revision=(self.menu.redraw_revision or 0)+1 end
+                self.menu.font_metric_key=self.view.metric_key or self.view.font_key
+                if self.font_logged_key~=self.view.font_key then
+                    self.font_logged_key=self.view.font_key
+                    ctx.log('Epic LUT UI font: '..(self.view.font_key=='core/performance_hud/debug'and 'stock debug' or 'game HUD'))
+                end
+            end
             if self.rendered_revision~=self.menu.redraw_revision then
                 if self.view.invalidate then self.view.invalidate()else self.view.clear()end
                 self.rendered_revision=self.menu.redraw_revision;self.draw_elapsed=1
@@ -233,6 +233,18 @@ function F.new(m,ctx,deps)
             end
             if self.was_visible and not self.menu.visible and self.preferences and self.preferences.save_size then self.preferences.save_size(self.basic_mode and self.full_size and self.full_size[1]or self.menu.window_width,self.basic_mode and self.full_size and self.full_size[2]or self.menu.window_height)end
             self.was_visible=self.menu.visible
+            -- Shortcuts, preview retirement and cursor restoration above remain
+            -- live while closed; rendering is retired once per close transition.
+            if not self.menu.visible then
+                if not self.idle_render_clean then
+                    self.menu.advance(dt)
+                    self.menu.compose(w,h)
+                    self.view.release()
+                    self.idle_render_clean=true
+                end
+                return
+            end
+            self.idle_render_clean=false
             local key=self.menu.toggle_key;self.menu.menu_key_label=m.ui_menu.key_name(key)
             self.menu.advance(dt)
             self.view.draw(self.menu.compose(w,h))

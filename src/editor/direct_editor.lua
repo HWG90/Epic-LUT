@@ -458,67 +458,78 @@ local function apply_bindings(document, targets, transient)
     return count, texture
 end
 local function recover_appearance(dt)
-    if not appearance then
-        return
+    operations.appearance_worked = false
+    if not appearance then return end
+    -- One recovery stage per update. Keep both scanners and replay work from
+    -- landing in the same gameplay frame; never retain a native read snapshot.
+    local job = operations.appearance_recovery
+    if not job then
+        appearance_elapsed = appearance_elapsed + math.max(0, dt or 0)
+        if appearance_elapsed < 0.5 then return end
+        appearance_elapsed = 0
     end
-    appearance_elapsed = appearance_elapsed + math.max(0, dt or 0)
-    if appearance_elapsed < 0.5 then
-        return
-    end
-    appearance_elapsed = 0
-    if
-        (region_indicator and region_indicator.job)
+    if (region_indicator and region_indicator.job)
         or (pattern_editor and pattern_editor.flashing())
-        or (
-            frontend
-            and frontend.menu
-            and frontend.menu.visible
-            and frontend.menu.is_interacting
-            and frontend.menu.is_interacting()
-        )
-    then
+        or (frontend and frontend.menu and frontend.menu.visible
+            and frontend.menu.is_interacting and frontend.menu.is_interacting()) then
+        operations.appearance_recovery = nil
         return
     end
-    for key, pending in pairs(appearance_pending) do
-        local b =
-            { original = pending.original, save_key = pending.save_key, kind = pending.kind, texture = pending.texture }
-        local captured_proof = { [pending.kind] = pending.proof }
-        local count = appearance.remember({ b }, pending.pattern, captured_proof, appearance_resource)
-        if count > 0 then
-            appearance_pending[key] = nil
+    if not job then
+        for key, pending in pairs(appearance_pending) do
+            local b = { original = pending.original, save_key = pending.save_key,
+                kind = pending.kind, texture = pending.texture }
+            local count = appearance.remember({ b }, pending.pattern,
+                { [pending.kind] = pending.proof }, appearance_resource)
+            if count > 0 then appearance_pending[key] = nil end
         end
     end
     if appearance.count() == 0 and not (edit.editor_target and edit.editor_target.kind == 'cape') then
+        operations.appearance_recovery = nil
         return
     end
     local proof = appearance_proof()
-    if not proof then
+    if not proof then operations.appearance_recovery = nil; return end
+    if job and (job.proof.armor ~= proof.armor or job.proof.helmet ~= proof.helmet
+        or job.proof.cape ~= proof.cape) then
+        operations.appearance_recovery = nil
+        appearance_elapsed = 0.5 -- Restart promptly with current gear.
         return
     end
-    local material_ready = pcall(refresh, true)
+    if not job then
+        job = { phase = 1, proof = proof }
+        operations.appearance_recovery = job
+    end
+    operations.appearance_worked = true
     local function replay(collection, pattern, session)
         local targets = {}
         for _, group in ipairs(collection or {}) do
-            for _, b in ipairs(group.bindings) do
-                targets[#targets + 1] = b
-            end
+            for _, b in ipairs(group.bindings) do targets[#targets + 1] = b end
         end
+        -- Fresh binding reads and the session's present/ownership/readback
+        -- checks still run immediately before every write.
         for _, batch in ipairs(appearance.batches(targets, pattern, proof, appearance_resource, binding)) do
             session.apply(batch.document, batch.targets)
             for _, b in ipairs(batch.targets) do
-                if b.cape then
-                    b.applied_cape_proof = proof.cape
-                end
+                if b.cape then b.applied_cape_proof = proof.cape end
             end
         end
     end
-    if material_ready then
-        replay(groups, false, bindings)
-    end
-    if pattern_editor and operations.pattern_session then
-        local ok, discovered = pcall(pattern_editor.scan, true)
-        if ok then
-            replay(discovered, true, operations.pattern_session)
+    local phase = job.phase
+    job.phase = phase + 1 -- Errors cannot pin a failed stage to every frame.
+    if phase == 1 then
+        job.material_ready = pcall(refresh, true)
+    elseif phase == 2 then
+        if job.material_ready then replay(groups, false, bindings) end
+    elseif phase == 3 then
+        if pattern_editor and operations.pattern_session then
+            local ok, discovered = pcall(pattern_editor.scan, true)
+            if ok then job.pattern_groups = discovered end
+        end
+    else
+        operations.appearance_recovery = nil
+        if job.pattern_groups and operations.pattern_session then
+            replay(job.pattern_groups, true, operations.pattern_session)
         end
     end
 end
@@ -3250,6 +3261,8 @@ local function register(current)
     groups = {}
 end
 local function close()
+    operations.appearance_recovery = nil
+    operations.appearance_worked = false
     -- Loader cleanup polls replace normal updates. Hide retained UI and release
     -- its input lease before any worker or native cleanup can defer unloading.
     local dismissed = not frontend or not frontend.dismiss or frontend.dismiss()
@@ -4424,7 +4437,7 @@ return {
             end
         end
         if pattern_editor and handle then
-            local ok, why = pcall(pattern_editor.tick, dt)
+            local ok, why = pcall(pattern_editor.tick, dt, operations.appearance_worked)
             if not ok then
                 pcall(pattern_editor.stop_flash)
                 if ctx.log then
