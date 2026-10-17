@@ -42,4 +42,5 @@ subprocess.run([sys.executable, str(ROOT/'tests/test_binding_provenance.py')], c
 subprocess.run([sys.executable, str(ROOT/'tests/test_binding_names.py')], cwd=ROOT, check=True)
 subprocess.run([sys.executable, str(ROOT/'tests/test_original_row_cache.py')], cwd=ROOT, check=True)
 subprocess.run([sys.executable, str(ROOT/'tests/test_original_patched_cache.py')], cwd=ROOT, check=True)
+subprocess.run([sys.executable, str(ROOT/'tests/test_snapshot_publish_race.py')], cwd=ROOT, check=True)
 print('PASS: source and bundled LuaJIT syntax; isolated editor contracts')
