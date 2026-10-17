@@ -95,7 +95,19 @@ public sealed class EpicOriginalReader : IDisposable {
  static string Stamp(string folder){string bundled=FileDigest(Path.Combine(folder,"bundles.nxa"));if(PatchNames(folder).Length==0)return bundled;using(var sha=SHA256.Create()){Hash(sha,Encoding.ASCII.GetBytes("Epic LUT patched originals v6\n"+bundled+"\n"));using(var loose=new LooseSet(folder,sha)){}sha.TransformFinalBlock(new byte[0],0,0);return BitConverter.ToString(sha.Hash).Replace("-","");}}
  public static string SourceStamp(string folder,int ownerPID,string status){owner=ownerPID;progress=status;healthChecked=false;return Stamp(folder);}
  static void WriteLut(string destination,Lut value){int size=checked(value.Width*value.Height*16);var pixels=new byte[size];for(int f=0;f<size/4;f++){float number=value.Format==2?BitConverter.ToSingle(value.Raw,f*4):(float)Half(BitConverter.ToUInt16(value.Raw,f*2));Buffer.BlockCopy(BitConverter.GetBytes(number),0,pixels,f*4,4);}var header=Slice(value.Main,192,148);Buffer.BlockCopy(BitConverter.GetBytes((uint)1),0,header,28,4);Buffer.BlockCopy(BitConverter.GetBytes((uint)2),0,header,128,4);Buffer.BlockCopy(BitConverter.GetBytes((uint)(value.Width*16)),0,header,20,4);string file=Path.Combine(destination,"game-"+value.Hash+"-original.dds");Write(file,header,pixels);string patch=Path.Combine(destination,"game-"+value.Hash+"-original.patch-source");if(value.SharedArchives==null)Write(patch,Encoding.ASCII.GetBytes(value.Archive+"\n"),value.Main);else {if(File.Exists(patch))File.Delete(patch);Write(Path.Combine(destination,"game-"+value.Hash+"-original.source-archives"),Encoding.ASCII.GetBytes(value.SharedArchives),new byte[0]);}}
- static void Write(string path,byte[] head,byte[] data){string temporary=path+"."+Guid.NewGuid().ToString("N")+".pending";try{using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)){output.Write(head,0,head.Length);output.Write(data,0,data.Length);output.Flush(true);}if(File.Exists(path))File.Replace(temporary,path,null);else File.Move(temporary,path);}finally{if(File.Exists(temporary))File.Delete(temporary);}}
+ // Serialize atomic cache publication across background worker processes.
+ // The lock is bounded and never runs on the game's update thread.
+ static void Publish(string temporary,string path){
+  string key;using(var hash=SHA256.Create())key=BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant()))).Replace("-","");
+  using(var mutex=new System.Threading.Mutex(false,"Local\\EpicLUTSnapshot-"+key)){
+   bool held=false;
+   try{try{held=mutex.WaitOne(5000);}catch(System.Threading.AbandonedMutexException){held=true;}
+    if(!held)throw new IOException("Snapshot cache publication timed out; retry Load Current Gear");
+    if(File.Exists(path))File.Replace(temporary,path,null);else File.Move(temporary,path);
+   }finally{if(held)mutex.ReleaseMutex();}
+  }
+ }
+ static void Write(string path,byte[] head,byte[] data){string temporary=path+"."+Guid.NewGuid().ToString("N")+".pending";try{using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)){output.Write(head,0,head.Length);output.Write(data,0,data.Length);output.Flush(true);}Publish(temporary,path);}finally{if(File.Exists(temporary))File.Delete(temporary);}}
  public int Extract(string destination,string wantedPath){return ExtractChecked(destination,wantedPath,null);}
  int ExtractChecked(string destination,string wantedPath,string expected,bool arrowhead=false){
   string before=expected??Stamp(folder);
