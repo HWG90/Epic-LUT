@@ -60,15 +60,17 @@ function W.files(folder,filter)
     local pattern=folder..'/'..filter;local n=kernel.epic_native_wide(65001,8,pattern,-1,nil,0);local wide=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,pattern,-1,wide,n)==n)
     local data=ffi.new('epic_find_data');local handle=kernel.epic_find_first(wide,data)
     if ffi.cast('intptr_t',handle)==-1 then return {}end
-    local names={};local ok,why=pcall(function()
+    local names,receipts={},{};local ok,why=pcall(function()
         repeat
             local length=kernel.epic_native_utf8(65001,0,data.name,-1,nil,0,nil,nil)
             if length>0 then local bytes=ffi.new('char[?]',length);kernel.epic_native_utf8(65001,0,data.name,-1,bytes,length,nil,nil)
                 local name=ffi.string(bytes);names[#names+1]=name
+                -- Exclude access time, which may change merely by reading a file.
+                receipts[name]=table.concat({tonumber(data.header[0]),tonumber(data.header[1]),tonumber(data.header[2]),tonumber(data.header[5]),tonumber(data.header[6]),tonumber(data.header[7]),tonumber(data.header[8])},':')
             end
         until kernel.epic_find_next(handle,data)==0
     end)
-    kernel.epic_find_close(handle);assert(ok,why);table.sort(names);return names
+    kernel.epic_find_close(handle);assert(ok,why);table.sort(names);return names,receipts
 end
 function W.row_presets(folder)
     local names={};for _,file in ipairs(W.files(folder,'row-*.dds'))do local name=file:match('^row%-([%w _-]+)%.dds$');if name then names[#names+1]=name end end;return names

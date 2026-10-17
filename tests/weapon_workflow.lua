@@ -213,3 +213,31 @@ assert(invalidated == 'Adjudicator')
 print(
     'PASS weapon workflow: frozen naming, exact slots/LOD capture, material-Pattern apply, export delegation and stale refusal'
 )
+
+do
+    local f = F.new()
+    local group = f.group(1, 'material', 1, 'babd338977faa2ff', 0.25, 1)
+    local attempts, complete, name = 0, false, 'Frozen'
+    local pending = 'pending proof'
+    local workflow = Workflow.new({weapon_mapping=Mapping,weapon_presets=Presets,outfit_targets=dofile('src/presets/outfit_targets.lua')}, {
+        bridge=function()return {runtime=function()return f.runtime end,descriptors=function()return {group}end}end,
+        outfits=function()return storage end,
+        message=function(text)return text end,
+        export_options=function()return name,3,1 end,
+        export_pending=function(why)return why==pending end,
+        exporter=function(snapshot)return {save=function(export_name,preset)
+            attempts=attempts+1
+            assert(export_name=='Frozen' and preset==snapshot and preset.entries[1].document.data[0]==0.25)
+            if attempts<3 then error(pending,0)end
+            complete=true;return 'output','one weapon','output.zip'
+        end}end,
+    })
+    assert(workflow.export({group}):find('finish automatically',1,true) and attempts==1)
+    name='Later';group.source_document.data[0]=0.9
+    assert(not pcall(workflow.export,{group}), 'A second click replaced the queued snapshot')
+    workflow.tick(0.1);assert(attempts==1)
+    workflow.tick(0.2);assert(attempts==2 and not complete)
+    workflow.tick(0.3);assert(attempts==3 and complete)
+    workflow.tick(10);assert(attempts==3, 'Finished export repeated')
+end
+print('PASS deferred weapon export: frozen name/pixels, one queued job, rate-limited retry and one publication')

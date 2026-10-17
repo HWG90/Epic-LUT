@@ -472,6 +472,23 @@ function D.new(E, deps)
         local value = bindings(b.material)[b.slot]
         return value ~= 0 and value or nil
     end
+    -- Negative-only frame gate: safe byte reads, never native Unit/Mesh calls.
+    -- A mismatch is only a request for fresh ownership validation, not write permission.
+    function self.bindings_unchanged(targets)
+        local decoded = {}
+        for _, b in ipairs(targets) do
+            assert(pointer(b.material), 'Invalid assigned Material pointer')
+            local slots = decoded[b.material]
+            if not slots then
+                slots = bindings(b.material)
+                decoded[b.material] = slots
+            end
+            if slots[b.slot] ~= b.current then
+                return false
+            end
+        end
+        return true
+    end
     function self.write_guard(b)
         -- Peer consent/current lobby membership is rechecked by present(), along
         -- with the exact Unit/material receipt. Call immediately before each bind.

@@ -16,6 +16,7 @@ function C.new(m, host)
     local folder, scripts = paths.cache .. '/' .. C.FOLDER .. partition, paths.cache .. '/binding-worker' .. partition
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {}, mode = mode }
     local loaded_bytes = 0
+    local scope_thread, scope_receipt, scope_cancel
     local function open_file(path, mode)
         -- Lua's Windows CRT cannot open ordinary paths beyond MAX_PATH.
         -- Keep cache identities unchanged; normalize only the filesystem call.
@@ -64,6 +65,11 @@ function C.new(m, host)
         end
     end
     function self.close()
+        if scope_thread then
+            scope_cancel = true
+            coroutine.resume(scope_thread)
+            scope_thread, scope_receipt = nil, nil
+        end
         if self.worker then
             pcall(write, folder .. '/progress.txt.cancel', 'cancel')
             local ok, done = pcall(self.worker.stop)
@@ -91,9 +97,10 @@ function C.new(m, host)
         if self.request == request and (self.state == 'loading' or self.state == 'ready' and not force) then
             return true
         end
-        if self.worker and not self.close() then
+        if (self.worker or scope_thread) and not self.close() then
             return false, 'Previous binding worker cleanup pending'
         end
+        scope_receipt, self.scope_error = nil, nil
         self.request, self.state, self.records, loaded_bytes = request, 'loading', {}, 0
         local ok, why = pcall(function()
             for _, path in ipairs({ folder, scripts }) do
@@ -236,6 +243,7 @@ function C.new(m, host)
         self.records, self.state, self.status, self.error = records, 'ready', 'Exact binding sources ready', nil
     end
     function self.tick()
+        if scope_thread then self.tick_scope() end
         if self.state ~= 'loading' or now() - (self.last_poll or 0) < 0.25 then
             return
         end
@@ -311,7 +319,7 @@ function C.new(m, host)
     function self.get()
         return self.state == 'ready' and self or nil
     end
-    function self.validate_scope()
+    local function validate_scope_full(checkpoint)
         if self.state ~= 'ready' then
             return false, self.status
         end
@@ -343,6 +351,7 @@ function C.new(m, host)
                         local size = assert(file:seek('end'))
                         assert(file:seek('set', 0))
                         local hashed, digest = pcall(m.binding_provenance.digest, function()
+                            if checkpoint then checkpoint() end
                             local chunk = file:read(65536)
                             return chunk and #chunk > 0 and chunk or nil
                         end, size)
@@ -363,6 +372,64 @@ function C.new(m, host)
             return false, tostring(why)
         end
         return true
+    end
+    local function inventory_receipt()
+        local names, receipts = m.windows.files(self.game, '*.patch_*')
+        assert(type(receipts) == 'table', 'Patch file metadata receipts unavailable')
+        table.sort(names)
+        local out = {}
+        for _, name in ipairs(names) do
+            out[#out + 1] = name .. '\t' .. assert(receipts[name], 'Patch receipt disappeared') .. '\n'
+        end
+        return table.concat(out)
+    end
+    function self.validate_scope()
+        if scope_receipt then
+            if self.state == 'ready' and inventory_receipt() == scope_receipt then
+                return true
+            end
+            scope_receipt = nil
+            return false, 'Patch files changed; verify weapon export sources again'
+        end
+        return validate_scope_full()
+    end
+    function self.prepare_scope()
+        if self.state ~= 'ready' then return false, self.status end
+        if scope_receipt and inventory_receipt() == scope_receipt then return true end
+        scope_receipt = nil
+        if not scope_thread then
+            local initial = inventory_receipt()
+            scope_cancel, self.scope_error = false, nil
+            scope_thread = coroutine.create(function()
+                local slice_start, chunks = os.clock(), 0
+                local function checkpoint()
+                    assert(not scope_cancel, 'Weapon export verification cancelled')
+                    chunks = chunks + 1
+                    if chunks > 64 or os.clock() - slice_start >= 0.0015 then
+                        coroutine.yield()
+                        assert(not scope_cancel, 'Weapon export verification cancelled')
+                        slice_start, chunks = os.clock(), 0
+                    end
+                end
+                local ok, why = validate_scope_full(checkpoint)
+                assert(ok, why)
+                assert(inventory_receipt() == initial, 'Patch files changed during verification')
+                scope_receipt = initial
+                return true
+            end)
+        end
+        return false, 'Verifying weapon export sources in the background'
+    end
+    function self.tick_scope()
+        if not scope_thread then return end
+        local ok, why = coroutine.resume(scope_thread)
+        if not ok then
+            scope_thread, scope_receipt = nil, nil
+            self.scope_error = tostring(why)
+            self.state, self.status = 'stale', self.scope_error
+        elseif coroutine.status(scope_thread) == 'dead' then
+            scope_thread = nil
+        end
     end
     function self.id_available(kind, resource)
         assert(self.state == 'ready', 'Complete resource collision catalog unavailable')

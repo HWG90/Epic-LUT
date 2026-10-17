@@ -164,12 +164,42 @@ function W.new(m, host)
         menu.text_edit = { mod = mod, control = mod.controls.outfit_name, text = '', replace = true }
         return true
     end
+    local export_job, export_elapsed
+    local function finish_export(job)
+        local ok, output, description, archive = pcall(job.exporter.save, job.name, job.preset, job.format, 1, job.naming)
+        if not ok then
+            if host.export_pending and host.export_pending(output) then
+                return false
+            end
+            error(output, 0)
+        end
+        export_job = nil
+        return true, host.message('Exported weapons (' .. description .. ') to ' .. (archive or output))
+    end
+    function self.tick(dt)
+        if not export_job then return end
+        export_elapsed = (export_elapsed or 0) + math.max(0, dt or 0)
+        if export_elapsed < 0.25 then return end
+        export_elapsed = 0
+        local ok, why = pcall(finish_export, export_job)
+        if not ok then
+            export_job = nil
+            host.message('Weapon export stopped: ' .. tostring(why))
+        end
+    end
     function self.export(targets)
+        assert(not export_job, 'A weapon export is already being prepared')
         local entries = presets().capture(bridge().descriptors(targets))
         local name, format, naming = host.export_options()
         local preset = { name = name, entries = entries }
-        local output, description, archive = host.exporter(preset).save(name, preset, format, 1, naming)
-        return host.message('Exported weapons (' .. description .. ') to ' .. (archive or output))
+        export_job = { name = name, format = format, naming = naming, preset = preset, exporter = host.exporter(preset) }
+        export_elapsed = 0
+        local ok, done, result = pcall(finish_export, export_job)
+        if not ok then export_job = nil; error(done, 0) end
+        if not done then
+            return host.message('Preparing weapon export; it will finish automatically when source checks are ready.')
+        end
+        return result
     end
     function self.export_editor(target, document, name, entire)
         bridge().check(target)

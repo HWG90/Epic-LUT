@@ -382,6 +382,12 @@ function B.new(m, host)
         if not runtime then
             return
         end
+        if runtime.enforce_assigned then
+            local _, failed = runtime.enforce_assigned()
+            if #failed > 0 then
+                poll_slot, elapsed = failed[1], 0.2
+            end
+        end
         elapsed = elapsed + (tonumber(dt) or 0)
         if elapsed < 0.2 / 3 then
             return

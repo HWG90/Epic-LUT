@@ -2739,6 +2739,9 @@ function operations.weapon_workflow()
                 end
                 return true
             end,
+            export_pending = function(why)
+                return m.weapon_provenance and why == m.weapon_provenance.PENDING
+            end,
             export_options = function()
                 return handle.get('armory_export_name'),
                     handle.get('armory_export_format'),
@@ -4231,6 +4234,9 @@ return {
             if report then
                 message(report)
             end
+        end
+        if operations.weapon_workflow_service then
+            operations.weapon_workflow_service.tick(dt)
         end
         if operations.weapon_sources_service then
             local ok, report = pcall(

@@ -374,3 +374,37 @@ assert(long_reads > 0 and long_writes >= 3, 'Long cache filesystem calls were no
 long_cache.close()
 m.windows.launch_worker = old_launch
 print('PASS binding cache Windows long paths: normalized reads/writes without changing cache identities')
+
+-- Full hashes run cooperatively; publication only rechecks file identity metadata.
+patch_names = {}
+local async = new()
+assert(async.start(units))
+dataset()
+time = time + 1
+async.tick()
+local patch = '1234567890abcdef.patch_1'
+local patch_bytes = string.rep('payload', 1024 * 1024)
+files['C:/game/data/' .. patch] = patch_bytes
+patch_names = {patch}
+async.scope_count = 1
+async.scope_sha256 = P.digest(patch .. '\t' .. #patch_bytes .. '\t' .. P.digest(patch_bytes) .. '\t-\t-\t-\t-\t\n')
+local metadata_version = 'original'
+local files_before = m.windows.files
+m.windows.files = function() return patch_names, {[patch] = metadata_version} end
+assert(not async.prepare_scope())
+async.tick_scope()
+assert(not async.prepare_scope(), 'Large scope verification did not yield')
+local steps = 1
+while not async.prepare_scope() do
+    assert(not async.scope_error, async.scope_error)
+    async.tick_scope(); steps = steps + 1; assert(steps < 100)
+end
+assert(steps >= 2 and async.validate_scope())
+metadata_version = 'changed'
+assert(not async.validate_scope(), 'Changed file metadata retained an export certificate')
+assert(not async.prepare_scope())
+async.tick_scope()
+assert(async.close() and async.state == 'closed', 'Cancellation did not unwind the verification coroutine')
+m.windows.files = files_before
+patch_names = {}
+print('PASS cooperative scope hashes: bounded slices, unchanged certificate, changed metadata refusal and cancellation')

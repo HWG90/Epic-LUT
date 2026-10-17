@@ -15,6 +15,7 @@ function R.new(deps)
         'Weapon runtime dependencies unavailable'
     )
     local self, catalogs, sessions, drafts, registered, active = { supports_target_subsets = true }, {}, {}, {}, {}, nil
+    local frame_suppressed = {}
     local function slot(value)
         assert(type(value) == 'number' and value % 1 == 0 and value >= 1 and value <= R.SLOTS, 'Invalid weapon slot')
         return value
@@ -130,6 +131,7 @@ function R.new(deps)
     end
     function self.refresh(weapon_slot)
         slot(weapon_slot)
+        frame_suppressed[weapon_slot] = nil
         local receipt, why = discovery.capture(weapon_slot)
         if not receipt then
             catalogs[weapon_slot] = {
@@ -705,6 +707,40 @@ function R.new(deps)
             end)
         end
         return #reset
+    end
+    function self.enforce_assigned()
+        local rebound, failed = 0, {}
+        if not discovery.bindings_unchanged then
+            return rebound, failed
+        end
+        for weapon_slot = 1, R.SLOTS do
+            local catalog = catalogs[weapon_slot]
+            if catalog and catalog.available and not frame_suppressed[weapon_slot] then
+                local assigned = {}
+                for _, kind in ipairs({ 'material', 'pattern' }) do
+                    for _, b in ipairs(sessions[weapon_slot][kind].owned) do
+                        if b.document and b.current ~= b.original then
+                            assigned[#assigned + 1] = b
+                        end
+                    end
+                end
+                if #assigned > 0 then
+                    local checked, unchanged = pcall(discovery.bindings_unchanged, assigned)
+                    if not checked or not unchanged then
+                        -- The probe's decoded bytes expire before any write. Rebind
+                        -- proves the current Unit, all aliases and each native target.
+                        local ok, count = pcall(self.rebind_stock, weapon_slot)
+                        if ok then
+                            rebound = rebound + count
+                        else
+                            frame_suppressed[weapon_slot] = true
+                            failed[#failed + 1] = weapon_slot
+                        end
+                    end
+                end
+            end
+        end
+        return rebound, failed
     end
     function self.update(selected_slot)
         if selected_slot then

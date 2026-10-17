@@ -472,4 +472,32 @@ test('failed omitted-target restoration rolls the entire desired-frame operation
     end
     assert(shape(f.runtime.capture_state().entries[1].document) == shape(before.entries[1].document))
 end)
+test('frame assignment gate uses no native identity scans while stable and restores resets immediately', function()
+    local f = fixture()
+    f.runtime.refresh(1)
+    local d, group = f.runtime.load(1, 1)
+    d.data[0] = 0.41
+    f.runtime.apply(d, 1, 1)
+    local assigned, allocations = group.bindings[1].current, f.allocations
+    local validate = f.discovery.validate
+    f.discovery.validate = function() error('Stable frame entered native identity validation') end
+    for _ = 1, 120 do
+        local count, failed = f.runtime.enforce_assigned()
+        assert(count == 0 and #failed == 0)
+    end
+    f.discovery.validate = validate
+    local reset = group.bindings[1]
+    f.textures[reset.material][reset.slot] = reset.original
+    local count, failed = f.runtime.enforce_assigned()
+    assert(count == 1 and #failed == 0 and f.textures[reset.material][reset.slot] == assigned)
+    assert(f.allocations == allocations and group.bindings[1].current == assigned)
+    f.textures[reset.material][reset.slot] = 0xdead00
+    local writes = #f.writes
+    count, failed = f.runtime.enforce_assigned()
+    assert(count == 0 and #failed == 1 and #f.writes == writes)
+    f.discovery.bindings_unchanged = function() error('Foreign slot was repeatedly probed') end
+    f.runtime.enforce_assigned()
+    assert(#f.writes == writes)
+end)
+
 print('PASS weapon runtime: ' .. cases .. ' focused contracts')

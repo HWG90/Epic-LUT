@@ -461,10 +461,20 @@ function W.new(m, host)
         end
         assert(next(preferences), 'Preset has no weapon assignments')
         for resource, archive in pairs(preferences) do
-            request_set[resource] = archive
+            local captured = cache and cache.state == 'ready' and cache.unit(resource)
+            -- A zero archive is a lookup hint, not an unverified destination.
+            -- Keep a ready effective cache whose actual archive already matches.
+            if not captured or (archive ~= '0000000000000000' and captured.archive ~= archive) then
+                request_set[resource] = archive
+            end
         end
         start_required(false)
         local sources = ready(next(preferences))
+        if sources.prepare_scope then
+            if sources.scope_error then error(sources.scope_error, 0) end
+            local prepared = sources.prepare_scope()
+            if not prepared then error(W.PENDING, 0) end
+        end
         local valid, why = sources.validate_scope()
         if not valid then
             error(why, 0)
@@ -721,7 +731,7 @@ function W.new(m, host)
         if waiting then
             if not ok then
                 return 'Weapon binding source cache update failed: ' .. tostring(why)
-            elseif cache.state == 'ready' then
+            elseif cache.state == 'ready' and not cache.scope_error then
                 return 'Exact weapon binding sources ready'
             elseif cache.state == 'failed' or cache.state == 'stale' then
                 return cache.error or cache.status
