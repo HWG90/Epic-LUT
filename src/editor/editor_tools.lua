@@ -335,7 +335,9 @@ function T.new(deps)
             })
             divider(cursor + gap / 2)
             cursor = cursor - gap
-            if controls.editor_load_armor then
+            if editor.gear == 'weapon' then
+                action(cursor, 'Apply to Weapon LUT', 'editor_apply_weapon', d ~= nil)
+            elseif controls.editor_load_armor then
                 local gear = editor.gear or 'armor'
                 local selector = controls['basic_' .. gear .. '_lut']
                 local selected = selector and selector.choices[h.get('basic_' .. gear .. '_lut')]

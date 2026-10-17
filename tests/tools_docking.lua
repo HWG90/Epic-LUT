@@ -76,7 +76,11 @@ for _, control in ipairs({
     button('populate_worn'),
     button('editor_load_armor'),
     button('editor_load_helmet'),
+    button('editor_load_weapon'),
     button('editor_apply_armor'),
+    button('editor_apply_weapon'),
+    { id = 'weapon_slot', type = 'choice', label = 'Weapon', choices = { 'Primary' }, default = 1 },
+    { id = 'weapon_lut', type = 'choice', label = 'Weapon LUT', choices = { 'LUT 1' }, default = 1 },
     button('editor_all_armor'),
     button('imported_map_gear'),
     button('imported_map_armor'),
@@ -775,3 +779,13 @@ print(
 print(
     'PASS Tools docking: persisted docked default and icon choices, no-write restoration/save failure, actual window icons/header tooltips, shared tabs/state, scroll containment, exact no-apply, docked dropdown ownership, independent Pattern/preview, font/scale variants and busy JSON import'
 )
+
+document.kind, document.family = 'weapon', 'material'
+editor.gear = 'weapon'
+editor.tools.set_docked(false)
+editor.tools.open('import')
+menu.visible = true
+menu.font_size, menu.window_width, menu.window_height, menu.ui_scale = 12, 1800, 1200, 0.7
+local weapon_commands = compose()
+assert(label(weapon_commands, 'Apply to Weapon LUT', true), 'Weapon Tools failed to render its apply action')
+print('PASS weapon Tools Import: no garment selector lookup while reopening')
