@@ -254,6 +254,10 @@ function A.new(deps)
             end)
         end,
         populate_worn_activate = function()
+            local editor = deps.palette_editor()
+            if editor and editor.gear == 'weapon' then
+                return deps.action(deps.reload_weapon_editor)
+            end
             deps.mark_current_load()
             return deps.action(function()
                 deps.request_population()

@@ -2644,6 +2644,23 @@ weapon_editor = function()
     end
     return operations.weapon_editor
 end
+function operations.reload_weapon_editor()
+    palette_editor.gear = 'weapon'
+    editor_pending, populate_request = nil, nil
+    edit.populate_manual_request = nil
+    local service = weapon_editor()
+    service.load_current()
+    local controller = service.controller()
+    controller.choose_family('main')
+    local state = controller.state()
+    if state.target and state.document then
+        return controller.open_editor()
+    end
+    edit.loaded, edit.editor_target, edit.preview_document = nil, nil, nil
+    palette_editor.sync()
+    api.focus_page(handle.id, 'weapons')
+    return message('Weapon LUT colors are not ready; select an available weapon on this page.')
+end
 function operations.weapon_document_target(document)
     assert(
         document and document.data and not document.stale and not document.read_only,
@@ -2927,6 +2944,7 @@ local function register(current)
             return stop_identification()
         end,
         populate_worn = populate_worn,
+        reload_weapon_editor = operations.reload_weapon_editor,
         refreshing_basic_presets = function()
             return edit.refreshing_basic_presets
         end,
@@ -3077,23 +3095,7 @@ local function register(current)
         end,
         weapon_editor = m.weapon_bridge and weapon_editor or nil,
         weapon_view = m.weapon_view,
-        open_weapons = function()
-            palette_editor.gear = 'weapon'
-            editor_pending, populate_request = nil, nil
-            edit.populate_manual_request = nil
-            local service = weapon_editor()
-            service.load_current()
-            local controller = service.controller()
-            controller.choose_family('main')
-            local state = controller.state()
-            if state.target and state.document then
-                return controller.open_editor()
-            end
-            edit.loaded, edit.editor_target, edit.preview_document = nil, nil, nil
-            palette_editor.sync()
-            api.focus_page(handle.id, 'weapons')
-            return message('Weapon LUT colors are not ready; select an available weapon on this page.')
-        end,
+        open_weapons = operations.reload_weapon_editor,
         apply_weapon_document = function()
             return action(function()
                 local target = operations.weapon_document_target(edit.loaded)
@@ -3400,6 +3402,7 @@ local function reset_transient_state()
         ensure_binding_provenance = operations.ensure_binding_provenance,
         request_binding_sources = operations.request_binding_sources,
         binding_export_provider = operations.binding_export_provider,
+        reload_weapon_editor = operations.reload_weapon_editor,
         weapon_workflow = operations.weapon_workflow,
         weapon_document_target = operations.weapon_document_target,
         weapon_sources = operations.weapon_sources,

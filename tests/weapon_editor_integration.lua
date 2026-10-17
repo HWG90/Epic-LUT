@@ -138,6 +138,18 @@ assert(page and page.render_layout and page.on_wheel)
 assert(handle.activate('editor_load_weapon'))
 assert(base.info().editor and base.info().editor.kind == 'weapon',
     'Weapon header did not load its table like Armor and Helmet')
+local weapon_reload_count = 0
+local reload_actions = m.editor_actions.new({
+    palette_editor = function() return base.palette end,
+    action = function(fn) return fn() end,
+    reload_weapon_editor = function() weapon_reload_count = weapon_reload_count + 1; return true end,
+    mark_current_load = function() error('Weapon reload entered garment loading') end,
+})
+assert(reload_actions.populate_worn_activate() and weapon_reload_count == 1,
+    'Load Current Gear did not route the active weapon editor to weapon loading')
+assert(handle.activate('populate_worn'))
+assert(base.info().editor and base.info().editor.kind == 'weapon' and base.palette.gear == 'weapon',
+    'Reloading from the shared LUT editor lost its weapon context')
 local function buttons()
     local result = {}
     page.render_layout({
