@@ -225,6 +225,7 @@ function S.new(modules, host)
                 armor = get('outfit_target_armor'),
                 helmet = get('outfit_target_helmet'),
                 cape = get('outfit_target_cape'),
+                weapon = controls.outfit_target_weapon and get('outfit_target_weapon') or false,
             },
             loaded = frame.imported,
             import_description = frame.import_description,

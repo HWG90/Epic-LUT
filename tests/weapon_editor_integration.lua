@@ -105,6 +105,25 @@ local ctx = {
 editor.on_enable(ctx)
 editor.on_update(ctx, 0)
 local mod, handle = base.api.mods.epic_direct_lut, base.api.mods.epic_direct_lut.handle
+assert(mod.controls.outfit_target_weapon and mod.controls.outfit_target_weapon.type == 'toggle',
+    'Armory rendered Weapons without registering its checkbox')
+local weapon_checked = handle.get('outfit_target_weapon')
+assert(handle.set('outfit_target_weapon', not weapon_checked))
+assert(handle.get('outfit_target_weapon') == not weapon_checked)
+assert(base.info().armory_targets.weapon == not weapon_checked,
+    'Armory summary dropped the registered Weapons checkbox state')
+assert(handle.set('outfit_target_weapon', true))
+local forwarded
+local armory_actions = m.editor_actions.new({
+    action = function(fn) return fn() end,
+    handle = function() return handle end,
+    armory_collection = function() return {selected = {}} end,
+    armory_cape_available = function() return false end,
+    apply_outfit = function(mask) forwarded = mask; return true end,
+})
+assert(armory_actions.outfit_apply_selected_activate() and forwarded.weapon == true and forwarded.cape == false,
+    'Apply Preset did not forward the real Weapons checkbox')
+assert(handle.set('outfit_target_weapon', weapon_checked) and handle.get('outfit_target_weapon') == weapon_checked)
 assert(
     mod.controls.weapon_slot and mod.controls.weapon_family and mod.controls.editor_apply_weapon,
     'Production registration omitted the weapon modules'

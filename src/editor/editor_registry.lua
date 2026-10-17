@@ -192,6 +192,12 @@ function R.pages(callbacks, defaults)
                     default = true,
                 },
                 {
+                    id = 'outfit_target_weapon',
+                    type = 'toggle',
+                    label = 'Weapons',
+                    default = false,
+                },
+                {
                     id = 'outfit_apply_selected',
                     type = 'button',
                     label = 'Apply Preset',

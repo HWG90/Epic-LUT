@@ -169,6 +169,7 @@ function A.new(deps)
                     helmet = handle.get('outfit_target_helmet'),
                     cape = handle.get('outfit_target_cape')
                         and deps.armory_cape_available(deps.armory_collection().selected),
+                    weapon = handle.get('outfit_target_weapon'),
                 })
             end)
         end,
