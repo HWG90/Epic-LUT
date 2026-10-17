@@ -2026,23 +2026,13 @@ function M.new(api, measure, Text)
                     drag = nil
                 elseif input.down(1) then
                     if x then
+                        -- Preview the draft only; edit/history callbacks run once on release.
                         drag.move(x, y)
-                        if
-                            drag.live
-                            and drag.value ~= drag.last_value
-                            and (not drag.last_commit or os.clock() - drag.last_commit >= 0.04)
-                        then
-                            local ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
-                            drag.last_value, drag.last_commit = drag.value, os.clock()
-                            if not ok then
-                                self.notice = 'Could not apply: ' .. tostring(err)
-                            end
-                        end
                     end
                 else
                     local current = drag.mod.handle.get(drag.control.id)
                     local ok, err = true, nil
-                    if not drag.live or math.abs(current - drag.value) > 1e-9 then
+                    if current ~= drag.value then
                         ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
                     end
 
@@ -3300,7 +3290,6 @@ function M.new(api, measure, Text)
                                     mod = mod,
                                     control = control,
                                     value = value,
-                                    live = true,
                                     widget_x = x,
                                     widget_y = y,
                                 }

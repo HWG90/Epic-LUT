@@ -64,6 +64,8 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
 end
 assert(bar)
 local x, y = bar.x + (bar.w / 0.2) * 0.8, bar.y + 5
+input(bar.x + (bar.w / 0.2) * 0.4, y, true)
+input(bar.x + (bar.w / 0.2) * 0.6, y, true)
 input(x, y, true)
 assert(menu.is_interacting(), 'Active value drag is invisible to automatic gear refresh')
 local displayed = false
@@ -79,8 +81,18 @@ for _, c in ipairs(menu.compose(1920, 1080)) do
     end
 end
 assert(other, 'Dragging one channel previewed its value in another column')
-assert(displayed and math.abs(h.get('value') - 0.8) < 1e-9 and changes == 1, 'Slider did not update live while held')
+assert(displayed and h.get('value') == 0.2 and changes == 0, 'Held slider committed intermediate edits')
 input(x, y, false)
 assert(not menu.is_interacting(), 'Released value drag keeps automatic gear refresh blocked')
 assert(math.abs(h.get('value') - 0.8) < 1e-9 and changes == 1, 'Release duplicated the live update')
-print('PASS slider preview: live numeric/bar display and live commit without duplicate release')
+-- Returning to the starting value must not create a redundant edit.
+input(bar.x + (bar.w / 0.2) * 0.3, y, true)
+input(x, y, true)
+input(x, y, false)
+assert(math.abs(h.get('value') - 0.8) < 1e-9 and changes == 1, 'No-op drag created another edit')
+-- Closing the menu cancels the draft rather than committing it.
+input(bar.x + (bar.w / 0.2) * 0.1, y, true)
+menu.visible = false
+input(bar.x + (bar.w / 0.2) * 0.1, y, false)
+assert(math.abs(h.get('value') - 0.8) < 1e-9 and changes == 1, 'Closing the menu committed an unfinished drag')
+print('PASS slider transaction: responsive draft display, zero intermediate callbacks, one release commit and no-op rejection')
