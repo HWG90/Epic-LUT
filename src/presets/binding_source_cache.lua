@@ -16,8 +16,16 @@ function C.new(m, host)
     local folder, scripts = paths.cache .. '/' .. C.FOLDER .. partition, paths.cache .. '/binding-worker' .. partition
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {}, mode = mode }
     local loaded_bytes = 0
+    local function open_file(path, mode)
+        -- Lua's Windows CRT cannot open ordinary paths beyond MAX_PATH.
+        -- Keep cache identities unchanged; normalize only the filesystem call.
+        if #path >= 248 and path:match('^%a:[/\\]') then
+            path = '\\\\?\\' .. path:gsub('/', '\\')
+        end
+        return io_api.open(path, mode)
+    end
     local function read(path, limit)
-        local f, why = io_api.open(path, 'rb')
+        local f, why = open_file(path, 'rb')
         if not f then
             return nil, why
         end
@@ -27,7 +35,7 @@ function C.new(m, host)
         return value
     end
     local function write(path, data)
-        local f = assert(io_api.open(path, 'wb'))
+        local f = assert(open_file(path, 'wb'))
         assert(f:write(data))
         assert(f:close())
     end
@@ -327,7 +335,7 @@ function C.new(m, host)
             for _, name in ipairs(names) do
                 receipt[#receipt + 1] = name .. '\t'
                 for _, suffix in ipairs({ '', '.gpu_resources', '.stream' }) do
-                    local file = io_api.open(self.game .. '/' .. name .. suffix, 'rb')
+                    local file = open_file(self.game .. '/' .. name .. suffix, 'rb')
                     if not file then
                         assert(suffix ~= '', 'Current patch disappeared')
                         receipt[#receipt + 1] = '-\t-\t'

@@ -5020,6 +5020,13 @@ function M.new(api, measure, Text)
                     end
                 end
                 check_ui.button(px + 14, py + 22, 198, 30, 'Save', function()
+                    if dialog.on_scope then
+                        local ok, why = pcall(dialog.on_scope, dialog.save_kind)
+                        if not ok or why == false then
+                            self.notice = tostring(why or 'Could not select save targets')
+                        end
+                        return
+                    end
                     dialog.phase = 'name'
                     self.text_edit = { mod = dialog.mod, control = dialog.control, text = '', replace = true }
                 end, { enabled = any, accent = any and accent, ink = T.background })

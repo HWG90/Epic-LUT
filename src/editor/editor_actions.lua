@@ -433,34 +433,54 @@ function A.new(deps)
             local selected = collection and collection.selected
             if selected then
                 local name = selected.name
-                local scope = {}
+                local initial = { weapon = false, weapon_slots = {} }
                 for _, entry in ipairs(selected.entries or {}) do
                     if entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape' then
-                        scope[entry.kind] = true
-                    elseif entry.kind == 'weapon' and deps.handle().get('outfit_target_weapon') == true then
-                        scope.weapon = true
-                        scope.weapon_slots = scope.weapon_slots or {}
-                        scope.weapon_slots[entry.weapon_slot] = true
+                        initial[entry.kind] = true
                     end
                 end
-                local prefs = deps.preferences and deps.preferences()
-                if prefs and prefs.confirm_overwrites and not prefs.confirm_overwrites() then
-                    return deps.keep_outfit(name, scope)
-                end
                 frontend.menu.outfit_dialog = {
-                    on_suppress = prefs and prefs.save_confirm_overwrites and function()
-                        return prefs.save_confirm_overwrites(false)
-                    end,
-                    phase = 'delete',
-                    title = 'Overwrite Current Preset?',
-                    preset_name = name,
-                    description = 'Replace the saved gear palettes with their current values?',
-                    action_label = 'Overwrite Preset',
-                    on_save = function()
-                        return deps.keep_outfit(name, scope)
+                    phase = 'scope',
+                    title = 'Choose LUTs to Save',
+                    save_kind = initial,
+                    weapon_options = deps.weapon_enabled == true,
+                    on_scope = function(chosen)
+                        local scope = {}
+                        for _, kind in ipairs({ 'armor', 'helmet', 'cape', 'weapon' }) do
+                            scope[kind] = chosen[kind] == true
+                        end
+                        if scope.weapon then
+                            scope.weapon_slots = {}
+                            for slot = 1, 3 do
+                                scope.weapon_slots[slot] = chosen.weapon_slots and chosen.weapon_slots[slot] == true
+                            end
+                        end
+                        assert(scope.armor or scope.helmet or scope.cape or scope.weapon, 'Choose at least one LUT type')
+                        local prefs = deps.preferences and deps.preferences()
+                        if prefs and prefs.confirm_overwrites and not prefs.confirm_overwrites() then
+                            frontend.menu.outfit_dialog = nil
+                            return deps.keep_outfit(name, scope)
+                        end
+                        frontend.menu.outfit_dialog = {
+                            on_suppress = prefs and prefs.save_confirm_overwrites and function()
+                                return prefs.save_confirm_overwrites(false)
+                            end,
+                            phase = 'delete',
+                            title = 'Overwrite Current Preset?',
+                            preset_name = name,
+                            description = 'Replace the preset with the LUT types you selected?',
+                            action_label = 'Overwrite Preset',
+                            on_save = function()
+                                return deps.keep_outfit(name, scope)
+                            end,
+                        }
+                        return true
                     end,
                 }
-                return deps.message('Confirm overwriting ' .. name .. ' with the current gear.')
+                if not deps.weapon_enabled then
+                    frontend.menu.outfit_dialog.on_scope(initial)
+                end
+                return deps.message('Choose the gear and weapon LUTs to save in ' .. name .. '.')
             end
             frontend.menu.outfit_dialog = {
                 phase = 'scope',

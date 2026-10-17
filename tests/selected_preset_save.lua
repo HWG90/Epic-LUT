@@ -36,8 +36,16 @@ local deps = {
         assert(scope.armor and scope.helmet and scope.cape)
     end,
 }
+deps.weapon_enabled = true
 local a = actions.new(deps)
+local function select_default_scope()
+    local dialog = menu.outfit_dialog
+    assert(dialog.phase == 'scope' and dialog.weapon_options and not dialog.save_kind.weapon,
+        'Existing presets must offer explicit weapon save selection')
+    dialog.on_scope(dialog.save_kind)
+end
 a.save_setup_activate()
+if selected then select_default_scope() end
 assert(saves == 0 and menu.outfit_dialog.phase == 'delete' and menu.outfit_dialog.preset_name == 'Existing')
 local confirm = menu.outfit_dialog
 menu.outfit_dialog = nil
@@ -47,6 +55,7 @@ confirm.on_save()
 assert(saves == 1 and target == 'Existing')
 selected = nil
 a.save_setup_activate()
+if selected then select_default_scope() end
 assert(menu.outfit_dialog.phase == 'scope' and saves == 1)
 print('PASS selected preset save: confirmation, cancellation, stable target, new preset fallback')
 
@@ -64,29 +73,45 @@ deps.preferences = function()
 end
 selected = { name = 'Existing', entries = { { kind = 'armor' }, { kind = 'helmet' }, { kind = 'cape' } } }
 a.save_setup_activate()
+if selected then select_default_scope() end
 assert(menu.outfit_dialog.on_suppress and saves == 1)
 menu.outfit_dialog.on_suppress()
 menu.outfit_dialog = nil
 a.save_setup_activate()
+if selected then select_default_scope() end
 assert(saves == 2 and target == 'Existing' and not menu.outfit_dialog)
 warnings = true
 a.save_setup_activate()
+if selected then select_default_scope() end
 assert(menu.outfit_dialog and saves == 2)
 print('PASS overwrite suppression and re-enabling preserve normal preset saving')
 
 local saved_scope
 selected = { name = 'Mixed', entries = { { kind = 'armor' }, { kind = 'weapon', weapon_slot = 1 } } }
-local weapons_checked = false
-deps.handle = function() return {get = function(id) assert(id == 'outfit_target_weapon'); return weapons_checked end} end
-deps.keep_outfit = function(name, scope) assert(name == 'Mixed'); saved_scope = scope end
+deps.keep_outfit = function(name, scope) assert(name == selected.name); saved_scope = scope end
 warnings = true
 a.save_setup_activate()
+local dialog = menu.outfit_dialog
+assert(not dialog.save_kind.weapon and dialog.weapon_options)
+dialog.on_scope(dialog.save_kind)
 menu.outfit_dialog.on_save()
-assert(saved_scope.armor and not saved_scope.weapon and saved_scope.weapon_slots == nil,
-    'Unchecked Weapons were inherited from the existing preset during overwrite')
-weapons_checked = true
+assert(saved_scope.armor and not saved_scope.weapon and saved_scope.weapon_slots == nil)
+-- Even a garment-only preset can explicitly add its current primary weapon.
+selected = {name = 'Garments', entries = {{kind = 'armor'}}}
 a.save_setup_activate()
+dialog = menu.outfit_dialog
+dialog.save_kind.weapon, dialog.save_kind.weapon_slots[1] = true, true
+dialog.on_scope(dialog.save_kind)
+-- A pending confirmation owns a snapshot, not mutable checkbox state.
+dialog.save_kind.weapon_slots[1] = false
 menu.outfit_dialog.on_save()
-assert(saved_scope.armor and saved_scope.weapon and saved_scope.weapon_slots[1],
-    'Explicit Weapons selection was not forwarded to preset capture')
-print('PASS selected preset overwrite: existing weapon entries require explicit Weapons opt-in')
+assert(saved_scope.armor and saved_scope.weapon and saved_scope.weapon_slots[1])
+selected = {name = 'Weapons', entries = {{kind = 'weapon', weapon_slot = 2}}}
+a.save_setup_activate()
+dialog = menu.outfit_dialog
+assert(not dialog.save_kind.armor and not dialog.save_kind.weapon)
+dialog.save_kind.weapon, dialog.save_kind.weapon_slots[2] = true, true
+dialog.on_scope(dialog.save_kind)
+menu.outfit_dialog.on_save()
+assert(saved_scope.weapon and saved_scope.weapon_slots[2] and not saved_scope.armor)
+print('PASS explicit overwrite scope: mixed, garment-only and weapon-only presets expose independent weapon slots')

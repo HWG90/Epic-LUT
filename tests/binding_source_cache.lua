@@ -355,3 +355,22 @@ assert(not pcall(new, 'guessed_priority'), 'Unsupported cache mode accepted')
 print(
     'PASS binding source cache: owned worker lifecycle, exact bounded parts, immutable data, collision/scope checks, isolated weapon-effective mode and validated source receipts'
 )
+
+local long_reads, long_writes = 0, 0
+local long_paths = {cache = 'C:/' .. string.rep('nested/', 40), directory_exists = paths.directory_exists, mkdir_new = paths.mkdir_new}
+local old_launch = m.windows.launch_worker
+m.windows.launch_worker = function() return {running = function() return false end, stop = function() return true end, close = function() end} end
+local long_cache = C.new(m, {paths = long_paths, time = function() return time end, io = {
+    open = function(path, mode)
+        assert(path:sub(1, 4) == '\\\\?\\' and not path:find('/', 1, true), 'Long cache path was not normalized for Windows')
+        if mode == 'rb' then long_reads = long_reads + 1 else long_writes = long_writes + 1 end
+        return io_fake.open(path:sub(5):gsub('\\', '/'), mode)
+    end,
+}})
+assert(long_cache.start(units))
+time = time + 2
+long_cache.tick()
+assert(long_reads > 0 and long_writes >= 3, 'Long cache filesystem calls were not exercised')
+long_cache.close()
+m.windows.launch_worker = old_launch
+print('PASS binding cache Windows long paths: normalized reads/writes without changing cache identities')
