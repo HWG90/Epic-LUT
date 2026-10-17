@@ -377,17 +377,18 @@ function B.new(m, host)
         host.load_editor(copy, target)
         return host.open_editor(cell or { target = target })
     end
+    local poll_slot = 1
     function self.update(dt)
         if not runtime then
             return
         end
         elapsed = elapsed + (tonumber(dt) or 0)
-        if elapsed < 0.2 then
+        if elapsed < 0.2 / 3 then
             return
         end
         elapsed = 0
         local prior = {}
-        for slot = 1, 3 do
+        for slot = poll_slot, poll_slot do
             local catalog = runtime.catalog(slot)
             if catalog and catalog.available then
                 local candidate = {
@@ -407,7 +408,10 @@ function B.new(m, host)
                 prior[slot] = candidate
             end
         end
-        local changed = runtime.update()
+        -- Spread the three native identity/material scans over separate frames.
+        -- Each equipped slot retains the same polling cadence.
+        local changed = runtime.update(poll_slot)
+        poll_slot = poll_slot % 3 + 1
         if #changed > 0 then
             status = 'Weapon changed; load current weapons again.'
             host.invalidate(changed)

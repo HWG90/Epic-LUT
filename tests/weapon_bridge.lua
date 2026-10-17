@@ -256,6 +256,8 @@ local pending, pending_bridge = recovery_fixture()
 local reset, reset_bridge = recovery_fixture()
 local reset_group = reset.runtime.groups(1)[1]
 local reset_writes = #reset.writes
+local reset_allocations = reset.allocations
+local assigned_object = reset_group.bindings[1].current
 for _, binding in ipairs(reset_group.bindings) do
     reset.textures[binding.material][binding.slot] = binding.original
 end
@@ -266,6 +268,14 @@ assert(
 )
 reset_bridge.update(0.2)
 assert(#reset.writes == reset_writes + 5, 'Stock reset replay repeated each poll')
+assert(
+    reset.allocations == reset_allocations and reset_group.bindings[1].current == assigned_object,
+    'A stock reset recreated the assigned texture instead of rebinding it'
+)
+assert(
+    reset.runtime.catalog(1).available and reset.runtime.groups(1)[1] == reset_group,
+    'A stock reset rebuilt the catalog or replaced editor assignments'
+)
 local replaced, replaced_bridge = recovery_fixture()
 local replaced_writes = #replaced.writes
 replaced.respawn(1, 101)

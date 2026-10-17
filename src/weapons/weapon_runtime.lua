@@ -665,11 +665,56 @@ function R.new(deps)
         end
         return self.apply_plan(entries, omitted)
     end
-    function self.update()
+    function self.rebind_stock(weapon_slot)
+        local catalog = catalogs[slot(weapon_slot)]
+        assert(catalog and catalog.available, 'Weapon changed before rebind')
+        local reset = {}
+        local function collect()
+            assert(discovery.validate(catalog.receipt), 'Weapon changed before rebind')
+            for _, kind in ipairs({ 'material', 'pattern' }) do
+                for _, group in ipairs(catalog[kind]) do
+                    for _, b in ipairs(group.bindings) do
+                        local current = discovery.binding(b)
+                        assert(current == b.current or current == b.original, 'Foreign weapon LUT write detected')
+                        if current == b.original and b.current ~= b.original and b.document then
+                            assert(
+                                b.texture and b.texture.object == b.current,
+                                'Assigned weapon texture is unavailable'
+                            )
+                            reset[#reset + 1] = b
+                        end
+                    end
+                end
+            end
+        end
+        -- Cache identity only during read-only preflight. Native writes below
+        -- retain their fresh per-target guards and private-material proof.
+        (discovery.with_validation_batch or function(fn)
+            return fn()
+        end)(collect)
+        if #reset > 0 then
+            operation(reset, function()
+                for _, b in ipairs(reset) do
+                    local current = discovery.binding(b)
+                    assert(current == b.current or current == b.original, 'Weapon changed during rebind')
+                    if current == b.original then
+                        deps.bind(b, b.current)
+                        assert(discovery.binding(b) == b.current, 'Assigned weapon LUT rebind readback failed')
+                    end
+                end
+            end)
+        end
+        return #reset
+    end
+    function self.update(selected_slot)
+        if selected_slot then
+            slot(selected_slot)
+        end
         local changed = {}
         for weapon_slot = 1, R.SLOTS do
             local catalog = catalogs[weapon_slot]
-            if catalog and catalog.available then
+            if (not selected_slot or selected_slot == weapon_slot) and catalog and catalog.available then
+                local reset = false
                 local checked, valid, why = pcall(discovery.with_validation_batch or function(fn)
                     return fn()
                 end, function()
@@ -680,8 +725,13 @@ function R.new(deps)
                                 for _, b in ipairs(group.bindings) do
                                     -- binding() already proves the complete locator and identity.
                                     -- A separate present() repeated that native work for every cell.
-                                    if discovery.binding(b) ~= b.current then
-                                        valid, why = false, 'Weapon material or LUT changed'
+                                    local current = discovery.binding(b)
+                                    if current ~= b.current then
+                                        if current == b.original and b.document and b.current ~= b.original then
+                                            reset = true
+                                        else
+                                            valid, why = false, 'Weapon material or LUT changed'
+                                        end
                                     end
                                 end
                             end
@@ -689,6 +739,12 @@ function R.new(deps)
                     end
                     return valid, why
                 end)
+                if checked and valid and reset then
+                    local rebound, reason = pcall(self.rebind_stock, weapon_slot)
+                    if not rebound then
+                        valid, why = false, tostring(reason)
+                    end
+                end
                 if not checked then
                     valid, why = false, tostring(valid)
                 end

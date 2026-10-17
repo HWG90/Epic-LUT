@@ -3,6 +3,28 @@ local fixture = dofile('tests/weapon_fixture.lua')
 local D = dofile('src/weapons/weapon_discovery.lua')
 local cases = 0
 do
+    local sliced = fixture()
+    for index = 1, 3 do
+        sliced.runtime.refresh(index)
+    end
+    local snapshots, locators = 0, 0
+    local meshes = sliced.native.meshes
+    sliced.identity_hook = function()
+        snapshots = snapshots + 1
+    end
+    sliced.native.meshes = function(...)
+        locators = locators + 1
+        return meshes(...)
+    end
+    assert(#sliced.runtime.update(1) == 0 and snapshots == 2)
+    local first_count = locators
+    snapshots, locators = 0, 0
+    assert(
+        #sliced.runtime.update() == 0 and snapshots == 4 and locators > first_count,
+        'Slot polling still scanned all equipped weapons in one frame'
+    )
+end
+do
     local poll = fixture()
     poll.runtime.refresh(1)
     local locator_checks, meshes = 0, poll.native.meshes
