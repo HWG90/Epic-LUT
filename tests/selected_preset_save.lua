@@ -73,3 +73,20 @@ warnings = true
 a.save_setup_activate()
 assert(menu.outfit_dialog and saves == 2)
 print('PASS overwrite suppression and re-enabling preserve normal preset saving')
+
+local saved_scope
+selected = { name = 'Mixed', entries = { { kind = 'armor' }, { kind = 'weapon', weapon_slot = 1 } } }
+local weapons_checked = false
+deps.handle = function() return {get = function(id) assert(id == 'outfit_target_weapon'); return weapons_checked end} end
+deps.keep_outfit = function(name, scope) assert(name == 'Mixed'); saved_scope = scope end
+warnings = true
+a.save_setup_activate()
+menu.outfit_dialog.on_save()
+assert(saved_scope.armor and not saved_scope.weapon and saved_scope.weapon_slots == nil,
+    'Unchecked Weapons were inherited from the existing preset during overwrite')
+weapons_checked = true
+a.save_setup_activate()
+menu.outfit_dialog.on_save()
+assert(saved_scope.armor and saved_scope.weapon and saved_scope.weapon_slots[1],
+    'Explicit Weapons selection was not forwarded to preset capture')
+print('PASS selected preset overwrite: existing weapon entries require explicit Weapons opt-in')

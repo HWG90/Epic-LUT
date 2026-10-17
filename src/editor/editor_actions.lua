@@ -437,7 +437,7 @@ function A.new(deps)
                 for _, entry in ipairs(selected.entries or {}) do
                     if entry.kind == 'armor' or entry.kind == 'helmet' or entry.kind == 'cape' then
                         scope[entry.kind] = true
-                    elseif entry.kind == 'weapon' then
+                    elseif entry.kind == 'weapon' and deps.handle().get('outfit_target_weapon') == true then
                         scope.weapon = true
                         scope.weapon_slots = scope.weapon_slots or {}
                         scope.weapon_slots[entry.weapon_slot] = true
