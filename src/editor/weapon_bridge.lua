@@ -419,18 +419,22 @@ function B.new(m, host)
             end
         end
         for slot, candidate in pairs(recovery) do
-            local dead, foreign = true, false
+            local dead, foreign, present, all_present, reset = true, false, false, true, false
             for _, binding in ipairs(candidate.bindings) do
                 dead = discovery.dead(binding) == true and dead
-                if discovery.present(binding) and discovery.binding(binding) ~= binding.current then
-                    foreign = true
+                local live = discovery.present(binding)
+                present, all_present = present or live, all_present and live
+                if live then
+                    local current = discovery.binding(binding)
+                    foreign = foreign or (current ~= binding.current and current ~= binding.original)
+                    reset = reset or (binding.current ~= binding.original and current == binding.original)
                 end
             end
             if foreign then
                 -- An external writer owns this change. A later death must not
                 -- turn it into permission to restore our earlier draft.
                 recovery[slot] = nil
-            elseif dead then
+            elseif dead or (all_present and reset) or not present then
                 local current = identity.snapshot(slot)
                 local resource = current and (current.weapon_resource or current.weapon_resource64)
                 if resource and resource ~= candidate.resource then
@@ -440,7 +444,7 @@ function B.new(m, host)
                     if ok and catalog then
                         recovery[slot] = nil
                         if count > 0 then
-                            status = 'Recovered ' .. names[slot] .. ' LUTs after respawn.'
+                            status = 'Recovered ' .. names[slot] .. ' LUTs after weapon reload.'
                             host.message(status)
                         end
                         if controller then

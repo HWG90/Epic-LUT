@@ -253,6 +253,25 @@ recovery_bridge.update(0.2)
 assert(#recovered.writes == writes + 5, 'Bridge repeatedly reapplied an already recovered draft')
 
 local pending, pending_bridge = recovery_fixture()
+local reset, reset_bridge = recovery_fixture()
+local reset_group = reset.runtime.groups(1)[1]
+local reset_writes = #reset.writes
+for _, binding in ipairs(reset_group.bindings) do
+    reset.textures[binding.material][binding.slot] = binding.original
+end
+reset_bridge.update(0.2)
+assert(
+    #reset.writes == reset_writes + 5 and reset.runtime.load(1, 1).data[0] == 0.625,
+    'Reload resetting live material slots to stock lost the retained weapon LUT'
+)
+reset_bridge.update(0.2)
+assert(#reset.writes == reset_writes + 5, 'Stock reset replay repeated each poll')
+local replaced, replaced_bridge = recovery_fixture()
+local replaced_writes = #replaced.writes
+replaced.respawn(1, 101)
+replaced.units[100].alive = true
+replaced_bridge.update(0.2)
+assert(#replaced.writes == replaced_writes + 5, 'Fresh equipped weapon lost its LUT while the old unit remained alive')
 writes = #pending.writes
 local stock = pending.documents[pending.A]
 pending.documents[pending.A] = nil
