@@ -1,3 +1,47 @@
+# Epic LUT R5.8.7
+
+- Reduced background CPU use while the editor is closed.
+- Slider drags now undo in one step.
+- Fixed Load Current Gear cache errors.
+
+# Epic LUT R5.8.6
+
+- Reduced background CPU use while Epic LUT is closed.
+- Reduced stutters when restoring applied colors and Patterns.
+- Improved Photo Mode input handoffs and menu reopening.
+
+Includes Shared LUT multiplayer appearances, improved compression and sync, preset safeguards, loose patch import and selected LUT, row or cell restores.
+
+Both players need R5.8.2 or newer, or R6 Alpha 3, for the Shared LUT update. Shared Lobby LUT remains in testing.
+
+Use one package: BSL, LLL or MDL. Keep your existing presets and settings.
+
+# Epic LUT R5.7.5
+
+- Remove the separate Save a New Preset button; new presets are selected through the dropdown. Confirmed Photo Mode coexistence after restart with the updated companion build.
+
+- Save updates the selected Armory preset after a confirmation naming the overwrite target. Capture and storage failures leave the existing preset intact.
+- Select **Save a New Preset** at the top of the preset dropdown when a LUT is loaded to create a separate preset through the existing Save workflow. No extra button is required.
+- Add cooperative input handoff support for updated War Journalist Photo Mode builds. Photo retains the camera while Epic LUT borrows input; closing Epic LUT returns the lease. Older Photo Mode builds do not provide this bridge, and its installed camera hooks require a normal game restart after updating.
+- Carry the shared changes into R6 without removing weapon-specific save scopes.
+
+# Epic LUT R5.7.4
+
+- Fix false Pattern/LUT conflicts across mod archives: compare the effective highest numeric layer in each family before refusing. Byte-identical native metadata, pixels and flags can load normally. Differing palettes and conflicting equal-index records remain refused, with the competing filenames reported.
+- Keep color agreement separate from archive provenance. Do not invent a single archive source for patch export; retain the alias list and refresh older caches with schema v6.
+- Identify the exact missing binding-cache part and I/O reason, invalidate the failed cache, and provide Load Current Gear as a recovery action.
+- User confirmed the archive-alias test build resolves the reported custom-model loading failure. The maintenance fix is also carried into R6.
+
+# Epic LUT R5.7.2
+
+- Read installed custom-model LUT patches instead of stock pixels under reused texture IDs. Recheck patch-sensitive caches on Load Current Gear; highlighting retains the custom palette's other rows.
+- Basic Apply Preset uses the same live assignments as The Armory. Valid material LUTs remain applicable without a matching Pattern; actual companions and Pattern-only destinations remain explicit.
+- Filter numbered gore caps and named gore/LOD meshes from Player Preview while preserving clothing and live LUT synchronization.
+- Restore the third quick Pattern swatch as Roughness, with Color and Mat/Opac labels. Roughness edits change Alpha and preserve all other channels; Cancel and Undo/Redo remain available.
+- Prevent Armory Apply Preset clipping at larger font sizes, wrapping controls when needed.
+- Right-click the LUT ID or renamed label to copy its underlying texture ID in the configured hexadecimal or exact unsigned decimal format.
+- Split the large direct editor into focused workflow modules without changing its public editing behavior.
+
 # Epic LUT R5.7.1
 
 - Expanded Shared LUT appearances for compatible squadmates: currently applied Armor, Helmet and associated Patterns retain exact RGBA, material, camo and emissive values. Apply an Armory preset to share it.
