@@ -23,6 +23,11 @@ assert(
 )
 assert(fresh.texture == nil and fresh.live == 99, 'Intent lookup changed a binding')
 fresh.live = 100
+local idle_metadata_reads = 0
+assert(#state.batches({ fresh }, false, proof, function(binding)
+    idle_metadata_reads = idle_metadata_reads + 1
+    return resource(binding)
+end, current) == 0 and idle_metadata_reads == 0, 'Stable applied appearance repeatedly resolved source metadata')
 assert(#state.batches({ fresh }, false, proof, resource, current) == 0, 'Owned texture was not a no-op')
 fresh.live = 777
 assert(#state.batches({ fresh }, false, proof, resource, current) == 0, 'Foreign texture was targeted')
