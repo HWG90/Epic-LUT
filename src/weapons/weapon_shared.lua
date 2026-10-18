@@ -133,7 +133,7 @@ function S.new(deps)
         )
         return value
     end
-    function self.local_identity(base)
+    local function local_identity(base)
         if not base then
             return nil
         end
@@ -150,20 +150,23 @@ function S.new(deps)
                 and discovery.present(binding)
                 and discovery.binding(binding) == binding.current
             then
-                edited[binding.weapon_slot] = true
+                local resource = id(binding.weapon_resource or binding.weapon_resource64)
+                assert(
+                    not edited[binding.weapon_slot] or edited[binding.weapon_slot] == resource,
+                    'Conflicting local shared weapon identities'
+                )
+                edited[binding.weapon_slot] = resource
             end
         end
         for slot = 1, 3 do
             if edited[slot] then
-                local receipt = discovery.capture(slot)
-                if receipt then
-                    result.weapons[slot] = id(receipt.weapon_resource or receipt.weapon_resource64)
-                end
+                -- present/binding already validated the exact immutable receipt.
+                result.weapons[slot] = edited[slot]
             end
         end
         return result
     end
-    function self.local_entries(identity)
+    local function local_entries(identity)
         assert(identity and type(identity.weapons) == 'table', 'Current shared weapon identities unavailable')
         local entries, seen = {}, {}
         for _, binding in ipairs(runtime.all_owned()) do
@@ -204,6 +207,22 @@ function S.new(deps)
             end
         end
         return entries
+    end
+    -- Publication is one synchronous read-only observation. Receipt validation
+    -- is shared inside this call and rechecked on exit; write guards stay fresh.
+    local function publication(fn, value)
+        if discovery.with_validation_batch then
+            return discovery.with_validation_batch(function()
+                return fn(value)
+            end)
+        end
+        return fn(value)
+    end
+    function self.local_identity(base)
+        return publication(local_identity, base)
+    end
+    function self.local_entries(identity)
+        return publication(local_entries, identity)
     end
     function self.remote_identity(base)
         if not base then

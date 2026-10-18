@@ -177,6 +177,18 @@ function D.new(E, deps)
         if validation_batch and not kept.peer and not cleanup and validation_batch[receipt] then
             return kept
         end
+        -- Multiple immutable descriptors may carry separate receipts for the
+        -- same Unit. Share only this synchronous read-only identity proof, then
+        -- revalidate its representative before the batch can return.
+        if validation_batch and not kept.peer and not cleanup then
+            for _, prior in pairs(validation_batch) do
+                if prior.unit == kept.unit and prior.lua_unit == kept.lua_unit
+                    and prior.world == kept.world and prior.resource == kept.resource
+                    and same(prior.identity, kept.identity) then
+                    return kept
+                end
+            end
+        end
         local fresh, why
         if kept.peer then
             if cleanup then

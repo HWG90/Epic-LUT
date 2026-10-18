@@ -221,11 +221,19 @@ function S.new(m, host)
             if #plans > 0 then
                 -- Recheck the complete disk-source scope once immediately before
                 -- writing, after cooperative captures have crossed frames.
-                host.sources().with_export_batch(selected_entries, function(batch)
-                    for _, entry in ipairs(selected_entries) do
-                        batch.provenance(entry)
+                while true do
+                    local ready, why = pcall(host.sources().with_export_batch, selected_entries, function(batch)
+                        for _, entry in ipairs(selected_entries) do
+                            batch.provenance(entry)
+                        end
+                    end)
+                    if ready then
+                        break
                     end
-                end)
+                    assert(tostring(why):find(m.weapon_provenance.PENDING, 1, true), why)
+                    assert(host.time() - started < S.TIMEOUT, 'Exact weapon startup sources are not ready; setup retained')
+                    coroutine.yield()
+                end
                 for _, receipt in ipairs(checked) do
                     assert(
                         discovery.present(receipt.binding) and discovery.binding(receipt.binding) == receipt.current,
@@ -254,7 +262,8 @@ function S.new(m, host)
             return
         end
         if host.busy and host.busy() then
-            self.cancel()
+            -- Temporary picker/draft activity pauses startup. Explicit weapon
+            -- mutations cancel through the host before making their writes.
             return
         end
         local now = host.time()

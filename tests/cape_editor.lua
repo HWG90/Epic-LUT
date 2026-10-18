@@ -1,5 +1,20 @@
 -- Production controller, discovery and ownership with a cape sharing Armor's original LUT.
 local ffi = require('ffi')
+local lifecycle = {}
+package.preload['mods/skyeshade/hd2runtime'] = function()
+    return {events={on=function(name, callback)
+        local token={callback=callback,unsubscribe=function(self)self.callback=nil end}
+        lifecycle[name]=lifecycle[name] or {}
+        lifecycle[name][#lifecycle[name]+1]=token
+        return token
+    end}}
+end
+local function refresh_event()
+    for _, token in ipairs(lifecycle.player_spawned or {}) do
+        if token.callback then token.callback() end
+    end
+end
+
 local Core, DDS = dofile('vendor/menu/core.lua'), dofile('src/core/dds.lua')
 local saved_settings = {}
 local store = {
@@ -337,6 +352,7 @@ f:close()
 local runtime = assert(loadstring('local m=...\n' .. source))(m)
 local ctx = { log = function() end, on_cleanup = function() end }
 local function recovery_tick(dt)
+    refresh_event()
     runtime.on_update(ctx, dt)
     for _ = 1, 5 do runtime.on_update(ctx, 0) end
 end

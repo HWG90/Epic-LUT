@@ -11,7 +11,12 @@ function B.new(m, host)
         'Weapon editor modules unavailable'
     )
     local self, runtime, discovery, controller, identity = {}, nil, nil, nil, nil
-    local status, elapsed, recovery = 'Load current weapons to begin.', 0, {}
+    local status, recovery = 'Load current weapons to begin.', {}
+    local subscriptions, pending_slots = {}, 0
+    local function equipment_changed()
+        pending_slots = 3
+    end
+    self.equipment_changed = equipment_changed
     local function get_runtime()
         if runtime then
             return runtime
@@ -36,8 +41,45 @@ function B.new(m, host)
                 return memory.read(require('ffi').cast('const uint8_t *', address), size)
             end,
         })
+        local ensure_private = m.weapon_private_config
+            and m.weapon_private_config.new({
+                module = function(name)
+                    return memory.address(memory.module(name))
+                end,
+                read = function(address, size)
+                    return memory.read(require('ffi').cast('const uint8_t *', address), size)
+                end,
+                clone = function(address, manager, owner)
+                    local ffi = require('ffi')
+                    local empty = ffi.new('uint32_t[3]')
+                    local create = ffi.cast('void (*)(void *, const void *, const void *)', address)
+                    create(ffi.cast('void *', manager), ffi.cast('const void *', owner), empty)
+                end,
+            })
+        local source_lease = m.weapon_source_lease
+            and m.weapon_source_lease.new({
+                ensure_private = ensure_private,
+                identity = identity,
+                discovery = discovery,
+                module = function(name)
+                    return memory.address(memory.module(name))
+                end,
+                read = function(address, size)
+                    return memory.read(require('ffi').cast('const uint8_t *', address), size)
+                end,
+                write = function(address, expected, replacement)
+                    local ffi = require('ffi')
+                    assert(#expected == 4 and #replacement == 4, 'Weapon source write bounds')
+                    local at = ffi.cast('uint8_t *', address)
+                    assert(memory.writable_data(at, 4), 'Weapon source is not private writable data')
+                    assert(memory.read(at, 4) == expected, 'Weapon source write preimage changed')
+                    ffi.copy(at, replacement, 4)
+                    assert(memory.read(at, 4) == replacement, 'Weapon source write readback failed')
+                end,
+            })
         runtime = m.weapon_runtime.new({
             discovery = discovery,
+            source_lease = source_lease,
             binding_session = m.binding_session,
             retain = host.retain(),
             cohort = host.cohort(),
@@ -48,6 +90,18 @@ function B.new(m, host)
             create_texture = host.create_texture,
             validate_document = host.validate_document,
         })
+        -- HD2Runtime is optional. Its equip events replace continuous material
+        -- polling; without it explicit Load Current Gear remains authoritative.
+        local ok, api = pcall(require, 'mods/skyeshade/hd2runtime')
+        if ok and type(api) == 'table' and api.events and api.events.on then
+            for _, name in ipairs({ 'weapon_equipped', 'weapon_unequipped', 'weapon_changed' }) do
+                local subscribed, token =
+                    pcall(api.events.on, name, equipment_changed, { owner = 'epic_lut_weapon_sources', key = name })
+                if subscribed and token then
+                    subscriptions[#subscriptions + 1] = token
+                end
+            end
+        end
         return runtime
     end
     local function source_group(target)
@@ -382,25 +436,10 @@ function B.new(m, host)
         if not runtime then
             return
         end
-        local assigned = true
-        if runtime.enforce_assigned then
-            local _, failed, active = runtime.enforce_assigned()
-            assigned = active ~= false
-            if #failed > 0 then
-                poll_slot, elapsed = failed[1], 0.2
-            end
-        end
-        -- Unedited catalogs are UI state. Keep assigned appearances and pending
-        -- recovery live, but defer unused catalog scans until the menu is visible.
-        -- All explicit actions still perform their own fresh ownership checks.
-        if host.visible and not host.visible() and not assigned and not next(recovery) then
+        if pending_slots == 0 then
             return
         end
-        elapsed = elapsed + (tonumber(dt) or 0)
-        if elapsed < 0.2 / 3 then
-            return
-        end
-        elapsed = 0
+        pending_slots = pending_slots - 1
         local prior = {}
         for slot = poll_slot, poll_slot do
             local catalog = runtime.catalog(slot)
@@ -422,8 +461,7 @@ function B.new(m, host)
                 prior[slot] = candidate
             end
         end
-        -- Spread the three native identity/material scans over separate frames.
-        -- Each equipped slot retains the same polling cadence.
+        -- One validation per equipped slot after an equipment event only.
         local changed = runtime.update(poll_slot)
         poll_slot = poll_slot % 3 + 1
         if #changed > 0 then
@@ -518,6 +556,12 @@ function B.new(m, host)
         return out
     end
     function self.close(allow_quarantine)
+        for _, token in ipairs(subscriptions) do
+            if token.unsubscribe then
+                pcall(token.unsubscribe, token)
+            end
+        end
+        subscriptions, pending_slots = {}, 0
         local flash_restored = self.stop_highlight()
         recovery = {}
         if not runtime then
@@ -526,6 +570,9 @@ function B.new(m, host)
         local ok, restored = pcall(runtime.restore)
         if not ok or not restored then
             status = 'Weapon restoration could not be certified; its texture allocations remain retained.'
+        end
+        if runtime.source_cleanup_pending and runtime.source_cleanup_pending() then
+            return false
         end
         return allow_quarantine == true or flash_restored and ok and restored
     end

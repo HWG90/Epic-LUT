@@ -26,7 +26,29 @@ local function compatible(identity, appearance)
 end
 function S.new(deps)
     local self = { status = 'Sharing: waiting for lobby', elapsed = 0, frame = 0, peers = {} }
-    local text, signature, current_kit, packet_kit, publication_status
+    local text, signature, current_kit, packet_kit, publication_status, published_revision, identity_stamp
+    local subscriptions = {}
+    local publication_job
+    local publication_epoch = 0
+    function self.invalidate()
+        publication_epoch = publication_epoch + 1
+        published_revision = nil
+    end
+    local function subscribe()
+        if #subscriptions > 0 then
+            return
+        end
+        local ok, api = pcall(require, 'mods/skyeshade/hd2runtime')
+        if ok and type(api) == 'table' and api.events and api.events.on then
+            for _, name in ipairs({ 'player_spawned', 'player_died', 'mission_started', 'mission_ended' }) do
+                local subscribed, token =
+                    pcall(api.events.on, name, self.invalidate, { owner = 'epic_lut_shared_appearance', key = name })
+                if subscribed and token then
+                    subscriptions[#subscriptions + 1] = token
+                end
+            end
+        end
+    end
     local decode_failures = {}
     local target_failures = {}
     local function message(value)
@@ -66,9 +88,10 @@ function S.new(deps)
         end
         return false
     end
-    local function publish(identity)
+    local function publish(identity, checkpoint, current)
         local kit = appearance_key(identity)
         if current_kit ~= kit then
+            published_revision = nil
             current_kit, signature, publication_status = kit, nil, nil
             if packet_kit ~= kit then
                 text, packet_kit = nil, nil
@@ -81,7 +104,16 @@ function S.new(deps)
             end
             return text
         end
-        local entries = deps.entries()
+        -- Transport still receives peer packets, but an unchanged local
+        -- assignment must not rescan every native gear/weapon binding.
+        local revision = deps.revision and deps.revision()
+        if revision ~= nil and published_revision == revision then
+            return text
+        end
+        local entries = deps.entries(identity)
+        if checkpoint then
+            checkpoint(true)
+        end
         local marks = { identity.body or 0, identity.armor or 0, identity.helmet or 0 }
         marks[#marks + 1] = appearance_key(identity)
         for _, entry in ipairs(entries) do
@@ -108,10 +140,14 @@ function S.new(deps)
         local now = table.concat(marks, '|')
         if signature ~= now then
             local ok, packet = pcall(function()
-                local encoded = codec.encode(identity, entries)
+                local encoded = codec.encode(identity, entries, checkpoint)
                 assert(type(encoded) == 'string' and encoded ~= '', 'Shared LUT encoder returned no appearance')
                 return encoded
             end)
+            -- A completed packet is accepted only for the captured assignment.
+            if current and not current() then
+                return text
+            end
             signature = now
             if ok then
                 text, packet_kit = packet, kit
@@ -138,7 +174,56 @@ function S.new(deps)
                 deps.note(self.status)
             end
         end
+        if not current or current() then
+            published_revision = revision
+        end
         return text
+    end
+    local function advance_publication()
+        local ok, why = coroutine.resume(publication_job)
+        if not ok then
+            publication_job = nil
+            publication_status = 'Sharing: ' .. message(why)
+            self.status = publication_status
+            deps.note(self.status)
+        elseif coroutine.status(publication_job) == 'dead' then
+            publication_job = nil
+        end
+    end
+    local function defer_publication(revision, stamp)
+        local epoch = publication_epoch
+        local clock = deps.publication_clock or os.clock
+        local started = clock()
+        local function checkpoint(force)
+            if force or clock() - started >= 0.002 then
+                coroutine.yield()
+                started = clock()
+            end
+        end
+        local function current()
+            return self.enabled
+                and publication_epoch == epoch
+                and (not deps.revision or deps.revision() == revision)
+                and (not deps.identity_key or deps.identity_key() == stamp)
+        end
+        publication_job = coroutine.create(function()
+            local identity = deps.identity()
+            checkpoint(true)
+            if not current() then
+                return
+            end
+            if identity then
+                publish(identity, checkpoint, current)
+                if current() then
+                    identity_stamp = stamp
+                end
+            else
+                text, signature, current_kit, packet_kit, identity_stamp = nil, nil, nil, nil, nil
+                publication_status = 'Sharing: waiting for local Helldiver; receiving remains on'
+                self.status = publication_status
+            end
+        end)
+        advance_publication()
     end
     local function receive(members)
         local players, seen, present = nil, {}, {}
@@ -299,11 +384,21 @@ function S.new(deps)
         return false, 'Peer live player identity changed'
     end
     function self.tick(dt, enabled)
+        if enabled and not self.enabled then
+            self.invalidate()
+            subscribe()
+            self.cleared = false
+        end
         self.enabled = enabled == true
+        if not enabled then
+            publication_job = nil
+        elseif publication_job then
+            advance_publication()
+        end
         self.frame = self.frame + math.max(0, dt or 0) * 60
         self.elapsed = self.elapsed + math.max(0, dt or 0)
         if not enabled then
-            signature, current_kit, publication_status = nil, nil, nil
+            signature, current_kit, publication_status, published_revision = nil, nil, nil, nil
             self.status = 'Sharing: off'
             for key, peer in pairs(self.peers) do
                 peer.job = nil
@@ -331,13 +426,30 @@ function S.new(deps)
         self.elapsed = 0
         local outgoing
         if enabled then
-            local identity = deps.identity()
-            if identity then
-                outgoing = publish(identity)
+            local revision = deps.revision and deps.revision()
+            local stamp = deps.identity_key and deps.identity_key()
+            if revision ~= nil and stamp ~= nil and published_revision == revision and identity_stamp == stamp then
+                outgoing = text
             else
-                text, signature, current_kit, packet_kit = nil, nil, nil, nil
-                publication_status = 'Sharing: waiting for local Helldiver; receiving remains on'
-                self.status = publication_status
+                if identity_stamp ~= stamp then
+                    published_revision = nil
+                end
+                if deps.defer_publication then
+                    if not publication_job then
+                        defer_publication(revision, stamp)
+                    end
+                    outgoing = text
+                else
+                    local identity = deps.identity()
+                    if identity then
+                        outgoing = publish(identity)
+                        identity_stamp = stamp
+                    else
+                        text, signature, current_kit, packet_kit, identity_stamp = nil, nil, nil, nil, nil
+                        publication_status = 'Sharing: waiting for local Helldiver; receiving remains on'
+                        self.status = publication_status
+                    end
+                end
             end
         end
         local members = session.poll(math.floor(self.frame), outgoing, false, { enabled = enabled })
@@ -345,6 +457,14 @@ function S.new(deps)
         self.status = not enabled and 'Sharing: off' or publication_status or self.status
     end
     function self.close(allow_quarantine)
+        publication_job = nil
+        for _, token in ipairs(subscriptions) do
+            if token.unsubscribe then
+                pcall(token.unsubscribe, token)
+            end
+        end
+        subscriptions = {}
+        self.invalidate()
         self.enabled = false
         local complete = true
         for key in pairs(self.peers) do

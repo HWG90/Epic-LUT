@@ -154,6 +154,7 @@ document.mixed, document.binding_documents = nil, nil
 valid = false
 local ok = pcall(bridge.apply, state.target, document)
 assert(not ok and applied == 1, 'Stale weapon target reached the runtime writer')
+bridge.equipment_changed()
 bridge.update(0.2)
 assert(invalidated[1] == 1)
 assert(bridge.close() and closed)
@@ -242,6 +243,7 @@ end
 local recovered, recovery_bridge, stale_target, invalidations = recovery_fixture()
 local writes = #recovered.writes
 recovered.respawn(1, 101)
+recovery_bridge.equipment_changed()
 recovery_bridge.update(0.2)
 assert(invalidations[1] and #recovered.writes == writes + 5, 'Bridge did not replay retained respawn bindings')
 assert(recovered.runtime.load(1, 1).data[0] == 0.625)
@@ -249,6 +251,7 @@ assert(
     not pcall(recovery_bridge.apply, stale_target, recovered.documents[recovered.A]),
     'Old editor was revived after respawn'
 )
+recovery_bridge.equipment_changed()
 recovery_bridge.update(0.2)
 assert(#recovered.writes == writes + 5, 'Bridge repeatedly reapplied an already recovered draft')
 
@@ -261,11 +264,13 @@ local assigned_object = reset_group.bindings[1].current
 for _, binding in ipairs(reset_group.bindings) do
     reset.textures[binding.material][binding.slot] = binding.original
 end
+reset_bridge.equipment_changed()
 reset_bridge.update(0.2)
 assert(
     #reset.writes == reset_writes + 5 and reset.runtime.load(1, 1).data[0] == 0.625,
     'Reload resetting live material slots to stock lost the retained weapon LUT'
 )
+reset_bridge.equipment_changed()
 reset_bridge.update(0.2)
 assert(#reset.writes == reset_writes + 5, 'Stock reset replay repeated each poll')
 assert(
@@ -280,30 +285,38 @@ local replaced, replaced_bridge = recovery_fixture()
 local replaced_writes = #replaced.writes
 replaced.respawn(1, 101)
 replaced.units[100].alive = true
+replaced_bridge.equipment_changed()
 replaced_bridge.update(0.2)
 assert(#replaced.writes == replaced_writes + 5, 'Fresh equipped weapon lost its LUT while the old unit remained alive')
 writes = #pending.writes
 local stock = pending.documents[pending.A]
 pending.documents[pending.A] = nil
 pending.respawn(1, 101)
+pending_bridge.equipment_changed()
 pending_bridge.update(0.2)
+pending_bridge.equipment_changed()
 pending_bridge.update(0.2)
 assert(#pending.writes == writes, 'Recovery allocated/wrote before the original cache was ready')
 pending.documents[pending.A] = stock
+pending_bridge.equipment_changed()
 pending_bridge.update(0.2)
 assert(#pending.writes == writes + 5 and pending.runtime.load(1, 1).data[0] == 0.625, 'Pending recovery was lost')
 
 local dropped, dropped_bridge = recovery_fixture()
 writes = #dropped.writes
 dropped.snapshots[1] = nil
+dropped_bridge.equipment_changed()
 dropped_bridge.update(0.2)
+dropped_bridge.equipment_changed()
 dropped_bridge.update(0.2)
 assert(dropped.units[100].alive and #dropped.writes == writes, 'Bridge wrote to a still-live dropped weapon')
 
 local different, different_bridge = recovery_fixture()
 writes = #different.writes
 different.respawn(1, 101, '9988776655443322')
+different_bridge.equipment_changed()
 different_bridge.update(0.2)
+different_bridge.equipment_changed()
 different_bridge.update(0.2)
 assert(#different.writes == writes, 'Respawn draft crossed weapon configuration identities')
 
@@ -311,17 +324,21 @@ local foreign, foreign_bridge = recovery_fixture()
 local foreign_binding = foreign.runtime.groups(1)[1].bindings[1]
 foreign.textures[foreign_binding.material][foreign_binding.slot] = 0xdead00
 writes = #foreign.writes
+foreign_bridge.equipment_changed()
 foreign_bridge.update(0.2)
 foreign.respawn(1, 101)
+foreign_bridge.equipment_changed()
 foreign_bridge.update(0.2)
 assert(#foreign.writes == writes, 'A foreign writer was overridden by later recovery')
 
 local closed_recovery, closed_bridge = recovery_fixture()
 closed_recovery.documents[closed_recovery.A] = nil
 closed_recovery.respawn(1, 101)
+closed_bridge.equipment_changed()
 closed_bridge.update(0.2)
 writes = #closed_recovery.writes
 assert(closed_bridge.close())
+closed_bridge.equipment_changed()
 closed_bridge.update(0.2)
 assert(#closed_recovery.writes == writes, 'Closed bridge retained a respawn replay job')
 local flashed, flashed_bridge = recovery_fixture()

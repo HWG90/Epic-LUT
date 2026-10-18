@@ -1,5 +1,20 @@
 -- Controller integration: simulated actor/material lifetimes, actual discovery/ownership/intent logic.
 local ffi = require('ffi')
+local lifecycle = {}
+local function emit(name)
+    for _, subscription in ipairs(lifecycle[name] or {}) do
+        if subscription.callback then subscription.callback() end
+    end
+end
+package.preload['mods/skyeshade/hd2runtime'] = function()
+    return {events={on=function(name, callback)
+        local token={callback=callback,unsubscribe=function(self)self.callback=nil end}
+        lifecycle[name]=lifecycle[name] or {}
+        lifecycle[name][#lifecycle[name]+1]=token
+        return token
+    end}}
+end
+
 local core = dofile('vendor/menu/core.lua')
 local D = dofile('src/core/dds.lua')
 local History = dofile('src/core/action_history.lua')
@@ -66,6 +81,7 @@ local function actor(generation, armor_materials)
         }
         bound[material] = { [1] = generation * 10000 + 1, [2] = generation * 10000 + 3 }
     end
+    emit('player_spawned')
 end
 actor(1)
 local native = {
@@ -289,6 +305,7 @@ local function frame(dt)
     assert(recovery_scans <= 1, 'Material and Pattern recovery scans collided in one frame')
 end
 local function recover()
+    emit('player_spawned')
     frame(0.5)
     for _ = 1, 5 do frame(0) end
 end
@@ -388,11 +405,13 @@ bound[helmet][1], bound[helmet][2] = 20002, 20004
 recover()
 expect_custom()
 unchanged_counts()
-local stable_binds = binds
+local stable_binds, stable_scans = binds, recovery_scans
 for _ = 1, 6 do
-    recover()
+    frame(0.5)
+    for _ = 1, 5 do frame(0) end
 end
-assert(binds == stable_binds, 'Stable owned appearance was rebound on every recovery poll')
+assert(binds == stable_binds and recovery_scans == stable_scans,
+    'Stable owned appearance repeated recovery without an event')
 -- Foreign writers are preserved, even with identical gear and slot numbers.
 bound[armor][1], bound[armor][2] = 777777, 888888
 recover()

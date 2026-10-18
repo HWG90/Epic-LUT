@@ -36,7 +36,9 @@ test('unchanged byte probes reuse decoding but never stale expected values or ch
     local b = f.discovery.descriptor(receipt, row, D.LUT)
     b.current = f.A
     local before = f.reads
-    for _ = 1, 5 do assert(f.discovery.bindings_unchanged({ b })) end
+    for _ = 1, 5 do
+        assert(f.discovery.bindings_unchanged({ b }))
+    end
     assert(f.reads == before + 10, 'Stable probes stopped reading fresh header and slot bytes')
     b.current = f.B
     assert(not f.discovery.bindings_unchanged({ b }), 'Changed desired value reused a cached comparison')
@@ -113,3 +115,25 @@ test('dead proof requires both genuine Lua and native unit death', function()
     assert(f.discovery.dead(b))
 end)
 print('PASS weapon discovery: ' .. cases .. ' focused contracts')
+
+do
+    local f = fixture()
+    local one = assert(f.discovery.capture(1))
+    local two = assert(f.discovery.capture(1))
+    local a = f.discovery.descriptor(one, f.discovery.materials(one)[1], D.LUT)
+    local b = f.discovery.descriptor(two, f.discovery.materials(two)[1], D.LUT)
+    local calls = 0
+    f.identity_hook = function()
+        calls = calls + 1
+    end
+    f.discovery.with_validation_batch(function()
+        assert(f.discovery.present(a))
+        assert(f.discovery.present(b))
+    end)
+    assert(calls == 2, 'Separate receipts for the same immutable Unit repeated its census')
+    calls = 0
+    assert(f.discovery.present(a))
+    assert(f.discovery.present(b))
+    assert(calls == 2, 'Read-only batch escaped into later write validation')
+    f.identity_hook = nil
+end

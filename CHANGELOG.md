@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Backport parity with R5.9.0: event-driven appearance recovery and cached, cooperative Shared LUT publication.
+- Private weapon configuration ownership keeps assigned LUTs through ammunition reloads without constant reapplication.
+- Saved weapon startup pauses during temporary UI activity and retries pending final source certification. Fresh-game persistence acceptance remains pending.
+
 ## R6.0.0-alpha4 - 2026-10-17
 
 - Reduced background CPU use while the editor is closed.

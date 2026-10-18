@@ -52,6 +52,9 @@ local function fixture()
             return {}, P.validate(refs, 'weapon', context.key, context.original)
         end,
         with_export_batch = function(entries, fn)
+            if f.batch_cold then
+                error('pending exact sources', 0)
+            end
             assert(not f.scope_changed, 'effective source changed before apply')
             return fn({
                 provenance = function(entry)
@@ -209,9 +212,26 @@ refusal(function(candidate)
     candidate.snapshots[1].weapon_resource64 = 'ffffffffffffffff'
     candidate.units[100].resource = 'ffffffffffffffff'
 end, 'Different primary received a saved palette')
-refusal(function(candidate)
-    candidate.busy = true
-end, 'Manual editor activity did not cancel startup')
+local paused = fixture()
+local paused_entries = applied(paused)
+local paused_writes = #paused.writes
+paused.service.start({ entries = paused_entries })
+paused.busy = true
+paused.step(5)
+assert(paused.service.pending() and #paused.writes == paused_writes, 'Busy menu discarded startup or wrote through UI activity')
+paused.busy = false
+paused.finish()
+assert(#paused.writes == paused_writes + #paused_entries, 'Saved weapons did not resume after temporary UI activity')
+local final_cold = fixture()
+local final_entries = applied(final_cold)
+local final_writes = #final_cold.writes
+final_cold.batch_cold = true
+final_cold.service.start({ entries = final_entries })
+final_cold.step(60)
+assert(final_cold.service.pending() and #final_cold.writes == final_writes, 'Pending final source scope discarded startup or applied early')
+final_cold.batch_cold = false
+final_cold.finish()
+assert(#final_cold.writes == final_writes + #final_entries, 'Startup did not resume after final source scope became ready')
 refusal(function(candidate)
     candidate.service.cancel()
 end, 'Restore cancellation retained a write job')

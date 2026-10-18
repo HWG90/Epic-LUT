@@ -31,3 +31,8 @@ SOURCE_GROUPS['weapon_pattern_quick'] = 'editor'
 
 OWN.append('shared_targets')
 SOURCE_GROUPS['shared_targets']='gear'
+
+OWN.append('weapon_source_lease')
+SOURCE_GROUPS['weapon_source_lease'] = 'weapons'
+OWN.append('weapon_private_config')
+SOURCE_GROUPS['weapon_private_config'] = 'weapons'

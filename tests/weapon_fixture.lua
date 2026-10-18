@@ -34,7 +34,7 @@ local function snapshot(slot, ref, resource)
         weapon_object = 0x400000 + ref * 128,
     }
 end
-return function()
+return function(source_lease)
     local state = {
         units = {},
         meshes = {},
@@ -180,6 +180,7 @@ return function()
     state.retain, state.cohort = { records = {}, cache = {}, bytes = 0 }, { sessions = {} }
     state.runtime = Runtime.new({
         discovery = state.discovery,
+        source_lease = source_lease,
         binding_session = Sessions,
         retain = state.retain,
         cohort = state.cohort,

@@ -642,7 +642,7 @@ m.shared_appearance = {
             tick = function(_, enabled)
                 if enabled then
                     local identity = assert(deps.identity())
-                    shared_entries = deps.entries()
+                    shared_entries = deps.entries(identity)
                     for _, entry in ipairs(shared_entries) do
                         if entry.kind == 'weapon' then
                             assert(identity.weapons[entry.weapon_slot] == entry.weapon_resource)

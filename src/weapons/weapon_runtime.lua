@@ -404,7 +404,33 @@ function R.new(deps)
         if #targets == 0 then
             return {}
         end
-        local results = operation(targets, function()
+        local function sync_sources(extra)
+            if not deps.source_lease then
+                return
+            end
+            local assigned, included = {}, {}
+            for _, b in ipairs(self.all_owned()) do
+                if b.current ~= b.original and discovery.present(b) then
+                    assigned[#assigned + 1], included[b] = b, true
+                end
+            end
+            for _, b in ipairs(extra or {}) do
+                if not included[b] then
+                    assigned[#assigned + 1], included[b] = b, true
+                end
+            end
+            deps.source_lease.sync(assigned)
+        end
+        -- Acquire source ownership before binding any edited texture. Keep old
+        -- roles leased until the native transaction has completed or rolled back.
+        local acquiring = {}
+        for _, entry in ipairs(plan) do
+            for _, b in ipairs(entry.targets) do
+                acquiring[#acquiring + 1] = b
+            end
+        end
+        sync_sources(acquiring)
+        local operation_ok, results = pcall(operation, targets, function()
             local results = {}
             local ok, why = pcall(function()
                 for _, b in ipairs(restore_targets) do
@@ -446,6 +472,10 @@ function R.new(deps)
             end
             return results
         end)
+        sync_sources()
+        if not operation_ok then
+            error(results, 0)
+        end
         -- Identification owns only temporary bindings; never retain its pixels
         -- as a recovery draft or publish them to the cached editor preview.
         if temporary then
@@ -533,6 +563,15 @@ function R.new(deps)
         else
             restored = restore()
         end
+        if deps.source_lease then
+            local remaining = {}
+            for _, b in ipairs(self.all_owned()) do
+                if b.current ~= b.original and discovery.present(b) then
+                    remaining[#remaining + 1] = b
+                end
+            end
+            deps.source_lease.sync(remaining)
+        end
         if restored then
             for index = 1, R.SLOTS do
                 if not weapon_slot or index == weapon_slot then
@@ -543,6 +582,9 @@ function R.new(deps)
         return restored
     end
     function self.retirement_certificate()
+        if deps.source_lease and deps.source_lease.pending() then
+            return false, 'Weapon source restoration pending'
+        end
         for index = 1, R.SLOTS do
             for _, kind in ipairs({ 'material', 'pattern' }) do
                 local ok, why = sessions[index][kind].retirement_certificate()
@@ -552,6 +594,9 @@ function R.new(deps)
             end
         end
         return true
+    end
+    function self.source_cleanup_pending()
+        return deps.source_lease and deps.source_lease.pending() or false
     end
     function self.target(weapon_slot, selected_index, kind)
         local group = selected(slot(weapon_slot), selected_index, family(kind))
