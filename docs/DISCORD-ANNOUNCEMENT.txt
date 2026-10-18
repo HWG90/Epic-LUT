@@ -1,14 +1,14 @@
-# EPIC LUT R5.8.6 🪿
+# EPIC LUT R5.8.7 🪿
 
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
 Share Armor, Helmet and Pattern colors, materials, camo and emissives with compatible Epic LUT squadmates. Apply an Armory preset and leave **Configuration > Share full LUT appearance** enabled. Cape materials excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
 
-**R5.8.6**
-- Reduced background CPU use while Epic LUT is closed.
-- Reduced stutters when restoring applied colors and Patterns.
-- Improved Photo Mode input handoffs and menu reopening.
+**R5.8.7**
+- Reduced background CPU use while the editor is closed.
+- Slider drags now undo in one step.
+- Fixed Load Current Gear cache errors.
 - Improved Shared LUT compression and sync. Both players need R5.8.2 or newer, or R6 Alpha 3.
 - Added confirmation before deleting presets from the dropdown.
 - Added loose patch import. Keep the sidecar files beside the patch.
@@ -19,9 +19,9 @@ Edit colors, materials and camo in game, save Armory presets, import LUTs, map t
 
 Massive thanks to **Scarpheon** for testing, patch help and 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex and the community.
 
-**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.8.6
+**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.8.7
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
-**R6 weapon preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha3
+**R6 weapon preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha4
 R6 is experimental. **No support offered.**
 
 BSL Main / MDL Optional on Nexus; LLL GitHub only. Enable one copy. Keep your presets and settings. F9 Basic / F10 Advanced. Turn MYC matching off. RAR needs 7-Zip.

@@ -1,3 +1,9 @@
+# Epic LUT R5.8.7
+
+- Reduced background CPU use while the editor is closed.
+- Slider drags now undo in one step.
+- Fixed Load Current Gear cache errors.
+
 # Epic LUT R5.8.6
 
 - Reduced background CPU use while Epic LUT is closed.
