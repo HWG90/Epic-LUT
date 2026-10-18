@@ -234,7 +234,8 @@ function M.new(deps)
         end
         source_revision = source_api.revision
     end
-    function self.tick()
+    local sync_elapsed = 0
+    function self.tick(dt)
         if self.closed then
             return
         end
@@ -355,6 +356,13 @@ function M.new(deps)
             end
             log('Epic LUT Settings registered in MCM')
         end
+        -- Lifecycle checks stay immediate; presentation labels need not be
+        -- walked every gameplay frame. Writes still route straight to the owner.
+        sync_elapsed = sync_elapsed + math.max(0, tonumber(dt) or 0)
+        if dt ~= nil and source_revision == source_api.revision and sync_elapsed < 0.25 then
+            return
+        end
+        sync_elapsed = 0
         local ok, why = pcall(synchronize)
         if not ok then
             log('Epic LUT MCM settings synchronization deferred: ' .. tostring(why))

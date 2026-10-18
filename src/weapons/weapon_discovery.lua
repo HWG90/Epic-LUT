@@ -377,15 +377,20 @@ function D.new(E, deps)
         local a, b, c, d = bytes:byte(offset + 1, offset + 4)
         return a + b * 256 + c * 65536 + d * 16777216
     end
-    local function bindings(material)
+    local function binding_bytes(material)
         local header = read(material + 24, 16)
         local count = u32(header, 0)
         assert(index(count, 65), 'Weapon texture slot count bounds changed')
         local array = u32(header, 8) + u32(header, 12) * 4294967296
-        local result = {}
         if count > 0 then
             assert(pointer(array), 'Invalid weapon binding array')
-            local bytes = read(array, count * 16)
+            return header, read(array, count * 16), count
+        end
+        return header, '', count
+    end
+    local function decode_bindings(bytes, count)
+        local result = {}
+        if count > 0 then
             for entry = 0, count - 1 do
                 local at, slot = entry * 16, u32(bytes, entry * 16)
                 assert(result[slot] == nil, 'Repeated weapon texture slot is ambiguous')
@@ -395,6 +400,10 @@ function D.new(E, deps)
             end
         end
         return result
+    end
+    local function bindings(material)
+        local _, bytes, count = binding_bytes(material)
+        return decode_bindings(bytes, count)
     end
     function self.descriptor(receipt, row, slot)
         local kept = validate(receipt)
@@ -474,13 +483,23 @@ function D.new(E, deps)
     end
     -- Negative-only frame gate: safe byte reads, never native Unit/Mesh calls.
     -- A mismatch is only a request for fresh ownership validation, not write permission.
+    -- Only immutable decoded bytes are reused, never ownership/write proof.
+    -- Weak keys release the probe when the assigned binding is retired.
+    local probe_cache = setmetatable({}, { __mode = 'k' })
     function self.bindings_unchanged(targets)
         local decoded = {}
         for _, b in ipairs(targets) do
             assert(pointer(b.material), 'Invalid assigned Material pointer')
             local slots = decoded[b.material]
             if not slots then
-                slots = bindings(b.material)
+                local header, bytes, count = binding_bytes(b.material)
+                local prior = probe_cache[b]
+                if prior and prior.material == b.material and prior.header == header and prior.bytes == bytes then
+                    slots = prior.slots
+                else
+                    slots = decode_bindings(bytes, count)
+                    probe_cache[b] = { material = b.material, header = header, bytes = bytes, slots = slots }
+                end
                 decoded[b.material] = slots
             end
             if slots[b.slot] ~= b.current then

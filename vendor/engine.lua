@@ -146,6 +146,26 @@ function Engine.unit_materials(native, unit)
     return out
 end
 
+-- A synchronous read-only inventory membership probe. Discard before writes.
+function Engine.presence_snapshot(native, enumerate)
+    local units = {}
+    return function(b)
+        local meshes = units[b.unit]
+        if not meshes then
+            meshes = {}
+            units[b.unit] = meshes
+            if native.alive(b.unit) ~= 0 then
+                for _, material in ipairs(enumerate(b.unit)) do
+                    local entries = meshes[material.mesh]
+                    if not entries then entries = {}; meshes[material.mesh] = entries end
+                    entries[material.material] = true
+                end
+            end
+        end
+        return meshes[b.mesh] and meshes[b.mesh][b.material] == true or false
+    end
+end
+
 -- The texture object bound to a material's texture slot (Engine.LUT_SLOT, Engine.PATTERN_SLOT,
 -- Engine.CAPE_LUT_SLOT), or nil.
 -- read(address number, size, buffer) -> true; buffer: >= 16 bytes, big: >= 64 x 16 bytes.

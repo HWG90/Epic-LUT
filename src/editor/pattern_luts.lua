@@ -110,10 +110,11 @@ function P.new(deps)
                 return list
             end
         end
+        local present = deps.discovery_present and enumerate and deps.discovery_present(enumerate) or deps.present
         local existing = {}
         local kept = {}
         for _, b in ipairs(deps.session.owned) do
-            if (not deps.present or deps.present(b, enumerate)) and binding(b) == b.current then
+            if (not present or present(b, enumerate)) and binding(b) == b.current then
                 existing[deps.key(b)] = b
                 kept[#kept + 1] = b
             end

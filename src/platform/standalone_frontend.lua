@@ -149,7 +149,7 @@ function F.new(m,ctx,deps)
                 if self.preferences.font_bold then self.menu.font_bold=self.preferences.font_bold()end
                 if not self.size_loaded and self.preferences.size then self.menu.window_width,self.menu.window_height=self.preferences.size();self.size_loaded=true end
             end
-            if self.mcm_settings then self.mcm_settings.tick() end
+            if self.mcm_settings then self.mcm_settings.tick(dt) end
             self.input.poll();local focused=self.input.focused()
             if self.input_cleanup_pending then
                 local ready,reason=release_input();if not ready then self.menu.notice=tostring(reason);return end

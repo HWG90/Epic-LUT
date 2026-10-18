@@ -25,9 +25,10 @@ function G.new(deps)
             end
             return list
         end
+        local present = deps.discovery_present and deps.discovery_present(materials) or deps.present
         local found, seen, kept, active = {}, {}, {}, {}
         for _, b in ipairs(owned) do
-            if deps.present(b, materials) and binding(b) == b.current then
+            if present(b, materials) and binding(b) == b.current then
                 kept[deps.key(b)] = b
                 active[#active + 1] = b
             end

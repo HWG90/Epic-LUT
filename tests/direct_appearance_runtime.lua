@@ -263,6 +263,11 @@ local m = {
         end,
     },
 }
+local discovery_readers = 0
+m.engine.binding_snapshot = function()
+    discovery_readers = discovery_readers + 1
+    return function(material, slot) return bound[material] and bound[material][slot or 1] end
+end
 local original_catalog_new = m.gear_catalog.new
 m.gear_catalog.new = function(deps)
     local catalog = original_catalog_new(deps)
@@ -496,6 +501,7 @@ recover()
 for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Canceled recovery failed to restart with fresh proof')
 end
+assert(discovery_readers > 0, 'Activation discarded the read-only discovery helper')
 assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'

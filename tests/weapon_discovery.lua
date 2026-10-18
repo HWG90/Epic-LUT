@@ -29,6 +29,24 @@ test('descriptors preserve every LOD locator and distinguish texture slot from w
         assert(f.discovery.present(b) and f.discovery.binding(b) == (row.material_index == 0 and f.A or f.B))
     end
 end)
+test('unchanged byte probes reuse decoding but never stale expected values or changed bytes', function()
+    local f = fixture()
+    local receipt = assert(f.discovery.capture(1))
+    local row = f.discovery.materials(receipt)[1]
+    local b = f.discovery.descriptor(receipt, row, D.LUT)
+    b.current = f.A
+    local before = f.reads
+    for _ = 1, 5 do assert(f.discovery.bindings_unchanged({ b })) end
+    assert(f.reads == before + 10, 'Stable probes stopped reading fresh header and slot bytes')
+    b.current = f.B
+    assert(not f.discovery.bindings_unchanged({ b }), 'Changed desired value reused a cached comparison')
+    f.textures[b.material][D.LUT] = f.B
+    assert(f.discovery.bindings_unchanged({ b }), 'Changed native bytes failed to invalidate decoding')
+    f.textures[b.material][D.LUT] = f.P
+    assert(not f.discovery.bindings_unchanged({ b }), 'Foreign native bytes escaped the negative gate')
+    assert(#f.writes == 0 and f.allocations == 0)
+end)
+
 test('shared texture objects are allowed but foreign material-pointer aliases are refused', function()
     local f = fixture()
     local receipt = assert(f.discovery.capture(1))
