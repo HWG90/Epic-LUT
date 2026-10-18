@@ -162,6 +162,7 @@ local m = {
         end,
     },
     engine = {
+        batch_commits = dofile('vendor/engine.lua').batch_commits,
         LUT_SLOT = 1,
         CAPE_LUT_SLOT = 3,
         open = function()
@@ -836,6 +837,18 @@ do
         'Typed Cape selection escaped current destination'
     )
     activate('restore')
+    -- Reported crash order: apply a saved preset, restore Arrowhead, then
+    -- load current gear without leaving the menu or recreating the actor.
+    local retained_allocations = created
+    for cycle = 1, 12 do
+        activate('outfit_apply_cape')
+        assert(bound[cape][1] == typed, 'Repeated preset apply lost its owned destination')
+        activate('restore')
+        activate('populate_worn')
+        assert(bound[cape][1] == 4001 and bound[armor][1] == 4001 and bound[helmet][1] == 4002,
+            'Restore then Load Current Gear resurrected a preset binding')
+        assert(created == retained_allocations, 'Repeated restore/load allocated new native textures')
+    end
     choose({ { kind = 'armor', key = '0:1:0:0', document = cape_doc } })
     assert(not api.mods[h.id].controls.outfit_apply_cape.disabled, 'Legacy same-destination Cape entry is unavailable')
     assert(h.set('outfit_preset', 2))

@@ -1,13 +1,13 @@
-# R5.9.0
+# Epic LUT R5.9.0
 
-Performance update for Armor, Helmet and Cape LUT editing and Shared LUT multiplayer appearances.
+Performance and stability update.
 
-- Appearance recovery now wakes on player lifecycle events and explicit gear loads instead of repeatedly rediscovering unchanged materials.
-- Shared LUT reuses unchanged appearance packets and builds changed packets cooperatively, reducing background work and spikes.
-- Publication validates materials once per operation and discards work invalidated by a newer edit or lifecycle event. Native write ownership checks remain in place.
-- Older loaders without lifecycle notifications use a bounded, read-only change detector; full recovery runs only when the signature changes.
+- Reduced background CPU use and stutters when applying or restoring looks.
+- Shared LUT reuses unchanged appearances and updates more smoothly.
+- Sliders update colors live again while dragging. Undo returns to the starting value in one step.
+- Fixed snapshot loading loops and several Load Current Gear crash/hang paths.
+- Player Preview stays idle until something changes.
 
-Retains Shared LUT multiplayer sharing, Pattern editing, checked-region camo, gear mapping, Armory presets and assignment-aware patch exports. Weapon LUT editing remains on the separate R6 development branch.
+Includes Shared LUT multiplayer appearances, Armor/Helmet/Cape editing, Pattern colors and roughness, Armory presets, custom-model LUT support, loose patch import and assignment-aware patch exports.
 
-Prepared packages: BSL and modular LLL R30+. Keep your presets and settings; install only one package. LLL remains GitHub-only.
-
+Keep your presets and settings. Enable one copy: BSL, LLL R30+ or bundled API-2 MDL. MDL is optional on Nexus; LLL is GitHub only. Shared Lobby LUT remains in testing. Weapon editing stays in the experimental R6 preview, with no support offered.

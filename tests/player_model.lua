@@ -80,7 +80,9 @@ local m = M.new(E, {
         error('Unexpected failed cleanup')
     end,
     apply_palette = function(piece, palette)
+        local changed = applied[piece.kind] ~= palette
         applied[piece.kind] = palette
+        return changed
     end,
 })
 local plan = m.capture(
@@ -94,7 +96,9 @@ assert(
 )
 local model = m.create('owned', plan)
 assert(copies == 18 and #model.pieces == 2)
-m.apply(model, { helmet = 'blue' })
+assert(m.apply(model, { helmet = 'blue' }) == true)
+assert(m.apply(model, { helmet = 'blue' }) == false)
+assert(m.apply(model, {}) == false)
 assert(applied.helmet == 'blue' and applied.armor == nil)
 m.destroy(model)
 assert(#destroyed == 2 and units.armor.alive and units.helmet.alive)

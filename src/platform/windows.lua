@@ -21,23 +21,54 @@ function W.verify_interface()
     return user,kernel
 end
 function W.launch_worker(args,folder)
-    local ffi=require('ffi');local _,kernel=W.verify_interface();local shell=ffi.load('shell32')
-    if not pcall(ffi.typeof,'epic_worker_execute')then ffi.cdef([[
-        typedef struct {uint32_t size,mask;void *window;const uint16_t *verb,*file,*args,*directory;int show;void *instance,*list;const uint16_t *class_name;void *class_key;uint32_t hotkey;void *icon,*process;} epic_worker_execute;
-        int epic_worker_shell(epic_worker_execute *) __asm__("ShellExecuteExW");
-        uint32_t epic_worker_pid(void *) __asm__("GetProcessId");
-        uint32_t epic_worker_wait(void *,uint32_t) __asm__("WaitForSingleObject");
-        int epic_worker_stop(void *,uint32_t) __asm__("TerminateProcess");
-        int epic_worker_close(void *) __asm__("CloseHandle");
+    local ffi=require('ffi');local _,kernel=W.verify_interface()
+    if not pcall(ffi.typeof,'epic_process_startup2')then ffi.cdef([[
+        typedef struct {
+            uint32_t size;uint16_t *reserved,*desktop,*title;
+            uint32_t x,y,width,height,columns,rows,fill,flags;
+            uint16_t show,reserved_size;uint8_t *reserved_bytes;
+            void *input,*output,*error;
+        } epic_process_startup2;
+        typedef struct {void *process,*thread;uint32_t pid,tid;} epic_process_info2;
+        int epic_process_create2(const uint16_t *,uint16_t *,void *,void *,int,uint32_t,void *,const uint16_t *,epic_process_startup2 *,epic_process_info2 *) __asm__("CreateProcessW");
+        uint32_t epic_process_system2(uint16_t *,uint32_t) __asm__("GetSystemDirectoryW");
+        uint32_t epic_process_error2(void) __asm__("GetLastError");
+        uint32_t epic_process_wait2(void *,uint32_t) __asm__("WaitForSingleObject");
+        int epic_process_stop2(void *,uint32_t) __asm__("TerminateProcess");
+        int epic_process_close2(void *) __asm__("CloseHandle");
     ]])end
-    local function wide(text)local n=kernel.epic_native_wide(65001,8,text,-1,nil,0);assert(n>0);local out=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,text,-1,out,n)==n);return out end
-    local file,parameters,directory,verb=wide('powershell.exe'),wide(args),wide(folder),wide('open')
-    local info=ffi.new('epic_worker_execute');info.size=ffi.sizeof(info);info.mask=0x40;info.file=file;info.args=parameters;info.directory=directory;info.verb=verb;info.show=0
-    assert(shell.epic_worker_shell(info)~=0 and info.process~=nil,'Windows could not start file import')
-    local self={handle=info.process,pid=tonumber(kernel.epic_worker_pid(info.process))}
-    function self.running()return self.handle~=nil and kernel.epic_worker_wait(self.handle,0)==258 end
-    function self.stop()if self.running()and kernel.epic_worker_stop(self.handle,1)==0 and self.running()then return false,'Could not stop owned import worker'end;return true end
-    function self.close()if self.handle~=nil then kernel.epic_worker_close(self.handle);self.handle=nil end end
+    local function wide(text)
+        assert(type(text)=='string' and not text:find('\0',1,true),'Invalid worker command')
+        local n=kernel.epic_native_wide(65001,8,text,-1,nil,0);assert(n>0 and n<=32767,'Worker command exceeds Windows limit')
+        local out=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,text,-1,out,n)==n);return out,n
+    end
+    -- ShellExecuteEx enters shell/COM handlers on the game thread. The hung
+    -- Load Current Gear dump stops inside that call. Launch this known executable
+    -- directly; no shell extensions, file associations or shell message pump.
+    local system=ffi.new('uint16_t[32768]');local count=tonumber(kernel.epic_process_system2(system,32768))
+    assert(count>0 and count<32768,'Windows system directory unavailable')
+    local suffix=wide('\\WindowsPowerShell\\v1.0\\powershell.exe')
+    local suffix_count=0;while suffix[suffix_count]~=0 do suffix_count=suffix_count+1 end
+    local file=ffi.new('uint16_t[?]',count+suffix_count+1)
+    ffi.copy(file,system,count*2);ffi.copy(file+count,suffix,(suffix_count+1)*2)
+    local command=ffi.new('uint16_t[?]',count+suffix_count+3)
+    command[0]=34;ffi.copy(command+1,file,(count+suffix_count)*2);command[count+suffix_count+1]=34
+    local parameters,param_count=wide(' '..args)
+    local length=count+suffix_count+2
+    assert(length+param_count<=32767,'Worker command exceeds Windows limit')
+    local line=ffi.new('uint16_t[?]',length+param_count)
+    ffi.copy(line,command,length*2);ffi.copy(line+length,parameters,param_count*2)
+    local directory=wide(folder)
+    local startup,info=ffi.new('epic_process_startup2'),ffi.new('epic_process_info2')
+    startup.size=ffi.sizeof(startup);startup.flags=1;startup.show=0
+    -- Mutable UTF-16 command line, hidden console, no inherited handles.
+    local started=kernel.epic_process_create2(file,line,nil,nil,0,0x08000000,nil,directory,startup,info)
+    assert(started~=0,'Windows could not start worker: '..tonumber(kernel.epic_process_error2()))
+    kernel.epic_process_close2(info.thread)
+    local self={handle=info.process,pid=tonumber(info.pid)}
+    function self.running()return self.handle~=nil and kernel.epic_process_wait2(self.handle,0)==258 end
+    function self.stop()if self.running()and kernel.epic_process_stop2(self.handle,1)==0 and self.running()then return false,'Could not stop owned import worker'end;return true end
+    function self.close()if self.handle~=nil then kernel.epic_process_close2(self.handle);self.handle=nil end end
     return self
 end
 function W.game_data()

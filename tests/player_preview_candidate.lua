@@ -7,6 +7,7 @@ local disabled = false
 local request
 local setup_failure = false
 local sync_failure = false
+local palette_changed = false
 local render_failure = false
 local logs = {}
 local factories, base_enables, base_disables, base_cleanups = 0, 0, 0, 0
@@ -45,6 +46,9 @@ end
 a.apply_luts = function()
     syncs = syncs + 1
     assert(not sync_failure, 'Preview garment disappeared')
+    local changed = palette_changed
+    palette_changed = false
+    return changed
 end
 a.advance_model = function(_, dt)
     advance_calls = advance_calls + 1
@@ -777,6 +781,25 @@ assert(#authored_records == before_disabled_sources, 'Disabled Player Preview st
 assert(editor.on_disable())
 disabled = false
 env.m.preview_animation, env.m.player_authored_source = nil, nil
+-- Static copies retain their rendered portrait until source pixels actually change.
+editor.on_enable(ctx)
+public = assert(registry['epic.player_preview.v1'])
+front.menu.visible = true
+assert(public.toggle())
+editor.on_update(ctx, 0.3)
+current_controls.animating = false
+env.render()
+local idle_renders = renders
+for _ = 1, 30 do editor.on_update(ctx, 0.11); env.render() end
+assert(renders == idle_renders, 'Unchanged static portrait kept submitting render jobs')
+palette_changed = true
+editor.on_update(ctx, 0.11); env.render()
+assert(renders == idle_renders + 1, 'Changed material copy did not redraw')
+for _ = 1, 10 do editor.on_update(ctx, 0.11); env.render() end
+assert(renders == idle_renders + 1, 'Material redraw did not return to idle')
+assert(editor.on_disable())
+print('PASS static preview: unchanged bindings submit zero render jobs, changed bindings redraw once and return idle')
+
 -- A frontend replaced by another owner cannot be dismissed by our unload.
 editor.on_enable(ctx)
 local foreign_frontend = {

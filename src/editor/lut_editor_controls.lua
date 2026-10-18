@@ -81,6 +81,9 @@ function C.new(deps)
                 max = 1e10,
                 step = 0.001,
                 default = 0,
+                slider_begin = function() return self.slider_begin(channel) end,
+                slider_preview = self.slider_preview,
+                slider_end = self.slider_end,
                 on_change = function(value)
                     change(self.handle.get('edit_column'), channel, value)
                 end,

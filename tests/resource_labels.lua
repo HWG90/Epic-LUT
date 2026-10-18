@@ -154,3 +154,26 @@ end
 print(
     'PASS resource labels: exact 64-bit identity, trim/rename/delete persistence, bounded malformed input, failed-save retention and native backup recovery'
 )
+
+-- Execute the production catalog wiring to guard against passing raw native
+-- references into Lua Unit APIs merely to decorate selector labels.
+do
+    local source = assert(io.open('src/editor/direct_editor.lua', 'rb'))
+    local text = source:read('*a'); source:close()
+    local first = assert(text:find('gear_catalog = m.gear_catalog.new({', 1, true))
+    local finish = assert(text:find('        present = present,', first, true))
+    local block = text:sub(first, finish - 1)
+    local native_calls = 0
+    local m = { gear_catalog = { new = function(deps) return deps end }, sdk_catalog = {} }
+    local scope = { m = m, stingray = { Unit = {
+        alive = function() native_calls = native_calls + 1; error('Raw Lua Unit call') end,
+        resource_name = function() native_calls = native_calls + 1; error('Raw Lua Unit call') end,
+    } } }
+    scope._G = scope
+    setmetatable(scope, { __index = _G })
+    local wire = assert(loadstring(block .. '}) return gear_catalog'))
+    setfenv(wire, scope)
+    local deps = wire()
+    if deps.resource_name then deps.resource_name(1596) end
+    assert(native_calls == 0, 'Optional gear labels called Lua Unit APIs with a native reference')
+end

@@ -1,25 +1,22 @@
-# EPIC LUT R5.8.7 🪿
+# EPIC LUT R5.9.0 🪿
 
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
 Share Armor, Helmet and Pattern colors, materials, camo and emissives with compatible Epic LUT squadmates. Apply an Armory preset and leave **Configuration > Share full LUT appearance** enabled. Cape materials excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
 
-**R5.8.7**
-- Reduced background CPU use while the editor is closed.
-- Slider drags now undo in one step.
-- Fixed Load Current Gear cache errors.
-- Improved Shared LUT compression and sync. Both players need R5.8.2 or newer, or R6 Alpha 3.
-- Added confirmation before deleting presets from the dropdown.
-- Added loose patch import. Keep the sidecar files beside the patch.
-- Added Arrowhead restore for the selected LUT, row or cells, with Undo/Redo.
-- Added hardware cursor options and preset overwrite safeguards.
+**R5.9.0**
+- Reduced background CPU use and stutters when applying or restoring looks.
+- Shared LUT updates more smoothly and reuses unchanged appearances.
+- Live slider previews are back, with one Undo step per drag.
+- Fixed snapshot loading loops and several Load Current Gear crash/hang paths.
+- Player Preview stays idle until something changes.
 
 Edit colors, materials and camo in game, save Armory presets, import LUTs, map them to gear and export binding-aware patches. Pattern quick swatches show **Color / Mat/Opac / Roughness**. Photo Mode coexistence and custom-model LUT fixes are included.
 
 Massive thanks to **Scarpheon** for testing, patch help and 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex and the community.
 
-**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.8.7
+**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.9.0
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **R6 weapon preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha4
 R6 is experimental. **No support offered.**

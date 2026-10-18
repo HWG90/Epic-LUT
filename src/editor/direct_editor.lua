@@ -116,7 +116,8 @@ local function palette_choices(labels)
 end
 local function action(fn, recover)
     local before
-    if history and not history.busy and not region_indicator.job then
+    if history and not history.busy and not region_indicator.job
+        and not (palette_editor and (palette_editor.active_slider or palette_editor.pending_slider)) then
         local ok, value = pcall(history.capture)
         if ok then
             before = value
@@ -124,7 +125,12 @@ local function action(fn, recover)
             ctx.log('Action snapshot skipped: ' .. tostring(value))
         end
     end
-    local ok, why = pcall(fn)
+    local ok, why
+    if m.engine.batch_commits then
+        ok, why = pcall(m.engine.batch_commits, native, fn)
+    else
+        ok, why = pcall(fn)
+    end
     if not ok then
         if recover then
             restore()
@@ -590,25 +596,10 @@ local function initialize_editor_state()
         materials = function(unit)
             return m.engine.unit_materials(native, unit)
         end,
-        resource_name = function(unit)
-            local sr = rawget(_G, 'stingray')
-            local U = sr and sr.Unit
-            if not m.sdk_catalog or not U or not U.resource_name then
-                return nil
-            end
-            if U.alive then
-                local ok, alive = pcall(U.alive, unit)
-                if not ok or not alive then
-                    return nil
-                end
-            end
-            local ok, value = pcall(U.resource_name, unit)
-            if not ok then
-                return nil
-            end
-            local hash = tostring(value):match('#ID%[(%x+)%]')
-            return hash and m.sdk_catalog.resource_name(hash)
-        end,
+        -- These are native uint32 references, not Lua Unit handles. Cosmetic
+        -- labels must never call Lua Unit APIs with them: pcall cannot catch
+        -- the native access violation. Keep the existing numbered gear labels.
+        resource_name = nil,
         present = present,
         binding = binding,
         discovery_binding = operations.discovery_binding,
@@ -3704,6 +3695,7 @@ return {
                     end)
                 end
             )
+            palette_editor.action_history = history
             palette_editor.arrowhead_source = function(document)
                 if not original_luts then
                     return
@@ -3901,6 +3893,9 @@ return {
                         end)
                     end
                 end
+            end
+            if palette_editor and palette_editor.pending_slider then
+                palette_editor.flush_slider_history()
             end
             if index_job then
                 local ok, why = coroutine.resume(index_job)

@@ -25,7 +25,7 @@ Select a saved preset and use [b]Save[/b] to update it after an overwrite confir
 Updated War Journalist Photo Mode builds can lend input to Epic LUT while keeping the camera active. This requires the updated Photo Mode companion and a normal game restart. Both staying open together was confirmed in-game after restart.
 
 [list]
-[*]Reduced background CPU use while Epic LUT is closed. Slider drags undo in one step. Fixed Load Current Gear cache errors.[/*]
+[*]Reduced background CPU use and stutters when applying or restoring looks. Shared LUT updates more smoothly. Live slider previews are back, with one Undo step per drag. Fixed snapshot loading loops and several Load Current Gear crash/hang paths. Player Preview stays idle until something changes.[/*]
 [*]Shared LUT compression and sync have been improved. Both players need R5.8.2 or R6 Alpha 3 for the latest sharing update.[/*]
 [*]Preset dropdowns now ask before deleting a saved preset. Overwrite warnings can be turned off and restored in Configuration.[/*]
 [*]Import loose patches with their sidecar files, or use ZIP/RAR as before.[/*]

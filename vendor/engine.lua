@@ -271,11 +271,40 @@ function Engine.bind(native, material, slot, object)
     native.set_resource(material, slot, object)
 end
 
+-- Material setters update CPU state immediately and enqueue their resource writes.
+-- Commit the final mesh state once per action, including rollback, rather than
+-- rebuilding the same mesh for each material/texture slot. Synchronous scope only.
+function Engine.batch_commits(native, fn)
+    local commit = native.commit
+    local meshes, seen = {}, {}
+    native.commit = function(mesh)
+        if not seen[mesh] then
+            seen[mesh] = true
+            meshes[#meshes + 1] = mesh
+        end
+    end
+    local function pack(...)
+        return {n = select('#', ...), ...}
+    end
+    local result = pack(pcall(fn))
+    -- Restore dispatch before flushing, even when the action raised. Nested
+    -- scopes flush into their parent's collector and remain one native commit.
+    native.commit = commit
+    local failure
+    for _, mesh in ipairs(meshes) do
+        local ok, why = pcall(commit, mesh)
+        if not ok and failure == nil then failure = why end
+    end
+    if not result[1] then error(result[2], 0) end
+    if failure ~= nil then error(failure, 0) end
+    return unpack(result, 2, result.n)
+end
+
 -- Code that runs once or rarely (jobs, startup, events) stays interpreted, sub-functions included: it must not
 -- add traces to the LuaJIT code cache the game and every mod share. Only the hot loops stay compiled.
 if type(jit) == 'table' and type(jit.off) == 'function' then
     for _, fn in ipairs({Engine.open, Engine.name64, Engine.texture_object, Engine.unit_materials, Engine.binding, Engine.binding_snapshot,
-        Engine.create_texture, Engine.update_texture, Engine.bind}) do
+        Engine.create_texture, Engine.update_texture, Engine.bind, Engine.batch_commits}) do
         jit.off(fn, true)
     end
 end

@@ -4,10 +4,12 @@
 
 ## R5.9.0 - 2026-10-18
 
-- Event-driven appearance recovery keeps unchanged gear idle.
-- Shared LUT caches unchanged packets, reuses validation snapshots and spreads changed-packet work across frames.
-- Bounded change detection preserves compatibility with loaders lacking lifecycle events.
-- Weapon LUT features remain in R6.
+- Reduced background CPU use and stutters when applying or restoring looks.
+- Shared LUT reuses unchanged appearances and updates more smoothly.
+- Restored live slider previews while keeping one Undo step per drag.
+- Fixed snapshot loading loops and several Load Current Gear crash/hang paths.
+- Player Preview stays idle until something changes.
+- Weapon editing remains in the separate R6 preview.
 
 ## R5.8.7 - 2026-10-17
 

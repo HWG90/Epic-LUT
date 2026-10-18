@@ -147,6 +147,7 @@ local m = {
         end,
     },
     engine = {
+        batch_commits = dofile('vendor/engine.lua').batch_commits,
         LUT_SLOT = 1,
         open = function()
             return native

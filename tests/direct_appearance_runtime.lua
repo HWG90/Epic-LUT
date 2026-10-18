@@ -195,6 +195,7 @@ local m = {
         end,
     },
     engine = {
+        batch_commits = dofile('vendor/engine.lua').batch_commits,
         LUT_SLOT = 1,
         PATTERN_SLOT = 2,
         open = function()
@@ -521,6 +522,40 @@ for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Canceled recovery failed to restart with fresh proof')
 end
 assert(discovery_readers > 0, 'Activation discarded the read-only discovery helper')
+-- Scalar drags must also coalesce the native session's global action history.
+frontend.menu.visible, frontend.basic_mode = true, false
+assert(h.set('file', 'material'))
+activate('load')
+assert(h.set('target_armor', true) and h.set('target_helmet', false))
+assert(h.set('unlock', true))
+local scalar = api.mods.epic_direct_lut.controls.cell_r
+history.undo, history.redo = {}, {}
+local starting_value = h.get('cell_r')
+local gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.25)
+frame(0.1)
+scalar.slider_preview(gesture, 0.75)
+frame(0.1)
+assert(#history.undo == 0, 'Live scalar preview recorded intermediate native action history')
+scalar.slider_end(gesture, true)
+frame(0.1)
+assert(#history.undo == 1, 'Scalar release did not record one global endpoint action')
+activate('global_undo')
+assert(h.get('cell_r') == starting_value, 'Global slider Undo missed the drag starting value')
+activate('global_redo')
+assert(h.get('cell_r') == 0.75, 'Global slider Redo missed the final value')
+local endpoint_count = #history.undo
+for _, commit in ipairs({ false, true }) do
+    gesture = scalar.slider_begin()
+    scalar.slider_preview(gesture, 0.125)
+    frame(0.1)
+    if commit then scalar.slider_preview(gesture, 0.75); frame(0.1) end
+    scalar.slider_end(gesture, commit)
+    frame(0.1)
+    assert(#history.undo == endpoint_count and h.get('cell_r') == 0.75,
+        'Canceled/no-op scalar drag changed global endpoint history')
+end
+print('PASS global scalar transaction: live native updates, endpoint Undo/Redo, no-op and cancel')
 assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'

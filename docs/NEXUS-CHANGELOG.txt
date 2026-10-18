@@ -1,8 +1,12 @@
 # Epic LUT R5.9.0
 
-- Reduced background work and stutters from appearance recovery.
-- Shared LUT reuses unchanged appearances and spreads updates across frames.
-- Keeps existing presets, settings and multiplayer appearance sharing.
+Performance and stability update.
+
+- Reduced background CPU use and stutters when applying or restoring looks.
+- Shared LUT reuses unchanged appearances and updates more smoothly.
+- Sliders update colors live again while dragging. Undo returns to the starting value in one step.
+- Fixed snapshot loading loops and several Load Current Gear crash/hang paths.
+- Player Preview stays idle until something changes.
 
 # Epic LUT R5.8.7
 
