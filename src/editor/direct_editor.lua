@@ -64,6 +64,11 @@ function operations.discovery_binding()
         return m.engine.binding(read, b.material, selected, small, big)
     end
 end
+function operations.discovery_present(enumerate)
+    if m.engine.presence_snapshot then
+        return m.engine.presence_snapshot(native, enumerate)
+    end
+end
 local function present(b, enumerate)
     if native.alive(b.unit) == 0 then
         return false
@@ -468,7 +473,8 @@ local function recover_appearance(dt)
         end
         -- Fresh binding reads and the session's present/ownership/readback
         -- checks still run immediately before every write.
-        for _, batch in ipairs(appearance.batches(targets, pattern, proof, appearance_resource, binding)) do
+        local observe = operations.discovery_binding()
+        for _, batch in ipairs(appearance.batches(targets, pattern, proof, appearance_resource, observe)) do
             session.apply(batch.document, batch.targets)
             for _, b in ipairs(batch.targets) do
                 if b.cape then b.applied_cape_proof = proof.cape end
@@ -576,6 +582,7 @@ local function initialize_editor_state()
         present = present,
         binding = binding,
         discovery_binding = operations.discovery_binding,
+        discovery_present = operations.discovery_present,
         key = material_key,
         is_cape = function(b, observe)
             if not m.engine.CAPE_LUT_SLOT then
@@ -2862,6 +2869,8 @@ local function reset_transient_state()
     -- activation. A shared table also keeps the initializer within LuaJIT's
     -- captured-variable limit.
     local export_helpers = {
+        discovery_binding = operations.discovery_binding,
+        discovery_present = operations.discovery_present,
         include_patterns_in_exports = operations.include_patterns_in_exports,
         selected_export_bindings = operations.selected_export_bindings,
         export_pattern_entries = operations.export_pattern_entries,
@@ -3345,6 +3354,7 @@ return {
                     return m.engine.unit_materials(native, unit)
                 end,
                 discovery_binding = operations.discovery_binding,
+                discovery_present = operations.discovery_present,
                 discover = function(enumerate, observe)
                     local identity = assert(m.avatar.resolve_live(memory, game), 'Worn gear not ready')
                     local out = {}

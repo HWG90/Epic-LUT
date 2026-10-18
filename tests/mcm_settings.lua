@@ -389,6 +389,18 @@ local count = #logs
 bridge.tick()
 bridge.tick()
 assert(#logs == count, 'Idle bridge re-registered or logged repeatedly')
+-- Label-only changes are polled at 4 Hz without delaying source writes or reload ownership.
+bridge.tick() -- Establish the current presentation baseline.
+status.label = 'Sharing: throttled status'
+bridge.tick(0.01)
+local function presented_status()
+    for _, control in ipairs(external.mods.epic_lut_settings.pages[1].controls) do
+        if control.id == 'sharing_status' then return control.label end
+    end
+end
+assert(presented_status() ~= status.label, 'Idle presentation walked every frame')
+bridge.tick(0.25)
+assert(presented_status() == status.label, 'Timed presentation failed to refresh')
 local old_external, old_handle = external, handle
 external = framework()
 bridge.tick()

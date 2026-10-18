@@ -69,3 +69,23 @@ snapshot = Engine.binding_snapshot(read); before = #reads
 for i = 0, 63 do assert(snapshot(0x60000, i) == i * 1000) end
 assert(#reads == before + 2 and reads[#reads][2] == 1024, 'Maximum valid slot table exceeded its bounded single copy')
 print('PASS binding snapshot: byte-backed first-match/zero/high pointers,64 slots, failed/partial/throw retry, operation expiry and fresh default reads')
+
+-- Membership indexes live for one read-only scan, including negative results.
+do
+    local alive, inventories = 0, 0
+    local rows = { { mesh = 11, material = 21 }, { mesh = 11, material = 22 } }
+    local native = { alive = function() alive = alive + 1; return 1 end }
+    local function enumerate() inventories = inventories + 1; return rows end
+    local probe = Engine.presence_snapshot(native, enumerate)
+    for _ = 1, 50 do
+        assert(probe({ unit = 1, mesh = 11, material = 21 }))
+        assert(not probe({ unit = 1, mesh = 12, material = 21 }))
+    end
+    assert(alive == 1 and inventories == 1, 'Read-only membership repeated native enumeration')
+    rows = { { mesh = 11, material = 23 } }
+    local fresh = Engine.presence_snapshot(native, enumerate)
+    assert(not fresh({ unit = 1, mesh = 11, material = 21 }))
+    assert(fresh({ unit = 1, mesh = 11, material = 23 }))
+    assert(alive == 2 and inventories == 2, 'Next scan reused stale material membership')
+end
+print('PASS scoped material membership: one native inventory per Unit; next scan is fresh')
