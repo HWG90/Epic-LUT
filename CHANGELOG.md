@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## R5.9.0 - 2026-10-18
+
+- Event-driven appearance recovery keeps unchanged gear idle.
+- Shared LUT caches unchanged packets, reuses validation snapshots and spreads changed-packet work across frames.
+- Bounded change detection preserves compatibility with loaders lacking lifecycle events.
+- Weapon LUT features remain in R6.
+
 ## R5.8.7 - 2026-10-17
 
 - Reduced background CPU use while the editor is closed.

@@ -90,7 +90,17 @@ function C.new(compression, original)
     end
     local function short(n) return string.char(n % 256, math.floor(n / 256)) end
     local self = {}
-    function self.encode(identity, entries)
+    function self.encode(identity, entries, checkpoint)
+        checkpoint = checkpoint or function() end
+        -- Published texture objects are immutable and can serve hundreds of
+        -- bindings. Validate their finite pixels once per packet build.
+        local validated = {}
+        local function finite_once(document)
+            if not validated[document] then
+                finite(document)
+                validated[document] = true
+            end
+        end
         local docs, delta_docs, xor_docs, lookup, bindings, seen = {}, {}, {}, {}, {}, {}
         local decoded_bytes = 0
         for _, entry in ipairs(entries) do
@@ -101,7 +111,7 @@ function C.new(compression, original)
             assert(t and slot and mesh and material and t <= 2 and slot <= 9 and mesh <= 63 and material <= 63, 'Invalid shared destination')
             local key = (pattern and 'p:' or '') .. t .. ':' .. slot .. ':' .. mesh .. ':' .. material
             local d = entry.document
-            finite(d)
+            finite_once(d)
             assert(d.width == (pattern and 3 or 23), 'Binding slot and table shape disagree')
             local pixels = ffi.string(d.data, d.width * d.height * 16)
             local signature = string.char(d.width, d.height) .. pixels
@@ -119,7 +129,7 @@ function C.new(compression, original)
                     local base = entry.original
                     if base and base.resource and base.resource:match('^%x+$') and #base.resource == 16
                         and base.width == d.width and base.height == d.height then
-                        finite(base)
+                        finite_once(base)
                         local bytes = ffi.string(base.data, #pixels)
                         -- Four byte planes retain every IEEE-754 bit; XOR makes
                         -- unchanged bytes zero and groups similarly changing bytes.
@@ -130,6 +140,7 @@ function C.new(compression, original)
                                 plane[#plane + 1] = string.char(bit.bxor(pixels:byte(at), bytes:byte(at)))
                             end
                             planes[#planes + 1] = table.concat(plane)
+                            checkpoint()
                         end
                         xor_docs[index] = string.char(2,d.width,d.height) .. base.resource:lower()
                             .. checksum(bytes) .. table.concat(planes)
@@ -148,6 +159,7 @@ function C.new(compression, original)
                 bindings[#bindings + 1] = {t = t, pattern = pattern, slot = slot, mesh = mesh, material = material, index = index}
                 seen[key] = signature
             end
+            checkpoint()
         end
         local legacy = #bindings <= C.LEGACY_BINDINGS
         local header = word(identity.body or 0) .. word(identity.armor or 0) .. word(identity.helmet or 0)
@@ -180,6 +192,7 @@ function C.new(compression, original)
                         local packed = version .. tag .. '|' .. #raw .. '|' .. base64(bytes)
                         self.packet_sizes[name] = math.min(self.packet_sizes[name] or math.huge,#packed)
                         if not text or #packed < #text then text = packed end
+                        checkpoint()
                     end
                 end
             end

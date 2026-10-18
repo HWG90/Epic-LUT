@@ -1,3 +1,9 @@
+# Epic LUT R5.9.0
+
+- Reduced background work and stutters from appearance recovery.
+- Shared LUT reuses unchanged appearances and spreads updates across frames.
+- Keeps existing presets, settings and multiplayer appearance sharing.
+
 # Epic LUT R5.8.7
 
 - Reduced background CPU use while the editor is closed.

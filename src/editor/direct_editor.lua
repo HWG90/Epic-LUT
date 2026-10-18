@@ -409,6 +409,9 @@ local function remember_appearance(targets, pattern)
         end
     end
     local _, pending = appearance.remember(targets, pattern, proof, appearance_resource)
+    if pending and #pending > 0 and operations.invalidate_appearance then
+        operations.invalidate_appearance()
+    end
     for _, item in ipairs(pending or {}) do
         local key = tostring(item.pattern) .. ':' .. item.kind .. ':' .. item.proof .. ':' .. item.save_key
         appearance_pending[key] = item
@@ -429,6 +432,27 @@ local function recover_appearance(dt)
     -- landing in the same gameplay frame; never retain a native read snapshot.
     local job = operations.appearance_recovery
     if not job then
+        -- No native reads/scans for unchanged appearance. Only a lifecycle
+        -- notification or a bounded unresolved-source retry can request work.
+        local generation = edit.appearance_generation or 0
+        if generation == (edit.appearance_completed or 0) then
+            -- Legacy loaders without lifecycle events retain automatic recovery.
+            -- Only a changed cheap read-only signature can schedule a full scan.
+            if edit.appearance_has_events or not operations.appearance_changed then return end
+            edit.appearance_fallback_elapsed = (edit.appearance_fallback_elapsed or 0) + math.max(0, dt or 0)
+            if edit.appearance_fallback_elapsed < 0.5 then return end
+            edit.appearance_fallback_elapsed = 0
+            if not operations.appearance_changed() then return end
+            operations.invalidate_appearance()
+            generation = edit.appearance_generation
+        end
+        if (edit.appearance_retry or 0) >= 40 then
+            edit.appearance_completed = generation
+            return
+        end
+        if edit.appearance_wake then
+            appearance_elapsed, edit.appearance_wake = 0.5, nil
+        end
         appearance_elapsed = appearance_elapsed + math.max(0, dt or 0)
         if appearance_elapsed < 0.5 then return end
         appearance_elapsed = 0
@@ -441,6 +465,7 @@ local function recover_appearance(dt)
         return
     end
     if not job then
+        edit.appearance_retry = (edit.appearance_retry or 0) + 1
         for key, pending in pairs(appearance_pending) do
             local b = { original = pending.original, save_key = pending.save_key,
                 kind = pending.kind, texture = pending.texture }
@@ -451,6 +476,7 @@ local function recover_appearance(dt)
     end
     if appearance.count() == 0 and not (edit.editor_target and edit.editor_target.kind == 'cape') then
         operations.appearance_recovery = nil
+        edit.appearance_completed = edit.appearance_generation or 0
         return
     end
     local proof = appearance_proof()
@@ -462,7 +488,7 @@ local function recover_appearance(dt)
         return
     end
     if not job then
-        job = { phase = 1, proof = proof }
+        job = { phase = 1, proof = proof, generation = edit.appearance_generation or 0, pattern_ready = true }
         operations.appearance_recovery = job
     end
     operations.appearance_worked = true
@@ -490,12 +516,16 @@ local function recover_appearance(dt)
     elseif phase == 3 then
         if pattern_editor and operations.pattern_session then
             local ok, discovered = pcall(pattern_editor.scan, true)
+            job.pattern_ready = ok
             if ok then job.pattern_groups = discovered end
         end
     else
         operations.appearance_recovery = nil
         if job.pattern_groups and operations.pattern_session then
             replay(job.pattern_groups, true, operations.pattern_session)
+        end
+        if job.material_ready and job.pattern_ready and not next(appearance_pending) then
+            edit.appearance_completed = job.generation
         end
     end
 end
@@ -898,6 +928,7 @@ local function warm_worn_slots()
     return gear_edits().warm_worn()
 end
 local function populate_worn()
+    if operations.invalidate_appearance then operations.invalidate_appearance() end
     return gear_edits().populate_worn()
 end
 local function mark_current_load()
@@ -2755,6 +2786,10 @@ local function register(current)
     groups = {}
 end
 local function close()
+    for _, token in ipairs(operations.appearance_subscriptions or {}) do
+        if token.unsubscribe then pcall(token.unsubscribe, token) end
+    end
+    operations.appearance_subscriptions = nil
     operations.appearance_recovery = nil
     operations.appearance_worked = false
     -- Loader cleanup polls replace normal updates. Hide retained UI and release
@@ -2934,6 +2969,49 @@ return {
         initialize_editor_state()
         if m.appearance_state then
             appearance = m.appearance_state.new()
+            operations.invalidate_appearance = function()
+                edit.appearance_generation = (edit.appearance_generation or 0) + 1
+                edit.appearance_retry = 0
+                edit.appearance_wake = true
+            end
+            operations.appearance_subscriptions = {}
+            local available, runtime = pcall(require, 'mods/skyeshade/hd2runtime')
+            if available and runtime.events and runtime.events.on then
+                for _, name in ipairs({ 'player_spawned', 'player_died', 'mission_started', 'mission_ended' }) do
+                    local ok, token = pcall(runtime.events.on, name, operations.invalidate_appearance,
+                        { owner = 'epic_lut_appearance_recovery', key = name })
+                    if ok and token then operations.appearance_subscriptions[#operations.appearance_subscriptions + 1] = token end
+                end
+            end
+            edit.appearance_has_events = #operations.appearance_subscriptions == 4
+            if not edit.appearance_has_events then
+                operations.appearance_changed = function()
+                    local identity = m.avatar.resolve(memory, game, appearance_read)
+                    local parts = { identity and identity.unit or 'absent' }
+                    if identity then
+                        parts[#parts + 1] = tostring(identity.body) .. ':' .. tostring(identity.armor)
+                            .. ':' .. tostring(identity.helmet) .. ':' .. tostring(identity.cape)
+                        for _, piece in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
+                            parts[#parts + 1] = tostring(piece.unit)
+                        end
+                        local observe = operations.discovery_binding()
+                        local function inspect(owned)
+                            for _, b in ipairs(owned or {}) do
+                                if b.current ~= b.original then
+                                    parts[#parts + 1] = tostring(b.material) .. ':' .. tostring(observe(b))
+                                end
+                            end
+                        end
+                        inspect(bindings.owned)
+                        inspect(operations.pattern_session and operations.pattern_session.owned)
+                    end
+                    local signature = table.concat(parts, '|')
+                    if edit.appearance_signature == signature then return false end
+                    edit.appearance_signature = signature
+                    return true
+                end
+            end
+            operations.invalidate_appearance()
         end
         if m.avatar.reader then
             appearance_read = m.avatar.reader(memory)
@@ -3007,6 +3085,7 @@ return {
                 local remote_read = m.avatar.reader(memory)
                 return m.shared_appearance.new({
                     sync = m.lobby_sync,
+                    defer_publication = true,
                     codec = m.shared_lut_codec.new(nil, function(resource)
                         return original_luts and original_luts.get_resource(resource)
                     end),
@@ -3020,19 +3099,45 @@ return {
                     identity = function()
                         return m.avatar.resolve(memory, game, remote_read)
                     end,
+                    identity_key = function()
+                        local identity = m.avatar.resolve(memory, game, remote_read)
+                        return identity and table.concat({ identity.unit or 0, identity.body or 0,
+                            identity.armor or 0, identity.helmet or 0 }, ':')
+                    end,
                     highlighting = function()
                         return (region_indicator and region_indicator.job ~= nil)
                             or (pattern_editor and pattern_editor.flashing())
                     end,
-                    entries = function()
+                    revision = function()
+                        -- Owned texture objects are immutable. Assignment and
+                        -- baseline readiness changes are observable in Lua state;
+                        -- unchanged publication needs no native material census.
+                        local marks = { tostring(original_luts and original_luts.loaded) }
+                        local function collect(owned)
+                            for _, b in ipairs(owned or {}) do
+                                marks[#marks + 1] = tostring(b.current) .. ':' .. tostring(b.document)
+                                    .. ':' .. tostring(b.document and b.document.revision)
+                                    .. ':' .. tostring(original_luts and original_luts.snapshots[b.original])
+                            end
+                        end
+                        collect(bindings.owned)
+                        collect(operations.pattern_session and operations.pattern_session.owned)
+                        return table.concat(marks, '|')
+                    end,
+                    entries = function(identity)
+                        -- Read-only publication snapshot; never reused for writes.
+                        local observe = operations.discovery_binding()
+                        local contains = operations.discovery_present(function(unit)
+                            return m.engine.unit_materials(native, unit)
+                        end) or present
                         local out = {}
                         for _, b in ipairs(bindings.owned) do
                             if
                                 not b.cape
                                 and b.document
                                 and b.current ~= b.original
-                                and present(b)
-                                and binding(b) == b.current
+                                and contains(b)
+                                and observe(b) == b.current
                             then
                                 out[#out + 1] = {
                                     key = b.save_key,
@@ -3046,8 +3151,8 @@ return {
                                 if
                                     b.document
                                     and b.current ~= b.original
-                                    and present(b)
-                                    and binding(b) == b.current
+                                    and contains(b)
+                                    and observe(b) == b.current
                                 then
                                     out[#out + 1] = {
                                         key = 'p:' .. b.save_key,
