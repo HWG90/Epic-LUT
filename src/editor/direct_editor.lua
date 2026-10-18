@@ -2561,6 +2561,9 @@ weapon_editor = function()
             context = function()
                 return frontend.menu and frontend.menu.page
             end,
+            visible = function()
+                return frontend.menu and frontend.menu.visible == true
+            end,
             mutate = operations.weapon_mutation,
             message = message,
             weapon_name = function(slot, resource)
@@ -3895,6 +3898,12 @@ return {
                     return original_luts and original_luts.snapshots and original_luts.snapshots[object]
                 end,
                 quick_bindings = function()
+                    if frontend.menu and not frontend.menu.visible and pattern_editor.requested then
+                        -- Keep the quick editor ready for its first visible frame,
+                        -- without reading every garment while the panel is closed.
+                        pattern_editor.quick_elapsed = 0.5
+                        return
+                    end
                     if not edit.loaded or not original_luts or not original_luts.loaded then
                         return
                     end

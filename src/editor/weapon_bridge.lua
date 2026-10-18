@@ -382,11 +382,19 @@ function B.new(m, host)
         if not runtime then
             return
         end
+        local assigned = true
         if runtime.enforce_assigned then
-            local _, failed = runtime.enforce_assigned()
+            local _, failed, active = runtime.enforce_assigned()
+            assigned = active ~= false
             if #failed > 0 then
                 poll_slot, elapsed = failed[1], 0.2
             end
+        end
+        -- Unedited catalogs are UI state. Keep assigned appearances and pending
+        -- recovery live, but defer unused catalog scans until the menu is visible.
+        -- All explicit actions still perform their own fresh ownership checks.
+        if host.visible and not host.visible() and not assigned and not next(recovery) then
+            return
         end
         elapsed = elapsed + (tonumber(dt) or 0)
         if elapsed < 0.2 / 3 then

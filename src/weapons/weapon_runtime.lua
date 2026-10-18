@@ -709,7 +709,7 @@ function R.new(deps)
         return #reset
     end
     function self.enforce_assigned()
-        local rebound, failed = 0, {}
+        local rebound, failed, assigned_any = 0, {}, false
         if not discovery.bindings_unchanged then
             return rebound, failed
         end
@@ -725,6 +725,7 @@ function R.new(deps)
                     end
                 end
                 if #assigned > 0 then
+                    assigned_any = true
                     local checked, unchanged = pcall(discovery.bindings_unchanged, assigned)
                     if not checked or not unchanged then
                         -- The probe's decoded bytes expire before any write. Rebind
@@ -740,7 +741,7 @@ function R.new(deps)
                 end
             end
         end
-        return rebound, failed
+        return rebound, failed, assigned_any
     end
     function self.update(selected_slot)
         if selected_slot then

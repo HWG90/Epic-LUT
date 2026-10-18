@@ -19,7 +19,7 @@ from tools.lua_runner import LuaRunner
 
 TESTS = (
     'primary_weapon_identity', 'weapon_lut_probe', 'weapon_lut_catalog_match', 'weapon_discovery',
-    'remote_weapon_discovery', 'weapon_runtime', 'weapon_controller', 'weapon_view', 'weapon_pattern_quick', 'weapon_bridge',
+    'remote_weapon_discovery', 'weapon_runtime', 'weapon_controller', 'weapon_view', 'weapon_pattern_quick', 'weapon_bridge', 'weapon_idle_poll',
     'weapon_mapping', 'weapon_presets', 'weapon_workflow', 'outfit_capture', 'armory_apply',
     'shared_weapon_authorization', 'weapon_shared', 'weapon_provenance', 'weapon_setup', 'weapon_editor_integration',
     'export_provenance', 'import_mapping', 'session_history', 'import_summary',

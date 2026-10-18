@@ -138,10 +138,15 @@ function S.new()
         assert(type(resource) == 'function' and type(current) == 'function', 'Appearance binding resolvers unavailable')
         local grouped, batches, seen = {}, {}, {}
         for _, b in ipairs(bindings or {}) do
-            local key = identity(b, not not pattern, proof, resource)
+            -- Most polls find our own texture still installed. Resolve saved
+            -- resource metadata only when a fresh read actually finds stock.
+            local called, object = false, nil
+            if b.original and b.original ~= 0 and not seen[b] then
+                called, object = pcall(current, b)
+            end
+            local key = called and object == b.original and identity(b, not not pattern, proof, resource)
             local record = key and records[key]
-            if record and b.original and b.original ~= 0 and not seen[b] then
-                local called, object = pcall(current, b)
+            if record then
                 -- Already-owned objects are no-ops. Foreign bindings and unknown
                 -- originals are deliberately left to their current owner.
                 if called and object ~= nil and object == b.original and object ~= record.texture.object then
