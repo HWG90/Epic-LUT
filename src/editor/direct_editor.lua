@@ -2938,6 +2938,7 @@ local function reset_transient_state()
         ensure_binding_provenance = operations.ensure_binding_provenance,
         request_binding_sources = operations.request_binding_sources,
         binding_export_provider = operations.binding_export_provider,
+        choose_export_patches = operations.choose_export_patches,
     }
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'

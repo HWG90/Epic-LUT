@@ -299,6 +299,12 @@ assert(
     'Loading worn colors changed target choices'
 )
 assert(bound[3] == 100, 'Population wrote game bindings')
+-- Export must resolve highlight cleanup after startup initializes the binding session.
+assert(handle.set('export_format', 5))
+local choose_status = activate('export_selected')
+assert(test_frontend.menu.lut_apply_dialog, 'Production export chooser failed: ' .. tostring(choose_status))
+test_frontend.menu.lut_apply_dialog = nil
+assert(handle.set('export_format', 1))
 assert(handle.get('cell_r') == 0.25, 'Stock game pixels did not populate editor')
 assert(handle.get('lut') == 2, 'Load Current Gear left the hidden live selector on Helmet')
 assert(activate('identify_region'):find('Flashing region', 1, true))
