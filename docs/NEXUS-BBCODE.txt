@@ -1,4 +1,4 @@
-[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.9.0[/b][/size]
+[center][size=6][b]EPIC [color=#f1c232]LUT[/color] R5.9.2[/b][/size]
 [size=5][b][color=#f1c232]STYLISH[/color] FREEDOM[/b][/size]
 [i]Defend Freedom in Style.[/i][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/6119/images/17039/17039-1791579431-1943225080.png[/img][/center]
@@ -25,6 +25,7 @@ Select a saved preset and use [b]Save[/b] to update it after an overwrite confir
 Updated War Journalist Photo Mode builds can lend input to Epic LUT while keeping the camera active. This requires the updated Photo Mode companion and a normal game restart. Both staying open together was confirmed in-game after restart.
 
 [list]
+[*]Choose several LUTs in Export > Choose LUT Patches, then export one combined patch or separate patches. Custom LUT names are used in exports, with matching Patterns included when enabled.[/*]
 [*]Reduced background CPU use and stutters when applying or restoring looks. Shared LUT updates more smoothly. Live slider previews are back, with one Undo step per drag. Fixed snapshot loading loops and several Load Current Gear crash/hang paths. Player Preview stays idle until something changes.[/*]
 [*]Shared LUT compression and sync have been improved. Both players need R5.8.2 or R6 Alpha 3 for the latest sharing update.[/*]
 [*]Preset dropdowns now ask before deleting a saved preset. Overwrite warnings can be turned off and restored in Configuration.[/*]
@@ -75,9 +76,9 @@ Updates wait for a stable squad lobby and settled edits. A received look applies
 
 [size=4][b]REQUISITION YOUR COPY[/b][/size]
 [list]
-[*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.9.0-BSL.zip[/b] and enable its BSL startup option.[/*]
-[*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.9.0-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
-[*][b]GitHub only - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.9.0-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
+[*][b]Main File - Arsenal / HD2MM + Bingus Shared Loader v15+:[/b] import [b]Epic-LUT-R5.9.2-BSL.zip[/b] and enable its BSL startup option.[/*]
+[*][b]Optional File - MDL / compatible API-2 loaders:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.9.2-MDL.zip[/b] into your loader's configured Mods directory, then enable it.[/*]
+[*][b]GitHub only - Live Lua Loader R30+:[/b] extract the complete [b]armor_lut_editor[/b] folder from [b]Epic-LUT-R5.9.2-LLL.zip[/b] into [b]%LOCALAPPDATA%/LLL/Helldivers2/Mods[/b], then enable it.[/*]
 [*]Enable [b]one[/b] Epic LUT entrypoint. Turn [b]Match Your Colors matching Off[/b] before editing the same gear. RAR imports require installed [b]7-Zip[/b].[/*]
 [/list]
 [center][b]DO NOT REPORT BUGS ON NEXUS. I WON'T SEE THEM.[/b]
@@ -105,7 +106,7 @@ This deserves much more than a name at the bottom of a page. Scarpheon helped ma
 [url=https://www.nexusmods.com/profile/Lytatroan][b]Lytatroan[/b][/url] — the stylish, human-made thumbnail.
 [url=https://github.com/paytonrog/paydex-lut-editor]Paydex LUT Editor[/url] — inspiration for semantic controls and layout; Epic LUT's editor is independently authored.
 
-[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Nexus BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.9.0]GitHub BSL / LLL / MDL[/url]
+[url=https://github.com/HWG90/Epic-LUT]Source and documentation[/url] | [url=https://www.nexusmods.com/helldivers2/mods/17039?tab=files]Nexus BSL / MDL[/url] | [url=https://github.com/HWG90/Epic-LUT/releases/tag/R5.9.2]GitHub BSL / LLL / MDL[/url]
 
 [center][b]Freedom deserves a better color palette.[/b][/center]
 [size=1][i]Community-made; not affiliated with Arrowhead, Sony or Nexus Mods. The Debug LUT by Plain Furniture is included; game textures are not packaged.[/i][/size]

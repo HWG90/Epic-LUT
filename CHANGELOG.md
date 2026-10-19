@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## R5.9.2 - 2026-10-19
+
+- Export selected LUTs as one combined patch or separate patches.
+- Use custom LUT names in exports.
+- Include matching Pattern LUTs when enabled.
+
 ## R5.9.2 RC1 - 2026-10-19
 
 - Export selected LUTs as one combined patch or separate patches.

@@ -1,3 +1,11 @@
+# Epic LUT R5.9.2
+
+- Export selected LUTs as one combined patch or separate patches.
+- Exported LUT names now use your custom names.
+- Matching Pattern LUTs are included when enabled.
+
+Open LUT Editor > Export and choose **Choose LUT Patches** to select what to export.
+
 # Epic LUT R5.9.0
 
 Performance and stability update.
