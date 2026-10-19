@@ -967,6 +967,9 @@ assert(bound[8] == 100 and bound[3] == armor_object, 'Failed helmet application 
 assert(restart_handle.activate('restore'))
 bound[8] = 400
 assert(restarted.on_disable(ctx))
+local import_script = assert(io.open('tools/import_zip.ps1', 'rb'))
+m.zip_import_script = import_script:read('*a'):gsub('.', function(c) return string.format('%02x', c:byte()) end)
+import_script:close()
 local actual_launch = m.native_import.launch_worker
 local workers = {}
 m.native_import.launch_worker = function(args)

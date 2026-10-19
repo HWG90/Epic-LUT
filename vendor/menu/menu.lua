@@ -5191,6 +5191,12 @@ function M.new(api, measure, Text)
                 drawing.button(px + pad + 148, toolbar_y, 140, bh, 'Clear All', function()
                     select_all(false)
                 end)
+                if dialog.allow_combine then
+                    drawing.button(px + pad + 296, toolbar_y, dw - pad * 2 - 296, bh,
+                        dialog.combine and 'One combined patch' or 'Separate patches', function()
+                            dialog.combine = not dialog.combine
+                        end)
+                end
             end
             local caption_y = toolbar_y - hint_height - 4
             bounded(
@@ -5198,7 +5204,7 @@ function M.new(api, measure, Text)
                 caption_y,
                 gear_columns and 'Choose an imported LUT, then its destination. Auto-map uses the checked gear columns.'
                     or mapping and 'Choose an imported LUT, then click its destination. Auto-map repeats imports in slot order.'
-                    or 'Matching Pattern LUTs are always included.',
+                    or dialog.hint or 'Matching Pattern LUTs are always included.',
                 12,
                 muted,
                 dw - pad * 2,
@@ -5345,7 +5351,7 @@ function M.new(api, measure, Text)
                     py + pad,
                     (dw - pad * 2 - 8) / 2,
                     bh,
-                    'Apply',
+                    dialog.action_label or 'Apply',
                     apply,
                     { enabled = any, accent = any and accent, ink = T.background }
                 )

@@ -448,7 +448,7 @@ function C.new(deps)
                         type = 'choice',
                         label = 'Export format',
                         description = 'Include Pattern LUTs in Exports controls matching companions for loaded gear tables. DDS exports write companion files in one folder.',
-                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)' },
+                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)', 'Choose LUT Patches' },
                         default = 1,
                     },
                     {
@@ -476,7 +476,7 @@ function C.new(deps)
                             end
                             return assert(deps.save_patch, 'Patch exporter unavailable')(
                                 self.handle.get('save_name'),
-                                format == 3
+                                format == 5 and 'choose' or format == 3
                             )
                         end,
                     },

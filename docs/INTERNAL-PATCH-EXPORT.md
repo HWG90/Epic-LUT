@@ -37,3 +37,9 @@ Format references reviewed: [HD2SDK Community Edition archive serializer](https:
 Validation: synthetic float/ID round trip, filesystem transaction and rollback, UI callback destination identity, stale gear refusal, existing editor contracts, and read-only extraction/export of real base-game 23x8, 23x5 and 3x1 LUTs. A saved Cape replacement with eight rows over an original five-row texture also round-trips exactly. The Pattern workspace offers DDS and Patch ZIP export. A separate binary check validates emitted archive records, sidecars, dimensions and edited floats.
 
 Archive validation and live patch rendering are separate checks. Managed development packages include the editor and preview; installing the editor does not install its exported patches. Source build tools use Python, while users do not need it to export.
+
+## Choosing several live LUT patches
+
+In LUT Editor Tools, choose **Choose LUT Patches** and press **Export...**. Check the material LUTs to include, then choose **One combined patch** or **Separate patches**. Matching Pattern companions follow the existing Include Patterns setting. The loaded draft is used for its current destination; other choices use their currently applied values. Cancelling writes nothing. Changed live bindings invalidate the chooser instead of guessing destinations.
+
+Custom LUT names appear in the chooser and saved-preset export list. Separate patches use a custom LUT name when present. DDS filename formats containing LUT numbers use the custom name instead; HEX-only and Decimal-only formats retain their ID naming. Names do not alter resource IDs or assignment provenance. Discovery runs only on opening/exporting, with one shared Pattern discovery per export operation.

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## R5.9.2 RC1 - 2026-10-19
+
+- Export selected LUTs as one combined patch or separate patches.
+- Use custom LUT names in exports.
+- Include matching Pattern LUTs in selected exports when enabled.
+
 ## R5.9.0 - 2026-10-18
 
 - Reduced background CPU use and stutters when applying or restoring looks.

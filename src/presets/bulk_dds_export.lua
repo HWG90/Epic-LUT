@@ -33,6 +33,9 @@ function B.new(m, paths)
             end
             local ordinal = (document.width == 3 and document.height == 1 and 'PatternLUT' or 'LUT')
                 .. string.format('%.0f', entry.ordinal)
+            local display = entry.label or ordinal
+            assert(type(display) == 'string' and #display > 0 and not display:find('[%c\\/:*?"<>|]'),
+                'Invalid custom LUT filename')
             local key = resource or (entry.kind .. ':' .. ordinal)
             local identity = resource and ('resource ID ' .. resource) or (entry.kind .. ' ' .. ordinal)
             local target = key .. ':' .. entry.kind .. ':' .. ordinal
@@ -46,9 +49,9 @@ function B.new(m, paths)
                     id = m.resource_ids.format(resource, true):match('^%[(%d+)%]$')
                     assert(id, 'Could not format LUT resource ID')
                 end
-                local suffix = ordinal
+                local suffix = display
                 if naming == 1 or naming == 2 then
-                    suffix = ordinal .. (id and '-' .. id or '')
+                    suffix = display .. (id and '-' .. id or '')
                 elseif naming == 4 or naming == 5 then
                     suffix = id or ordinal
                 end

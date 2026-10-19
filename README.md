@@ -1,5 +1,7 @@
-# Epic LUT R5.9.0
-Event-driven appearance recovery and lower-cost Shared LUT publication. [Release notes](docs/RELEASE-R5.9.0.md).
+# Epic LUT R5.9.2 RC1
+Release candidate: named LUT exports and selected combined or separate patches. [Candidate notes](docs/RELEASE-R5.9.2-rc1.md).
+
+Public stable downloads below remain R5.9.0.
 
 **STYLISH FREEDOM. Defend Freedom in Style.**
 

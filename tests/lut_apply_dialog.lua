@@ -122,6 +122,20 @@ local function checked(dialog, id)
         end
     end
 end
+-- Export reuses selection ownership while retaining its own labels and file mode.
+do
+    local export = descriptor()
+    export.title, export.action_label, export.hint = 'Export LUT Patches', 'Export', 'Choose export targets'
+    export.allow_combine, export.combine = true, true
+    open(export)
+    assert(label('Export', true) and label('Choose export targets', true))
+    click(assert(label('One combined patch', true)))
+    assert(not export.combine and label('Separate patches', true))
+    click(assert(label('Separate patches', true)))
+    assert(export.combine)
+    click(assert(label('Cancel', true)))
+    assert(not menu.lut_apply_dialog and apply_attempts == 0)
+end
 local dialog = open()
 assert(label('Armor / Cape', true) and label('Helmet', true), 'Per-LUT preset modal did not show its two gear columns')
 assert(label('Pattern included', true), 'Associated Pattern was omitted from the preset row information')

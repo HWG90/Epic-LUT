@@ -97,6 +97,11 @@ for format = 1, 5 do
     )
     previous = folder
 end
+-- Custom names replace LUT ordinals without changing identity or bytes.
+local named = entry(material, 'armor', 3, 'd3ce605892d5331b')
+named.label = 'Desert'
+local named_folder = save('Named', { named }, 1, { 'Named Desert-d3ce605892d5331b.dds' })
+assert_file(named_folder, 'Named Desert-d3ce605892d5331b.dds', material)
 -- Unknown IDs fall back to an ordinal instead of inventing a resource ID.
 for _, format in ipairs({ 1, 2, 4, 5 }) do
     local folder = save('Unknown', { entry(material, 'helmet', 12) }, format, { 'Unknown LUT12.dds' })

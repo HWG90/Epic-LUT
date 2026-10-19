@@ -2193,6 +2193,24 @@ local function gear_exports()
             file_io = m.file_io,
         }, {
             paths = paths,
+            menu = function() return frontend.menu end,
+            label = function(hash) return hash and operations.lut_names and operations.lut_names.get(hash) end,
+            draft = function(index, kind)
+                local target = edit.editor_target
+                if edit.loaded and target and checked_editor_target(target) == index
+                    and (not target.kind or target.kind == kind) then return edit.loaded end
+            end,
+            write_patch = function(name, documents)
+                return m.patch_export.new(paths.exports, {
+                    available_name = m.lut_files.available_name, dds = m.dds,
+                    directory_exists = paths.directory_exists, mkdir_new = paths.mkdir_new, rmdir = paths.rmdir,
+                    binding_writer = m.binding_patch_export,
+                    provenance = operations.binding_export_provider({ entries = documents }),
+                    original_patch = operations.export_original_patch,
+                    material_source = operations.export_material_source, unit_layout = m.binding_unit_layout,
+                    id_available = function(kind, id) return operations.export_id_available(kind, id) end,
+                }).save(name, documents)
+            end,
             armory_options = function()
                 if handle then
                     local controls = api.mods[handle.id].controls
@@ -2258,6 +2276,9 @@ local function gear_exports()
         })
     end
     return operations.gear_export
+end
+function operations.choose_export_patches(name)
+    return gear_exports().choose_patches(name)
 end
 local function sync_armory_export()
     return gear_exports().sync_armory_options()
@@ -2570,6 +2591,7 @@ local function register(current)
             local preset =
                 assert(armory_collection and armory_collection.selected, 'Choose a saved Armory preset first')
             local exporter = assert(m.preset_export, 'Armory exporter unavailable').new(m, paths, {
+                lut_label = function(hash) return operations.lut_names and operations.lut_names.get(hash) end,
                 include_capes = function()
                     return operations.include_capes_in_exports()
                 end,
@@ -3524,6 +3546,7 @@ return {
                                     original = original,
                                     kind = m.gear_catalog.kind(targets[1]),
                                     ordinal = 1,
+                                    label = operations.lut_names and original and operations.lut_names.get(original.resource),
                                 },
                             }
                             for _, entry in ipairs(companions) do
@@ -3563,6 +3586,7 @@ return {
                 function(name, entire)
                     return action(function()
                         assert(m.patch_export, 'Patch exporter unavailable')
+                        if entire == 'choose' then return operations.choose_export_patches(name) end
                         if entire then
                             assert(stop_identification(), 'Highlight restoration pending')
                             if pattern_editor then
