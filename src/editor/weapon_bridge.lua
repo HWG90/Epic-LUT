@@ -11,13 +11,23 @@ function B.new(m, host)
         'Weapon editor modules unavailable'
     )
     local self, runtime, discovery, controller, identity = {}, nil, nil, nil, nil
+    local buffers = m.float_buffer or require('src.core.float_buffer')
     local status, recovery = 'Load current weapons to begin.', {}
     local subscriptions, pending_slots, events, events_suspended = {}, 0, nil, false
-    local bit = require('bit')
+    local function has_bit(mask, value)
+        return mask % (value * 2) >= value
+    end
     local function equipment_changed(mask)
         if host.restart_wake then host.restart_wake(mask) end
-        pending_slots = bit.bor(pending_slots, type(mask) == 'number' and bit.band(mask, 7) or 7)
-        if type(mask) == 'number' and bit.band(mask, 8) ~= 0 and host.actor_changed then
+        local selected = type(mask) == 'number' and mask or 7
+        local value = 1
+        for _ = 1, 3 do
+            if has_bit(selected, value) and not has_bit(pending_slots, value) then
+                pending_slots = pending_slots + value
+            end
+            value = value * 2
+        end
+        if type(mask) == 'number' and has_bit(mask, 8) and host.actor_changed then
             host.actor_changed()
         end
     end
@@ -202,7 +212,7 @@ function B.new(m, host)
         local active, group, index, kind, chosen = source_group(target)
         local loaded = active.load(target.weapon_slot, index, kind)
         assert(type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= loaded.height, 'Invalid weapon region')
-        local ffi, plans, variants, items = require('ffi'), {}, {}, {}
+        local plans, variants, items = {}, {}, {}
         local cache = {
             document = group.document,
             preview = group.preview_document,
@@ -211,11 +221,12 @@ function B.new(m, host)
         }
         for _, b in ipairs(chosen) do
             local source = assert(b.document or group.source_document, 'Original weapon colors unavailable')
-            local bytes = ffi.string(source.data, source.width * source.height * 16)
+            local count = source.width * source.height * 4
+            local bytes = buffers.bytes(source.data, count)
             local plan = variants[bytes]
             if not plan then
-                local data = ffi.new('float[?]', source.width * source.height * 4)
-                ffi.copy(data, source.data, source.width * source.height * 16)
+                local data = buffers.new(count)
+                buffers.copy(data, source.data, count)
                 for _, column in ipairs(source.width == 23 and { 1, 3, 6, 7, 13, 17, 18, 19, 20 } or { 1 }) do
                     local at = ((row - 1) * source.width + column - 1) * 4
                     data[at], data[at + 1], data[at + 2] = 1, 0, 1
@@ -474,10 +485,12 @@ function B.new(m, host)
             return
         end
         local poll_slot = 1
-        while bit.band(pending_slots, bit.lshift(1, poll_slot - 1)) == 0 do
+        local selected = 1
+        while not has_bit(pending_slots, selected) do
             poll_slot = poll_slot + 1
+            selected = selected * 2
         end
-        pending_slots = bit.band(pending_slots, bit.bnot(bit.lshift(1, poll_slot - 1)))
+        pending_slots = pending_slots - selected
         local prior = {}
         for slot = poll_slot, poll_slot do
             local catalog = runtime.catalog(slot)
