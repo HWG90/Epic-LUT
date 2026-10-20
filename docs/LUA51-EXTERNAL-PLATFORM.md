@@ -87,6 +87,7 @@ successfully detached workers.
 ```powershell
 py -3.14 tools/build_lua51_platform_service.py
 py -3.14 tests/test_lua51_platform_external.py
+py -3.14 tests/test_lua51_external_project.py
 ```
 
 The test copies the real EXE into private Temp and uses actual stock Lua 5.1
@@ -107,4 +108,26 @@ IPC/stat/hash latency, and a separate idle CPU sample. These are standalone
 measurements, not deployed game performance. Observed one-shot startup samples
 were sub-second to approximately two seconds, varying with host load; they are
 separate from subsequent request timings. This backend remains opt-in and has
-not been activated in the game.
+no full-runtime gameplay acceptance.
+
+## OS-only game probe status
+
+An approved isolated one-shot reached the game's stock Lua 5.1 runtime, started
+the external service, and completed Unicode binary write/read. It then failed
+before SHA256 because the prepared project omitted the model's cooperative
+module dependency. Normal cleanup and the actual helper's exit were verified;
+the temporary project and its owned settings were retired. This is partial
+OS-service evidence, not a completed smoke or an Epic LUT gameplay result.
+
+The earlier standalone candidate fixture allowed a global import from the
+repository, which concealed that missing packaged dependency. The public
+`test_lua51_external_project.py` now runs the actual LLL project/config code with
+the real EXE in private Temp. Its working directory is private, both package
+paths are empty, and global `require`, `dofile`, and DLL loading are forbidden.
+Only declared project modules, including cooperative and the production smoke
+runner, can load. It reproduces the missing dependency as a failure, verifies
+cleanup, and passes the corrected complete OS smoke. Repeat enable and actual
+config reload perform no additional launch or settings write; helper exit is
+checked independently. Completion of the corrected OS-only probe in the game
+remains pending. Armor/weapon binding, recovery and deployed performance remain
+separate.
