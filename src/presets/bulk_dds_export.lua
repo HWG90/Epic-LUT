@@ -1,5 +1,5 @@
 -- Transactional raw DDS export; all pixels and names validate before creating a folder.
-local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
+local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal', 'Name only' } }
 local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape' }
 function B.new(m, paths)
     local self = {}
@@ -55,7 +55,8 @@ function B.new(m, paths)
                 elseif naming == 4 or naming == 5 then
                     suffix = id or ordinal
                 end
-                local stem = prefix .. ' ' .. suffix
+                if naming == 6 then suffix = '' end
+                local stem = prefix .. (suffix ~= '' and ' ' .. suffix or '')
                 stems[stem:lower()] = (stems[stem:lower()] or 0) + 1
                 files[#files + 1] = { stem = stem, kind = entry.kind, bytes = bytes }
             end

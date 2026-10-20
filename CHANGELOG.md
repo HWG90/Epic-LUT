@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## R5.9.3 - 2026-10-19
+
+- Fixed Choose LUT Patches export after startup.
+- Added single DDS and selected patch filename formats, including Name only plus timestamp.
+- Preparing for R6 weapon LUT editing; R5 remains the maintenance branch.
+
 ## R5.9.2 - 2026-10-19
 
 - Export selected LUTs as one combined patch or separate patches.

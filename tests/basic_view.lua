@@ -470,7 +470,7 @@ for _, format in ipairs({ 1, 2, 3, 4 }) do
         export_hits == prior + ((format == 3 or format == 4) and 1 or 0),
         'Basic full-collection export eligibility changed for format ' .. format
     )
-    assert((bulk_label('LUT# + HEX') ~= nil) == (format == 4), 'Basic DDS naming appears in the wrong format')
+    assert((bulk_label('LUT# + HEX') ~= nil) == (format ~= 3), 'Basic DDS naming appears in the wrong format')
 end
 tap_label('LUT# + HEX')
 assert(menu.dropdown and menu.dropdown.control.id == 'dds_naming', 'Basic bulk naming dropdown did not open')

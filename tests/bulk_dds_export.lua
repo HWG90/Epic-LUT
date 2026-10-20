@@ -71,7 +71,7 @@ local function save(prefix, entries, format, filenames)
     published[#published + 1] = { folder = folder, filenames = filenames }
     return folder
 end
-assert(table.concat(B.formats, '|') == 'LUT# + HEX|LUT# + Decimal|LUT#|HEX|Decimal')
+assert(table.concat(B.formats, '|') == 'LUT# + HEX|LUT# + Decimal|LUT#|HEX|Decimal|Name only')
 local resources = {
     entry(material, 'armor', 3, 'd3ce605892d5331b'),
     entry(pattern, 'helmet', 3, 'ffffffffffffffff'),
@@ -185,7 +185,7 @@ assert(not pcall(export.save, 'Invalid', { resources[1], entry(nonfinite, 'helme
 assert(not pcall(export.save, '../escape', resources, 1))
 assert(not pcall(export.save, string.rep('A', 49), resources, 1))
 assert(not pcall(export.save, 'Bad ID', { entry(material, 'armor', 1, 'not an id') }, 1))
-assert(not pcall(export.save, 'Bad Mode', resources, 6))
+assert(not pcall(export.save, 'Bad Mode', resources, 7))
 assert(not pcall(export.save, 'Bad Ordinal', { entry(material, 'armor', 0) }, 1))
 local too_many = {}
 for i = 1, B.MAX_BINDINGS + 1 do
@@ -243,6 +243,10 @@ assert(
 )
 os.remove(foreign_staging)
 assert(rmdir(last_stage))
+
+local plain = save('Plain', { entry(material, 'armor', 1, '1111111111111111') }, 6, { 'Plain.dds' })
+assert_file(plain, 'Plain.dds', material)
+
 for _, output in ipairs(published) do
     for _, name in ipairs(output.filenames) do
         assert(os.remove(output.folder .. '/' .. name))

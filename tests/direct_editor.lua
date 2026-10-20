@@ -346,6 +346,15 @@ assert(
         and bound[3] == 100,
     'Patch export changed bindings or used an imported identity'
 )
+assert(handle.set('dds_naming', 4))
+activate('save_patch')
+local exact_name = patch_saved.deps.available_name('Named', function() return false end)
+assert(exact_name:find(' ffffffffffffffff-', 1, true), 'Single patch ignored HEX naming')
+assert(handle.set('dds_naming', 6))
+activate('save_patch')
+local plain_name = patch_saved.deps.available_name('Named', function() return false end)
+assert(not plain_name:find('ffffffffffffffff', 1, true), 'Name only patch kept a resource suffix')
+assert(handle.set('dds_naming', 1))
 patch_saved = nil
 bound[3], bound[4] = 777, 777
 assert(
@@ -805,6 +814,7 @@ assert(bound[8] ~= helmet_object, 'Editor apply did not use the edited table')
 activate('undo')
 activate('apply_editor')
 assert(bound[8] == helmet_object)
+assert(handle.set('dds_naming', 6))
 assert(handle.set('save_name', 'shared-palette'))
 local actual_date = os.date
 os.date = function()

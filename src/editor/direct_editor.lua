@@ -3534,10 +3534,7 @@ return {
                         assert(edit.loaded, 'Import a palette first')
                         local d = edit.loaded
                         assert(stop_identification(), 'Highlight restoration pending')
-                        local targets = d.width == 23
-                                and operations.include_patterns_in_exports()
-                                and operations.selected_export_bindings(false)
-                            or {}
+                        local targets = d.width == 23 and operations.selected_export_bindings(false) or {}
                         local companions = operations.export_pattern_entries(targets)
                         if #companions > 0 then
                             local original = original_luts and original_luts.get(targets[1].original)
@@ -3553,11 +3550,13 @@ return {
                             for _, entry in ipairs(companions) do
                                 entries[#entries + 1] = entry
                             end
-                            local folder, count = m.bulk_dds_export.new(m, paths).save(name, entries, 1)
+                            local folder, count = m.bulk_dds_export.new(m, paths).save(name, entries, handle.get('dds_naming'))
                             d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
                             return message('Saved LUT and matching Patterns: ' .. count .. ' DDS files to ' .. folder)
                         end
-                        local chosen = operations.export_files.save_unique(name, d)
+                        local chosen = operations.export_files.save_unique(name, d, m.lut_files.naming_suffix(d,
+                            targets[1] and original_luts and original_luts.get(targets[1].original),
+                            handle.get('dds_naming'), operations.lut_names and operations.lut_names.get(d.resource), m.resource_ids, handle.get('lut')))
                         d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
                         return message('Saved ' .. chosen .. '.dds in Epic LUT/files/exports')
                     end)
@@ -3666,8 +3665,11 @@ return {
                             end
                         end
                         assert(original, 'Original destination LUT snapshot is not ready')
+                        local suffix = m.lut_files.naming_suffix(edit.loaded, original, handle.get('dds_naming'),
+                            operations.lut_names and operations.lut_names.get(original.resource), m.resource_ids, handle.get('lut'))
+                        local function available_name(name, exists) return m.lut_files.available_name(name, exists, suffix) end
                         local exporter = m.patch_export.new(paths.exports, {
-                            available_name = m.lut_files.available_name,
+                            available_name = available_name,
                             dds = m.dds,
                             directory_exists = paths.directory_exists,
                             mkdir_new = paths.mkdir_new,
@@ -3688,7 +3690,7 @@ return {
                                 documents[#documents + 1] = entry
                             end
                             exporter = m.patch_export.new(paths.exports, {
-                                available_name = m.lut_files.available_name,
+                                available_name = available_name,
                                 dds = m.dds,
                                 directory_exists = paths.directory_exists,
                                 mkdir_new = paths.mkdir_new,

@@ -1,22 +1,22 @@
-# EPIC LUT R5.9.2 🪿
+# EPIC LUT R5.9.3 🪿
 
 **STYLISH FREEDOM — Defend Freedom in Style.**
 
 **SHARED LUT — YOUR LOOK, VISIBLE TO YOUR SQUAD**
 Share Armor, Helmet and Pattern colors, materials, camo and emissives with compatible Epic LUT squadmates. Apply an Armory preset and leave **Configuration > Share full LUT appearance** enabled. Cape materials excluded; oversized looks stay local. **Shared Lobby LUT remains in testing.**
 
-**R5.9.2**
-- Export selected LUTs as one combined patch or separate patches.
-- Exports use your custom LUT names.
-- Matching Pattern LUTs are included when enabled.
+**R5.9.3**
+- Fixed the Export button in Choose LUT Patches.
+- Single DDS and selected patch exports now use the filename options.
+- Added Name only: your name plus a timestamp.
 
-LUT Editor > Export > Choose LUT Patches.
+**Preparing for R6:** primary, secondary and support weapon LUT editing, weapon presets and weapon import/export alongside gear editing. R5 remains the maintenance branch. Weapon features are not part of R5.9.3.
 
 Edit colors, materials and camo in game, save Armory presets, import LUTs, map them to gear and export binding-aware patches. Pattern quick swatches show **Color / Mat/Opac / Roughness**. Photo Mode coexistence and custom-model LUT fixes are included.
 
 Massive thanks to **Scarpheon** for testing, patch help and 26 bump maps. Thanks to Arkturus425, CowboyBingus, Plain Furniture, Lytatroan, Shikami, Kaiser & Amiba, Paydex and the community.
 
-**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.9.2
+**R5:** https://github.com/HWG90/Epic-LUT/releases/tag/R5.9.3
 **Nexus:** https://www.nexusmods.com/helldivers2/mods/17039
 **R6 weapon preview:** https://github.com/HWG90/Epic-LUT/releases/tag/R6.0.0-alpha4
 R6 is experimental. **No support offered.**

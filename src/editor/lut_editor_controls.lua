@@ -455,8 +455,8 @@ function C.new(deps)
                         id = 'dds_naming',
                         type = 'choice',
                         presentation = 'dropdown',
-                        label = 'DDS filenames',
-                        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
+                        label = 'Export filenames',
+                        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal', 'Name only' },
                         default = 1,
                     },
                     {
