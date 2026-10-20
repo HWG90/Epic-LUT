@@ -81,8 +81,14 @@ independent rounding cases, malformed/mip input and bounds. Portable editor and
 binding-session fixtures execute the real production controllers with explicit
 host fixtures and forbidden native imports; they do not emulate FFI or prove GPU
 rendering. Existing LuaJIT regression suites also exercise the changed paths.
-The broad suite retains the previously observed legacy full_editor failure;
-`dist/lua51-regressions.json` records current results. The font-metric fixture
+The earlier broad report `dist/lua51-regressions.json` recorded a legacy
+full_editor fixture failure. Isolation showed that both current and pre-port
+production behave identically: saved test DDS data made the expected edit a
+no-op, then a disabled protected edit correctly returned false instead of
+throwing. The corrected fixture uses private storage and verifies exact unchanged
+DDS bytes and activation flags; repeated current R5/R6 and pre-port runs pass.
+That focused result does not silently refresh the earlier broad report.
+The font-metric fixture
 passes when its original UTF-8 bytes are executed, avoiding Python ANSI decoding.
 The real 155-binding publication fixture serializes two palette copies; the larger
 10-LUT fixture preserves a 410-byte wire packet across 2,819 forced cooperative
@@ -335,3 +341,28 @@ Shared path/filter/child-name guards and custom DDS display filenames now reject
 ASCII control bytes explicitly. Locale-dependent Lua %c could reject valid UTF-8
 bytes in names such as 服装. Strict UTF-8 validation, traversal/reserved-character
 checks, size budgets and explicit ASCII naming policies remain in force.
+
+## Actual loader preflight and explicit legacy boundaries
+
+LLL's stock-runtime guard rejects a literal native-library import anywhere in a
+loaded module, including an unused branch. Standalone Lua execution had concealed
+that loading failure in binding SHA, export provenance and Direct Editor.
+The BCrypt fallback now lives in legacy_binding_digest; checked snapshot reads
+and Direct Editor's native scratch buffers live in legacy_memory. Existing native
+builders include those modules explicitly. Stock projects omit them and consume
+the selected platform or an explicit read_snapshot service. Selecting a legacy
+fallback still fails the loader's native-runtime guard; no check is bypassed.
+
+The exact production modules now pass the actual LLL Project/check_runtime and
+private project/config integration. The real external service hashes independent
+string/empty vectors and a 65,792-byte owned binary file through three yielding
+reader slices. The same project exercises exact portable snapshot bytes and
+cold Direct Editor cleanup, then verifies helper exit and saved reload with no
+new launch or write. This proves those module boundaries and source functions;
+it does not supply the missing game engine or activate the full editor.
+
+The exact fourteen-file project subsequently passed those same checks in the
+running game's stock Lua 5.1 VM. The owned file was removed, the actual helper's
+exit was independently verified, and project/settings retirement retained and
+rechecked the reviewed hashes. Direct Editor on_enable was never called: this
+was a loading/source-function test, with no engine, LUT, input or renderer calls.

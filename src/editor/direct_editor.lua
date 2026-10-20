@@ -1,7 +1,7 @@
 local open_file = m.file_io and m.file_io.open or io.open
 -- Active edit session, service composition and controller-owned gear transitions.
 local buffers = m.float_buffer or require('src.core.float_buffer')
-local ffi, small, big
+local memory_access, small, big
 local ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor
 local updates
 local groups = {}
@@ -51,16 +51,16 @@ local DEBUG_SOURCE = 'builtin:Debug.dds'
 local import_counter = package.loaded['epic.import.counter.v1'] or { value = 0 }
 package.loaded['epic.import.counter.v1'] = import_counter
 function operations.initialize_legacy_buffers()
-    if ffi then return end
+    if memory_access then return end
     -- Only the verified legacy activation selects its FFI memory boundary.
-    local library = require('ffi')
-    local first, second = library.new('uint8_t[96]'), library.new('uint8_t[1024]')
-    ffi, small, big = library, first, second
+    local library = m.legacy_memory or require('src.platform.legacy_memory')
+    local state = library.buffers()
+    memory_access, small, big = state.read_into, state.small, state.big
 end
 local retain = package.loaded['epic.direct_lut.retained.v1'] or { records = {}, bytes = 0, cache = {} }
 package.loaded['epic.direct_lut.retained.v1'] = retain
 local function read(a, n, b)
-    return memory.read_into(ffi.cast('const uint8_t *', a), n, b)
+    return memory_access(memory, a, n, b)
 end
 local function binding(b)
     return m.engine.binding(read, b.material, b.slot or m.engine.LUT_SLOT, small, big)

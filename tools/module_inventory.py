@@ -91,6 +91,10 @@ SOURCE_GROUPS['legacy_paths'] = 'platform'
 OWN.insert(0, 'legacy_windows')
 SOURCE_GROUPS['legacy_windows'] = 'platform'
 
+# Existing native builders retain BCrypt; stock projects omit this adapter.
+OWN.insert(0, 'legacy_binding_digest')
+SOURCE_GROUPS['legacy_binding_digest'] = 'platform'
+
 OWN.append('runtime_services')
 SOURCE_GROUPS['runtime_services'] = 'platform'
 
@@ -101,3 +105,8 @@ SOURCE_GROUPS['external_platform'] = 'platform'
 # Shared explicit worker-launch ownership precedes all cache/import consumers.
 OWN.insert(0, 'worker_launch')
 SOURCE_GROUPS['worker_launch'] = 'platform'
+
+# Existing native builders retain the explicit raw-memory fallback. Stock-only
+# projects select their snapshot service and omit this legacy dependency.
+OWN.insert(0, 'legacy_memory')
+SOURCE_GROUPS['legacy_memory'] = 'platform'
