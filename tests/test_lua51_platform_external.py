@@ -97,6 +97,8 @@ def until(predicate, reason, limit=10):
 def worker(folder, executable, digest, blocked):
     root = Path(folder)
     lua, module, transport = runtime()
+    lua.globals()[b'actual_external'] = transport
+    lua.execute(b"m={external_platform={start=function(o,p)local c=actual_external.start(o,p);external_pid=c.server_pid;return c end}}")
     options = opts(lua, executable, digest)
     malformed=lua.execute(b"""return function(provider,options,pid,line)
         local old_open,old_popen=io.open,io.popen
@@ -232,15 +234,81 @@ def worker(folder, executable, digest, blocked):
     assert owned.running() is True and owned.stop() is True
     until(lambda:not owned.running(), 'Owned worker did not stop')
     assert owned.close() is True
-    detached, worker_args = launch(root / 'detached.txt', delay=500)
-    assert detached.close() is True
-    assert service.close() is True
-    until((root/'detached.txt').exists, 'Service retirement killed a detached worker')
-    assert int((root/'detached.txt').read_text()) == detached.pid
+    retained, _ = launch(root / 'service-owned.txt', hold=60)
+    retained_handle = process(retained.pid)
+    try:
+        until((root/'service-owned.txt').exists, 'Service-close owned worker never ran')
+        assert retained.running() is True
+        detached, worker_args = launch(root / 'detached.txt', delay=500)
+        assert detached.close() is True
+        assert service.close() is True
+        assert K.WaitForSingleObject(retained_handle, 3000) == 0, 'Service close detached a still-owned worker'
+        until((root/'detached.txt').exists, 'Service retirement killed an explicitly detached worker')
+        assert int((root/'detached.txt').read_text()) == detached.pid
+    finally:
+        if K.WaitForSingleObject(retained_handle, 0) == 258:
+            assert K.TerminateProcess(retained_handle, 78)
+            assert K.WaitForSingleObject(retained_handle, 3000) == 0
+        K.CloseHandle(retained_handle)
+
+    # A successfully acknowledged worker remains owned until explicit close.
+    # Kill the exact helper, retain real process handles, and verify the job
+    # terminates its already-running child rather than detaching it on loss.
+    service = module.new(options)
+    helper_handle = process(int(lua.globals()[b'external_pid']))
+    acknowledged, _ = launch(root / 'acknowledged.txt', hold=60)
+    acknowledged_handle = process(acknowledged.pid)
+    try:
+        until((root/'acknowledged.txt').exists, 'Acknowledged worker never ran')
+        assert int((root/'acknowledged.txt').read_text()) == acknowledged.pid
+        assert acknowledged.running() is True
+        assert K.TerminateProcess(helper_handle, 77)
+        assert K.WaitForSingleObject(helper_handle, 2000) == 0
+        assert K.WaitForSingleObject(acknowledged_handle, 3000) == 0, 'Helper loss detached an acknowledged owned worker'
+        error(acknowledged.running)
+        assert service.close() is True
+    finally:
+        # Failure cleanup is restricted to these exact test-owned handles.
+        if K.WaitForSingleObject(acknowledged_handle, 0) == 258:
+            assert K.TerminateProcess(acknowledged_handle, 78)
+            assert K.WaitForSingleObject(acknowledged_handle, 3000) == 0
+        if K.WaitForSingleObject(helper_handle, 0) == 258:
+            assert K.TerminateProcess(helper_handle, 78)
+            assert K.WaitForSingleObject(helper_handle, 3000) == 0
+        K.CloseHandle(acknowledged_handle); K.CloseHandle(helper_handle)
 
     # Compile-only injected stalled dispatch uses the exact production watchdog.
     injected = json.loads((Path(blocked) / 'build.json').read_text())
     block_options = opts(lua, injected['exe'], injected['sha256'])
+    # A failed explicit detach must retain the exact token/job. This private
+    # fault cannot exist in the production build and never replaces OS launch.
+    channel = transport.start(block_options, os.getpid()); server_handle = process(channel.server_pid)
+    assert request(29, channel.token + struct.pack('<II', os.getpid(), channel.server_pid))[0] == 0
+    assert request(248, b'\1', 2) == (0, b'')
+    script = 'Start-Sleep -Seconds 60'
+    args = ('-NoLogo -NoProfile -NonInteractive -EncodedCommand ' + base64.b64encode(script.encode('utf-16-le')).decode()).encode()
+    status, receipt = request(12, struct.pack('<I', len(args)) + args + str(root).encode('utf8'), 3)
+    assert status == 0 and len(receipt) == 8
+    token, retained_pid = struct.unpack('<II', receipt)
+    retained_handle = process(retained_pid)
+    try:
+        assert request(15, struct.pack('<I', token), 4) == (5, b'')
+        assert request(13, struct.pack('<I', token), 5) == (0, struct.pack('<I', 1)), 'Failed detach discarded the owner'
+        assert request(14, struct.pack('<I', token), 6) == (0, b'')
+        assert K.WaitForSingleObject(retained_handle, 3000) == 0
+        assert request(248, b'\0', 7) == (0, b'')
+        assert request(15, struct.pack('<I', token), 8) == (0, b'')
+        assert request(13, struct.pack('<I', token), 9) == (6, b'')
+        assert request(30, b'', 10) == (0, b'')
+        assert K.WaitForSingleObject(server_handle, 3000) == 0
+    finally:
+        if K.WaitForSingleObject(retained_handle, 0) == 258:
+            assert K.TerminateProcess(retained_handle, 78)
+            assert K.WaitForSingleObject(retained_handle, 3000) == 0
+        if K.WaitForSingleObject(server_handle, 0) == 258:
+            assert K.TerminateProcess(server_handle, 78)
+            assert K.WaitForSingleObject(server_handle, 3000) == 0
+        close(channel); K.CloseHandle(retained_handle); K.CloseHandle(server_handle)
     for operation in [249, 250, 251, 254, 30]:
         channel = transport.start(block_options, os.getpid()); server_handle = process(channel.server_pid)
         assert request(29, channel.token + struct.pack('<II', os.getpid(), channel.server_pid))[0] == 0
@@ -288,11 +356,34 @@ def worker(folder, executable, digest, blocked):
     if child_handle:
         assert K.WaitForSingleObject(child_handle,2000)==0,'Service survived actual client exit'
         K.CloseHandle(child_handle)
+    # A separate actual host exits abruptly after receiving and exercising a
+    # long-running worker's receipt. Both the helper and its owned job must exit.
+    owner_exit = subprocess.run([sys.executable, __file__, '--owner-exit-worker', str(executable), digest, str(root)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+    assert owner_exit.returncode == 0, owner_exit.stdout + owner_exit.stderr
+    owned_pids = json.loads(owner_exit.stdout.strip())
+    assert int((root/'host-owned-started.txt').read_text()) == owned_pids['worker']
+    for name, pid in owned_pids.items():
+        child_handle = K.OpenProcess(0x100000 | 0x1000 | 1, False, pid)
+        if child_handle:
+            try:
+                exited = K.WaitForSingleObject(child_handle, 3000)
+                if exited != 0:
+                    # Retire only the reported, actual test-owned process even
+                    # when the assertion catches the old orphaning behavior.
+                    assert K.TerminateProcess(child_handle, 78)
+                    assert K.WaitForSingleObject(child_handle, 3000) == 0
+                assert exited == 0, f'{name} survived actual client exit'
+            finally:
+                K.CloseHandle(child_handle)
+        else:
+            assert ctypes.get_last_error() == 87, ('Cannot verify owned process exit', name, pid)
     timings = {'startup_ms': round(startup_ms, 3), 'ipc_median_ms': round(statistics.median(samples), 3),
         'ipc_max_ms': round(max(samples), 3), 'idle_cpu_seconds': idle_cpu,
         'operations':operation_timings,'game_performance_measured': False}
     print('PASS external stock Lua5.1: actual hidden launcher/EXE/pipes, exact identity, Unicode/binary IO, atomic replacement, '
-        'SHA256, max/fragmented transfers, deadline/EOF/token faults, idle silence, isolated workers/detach, blocked dispatch and provisional-worker cleanup')
+        'SHA256, max/fragmented transfers, deadline/EOF/token faults, idle silence, owned workers on helper/host loss, '
+        'explicit detach, blocked dispatch and provisional-worker cleanup')
     print(json.dumps(timings, sort_keys=True))
 
 
@@ -307,6 +398,19 @@ if __name__ == '__main__':
         lua.execute(b"m={external_platform={start=function(o,p)local c=actual_external.start(o,p);external_pid=c.server_pid;return c end}}")
         service=module.new(opts(lua,sys.argv[2],sys.argv[3]))
         print(int(lua.globals()[b'external_pid']),flush=True)
+        os._exit(0)
+    elif len(sys.argv)==5 and sys.argv[1]=='--owner-exit-worker':
+        lua,module,transport=runtime()
+        lua.globals()[b'actual_external']=transport
+        lua.execute(b"m={external_platform={start=function(o,p)local c=actual_external.start(o,p);external_pid=c.server_pid;return c end}}")
+        service=module.new(opts(lua,sys.argv[2],sys.argv[3]))
+        marker=Path(sys.argv[4])/'host-owned-started.txt'
+        script="[IO.File]::WriteAllText('"+str(marker).replace("'","''")+"',[string]$PID);Start-Sleep -Seconds 60"
+        args=('-NoLogo -NoProfile -NonInteractive -EncodedCommand '+base64.b64encode(script.encode('utf-16-le')).decode()).encode()
+        owned=service.launch_worker(args,str(marker.parent).encode('utf8'))
+        until(marker.exists,'Host-exit owned worker did not actually run',limit=5)
+        assert owned.running() is True
+        print(json.dumps({'helper':int(lua.globals()[b'external_pid']),'worker':int(owned.pid)}),flush=True)
         os._exit(0)
     elif len(sys.argv) == 6 and sys.argv[1] == '--worker':
         worker(*sys.argv[2:])

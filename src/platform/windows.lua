@@ -64,7 +64,9 @@ function W.new(platform)
     end
     local function listing(folder, filter, metadata)
         folder = text(folder)
-        assert(type(filter) == 'string' and #filter > 0 and #filter <= 240 and not filter:find('[/\\%c]'), 'Invalid Windows file filter')
+        assert(type(filter) == 'string' and #filter > 0 and #filter <= 240
+            and not filter:find('[/\\%z\1-\31\127]'), 'Invalid Windows file filter')
+        filter = text(filter)
         local files, directories, supplied = operation(platform, 'files')(folder, filter)
         assert(type(files) == 'table' and (directories == nil or type(directories) == 'table'), 'Invalid Windows file listing')
         local names, receipts, seen, size = {}, {}, {}, 0
@@ -76,7 +78,7 @@ function W.new(platform)
             end
             for index = 1, count do
                 local name = text(array[index])
-                assert(name ~= '.' and name ~= '..' and not name:find('[/\\%c]') and not seen[name], 'Ambiguous or foreign Windows child path')
+                assert(name ~= '.' and name ~= '..' and not name:find('[/\\%z\1-\31\127]') and not seen[name], 'Ambiguous or foreign Windows child path')
                 seen[name], size = true, size + #name
                 names[#names + 1] = name
                 assert(#names <= MAX_FILES and size <= MAX_NAME_BYTES, 'Windows listing exceeds budget')

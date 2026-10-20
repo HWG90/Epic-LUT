@@ -36,7 +36,7 @@ function B.new(m, paths)
             local ordinal = (document.width == 3 and document.height == 1 and 'PatternLUT' or 'LUT')
                 .. string.format('%.0f', entry.ordinal)
             local display = entry.label or ordinal
-            assert(type(display) == 'string' and #display > 0 and not display:find('[%c\\/:*?"<>|]'),
+            assert(type(display) == 'string' and #display > 0 and not display:find('[%z\1-\31\127\\/:*?"<>|]'),
                 'Invalid custom LUT filename')
             local key = resource or (entry.kind .. ':' .. ordinal)
             local identity = resource and ('resource ID ' .. resource) or (entry.kind .. ' ' .. ordinal)

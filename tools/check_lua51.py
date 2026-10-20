@@ -23,6 +23,8 @@ PURE_TESTS += ('preview_source_io_portable', 'player_authored_clip_io')
 
 PURE_TESTS += ('public_engine_metadata',)
 PURE_TESTS += ('lut_row_files_portable',)
+PURE_TESTS += ('worker_smoke_portable',)
+PURE_TESTS += ('bulk_dds_unicode',)
 
 def runtime():
     lua = LuaRuntime(encoding=None, unpack_returned_tuples=True)

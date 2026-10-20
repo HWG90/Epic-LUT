@@ -148,9 +148,12 @@ preview-worker and saved-setup controllers consume the shared methods.
 The native broker additionally provides Unicode binary streams, file-only
 removal, rename without overwrite, controlled hidden system-PowerShell workers,
 and incremental BCrypt SHA256. Handles are private monotonic tokens with bounded
-counts; errors and service shutdown close their owned resources. Closing a worker
-releases ownership without terminating it; stop is explicit and scoped to that
-worker's job. Hash readers can yield, enforce complete EOF/length proof and cancel
+counts; errors and service shutdown close their owned resources. Explicit worker
+close releases ownership without terminating it; stop is scoped to its job.
+External workers retain kill-on-close protection after receipt delivery until
+explicit close succeeds. Helper loss, client exit and service retirement terminate
+still-owned jobs; failed detach retains its exact owner. Hash readers can yield,
+enforce complete EOF/length proof and cancel
 through their exact coroutine owner. Abandoned hash owners are reaped after Lua
 GC on a new digest; no idle scan or background reaper is installed.
 
@@ -282,3 +285,24 @@ current effective binding readback and float texture lifetimes, local actor and
 equipment identity, supported death/equip notifications, Player Preview/native
 submission, lobby transport, and end-to-end deployed performance. The shared
 OS bootstrap does not supply or emulate those game-specific services.
+
+## Worker ownership and Unicode validation
+
+Real external-service regressions now verify acknowledged worker retirement on
+helper loss, actual client exit and service close, plus explicit detach and a
+failed detach that retains a stoppable owner. The legacy DLL bytes are unchanged.
+The finite tools/lua51_worker_smoke.lua controller uses the production bootstrap,
+shared Windows facade and owned Unicode files. Its hermetic actual-LLL candidate
+test verified binary/PID markers, normal completion, explicit stop, absent delayed
+output and complete process/file retirement. Terminal callbacks do no work.
+
+That worker candidate has not been deployed: real standalone measurements found
+the synchronous launch request blocking for 200-535 ms. Pacing those calls cannot
+remove that blocking cost; an explicit asynchronous launch contract is still
+needed before this path can meet the runtime performance requirement. The
+earlier completed OS-only game smoke did not exercise worker creation.
+
+Shared path/filter/child-name guards and custom DDS display filenames now reject
+ASCII control bytes explicitly. Locale-dependent Lua %c could reject valid UTF-8
+bytes in names such as 服装. Strict UTF-8 validation, traversal/reserved-character
+checks, size budgets and explicit ASCII naming policies remain in force.
