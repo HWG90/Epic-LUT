@@ -22,16 +22,24 @@ function X.new(modules, host)
             type(address) == 'number'
                 and address >= 65536
                 and address < 2 ^ 47
+                and address % 1 == 0
                 and type(size) == 'number'
                 and size >= 1
-                and size <= 96,
+                and size <= 96
+                and size % 1 == 0,
             'Invalid kit snapshot read'
         )
-        -- This legacy raw-memory fallback is selected only by an explicit read.
-        local ffi = require('ffi')
-        local buffer = ffi.new('uint8_t[?]', size)
-        return host.memory.read_into(ffi.cast('const uint8_t *', address), size, buffer) and ffi.string(buffer, size)
-            or nil
+        if host.read_snapshot ~= nil then
+            assert(type(host.read_snapshot) == 'function', 'Snapshot read service unavailable')
+            local bytes = host.read_snapshot(address, size)
+            assert(bytes == nil or type(bytes) == 'string' and #bytes == size,
+                'Incomplete kit snapshot read')
+            return bytes
+        end
+        -- Keep this module composable by stock loaders that reject any source
+        -- importing native libraries, including imports in an unused branch.
+        local legacy = modules.legacy_memory or require('src.platform.legacy_memory')
+        return legacy.read(host.memory, address, size)
     end
     function self.ensure()
         if resolver then

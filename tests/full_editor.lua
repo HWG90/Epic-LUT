@@ -1,3 +1,48 @@
+-- The editor intentionally restores its working DDS files. Keep this fixture's
+-- storage private and initially empty so prior runs cannot turn edits into no-ops.
+local fixture_root, files, streams = 'tests/tmp/full-editor-owned', {}, 0
+local saved_open, saved_remove, saved_rename = io.open, os.remove, os.rename
+local function owned(path)
+    return type(path) == 'string' and path:sub(1, #fixture_root + 1) == fixture_root .. '/'
+end
+io.open = function(path, mode)
+    if not owned(path) then
+        assert(mode == nil or mode == 'r' or mode == 'rb', 'Fixture attempted a foreign file write')
+        return saved_open(path, mode)
+    end
+    assert(mode == 'rb' or mode == 'wb', 'Unexpected private stream mode')
+    if mode == 'rb' and files[path] == nil then return nil, 'Private fixture file does not exist' end
+    if mode == 'wb' then files[path] = '' end
+    local at, closed = 1, false
+    streams = streams + 1
+    return {
+        read = function(_, count)
+            assert(not closed and mode == 'rb')
+            if count == '*a' then local bytes = files[path]:sub(at); at = #files[path] + 1; return bytes end
+            assert(type(count) == 'number' and count >= 0)
+            if at > #files[path] then return nil end
+            local bytes = files[path]:sub(at, at + count - 1); at = at + #bytes; return bytes
+        end,
+        write = function(self, bytes)
+            assert(not closed and mode == 'wb' and type(bytes) == 'string')
+            files[path] = files[path] .. bytes; return self
+        end,
+        close = function()
+            assert(not closed, 'Private fixture stream closed twice')
+            closed, streams = true, streams - 1; return true
+        end,
+    }
+end
+os.remove = function(path)
+    assert(owned(path), 'Fixture attempted to remove a foreign file')
+    if files[path] == nil then return nil, 'Private fixture file does not exist' end
+    files[path] = nil; return true
+end
+os.rename = function(source, target)
+    assert(owned(source) and owned(target), 'Fixture attempted to move a foreign file')
+    if files[source] == nil or files[target] ~= nil then return nil, 'Private fixture rename refused' end
+    files[target], files[source] = files[source], nil; return true
+end
 local ffi = require('ffi')
 local root = assert(os.getenv('MCM_SOURCE_DIR'))
 local Core = dofile(root .. '/src/core.lua')
@@ -143,7 +188,7 @@ local source = file:read('*a')
 file:close()
 local editor = assert(loadstring('local m=...\n' .. source))(m)
 assert(provider.set('mode', 2))
-local ctx = { dir = 'tests/tmp', log = function() end, on_cleanup = function() end }
+local ctx = { dir = fixture_root, log = function() end, on_cleanup = function() end }
 editor.on_enable(ctx)
 editor.on_update(ctx, 0.016)
 local armor = assert(DBFMCM.mods.dbf_armor_lut_00000101_0).handle
@@ -170,7 +215,15 @@ assert(#calls == 1 and calls[1].target == 1 and not helmet.get('enabled'), 'Armo
 local rendered = calls[1].docs['1111111111111111']
 assert(rendered[0] == 0.25 and rendered[3] == 2 and rendered[13 * 4] == 8.5 and rendered[13 * 4 + 1] == 1000000)
 assert(armor.set('edit_column', 14))
-assert(not pcall(armor.set, 'cell_r', 0.1), 'Protected emission channel was editable')
+local protected_document = package.loaded['dbf.armor_lut_editor.owner.v1'].features.document.documents['1111111111111111']
+local protected_bytes = m.dds.encode(protected_document.data, 23, 2)
+local protected_row, protected_enabled = armor.get('1111111111111111_r1_on'), armor.get('enabled')
+local rejected, reason = armor.set('cell_r', 0.1)
+assert(rejected == false and type(reason) == 'string', 'Protected emission channel was editable')
+assert(armor.get('cell_r') == 8.5 and m.dds.encode(protected_document.data, 23, 2) == protected_bytes,
+    'Rejected protected edit changed displayed or authoritative LUT values')
+assert(armor.get('1111111111111111_r1_on') == protected_row and armor.get('enabled') == protected_enabled,
+    'Rejected protected edit changed activation flags')
 assert(DBFMCM.mods.dbf_armor_lut_00000101_0.controls.cell_color.disabled, 'Emission incorrectly exposed RGB picker')
 assert(armor.set('preserve_effects', false))
 assert(armor.set('cell_r', 0.1))
@@ -334,3 +387,7 @@ assert(
 print(
     'PASS: actual MCM semantic controls, protected emission data, deliberate unlock, independent armor/helmet activation/reset, original submenu and competing-writer pause/resume'
 )
+
+assert(streams == 0, 'Full-editor fixture leaked a private file stream')
+assert(next(files) ~= nil, 'Full-editor fixture did not exercise working-file persistence')
+io.open, os.remove, os.rename = saved_open, saved_remove, saved_rename
