@@ -35,7 +35,7 @@ def package(root,mod_id,title,version,main,modules,extra=None,restart_only=False
     return target
 
 spec=importlib.util.spec_from_file_location('epic_inventory',ROOT/'tools/module_inventory.py');inv=importlib.util.module_from_spec(spec);spec.loader.exec_module(inv)
-version=(ROOT/'VERSION').read_text().strip()
+version=(ROOT/'VERSION').read_text(encoding='utf-8').strip()
 mode='authored_salute' if args.preview_animation else 'disabled'
 label=Path(args.output).stem.removesuffix('-LLL') if args.output else 'Epic-LUT-'+version+'-LLL-Modular'
 title='Epic LUT '+version+(' Preview Animation Test' if args.preview_animation else '')
@@ -54,7 +54,7 @@ for name in inv.VENDOR:
 for name in inv.OWN+inv.PREVIEW:
     path=inv.source_path(name);modules[path]=(ROOT/path).read_bytes();main.append('m.'+name+'=mod.require("'+path+'")')
 preferences_path=inv.source_path('preferences')
-source=(ROOT/preferences_path).read_text();defaults={};edits=[]
+source=(ROOT/preferences_path).read_text(encoding='utf-8');defaults={};edits=[]
 for match in re.finditer(r'\bdefault\s*=\s*(true|false|-?\d+(?:\.\d+)?)',source):
     keys=re.findall(r"\bid\s*=\s*['\"]([\w_-]+)['\"]",source[:match.start()])
     if not keys:continue
@@ -66,7 +66,7 @@ main.append('m.native_import=m.windows')
 for name in ['direct_editor','player_preview_candidate']:
     path=inv.source_path(name);modules[path]=(ROOT/path).read_bytes()
 editor_path=inv.source_path('direct_editor')
-source=(ROOT/editor_path).read_text().replace('frontend.preferences = preferences','frontend.preferences = preferences\n        preferences.mount(frontend.api)\n        local console_fields={}\n        for key,control in pairs(frontend.api.mods.epic_lut_preferences.controls)do\n            local field=key\n            if control.type=="button" then console_fields[field]={call=function()return preferences.handle.activate(field)end}\n            else console_fields[field]={type=control.type=="toggle" and "boolean" or "number",get=function()return preferences.handle.get(field)end,set=function(v)return preferences.handle.set(field,v)end}end\n        end\n        mod.expose("epiclut",{preferences=console_fields})')
+source=(ROOT/editor_path).read_text(encoding='utf-8').replace('frontend.preferences = preferences','frontend.preferences = preferences\n        preferences.mount(frontend.api)\n        local console_fields={}\n        for key,control in pairs(frontend.api.mods.epic_lut_preferences.controls)do\n            local field=key\n            if control.type=="button" then console_fields[field]={call=function()return preferences.handle.activate(field)end}\n            else console_fields[field]={type=control.type=="toggle" and "boolean" or "number",get=function()return preferences.handle.get(field)end,set=function(v)return preferences.handle.set(field,v)end}end\n        end\n        mod.expose("epiclut",{preferences=console_fields})')
 modules[editor_path]=source
 main+=['mod.scope.editor=mod.require("'+inv.source_path('direct_editor')+'")','mod.scope.PREVIEW_INSPECT_ONLY=false','mod.scope.PREVIEW_ANIMATION_ENABLED='+str(args.preview_animation).lower(),'return mod.require("'+inv.source_path('player_preview_candidate')+'")']
 package(ROOT,'armor_lut_editor',title,version,'\n'.join(main)+'\n',modules,extra)

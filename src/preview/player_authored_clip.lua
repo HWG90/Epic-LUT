@@ -353,11 +353,13 @@ function Clip.decode(resources)
     end
     return set
 end
-function Clip.load(folder)
+function Clip.load(folder, files)
+    files = files or (m and m.file_io)
+    local open_file = files and files.open or io.open
     assert(type(folder) == 'string' and #folder > 0 and #folder < 4096, 'Authored animation cache path invalid')
     local resources = {}
     for key, name in pairs(Clip.FILES) do
-        local file = assert(io.open(folder .. '/' .. name, 'rb'), 'Authored animation cache missing: ' .. name)
+        local file = assert(open_file(folder .. '/' .. name, 'rb'), 'Authored animation cache missing: ' .. name)
         local bytes = file:read(Clip.MAX_BYTES + 1)
         file:close()
         assert(#bytes <= Clip.MAX_BYTES, 'Authored resource exceeds size bound')

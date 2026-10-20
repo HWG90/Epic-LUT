@@ -22,6 +22,33 @@ function P.digest(bytes, expected_bytes)
                 and expected_bytes % 1 == 0,
         'Invalid binding digest expected length'
     )
+    local platform = m and m.platform
+    if platform then
+        assert(type(platform.digest) == 'function', 'Portable binding SHA256 service unavailable')
+        local payload, complete = bytes, type(bytes) ~= 'function'
+        if not complete then
+            local total, limit = 0, expected_bytes or 512 * 1024 * 1024
+            payload = function()
+                assert(not complete, 'Binding digest reader consumed after completion')
+                -- No protected call: staged readers may yield between chunks.
+                local chunk = bytes()
+                if chunk == nil then
+                    assert(expected_bytes == nil or total == expected_bytes, 'Binding digest file length differs')
+                    complete = true
+                    return nil
+                end
+                assert(type(chunk) == 'string' and #chunk > 0 and #chunk <= 65536, 'Invalid binding digest chunk')
+                assert(#chunk <= limit - total, 'Binding digest file exceeds its limit')
+                total = total + #chunk
+                return chunk
+            end
+        end
+        local result = platform.digest(payload, expected_bytes)
+        assert(complete, 'Binding digest service did not consume the complete reader')
+        assert(type(result) == 'string' and #result == 64 and not result:find('[^0-9a-f]'),
+            'Invalid binding SHA256 result')
+        return result
+    end
     local ffi = require('ffi')
     if not pcall(ffi.typeof, 'epic_binding_hash_marker') then
         ffi.cdef([[

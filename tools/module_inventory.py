@@ -60,3 +60,6 @@ SOURCE_GROUPS['legacy_clipboard'] = 'platform'
 
 OWN.insert(0, 'legacy_paths')
 SOURCE_GROUPS['legacy_paths'] = 'platform'
+
+OWN.insert(0, 'legacy_windows')
+SOURCE_GROUPS['legacy_windows'] = 'platform'

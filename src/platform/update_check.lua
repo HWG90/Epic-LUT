@@ -19,7 +19,10 @@ local function newer(a, b)
     if a.rank ~= b.rank then return a.rank > b.rank end
     return a.revision > b.revision
 end
-function U.new(windows, folder, version)
+function U.new(windows, folder, version, files)
+    files = files or (m and m.file_io)
+    local open_file = files and files.open or io.open
+    local remove_file = files and files.remove or os.remove
     local self = { status = 'Updates: not checked', started = false }
     local worker, age
     local script = folder .. '/check-updates.ps1'
@@ -32,10 +35,10 @@ function U.new(windows, folder, version)
         if worker then
             return self.status
         end
-        os.remove(result)
+        remove_file(result)
         self.started = true
-        local f = assert(io.open(script, 'wb'))
-        f:write([=[param([string]$Output)
+        local f = assert(open_file(script, 'wb'))
+        local wrote, write_error = f:write([=[param([string]$Output)
 $ErrorActionPreference='Stop'
 try {
  [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
@@ -46,7 +49,9 @@ try {
 } catch { [IO.File]::WriteAllText($Output+'.tmp','ERROR') }
 Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
 ]=])
-        f:close()
+        local closed, close_error = f:close()
+        assert(wrote, write_error)
+        assert(closed, close_error)
         local ok, value = pcall(
             windows.launch_worker,
             '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' .. quote(script) .. ' -Output ' .. quote(result),
@@ -66,7 +71,7 @@ Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
             return
         end
         age = age + math.max(0, tonumber(dt) or 0)
-        local f = io.open(result, 'rb')
+        local f = open_file(result, 'rb')
         local tag
         if f then
             tag = f:read(128)

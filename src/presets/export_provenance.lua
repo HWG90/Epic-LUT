@@ -1,7 +1,7 @@
 -- One editor activation's exact binding-source resolver and background cache.
 -- Named identity, bounded reads and owned worker cleanup retain their existing
 -- implementations; the controller supplies only current session transitions.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local X = {
     PENDING = 'Reading exact binding sources; retry Export after the background cache is ready',
 }
@@ -27,6 +27,8 @@ function X.new(modules, host)
                 and size <= 96,
             'Invalid kit snapshot read'
         )
+        -- This legacy raw-memory fallback is selected only by an explicit read.
+        local ffi = require('ffi')
         local buffer = ffi.new('uint8_t[?]', size)
         return host.memory.read_into(ffi.cast('const uint8_t *', address), size, buffer) and ffi.string(buffer, size)
             or nil
@@ -79,6 +81,8 @@ function X.new(modules, host)
             original_snapshot_reader = modules.original_snapshot_reader,
             windows = modules.windows,
             paths = modules.paths,
+            file_io = modules.file_io,
+            platform = modules.platform,
         }, { paths = host.paths, log = host.log })
         local proof = modules.binding_provenance.new({
             engine = modules.engine,
@@ -274,8 +278,8 @@ function X.new(modules, host)
                         current
                             and current.width == entry.document.width
                             and current.height == entry.document.height
-                            and ffi.string(current.data, current.width * current.height * 16)
-                                == ffi.string(entry.document.data, entry.document.width * entry.document.height * 16),
+                            and buffers.bytes(current.data, current.width * current.height * 4)
+                                == buffers.bytes(entry.document.data, entry.document.width * entry.document.height * 4),
                         'Apply this legacy preset to the current gear first; its assigned colors do not match the active binding context'
                     )
                 end

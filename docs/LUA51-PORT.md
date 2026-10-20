@@ -113,3 +113,110 @@ proof, introduce hooks or weaken ownership just to make a fixture pass.
 The current source backport and Git update do not deploy files, publish a
 release, send game input, or change native settings. Photo, other components
 and private review copies remain outside this writer's scope.
+
+
+## Public GUI font evidence
+
+The existing production view uses the stock `core/performance_hud/debug` face
+through public `Gui.text` and `Gui.text_extents`; these operations appear in the
+retained build 25988413 startup inventory and LLL uses this path in its Steam
+manager. No replacement native font adapter is necessary for this path.
+`ui_font_portable`, `ui_font`, `ui_font_render`, and `native_text_metrics` pass
+in actual Lua 5.1 with FFI/bit/jit imports forbidden. They cover owned GUI
+cleanup, cached glyph advances and bearings, suspend/reopen/world replacement,
+and text/caret/selection geometry. The portable stock-face fixture performs no
+extra GUI allocations or text-extents queries across 1,000 unchanged frames.
+These are offline production-control-flow checks, not visual game acceptance.
+
+Custom HUD-face parity remains open: the current game build needs a verified
+font/atlas/material descriptor or a supported provider. Public GUI availability
+does not identify those resources. The legacy exact-build font resolver and
+per-GUI ownership guards remain intact; old RVAs are not current-build proof.
+
+## Shared Windows import/export and provenance
+
+The Windows facade now uses explicit services for process identity, executable
+location, file listing and receipts, worker ownership and atomic replacement.
+Raw FFI entry points remain isolated in legacy_windows. Import, original-source,
+preview-worker and saved-setup controllers consume the shared methods.
+
+The native broker additionally provides Unicode binary streams, file-only
+removal, rename without overwrite, controlled hidden system-PowerShell workers,
+and incremental BCrypt SHA256. Handles are private monotonic tokens with bounded
+counts; errors and service shutdown close their owned resources. Closing a worker
+releases ownership without terminating it; stop is explicit and scoped to that
+worker's job. Hash readers can yield, enforce complete EOF/length proof and cancel
+through their exact coroutine owner. Abandoned hash owners are reaped after Lua
+GC on a new digest; no idle scan or background reaper is installed.
+
+Core file_io and portable DDS publication use those streams. A failed DDS
+replacement retains the active file and its previous copy. Real Lua5.1/native
+tests cover exact multi-MiB data, 64MiB boundaries, Unicode paths, sharing locks,
+worker lifecycle, malformed/stale tokens, independent SHA256 vectors, reader
+errors/yields, cancellation and cleanup. These are standalone host measurements
+and contracts, not game-thread performance or gameplay acceptance.
+
+Run the additional native and provenance suites after building the helper:
+
+```
+py -3.14 tests/test_lua51_workers.py
+py -3.14 tests/test_lua51_streams.py
+py -3.14 tests/test_lua51_digest.py
+py -3.14 tests/test_lua51_binding_provenance.py
+```
+
+## Current game API inventory
+
+An explicitly approved one-shot LLL project captured 682 raw namespace members
+from the running game's actual Lua5.1 VM. It called no engine functions, had no
+on_update callback and saved only its own configuration. Its installed bytes
+matched the reviewed candidate; the project and its settings were then retired
+and their hashes rechecked. The capture and deployment/retirement receipt remain
+private under dist/engine-api-inventory.
+
+The game exposes Renderer.update_texture_base64, Application.update_raw_buffer
+and Mesh.refresh_instance_hash. Their presence does not establish arguments,
+RGBA32F support, current-binding readback or renderer lifetime. Material exposes
+set_resource/set_texture but no raw member named as a binding getter. The engine
+bridge remains unvalidated; no live LUT write was performed during this capture.
+
+## Detached gear buffers and controller composition
+
+Armory mirror serialization and original effect preservation now share the
+owned float-buffer boundary. Original restoration previously allocated only the
+original row count but copied the taller imported document into it. The copy
+now uses the allocated output height; the 8-row import to 5-row original case
+is covered with exact bounded buffers on both runtimes. R6 weapon runtime
+documents, history and retained recovery copies also use that boundary and
+retain private ownership checks, immutable uploads and transaction rollback.
+These are production-controller fixtures with an explicitly injected host, not
+current-game ownership or rendering proof.
+
+Saved-setup reads, authored-preview cache reads and the update controller accept
+the shared file provider. The provenance controller forwards that provider into
+its scoped source cache instead of losing it during composition. Its legacy
+raw-memory implementation is loaded only if that legacy read is actually used.
+Update checks retain one bounded worker and perform no file or worker IO after
+completion or while idle. No continuous polling was added by this port.
+
+Read-only archive streams support exact integer sizes and positions through
+2^53-1; wide seek has its own operation and keeps the earlier 32-bit operation
+unchanged. This does not increase allocation or output budgets: each Lua read or
+write remains bounded to 64MiB, native transfers to 1MiB, and written files to
+64MiB. Real NTFS sparse files over 4GiB and incremental provenance SHA256 above
+64MiB are verified without loading the entire source.
+
+Preset manifests, raw DDS folders, patch triplets, shared preset ZIPs and Paydex
+rows now use explicit shared file operations. Every production patch-export
+constructor forwards that provider. Portable manifest publication atomically
+replaces the target and retains the prior copy on failure; rename/export name
+selection remains unchanged. Focused fixtures forbid global filesystem calls
+and exercise successful publication, replacement failure and owned cleanup.
+
+Known access and sharing errors propagate through optional snapshot reads; only
+missing files are optional. Atomic publication therefore cannot replace an
+unreadable active file while silently omitting its previous copy. Native stream
+writes preserve multi-part Lua file writes, validate the full argument list and
+allocation budget before the first transfer, and are covered by actual saved
+setup manifest/DDS round trips. The modular LLL builder reads UTF-8 explicitly
+to preserve source text under Windows Python's default legacy code page.

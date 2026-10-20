@@ -7,7 +7,7 @@ end
 function C.new(m, host)
     host = host or {}
     local paths = host.paths or m.paths.new(m)
-    local io_api, now = host.io or io, host.time or os.clock
+    local io_api, now = host.io or m.file_io or io, host.time or os.clock
     local folder, scripts = paths.cache .. '/' .. C.FOLDER, paths.cache .. '/binding-worker'
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {} }
     local loaded_bytes = 0
@@ -92,8 +92,8 @@ function C.new(m, host)
             hexfile('binding_provenance_reader.cs', m.binding_provenance_reader)
             hexfile('original_snapshots.cs', m.original_snapshot_reader)
             write(folder .. '/request.tsv', request)
-            local _, kernel = m.windows.verify_interface()
-            self.owner = tonumber(kernel.epic_native_pid())
+            if m.windows.process_id then self.owner = m.windows.process_id()
+            else local _, kernel = m.windows.verify_interface();self.owner = tonumber(kernel.epic_native_pid()) end
             assert(self.owner and self.owner > 0, 'Binding worker owner unavailable')
             heartbeat()
             local game = m.windows.game_data()

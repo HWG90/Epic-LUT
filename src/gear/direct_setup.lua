@@ -21,10 +21,12 @@ local function target(key)
     return pattern
 end
 function S.new(m, paths)
+    local remove_file = m.file_io and m.file_io.remove or os.remove
+    local open_file = m.file_io and m.file_io.open or io.open
     local self = { sequence = 0 }
     local manifest = paths.settings .. '/direct-applied.tsv'
     function self.read()
-        local f = io.open(manifest, 'rb')
+        local f = open_file(manifest, 'rb')
         if not f then
             return {}
         end
@@ -73,7 +75,7 @@ function S.new(m, paths)
         repeat
             self.sequence = self.sequence + 1
             prefix = 'setup-' .. os.time() .. '-' .. self.sequence .. '-'
-            local f = io.open(paths.presets .. '/' .. prefix .. '1.dds', 'rb')
+            local f = open_file(paths.presets .. '/' .. prefix .. '1.dds', 'rb')
             if f then
                 f:close()
             else
@@ -112,29 +114,26 @@ function S.new(m, paths)
                 .. (b.cape and ('\tcape\t' .. b.cape_proof .. '\t' .. b.resource:lower()) or '')
         end
         table.sort(rows)
-        local f = assert(io.open(manifest .. '.pending', 'wb'))
+        local f = assert(open_file(manifest .. '.pending', 'wb'))
         assert(f:write(version, table.concat(rows, '\n'), '\n'))
         assert(f:close())
-        local ffi = require('ffi')
-        local _, kernel = m.native_import.verify_interface()
-        local function wide(text)
-            local n = kernel.epic_native_wide(65001, 8, text, -1, nil, 0)
-            assert(n > 0)
-            local out = ffi.new('uint16_t[?]', n)
-            assert(kernel.epic_native_wide(65001, 8, text, -1, out, n) == n)
-            return out
+        local windows = m.native_import or m.windows
+        local replaced
+        if windows.replace then
+            replaced = windows.replace(manifest .. '.pending', manifest)
+        else
+            -- Compatibility for older adapters/test stubs; FFI stays isolated.
+            local legacy = m.legacy_windows or require('src.platform.legacy_windows')
+            replaced = legacy.replace(manifest .. '.pending', manifest, windows.verify_interface)
         end
-        assert(
-            kernel.epic_native_move(wide(manifest .. '.pending'), wide(manifest), 1) ~= 0,
-            'Could not save the applied setup; previous setup retained'
-        )
+        assert(replaced == true, 'Could not save the applied setup; previous setup retained')
         return count
     end
     function self.clear()
-        local f = io.open(manifest, 'rb')
+        local f = open_file(manifest, 'rb')
         if f then
             f:close()
-            assert(os.remove(manifest))
+            assert(remove_file(manifest))
         end
     end
     return self

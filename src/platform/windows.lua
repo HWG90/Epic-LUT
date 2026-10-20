@@ -1,107 +1,131 @@
--- Shared Windows declarations for menu, paths and import launch.
-local W={}
-function W.verify_interface()
-    local ffi=require('ffi')
-    if not pcall(ffi.typeof,'epic_native_hwnd')then ffi.cdef('typedef void *epic_native_hwnd;')end
-    local user=ffi.load('user32');local kernel=ffi.load('kernel32')
-    for _,entry in ipairs({
-        {user,'epic_native_foreground','epic_native_hwnd epic_native_foreground(void) __asm__("GetForegroundWindow");'},
-        {kernel,'epic_native_pid','uint32_t epic_native_pid(void) __asm__("GetCurrentProcessId");'},
-        {user,'epic_native_window_pid','uint32_t epic_native_window_pid(epic_native_hwnd,uint32_t *) __asm__("GetWindowThreadProcessId");'},
-        {user,'epic_native_allow_foreground','int epic_native_allow_foreground(uint32_t) __asm__("AllowSetForegroundWindow");'}
-        ,{kernel,'epic_native_attributes','uint32_t epic_native_attributes(const uint16_t *) __asm__("GetFileAttributesW");'}
-        ,{kernel,'epic_native_wide','int epic_native_wide(uint32_t,uint32_t,const char *,int,uint16_t *,int) __asm__("MultiByteToWideChar");'}
-        ,{kernel,'epic_native_move','int epic_native_move(const uint16_t *,const uint16_t *,uint32_t) __asm__("MoveFileExW");'}
-        ,{kernel,'epic_native_mkdir','int epic_native_mkdir(const uint16_t *,void *) __asm__("CreateDirectoryW");'}
-        ,{kernel,'epic_native_utf8','int epic_native_utf8(uint32_t,uint32_t,const uint16_t *,int,char *,int,const char *,int *) __asm__("WideCharToMultiByte");'}
-    })do
-        if not pcall(function()return entry[1][entry[2]]end)then ffi.cdef(entry[3])end
-        assert(entry[1][entry[2]],'Native import Windows API unavailable: '..entry[2])
+-- Explicit platform services; old raw Win32/FFI operations remain legacy-only.
+local W = {}
+local MAX_FILES, MAX_NAME_BYTES = 100000, 1024 * 1024
+local function text(value, allow_empty)
+    assert(type(value) == 'string' and (allow_empty or #value > 0) and #value <= 131064, 'Invalid Windows text bounds')
+    local at, units = 1, 0
+    while at <= #value do
+        local a, b, c, d = value:byte(at, at + 3)
+        local width = 1
+        if a >= 194 and a <= 223 then width = 2
+        elseif a >= 224 and a <= 239 then width = 3
+        elseif a >= 240 and a <= 244 then width = 4
+        else assert(a >= 1 and a <= 127, 'Invalid Windows UTF-8 text') end
+        if width >= 2 then assert(b and b >= 128 and b <= 191, 'Invalid Windows UTF-8 continuation') end
+        if width >= 3 then
+            assert(c and c >= 128 and c <= 191 and (a ~= 224 or b >= 160) and (a ~= 237 or b < 160), 'Invalid Windows UTF-8 scalar')
+        end
+        if width == 4 then
+            assert(d and d >= 128 and d <= 191 and (a ~= 240 or b >= 144) and (a ~= 244 or b <= 143), 'Invalid Windows UTF-8 scalar')
+        end
+        units, at = units + (width == 4 and 2 or 1), at + width
+        assert(units <= 32766, 'Windows text exceeds UTF-16 limit')
     end
-    return user,kernel
+    return value
 end
-function W.launch_worker(args,folder)
-    local ffi=require('ffi');local _,kernel=W.verify_interface()
-    if not pcall(ffi.typeof,'epic_process_startup2')then ffi.cdef([[
-        typedef struct {
-            uint32_t size;uint16_t *reserved,*desktop,*title;
-            uint32_t x,y,width,height,columns,rows,fill,flags;
-            uint16_t show,reserved_size;uint8_t *reserved_bytes;
-            void *input,*output,*error;
-        } epic_process_startup2;
-        typedef struct {void *process,*thread;uint32_t pid,tid;} epic_process_info2;
-        int epic_process_create2(const uint16_t *,uint16_t *,void *,void *,int,uint32_t,void *,const uint16_t *,epic_process_startup2 *,epic_process_info2 *) __asm__("CreateProcessW");
-        uint32_t epic_process_system2(uint16_t *,uint32_t) __asm__("GetSystemDirectoryW");
-        uint32_t epic_process_error2(void) __asm__("GetLastError");
-        uint32_t epic_process_wait2(void *,uint32_t) __asm__("WaitForSingleObject");
-        int epic_process_stop2(void *,uint32_t) __asm__("TerminateProcess");
-        int epic_process_close2(void *) __asm__("CloseHandle");
-    ]])end
-    local function wide(text)
-        assert(type(text)=='string' and not text:find('\0',1,true),'Invalid worker command')
-        local n=kernel.epic_native_wide(65001,8,text,-1,nil,0);assert(n>0 and n<=32767,'Worker command exceeds Windows limit')
-        local out=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,text,-1,out,n)==n);return out,n
+local function operation(platform, name)
+    return assert(type(platform[name]) == 'function' and platform[name], 'Portable Windows service unavailable: ' .. name)
+end
+function W.new(platform)
+    assert(type(platform) == 'table', 'Explicit Windows platform service required')
+    local self = {}
+    function self.verify_interface()
+        error('Raw Win32 FFI interface is unavailable with the portable service; use process_id/replace and owned worker APIs', 0)
     end
-    -- ShellExecuteEx enters shell/COM handlers on the game thread. The hung
-    -- Load Current Gear dump stops inside that call. Launch this known executable
-    -- directly; no shell extensions, file associations or shell message pump.
-    local system=ffi.new('uint16_t[32768]');local count=tonumber(kernel.epic_process_system2(system,32768))
-    assert(count>0 and count<32768,'Windows system directory unavailable')
-    local suffix=wide('\\WindowsPowerShell\\v1.0\\powershell.exe')
-    local suffix_count=0;while suffix[suffix_count]~=0 do suffix_count=suffix_count+1 end
-    local file=ffi.new('uint16_t[?]',count+suffix_count+1)
-    ffi.copy(file,system,count*2);ffi.copy(file+count,suffix,(suffix_count+1)*2)
-    local command=ffi.new('uint16_t[?]',count+suffix_count+3)
-    command[0]=34;ffi.copy(command+1,file,(count+suffix_count)*2);command[count+suffix_count+1]=34
-    local parameters,param_count=wide(' '..args)
-    local length=count+suffix_count+2
-    assert(length+param_count<=32767,'Worker command exceeds Windows limit')
-    local line=ffi.new('uint16_t[?]',length+param_count)
-    ffi.copy(line,command,length*2);ffi.copy(line+length,parameters,param_count*2)
-    local directory=wide(folder)
-    local startup,info=ffi.new('epic_process_startup2'),ffi.new('epic_process_info2')
-    startup.size=ffi.sizeof(startup);startup.flags=1;startup.show=0
-    -- Mutable UTF-16 command line, hidden console, no inherited handles.
-    local started=kernel.epic_process_create2(file,line,nil,nil,0,0x08000000,nil,directory,startup,info)
-    assert(started~=0,'Windows could not start worker: '..tonumber(kernel.epic_process_error2()))
-    kernel.epic_process_close2(info.thread)
-    local self={handle=info.process,pid=tonumber(info.pid)}
-    function self.running()return self.handle~=nil and kernel.epic_process_wait2(self.handle,0)==258 end
-    function self.stop()if self.running()and kernel.epic_process_stop2(self.handle,1)==0 and self.running()then return false,'Could not stop owned import worker'end;return true end
-    function self.close()if self.handle~=nil then kernel.epic_process_close2(self.handle);self.handle=nil end end
+    function self.process_id()
+        local pid = operation(platform, 'process_id')()
+        assert(type(pid) == 'number' and pid % 1 == 0 and pid > 0 and pid < 4294967296, 'Current process identity unavailable')
+        return pid
+    end
+    function self.game_data()
+        local exe = text(operation(platform, 'executable_path')()):gsub('\\', '/')
+        assert(exe:match('^%a:/') or exe:match('^//'), 'Absolute executable path required')
+        local parent = assert(exe:match('^(.*)/[^/]+$'), 'Game executable path unavailable')
+        if parent:lower():match('/bin$') then parent = parent:sub(1, -5) end
+        return parent .. '/data'
+    end
+    function self.launch_worker(args, folder)
+        args, folder = text(args, true), text(folder)
+        -- The service also validates the complete executable + argument line.
+        local worker, why = operation(platform, 'launch_worker')(args, folder)
+        assert(type(worker) == 'table', why or 'Owned Windows worker unavailable')
+        assert(type(worker.pid) == 'number' and worker.pid % 1 == 0 and worker.pid > 0 and worker.pid < 4294967296,
+            'Owned Windows worker identity unavailable')
+        for _, name in ipairs({ 'running', 'stop', 'close' }) do
+            assert(type(worker[name]) == 'function', 'Owned Windows worker interface missing ' .. name)
+        end
+        -- Keep the service's opaque ownership and async lifecycle object intact.
+        -- In particular, close releases handles; only explicit stop terminates it.
+        return worker
+    end
+    function self.replace(source, destination)
+        local ok, why = operation(platform, 'replace')(text(source), text(destination))
+        return ok == true, why
+    end
+    local function listing(folder, filter, metadata)
+        folder = text(folder)
+        assert(type(filter) == 'string' and #filter > 0 and #filter <= 240 and not filter:find('[/\\%c]'), 'Invalid Windows file filter')
+        local files, directories, supplied = operation(platform, 'files')(folder, filter)
+        assert(type(files) == 'table' and (directories == nil or type(directories) == 'table'), 'Invalid Windows file listing')
+        local names, receipts, seen, size = {}, {}, {}, 0
+        for _, array in ipairs({ files, directories or {} }) do
+            assert(type(array) == 'table' and getmetatable(array) == nil, 'Invalid Windows file listing')
+            local count = #array
+            for index in pairs(array) do
+                assert(type(index) == 'number' and index % 1 == 0 and index >= 1 and index <= count, 'Non-dense Windows file listing')
+            end
+            for index = 1, count do
+                local name = text(array[index])
+                assert(name ~= '.' and name ~= '..' and not name:find('[/\\%c]') and not seen[name], 'Ambiguous or foreign Windows child path')
+                seen[name], size = true, size + #name
+                names[#names + 1] = name
+                assert(#names <= MAX_FILES and size <= MAX_NAME_BYTES, 'Windows listing exceeds budget')
+                if metadata then
+                    local receipt = type(supplied) == 'table' and supplied[name] or nil
+                    if receipt == nil then
+                        local stat = operation(platform, 'stat')(folder .. '/' .. name)
+                        assert(type(stat) == 'table' and type(stat.directory) == 'boolean'
+                            and type(stat.size_hex) == 'string' and #stat.size_hex == 16 and stat.size_hex:match('^%x+$')
+                            and type(stat.stamp) == 'string' and #stat.stamp == 16 and stat.stamp:match('^%x+$'), 'Windows file metadata disappeared')
+                        receipt = (stat.directory and 'D:' or 'F:') .. stat.size_hex .. ':' .. stat.stamp
+                    end
+                    assert(type(receipt) == 'string' and #receipt > 0 and #receipt <= 256 and not receipt:find('%c'), 'Invalid Windows file receipt')
+                    receipts[name] = receipt
+                end
+            end
+        end
+        table.sort(names)
+        return names, receipts
+    end
+    function self.files(folder, filter) return listing(folder, filter, true) end
+    function self.row_presets(folder)
+        local rows = {}
+        for _, file in ipairs(listing(folder, 'row-*.dds', false)) do
+            local name = file:match('^row%-([%w _-]+)%.dds$')
+            if name then rows[#rows + 1] = name end
+        end
+        return rows
+    end
     return self
 end
-function W.game_data()
-    local ffi=require('ffi');local _,kernel=W.verify_interface()
-    if not pcall(function()return kernel.epic_worker_module_file end)then ffi.cdef('uint32_t epic_worker_module_file(void *,uint16_t *,uint32_t) __asm__("GetModuleFileNameW");')end
-    local path=ffi.new('uint16_t[32768]');local count=tonumber(kernel.epic_worker_module_file(nil,path,32768));assert(count>0 and count<32768,'Game executable path unavailable')
-    local length=kernel.epic_native_utf8(65001,0,path,count,nil,0,nil,nil);local bytes=ffi.new('char[?]',length+1);assert(kernel.epic_native_utf8(65001,0,path,count,bytes,length,nil,nil)==length)
-    local exe=ffi.string(bytes,length):gsub('\\','/');local parent=assert(exe:match('^(.*)/[^/]+$'))
-    if parent:lower():match('/bin$')then parent=parent:sub(1,-5)end
-    return parent..'/data'
+local cached_platform, cached_service, legacy
+local function current()
+    local platform = m and m.platform
+    if platform then
+        if cached_platform ~= platform then cached_platform, cached_service = platform, W.new(platform) end
+        return cached_service
+    end
+    if m and m.legacy_windows then return m.legacy_windows end
+    if not legacy then legacy = require('src.platform.legacy_windows') end
+    return legacy
 end
-function W.files(folder,filter)
-    local ffi=require('ffi');local _,kernel=W.verify_interface()
-    if not pcall(ffi.typeof,'epic_find_data')then ffi.cdef([[
-        typedef struct {uint32_t header[11];uint16_t name[260],alternate[14];} epic_find_data;
-        void *epic_find_first(const uint16_t *,epic_find_data *) __asm__("FindFirstFileW");
-        int epic_find_next(void *,epic_find_data *) __asm__("FindNextFileW");
-        int epic_find_close(void *) __asm__("FindClose");
-    ]])end
-    local pattern=folder..'/'..filter;local n=kernel.epic_native_wide(65001,8,pattern,-1,nil,0);local wide=ffi.new('uint16_t[?]',n);assert(kernel.epic_native_wide(65001,8,pattern,-1,wide,n)==n)
-    local data=ffi.new('epic_find_data');local handle=kernel.epic_find_first(wide,data)
-    if ffi.cast('intptr_t',handle)==-1 then return {}end
-    local names={};local ok,why=pcall(function()
-        repeat
-            local length=kernel.epic_native_utf8(65001,0,data.name,-1,nil,0,nil,nil)
-            if length>0 then local bytes=ffi.new('char[?]',length);kernel.epic_native_utf8(65001,0,data.name,-1,bytes,length,nil,nil)
-                local name=ffi.string(bytes);names[#names+1]=name
-            end
-        until kernel.epic_find_next(handle,data)==0
-    end)
-    kernel.epic_find_close(handle);assert(ok,why);table.sort(names);return names
+for _, name in ipairs({ 'verify_interface', 'game_data', 'files', 'row_presets', 'launch_worker', 'replace' }) do
+    W[name] = function(...) return current()[name](...) end
 end
-function W.row_presets(folder)
-    local names={};for _,file in ipairs(W.files(folder,'row-*.dds'))do local name=file:match('^row%-([%w _-]+)%.dds$');if name then names[#names+1]=name end end;return names
+function W.process_id()
+    local target = current()
+    if target.process_id then return target.process_id() end
+    local _, kernel = target.verify_interface()
+    return tonumber(kernel.epic_native_pid())
 end
 return W
