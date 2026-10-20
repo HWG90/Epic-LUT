@@ -6,7 +6,7 @@ require = function(name)
     return original_require(name)
 end
 local Windows = dofile('src/platform/windows.lua')
-local unicode = '\208\148\208\176\208\178\208\184\208\180'
+local unicode = '\208\148\208\176\208\178\208\184\208\180 \230\156\141\232\163\133'
 local calls, bulk, listed_pattern = {}, true, nil
 local function count(name) calls[name] = (calls[name] or 0) + 1 end
 local file_names = { 'z.dds', 'row-Blue.dds', 'row-Alpha.dds' }
@@ -61,6 +61,14 @@ assert(calls.files == 2 and calls.stat == 4 and receipts['z.dds'] == 'F:00000000
 local rows = windows.row_presets('C:/Data/' .. unicode)
 assert(#rows == 2 and rows[1] == 'Alpha' and rows[2] == 'Blue' and listed_pattern == 'row-*.dds')
 assert(calls.stat == 4, 'Row names unnecessarily queried metadata')
+local saved_names, saved_directories = file_names, directory_names
+file_names, directory_names = { unicode .. '.dds' }, { unicode .. ' folder' }
+bulk = true
+names, receipts = windows.files('C:/Data/' .. unicode, unicode .. '*.dds')
+assert(#names == 2 and names[1] == unicode .. ' folder' and names[2] == unicode .. '.dds'
+    and listed_pattern == unicode .. '*.dds' and receipts[unicode .. '.dds']
+    and receipts[unicode .. ' folder'], 'Unicode filter/file/directory names were rejected or altered')
+file_names, directory_names, bulk = saved_names, saved_directories, false
 assert(windows.launch_worker('-NoProfile -File "C:/Data/' .. unicode .. '/task.ps1"', 'C:/Data/' .. unicode) == worker)
 assert(windows.replace('C:/Data/' .. unicode .. '/state.pending', 'C:/Data/' .. unicode .. '/state') and calls.replace == 1)
 assert(running == 0 and stopped == 0 and closed == 0, 'Launching sampled or closed a live worker')
@@ -75,6 +83,11 @@ end
 assert(calls.launch_worker == before, 'Invalid worker arguments reached service')
 assert(not pcall(windows.replace, 'bad\0path', 'destination') and calls.replace == 1)
 assert(not pcall(windows.files, 'C:/Data/' .. unicode, '../*'))
+local before_files = calls.files
+for _, invalid in ipairs({ '\\*', 'bad\0*', 'bad\1*', 'bad\9*', 'bad\10*', 'bad\13*', 'bad\31*', 'bad\127*', '\255*', '\192\175*' }) do
+    assert(not pcall(windows.files, 'C:/Data/' .. unicode, invalid), 'Invalid listing filter was accepted')
+end
+assert(calls.files == before_files, 'Invalid filter reached native listing')
 assert(not pcall(windows.verify_interface), 'Portable code received a fake Win32/FFI interface')
 local missing = Windows.new({})
 assert(not pcall(missing.game_data) and not pcall(missing.launch_worker, '-NoProfile', 'C:/Data'))
@@ -82,6 +95,11 @@ local saved_stat = platform.stat
 platform.stat = function() return nil end
 assert(not pcall(windows.files, 'C:/Data/' .. unicode, '*.dds'), 'Disappeared files received invented receipts')
 platform.stat = saved_stat
+for _, invalid in ipairs({ '.', '..', '..\\outside.dds', 'bad\0.dds', 'bad\1.dds', 'bad\9.dds',
+    'bad\10.dds', 'bad\13.dds', 'bad\31.dds', 'bad\127.dds', '\255.dds', '\192\175.dds' }) do
+    file_names = { invalid }
+    assert(not pcall(windows.files, 'C:/Data/' .. unicode, '*.dds'), 'Invalid or foreign child name was accepted')
+end
 file_names = { '../outside.dds' }
 assert(not pcall(windows.files, 'C:/Data/' .. unicode, '*.dds'), 'Foreign child path was accepted')
 file_names = { 'duplicate.dds', 'duplicate.dds' }

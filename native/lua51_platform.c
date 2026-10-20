@@ -28,6 +28,7 @@ static HANDLE authenticated_client_process;
 static wchar_t authenticated_client_image[MAX_PATH_CHARS];
 #ifdef EPIC_PLATFORM_TEST_BLOCK
 static int platform_test_stall_after_create;
+static int platform_test_refuse_detach;
 #endif
 #define PLATFORM_CLIENT_PID authenticated_client_pid
 #else
@@ -398,6 +399,16 @@ static DWORD worker_operation(uint32_t operation,const char *payload,uint32_t le
     for(i=0;i<8;i++)if(workers[i].process && workers[i].token==token) {worker=&workers[i];break;}
     if(!worker)return ERROR_INVALID_HANDLE;
     if(operation==15) {
+#ifdef EPIC_PLATFORM_EXTERNAL
+        /* Only an explicit close detaches an acknowledged worker. Until then,
+           unexpected service/client exit must terminate the still-owned job. */
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit={0};
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+        if(platform_test_refuse_detach)return ERROR_ACCESS_DENIED;
+#endif
+        if(!SetInformationJobObject(worker->job,JobObjectExtendedLimitInformation,&limit,sizeof(limit)))
+            return last_error(); /* Preserve the owner/token on detach failure. */
+#endif
         CloseHandle(worker->process);CloseHandle(worker->job);memset(worker,0,sizeof(*worker));return ERROR_SUCCESS;
     }
     state=WaitForSingleObject(worker->process,0);

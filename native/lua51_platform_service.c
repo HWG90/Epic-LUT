@@ -27,7 +27,11 @@ static DWORD bounded_dispatch(uint32_t operation,const char *payload,uint32_t le
     ResetEvent(dispatch_finished);InterlockedExchange(&dispatch_expired,0);
     if(!CreateTimerQueueTimer(&timer,NULL,expire_dispatch,NULL,TRANSFER_TIMEOUT,0,WT_EXECUTEONLYONCE))return last_error();
 #ifdef EPIC_PLATFORM_TEST_BLOCK
-    if(operation==252) {test_stall_close=1;result=ERROR_SUCCESS;}
+    if(operation==248) {
+        if(length!=1 || (unsigned char)payload[0]>1)result=ERROR_INVALID_DATA;
+        else {platform_test_refuse_detach=payload[0];result=ERROR_SUCCESS;}
+    }
+    else if(operation==252) {test_stall_close=1;result=ERROR_SUCCESS;}
     else if(operation==254) {platform_test_stall_after_create=1;result=dispatch(12,payload,length,output);}
     else if(operation==249 || operation==250 || operation==251) {
         if(operation==250)result=dispatch(12,payload,length,output);
@@ -54,12 +58,10 @@ static DWORD publish_worker(Buffer *output,int delivered) {
     DWORD result=ERROR_INVALID_DATA;
     {
         unsigned i;uint32_t token=output->length==8 ? word((unsigned char*)output->data) : 0;
-        /* Successful workers preserve the established close/detach contract.
-           Provisional jobs retain kill-on-close until dispatch has completed. */
+        /* Receipt delivery acknowledges ownership; it does not detach it.
+           Kill-on-close remains until the client's explicit worker.close. */
         for(i=0;i<8;i++)if(workers[i].job && workers[i].token==token) {
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit={0};
-            result=delivered && SetInformationJobObject(workers[i].job,JobObjectExtendedLimitInformation,&limit,sizeof(limit))
-                ? ERROR_SUCCESS : ERROR_OPERATION_ABORTED;
+            result=delivered ? ERROR_SUCCESS : ERROR_OPERATION_ABORTED;
             if(result) {
                 TerminateJobObject(workers[i].job,1);
                 CloseHandle(workers[i].process);CloseHandle(workers[i].job);memset(&workers[i],0,sizeof(workers[i]));

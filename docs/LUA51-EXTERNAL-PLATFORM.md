@@ -76,12 +76,14 @@ EOF, actual client exit, malformed framing and explicit close retire the
 service's file/hash/process handles. No raw native handle crosses the protocol.
 Workers retain the existing eight-slot token ownership and stop-versus-close
 semantics: `stop` terminates the owned job, while `close` releases ownership
-without terminating a successful worker. During an unacknowledged launch only,
-a provisional job has kill-on-close, assigned atomically with process creation,
-so a blocked launch cannot leave a suspended child after the watchdog exits.
-A successfully written worker receipt removes that provisional flag; failed
-receipt delivery terminates the unreported worker. Service retirement preserves
-successfully detached workers.
+without terminating a successful worker. The job has kill-on-close assigned
+atomically with process creation, so a blocked launch cannot leave a suspended
+child after the watchdog exits. Receipt delivery retains this protection: an
+acknowledged worker remains owned until explicit `worker.close()` successfully
+removes the job limit before releasing its handles. A failed detach preserves
+the token and owner for an explicit cleanup decision. Failed receipt delivery
+terminates the unreported worker; unexpected helper/client exit and service
+retirement terminate still-owned jobs. Explicitly detached workers survive.
 
 ## Standalone validation
 
@@ -96,11 +98,15 @@ The test copies the real EXE into private Temp and uses actual stock Lua 5.1
 and binary IO, atomic replacement, SHA256 versus Python hashlib, exact client
 identity, wrong token/foreign PID/image rejection, maximum fragmented transfers,
 partial-frame expiry, killed server, abrupt owner exit, idle CPU/handle stability,
-and owned worker stop/detach. It does not change the clipboard or open a dialog.
+and owned worker stop/detach. Acknowledged long-running workers are verified to
+exit on helper loss, actual client exit and explicit service retirement, while
+an explicitly closed worker survives retirement. It does not change the
+clipboard or open a dialog.
 
 A separate test-only compile defines blocked dispatch/close operations. The
 production build contains none of those operations. Tests prove EOF after a
 noncancellable dispatch, provisional-worker cleanup, explicit-close timeout,
+an injected detach failure that preserves the token/job for explicit stop,
 and an ambiguous response after an already completed filesystem side effect.
 
 `dist/native-lua51-platform-service/build.json` records exact shared-source,

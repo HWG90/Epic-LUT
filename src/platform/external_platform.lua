@@ -40,11 +40,17 @@ local function unhex(value)
     assert(#value>0 and #value%2==0 and #value<=262128 and not value:find('[^0-9a-f]'),'Invalid launcher image receipt')
     return (value:gsub('..',function(pair)return string.char(tonumber(pair,16))end))
 end
+function E.encode_script(script)
+    assert(type(script)=='string' and #script>0 and #script<=131064,'Bounded UTF-8 script required')
+    local encoded=base64(utf16(script))
+    assert(#encoded<=32766,'Encoded script exceeds Windows command-line limit')
+    return encoded
+end
 function E.command(options,pid)
     local service,hash=options.service,options.sha256
     assert(type(service)=='string' and #service>0 and #service<=131064
         and (service:match('^%a:[/\\]') or service:match('^[/\\][/\\]'))
-        and not service:find('[%c"]'),'Absolute external service path required')
+        and not service:find('[%z\1-\31\127"]'),'Absolute external service path required')
     assert(type(hash)=='string' and #hash==64 and not hash:find('[^0-9a-f]'),'Exact external service SHA256 required')
     assert(type(pid)=='number' and pid>0 and pid<4294967296 and pid%1==0,'Actual client PID required')
     assert(type(io.popen)=='function','Public Lua process launch is unavailable')
@@ -78,9 +84,9 @@ try {
     script=script:gsub('@{([A-Z]+)}',function(key)return assert(values[key])end)
     -- Only the known system PowerShell executable is launched; no policy flags.
     local system=assert(os.getenv('SystemRoot'),'Windows SystemRoot unavailable')
-    assert(not system:find('[%c"]'),'Invalid Windows system path')
+    assert(not system:find('[%z\1-\31\127"]'),'Invalid Windows system path')
     local command='"'..system..'\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '
-        ..base64(utf16(script))
+        ..E.encode_script(script)
     assert(#command<=32766,'External launcher exceeds Windows command-line limit')
     return command
 end
@@ -95,7 +101,7 @@ function E.start(options,pid)
     assert(client and tonumber(client)==pid and tonumber(server)>0 and tonumber(server)<4294967296
         and tonumber(server)~=pid and #token==64,'External launcher failed: '..line:sub(1,240))
     local image_bytes=unhex(image)
-    assert(not image_bytes:find('[%z%c]')
+    assert(not image_bytes:find('[%z\1-\31\127]')
         and (image_bytes:match('^%a:[/\\]') or image_bytes:match('^[/\\][/\\]')),
         'Invalid launcher executable path')
     local prefix='\\\\.\\pipe\\EpicLutExternal-'..client..'-'..token
