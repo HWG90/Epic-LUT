@@ -1,6 +1,7 @@
 local open_file = m.file_io and m.file_io.open or io.open
 -- Active edit session, service composition and controller-owned gear transitions.
-local ffi = require('ffi')
+local buffers = m.float_buffer or require('src.core.float_buffer')
+local ffi, small, big
 local ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor
 local updates
 local groups = {}
@@ -48,7 +49,13 @@ local refresh_needed, next_refresh = false, 0
 local DEBUG_SOURCE = 'builtin:Debug.dds'
 local import_counter = package.loaded['epic.import.counter.v1'] or { value = 0 }
 package.loaded['epic.import.counter.v1'] = import_counter
-local small, big = ffi.new('uint8_t[96]'), ffi.new('uint8_t[1024]')
+function operations.initialize_legacy_buffers()
+    if ffi then return end
+    -- Only the verified legacy activation selects its FFI memory boundary.
+    local library = require('ffi')
+    local first, second = library.new('uint8_t[96]'), library.new('uint8_t[1024]')
+    ffi, small, big = library, first, second
+end
 local retain = package.loaded['epic.direct_lut.retained.v1'] or { records = {}, bytes = 0, cache = {} }
 package.loaded['epic.direct_lut.retained.v1'] = retain
 local function read(a, n, b)
@@ -485,7 +492,8 @@ local function initialize_editor_state()
                 end
                 -- Keep the attempt before calling native code: an exception can
                 -- leave a queued creation/destruction with unknown completion.
-                local keep = { data = ffi.new('float[4]', { 0, 0, 0, 1 }) }
+                local keep = { data = buffers.new(4) }
+                keep.data[3] = 1
                 retain.fence_pending = retain.fence_pending or {}
                 retain.fence_pending[#retain.fence_pending + 1] = keep
                 local fence, why = m.engine.create_texture(native, 1, 1, keep.data, read, small)
@@ -784,8 +792,8 @@ local function save_palette()
     edit.editor_target = nil
     editor_pending = nil
     local source = assert(edit.imported, 'Import a LUT first')
-    local data = ffi.new('float[?]', source.width * source.height * 4)
-    ffi.copy(data, source.data, source.width * source.height * 16)
+    local data = buffers.new(source.width * source.height * 4)
+    buffers.copy(data, source.data, source.width * source.height * 4)
     edit.loaded = { data = data, width = source.width, height = source.height, source = source.source }
     editor_tables[source.source] = edit.loaded
     edit.preview_document = edit.loaded
@@ -1788,7 +1796,7 @@ local function import_mapping()
             end,
             message = message,
             pixels = function(d)
-                return d and ffi.string(d.data, d.width * d.height * 16)
+                return d and buffers.bytes(d.data, d.width * d.height * 4)
             end,
             imports = {
                 palettes = function()
@@ -2095,8 +2103,8 @@ local function select_import_cell(entry, row, column, identify, kind)
         end
     end
     if not edit.loaded or (edit.loaded.data ~= entry.data and m.quick_source ~= entry.data) then
-        local data = ffi.new('float[?]', entry.width * entry.height * 4)
-        ffi.copy(data, entry.data, entry.width * entry.height * 16)
+        local data = buffers.new(entry.width * entry.height * 4)
+        buffers.copy(data, entry.data, entry.width * entry.height * 4)
         edit.loaded = { data = data, width = entry.width, height = entry.height, source = entry.source or entry.name }
     end
     m.quick_source = entry.data
@@ -2307,6 +2315,17 @@ local function close()
     if preferences then
         preferences.close()
     end
+    if operations.runtime_services then
+        local done, why = operations.runtime_services.close(true)
+        if not done then
+            if operations.runtime_cleanup_note ~= why then
+                operations.runtime_cleanup_note = why
+                ctx.log('Epic LUT platform cleanup pending: ' .. tostring(why))
+            end
+            return false
+        end
+        operations.runtime_services, operations.runtime_cleanup_note = nil, nil
+    end
     return true
 end
 local function reset_transient_state()
@@ -2318,6 +2337,7 @@ local function reset_transient_state()
     -- activation. A shared table also keeps the initializer within LuaJIT's
     -- captured-variable limit.
     local export_helpers = {
+        initialize_legacy_buffers = operations.initialize_legacy_buffers,
         discovery_binding = operations.discovery_binding,
         discovery_present = operations.discovery_present,
         include_patterns_in_exports = operations.include_patterns_in_exports,
@@ -2367,6 +2387,11 @@ return {
         reset_transient_state()
         ctx = context
         ctx.log('Epic LUT build: ' .. (m.build_label or m.version or 'development'))
+        if m.runtime_services then
+            local why
+            operations.runtime_services, why = m.runtime_services.start(m, ctx)
+            assert(operations.runtime_services.ready, why)
+        end
         paths = m.paths.new(m)
         if m.resource_ids.labels and paths.storage then
             operations.lut_names = m.resource_ids.labels(paths.storage)
@@ -2380,6 +2405,7 @@ return {
             game_sha256 = '2E2C3B7C2500646DADD5F2B4C6E0504DBB7E7896139F64CDDC0D1813C718F51E',
         })
         assert(ok, why)
+        operations.initialize_legacy_buffers()
         game = memory.address(assert(memory.module('game.dll')))
         native = assert(m.engine.open(memory, game, memory.address(assert(memory.module()))))
         initialize_editor_state()
@@ -2933,13 +2959,13 @@ return {
                                 entries[#entries + 1] = entry
                             end
                             local folder, count = m.bulk_dds_export.new(m, paths).save(name, entries, handle.get('dds_naming'))
-                            d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+                            d.saved_pixels = buffers.bytes(d.data, d.width * d.height * 4)
                             return message('Saved LUT and matching Patterns: ' .. count .. ' DDS files to ' .. folder)
                         end
                         local chosen = operations.export_files.save_unique(name, d, m.lut_files.naming_suffix(d,
                             targets[1] and original_luts and original_luts.get(targets[1].original),
                             handle.get('dds_naming'), operations.lut_names and operations.lut_names.get(d.resource), m.resource_ids, handle.get('lut')))
-                        d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+                        d.saved_pixels = buffers.bytes(d.data, d.width * d.height * 4)
                         return message('Saved ' .. chosen .. '.dds in Epic LUT/files/exports')
                     end)
                 end,

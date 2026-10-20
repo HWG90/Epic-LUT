@@ -63,3 +63,20 @@ kit overrides, private weapon configuration, or another mod's changes.
 The next useful source evidence is an authored HD2 Lua call site or build-matched
 API declaration for the unverified extensions. No current signature or complete
 provider is inferred from the member names alone.
+
+## Additional authored HD2 call shape
+
+A distinct public-source pass found
+[GooseGadgets wall_terminal.lua:398-431](https://github.com/HWG90/GooseGadgets/blob/9025f45aac89beea9fc39f69ffcf1ec26a2a3cc8/Bridge%20Combat/terminal-0.1.14/compat/lll-0.1.14/src/wall_terminal.lua#L398)
+at revision 9025f45aac89beea9fc39f69ffcf1ec26a2a3cc8. It creates a
+render_target/R8G8B8A8 resource, obtains Unit.mesh then Mesh.material, assigns
+Material.set_resource(material, 'input_image', texture), and calls
+Mesh.refresh_instance_hash(mesh). This supplies authored setter/refresh argument
+shapes, not target-25988413 execution, RGBA32F creation, readback or retirement
+proof. No LUT adapter was inferred from the terminal implementation.
+
+Focused primary-source searches at recorded revisions of HD2Runtime,
+HD2WeaponEditor, HD2SDK-AQ-Edition, HellDivers2-SDK, BingusSharedLoader and
+VanillaPlusMegapack found no additional authored update_texture_base64,
+update_raw_buffer or float-texture upload contract. Repeating namespace searches
+is not a replacement for those missing contracts.

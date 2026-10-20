@@ -63,3 +63,6 @@ SOURCE_GROUPS['legacy_paths'] = 'platform'
 
 OWN.insert(0, 'legacy_windows')
 SOURCE_GROUPS['legacy_windows'] = 'platform'
+
+OWN.append('runtime_services')
+SOURCE_GROUPS['runtime_services'] = 'platform'

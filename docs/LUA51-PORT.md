@@ -220,3 +220,38 @@ writes preserve multi-part Lua file writes, validate the full argument list and
 allocation budget before the first transfer, and are covered by actual saved
 setup manifest/DDS round trips. The modular LLL builder reads UTF-8 explicitly
 to preserve source text under Windows Python's default legacy code page.
+
+## Runtime service selection and remaining activation gates
+
+Direct Editor now starts a shared runtime-services lease before creating paths
+and preferences. The same platform and settings objects reach the model and
+frontend context. It closes a created platform only after consumer cleanup has
+finished; borrowed services remain with their owner. A failed constructor that
+cannot close its native owner returns a retained, unready lease for ordinary
+cleanup. No timer or background recovery loop is added. Public modular loader
+storage remains explicit; legacy MDL settings are not migrated implicitly.
+
+Direct Editor detached pixel copies, import comparisons, saved-byte baselines
+and its retained fence pixel use float_buffer. Legacy scratch-buffer allocation
+is deferred until the existing exact-build verification succeeds. The descriptor
+can load and reject an unsupported build under stock Lua 5.1 without importing
+FFI. R6 Weapon Bridge also uses portable highlight buffers and arithmetic event
+masks, retaining all native privacy/ownership checks.
+
+The one-shot tools/lua51_platform_smoke.lua exercises the production bootstrap,
+Unicode binary IO, atomic replace/rename, independent SHA256 and owned loader
+settings. Its native test uses the actual Windows DLL in a private standalone
+Lua 5.1 process. The separately approved one-shot LLL test reached the game's
+Lua 5.1 VM, but Windows rejected package.loadlib with error 577 (digital
+signature verification) before any helper export ran. Its failure capture was
+preserved and its hash-verified project/settings retired. The standalone result
+does not establish that this DLL can run inside the current game. No signing or
+code-integrity policy was changed. A different deployment requires new approval.
+
+Full current-runtime activation is still unproven. Regular package builders
+eagerly select legacy engine/avatar/lobby/Armory modules and the old input DLL.
+They do not yet select a complete new engine provider. Remaining work includes
+current effective binding readback and float texture lifetimes, local actor and
+equipment identity, supported death/equip notifications, Player Preview/native
+submission, lobby transport, and end-to-end deployed performance. The shared
+OS bootstrap does not supply or emulate those game-specific services.

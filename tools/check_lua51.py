@@ -15,7 +15,9 @@ PURE_TESTS = ('appearance_recovery_events', 'appearance_state', 'export_pairing'
 PURE_TESTS += ('ui_font_portable', 'ui_font', 'ui_font_render', 'native_text_metrics', 'table_groups_portable')
 
 PURE_TESTS += ('windows_portable', 'direct_setup_portable')
-PURE_TESTS += ('public_engine_api_inventory', 'gear_buffers_portable', 'preset_file_io_portable', 'update_check_portable', 'export_provenance_portable')
+PURE_TESTS += ('direct_editor_load_portable', 'public_engine_api_inventory', 'gear_buffers_portable', 'preset_file_io_portable', 'update_check_portable', 'export_provenance_portable')
+
+PURE_TESTS += ('runtime_services_portable',)
 
 def runtime():
     lua = LuaRuntime(encoding=None, unpack_returned_tuples=True)
