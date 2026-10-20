@@ -296,11 +296,40 @@ shared Windows facade and owned Unicode files. Its hermetic actual-LLL candidate
 test verified binary/PID markers, normal completion, explicit stop, absent delayed
 output and complete process/file retirement. Terminal callbacks do no work.
 
-That worker candidate has not been deployed: real standalone measurements found
-the synchronous launch request blocking for 200-535 ms. Pacing those calls cannot
-remove that blocking cost; an explicit asynchronous launch contract is still
-needed before this path can meet the runtime performance requirement. The
-earlier completed OS-only game smoke did not exercise worker creation.
+The synchronous worker request blocked for 200-535 ms in standalone measurements.
+External-only operations 31-33 now move creation to finite helper-owned threads.
+Begin returns a future without a provisional PID; result transfers the real owned
+worker only after creation finishes. Cancel acknowledgement is not completion:
+terminal cancellation requires a signaled process handle. Pending, ready and
+ordinary workers share the eight-slot budget. Lost replies, helper/client exit,
+cancel races and stalled creation remain protected by the owned job/watchdog.
+The legacy DLL bytes and explicit synchronous operation remain unchanged.
+
+Import, update, original-source and preview/cache controllers now share
+worker_launch ownership. They choose async only when the selected service
+supports it, wait before PID-dependent reads, and retain failed cleanup owners.
+Result checks occur only during active work, at least 250 ms apart. Automatic
+cleanup attempts are capped; exhausted owners remain available for explicit
+cleanup. Editor retirement waits for original-source and update consumers before
+closing their shared platform. Finished/idle controllers perform no IO.
+
+The corrected exact twelve-file candidate passed hermetic actual-LLL/EXE tests
+and then completed the worker smoke in the game's stock Lua 5.1 VM. Binary/PID
+markers, normal completion, explicit stop, absent delayed output, file cleanup,
+platform closure and all three process exits were verified. Its project/settings
+were retired with hashes checked. The tested EXE SHA256 was
+7c570f1cde074435be736b0dff93f297266aea0285c2f089536f9cb56211cc25.
+
+The first game timing used Application.time_since_launch, which is constant
+within a callback and produced unusable zero-cost samples. A second isolated
+one-shot used the standard os.clock counter: 122 active callbacks, seven status
+checks and a maximum observed callback cost of about 2 ms at millisecond
+resolution. Its one-time service bootstrap still took about 919 ms. Separate
+standalone R6 measurements put begin/result/cancel request maxima at
+0.202/0.430/0.082 ms; complete worker creation still takes hundreds of milliseconds
+off the request path. These limited worker measurements do not establish full
+editor, engine or gameplay performance. Initial service bootstrap remains
+synchronous and the selected lease must be reused across consumers.
 
 Shared path/filter/child-name guards and custom DDS display filenames now reject
 ASCII control bytes explicitly. Locale-dependent Lua %c could reject valid UTF-8

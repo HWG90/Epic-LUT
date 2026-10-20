@@ -42,6 +42,13 @@ function platform.launch_worker(args, folder)
     assert(folder == 'C:/Data/' .. unicode)
     return worker
 end
+local future={status=function()count('future_status');return 'pending'end,
+    cancel=function()count('future_cancel');return false,'pending'end}
+function platform.begin_worker(args, folder)
+    count('begin_worker')
+    assert(args == '-NoProfile -File "C:/Data/' .. unicode .. '/task.ps1"' and folder == 'C:/Data/' .. unicode)
+    return future
+end
 function platform.replace(source, destination)
     count('replace')
     assert(source == 'C:/Data/' .. unicode .. '/state.pending' and destination == 'C:/Data/' .. unicode .. '/state')
@@ -49,6 +56,10 @@ function platform.replace(source, destination)
 end
 local windows = Windows.new(platform)
 assert(next(calls) == nil, 'Constructing Windows adapter performed native work')
+assert(windows.supports_async_workers() and next(calls) == nil, 'Capability check performed work')
+assert(windows.begin_worker('-NoProfile -File "C:/Data/' .. unicode .. '/task.ps1"', 'C:/Data/' .. unicode) == future
+    and calls.begin_worker == 1 and calls.future_status == nil and calls.future_cancel == nil,
+    'Windows adapter sampled a future or substituted ownership')
 assert(windows.process_id() == 1234)
 assert(windows.game_data() == 'C:/Games/' .. unicode .. '/data')
 local names, receipts = windows.files('C:/Data/' .. unicode, '*.dds')
@@ -77,10 +88,12 @@ assert(not worker.stop() and worker.handle ~= nil)
 failed_stop = false
 assert(worker.stop() and worker.close() and closed == 1)
 local before = calls.launch_worker
+local before_begin = calls.begin_worker
 for _, invalid in ipairs({ 'bad\0argument', '\255', string.rep('a', 32767), '\237\160\128' }) do
     assert(not pcall(windows.launch_worker, invalid, 'C:/Data/' .. unicode))
+    assert(not pcall(windows.begin_worker, invalid, 'C:/Data/' .. unicode))
 end
-assert(calls.launch_worker == before, 'Invalid worker arguments reached service')
+assert(calls.launch_worker == before and calls.begin_worker == before_begin, 'Invalid worker arguments reached service')
 assert(not pcall(windows.replace, 'bad\0path', 'destination') and calls.replace == 1)
 assert(not pcall(windows.files, 'C:/Data/' .. unicode, '../*'))
 local before_files = calls.files
@@ -91,6 +104,11 @@ assert(calls.files == before_files, 'Invalid filter reached native listing')
 assert(not pcall(windows.verify_interface), 'Portable code received a fake Win32/FFI interface')
 local missing = Windows.new({})
 assert(not pcall(missing.game_data) and not pcall(missing.launch_worker, '-NoProfile', 'C:/Data'))
+assert(not missing.supports_async_workers() and not pcall(missing.begin_worker, '-NoProfile', 'C:/Data'))
+local saved_begin=platform.begin_worker
+platform.begin_worker=function()return {pid=42,status=function()return 'pending'end,cancel=function()return true end}end
+assert(not pcall(windows.begin_worker, '-NoProfile', 'C:/Data'), 'Future was accepted with a fabricated PID')
+platform.begin_worker=saved_begin
 local saved_stat = platform.stat
 platform.stat = function() return nil end
 assert(not pcall(windows.files, 'C:/Data/' .. unicode, '*.dds'), 'Disappeared files received invented receipts')
@@ -111,9 +129,11 @@ platform.files = original_files
 local old_m, legacy_calls = m, 0
 m = { platform = platform }
 assert(Windows.process_id() == 1234, 'Default methods did not dispatch explicit model service')
+assert(Windows.supports_async_workers())
 m = { legacy_windows = { files = function(folder, pattern)
     legacy_calls = legacy_calls + 1;return { folder, pattern }, { exact = true }
 end } }
+assert(not Windows.supports_async_workers(), 'Legacy service advertised unsupported asynchronous workers')
 local legacy_names, legacy_receipts = Windows.files('old', 'filter')
 assert(legacy_calls == 1 and legacy_names[1] == 'old' and legacy_receipts.exact)
 m, require = old_m, original_require

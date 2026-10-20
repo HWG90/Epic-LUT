@@ -20,11 +20,13 @@ local function newer(a, b)
     return a.revision > b.revision
 end
 function U.new(windows, folder, version, files)
+    local launches = (m and m.worker_launch) or require('src.platform.worker_launch')
     files = files or (m and m.file_io)
     local open_file = files and files.open or io.open
     local remove_file = files and files.remove or os.remove
     local self = { status = 'Updates: not checked', started = false }
-    local worker, age
+    local worker, launch, age, check_after, checks
+    local opening, open_age, open_after, open_checks
     local script = folder .. '/check-updates.ps1'
     local result = folder .. '/update-result.txt'
     local function quote(s)
@@ -32,7 +34,7 @@ function U.new(windows, folder, version, files)
         return '"' .. s .. '"'
     end
     function self.check()
-        if worker then
+        if launch then
             return self.status
         end
         remove_file(result)
@@ -53,7 +55,7 @@ Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
         assert(wrote, write_error)
         assert(closed, close_error)
         local ok, value = pcall(
-            windows.launch_worker,
+            launches.start, windows,
             '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' .. quote(script) .. ' -Output ' .. quote(result),
             folder
         )
@@ -61,16 +63,56 @@ Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
             self.status = 'Update check unavailable'
             return self.status
         end
-        worker = value
-        age = 0
+        launch, worker = value, value.worker
+        age, check_after, checks = 0, 0, 0
         self.status = 'Checking GitHub for updates...'
         return self.status
     end
     function self.tick(dt)
-        if not worker then
-            return
+        if not launch and not opening then return end
+        dt = math.max(0, tonumber(dt) or 0)
+        if opening then
+            open_age, open_after = open_age + dt, open_after - dt
+            if open_after <= 0 and open_checks < 128 then
+                open_after, open_checks = 0.25, open_checks + 1
+                if open_age > 20 then
+                    if opening.cancel() then opening = nil end
+                else
+                    local state, why = opening.advance()
+                    if state == 'ready' then
+                        if opening.detach() then
+                            opening = nil
+                            self.status = 'Opened Epic LUT release page'
+                        end
+                    elseif state ~= 'pending' then
+                        if not opening.future then
+                            opening = nil
+                            self.status = 'Could not open release page: ' .. tostring(why or state)
+                        end
+                    end
+                end
+            end
         end
-        age = age + math.max(0, tonumber(dt) or 0)
+        if not launch then return end
+        age, check_after = age + dt, check_after - dt
+        if check_after > 0 or checks >= 128 then return end
+        check_after, checks = 0.25, checks + 1
+        if not worker then
+            if age > 20 then
+                if launch.cancel() then launch = nil end
+                self.status = 'Update check unavailable; try again later'
+                return
+            end
+            local state, value = launch.advance()
+            if state == 'pending' then return end
+            if state ~= 'ready' then
+                if launch.future then return end
+                launch = nil
+                self.status = 'Update check unavailable; try again later'
+                return
+            end
+            worker = value
+        end
         local f = open_file(result, 'rb')
         local tag
         if f then
@@ -78,11 +120,8 @@ Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
             f:close()
         end
         if tag or age > 20 or not worker.running() then
-            if worker.running() then
-                worker.stop()
-            end
-            worker.close()
-            worker = nil
+            if not launch.cancel() then return end
+            worker, launch = nil, nil
             local latest = tag and parse_version(tag)
             local current = parse_version(version)
             if not latest or not current then
@@ -95,19 +134,28 @@ Move-Item -LiteralPath ($Output+'.tmp') -Destination $Output -Force
         end
     end
     function self.open()
-        local w = windows.launch_worker(
+        if opening then return 'Opening Epic LUT release page...' end
+        opening = launches.start(windows,
             '-NoProfile -NonInteractive -Command "Start-Process \'https://github.com/HWG90/Epic-LUT/releases\'"',
             folder
         )
-        w.close()
-        return 'Opened Epic LUT release page'
+        open_age, open_after, open_checks = 0, 0, 0
+        if opening.worker and opening.detach() then
+            opening = nil
+            return 'Opened Epic LUT release page'
+        end
+        return 'Opening Epic LUT release page...'
     end
     function self.close()
-        if worker then
-            worker.stop()
-            worker.close()
-            worker = nil
+        if launch then
+            if not launch.cancel() then return false end
+            launch, worker = nil, nil
         end
+        if opening then
+            if not opening.cancel() then return false end
+            opening = nil
+        end
+        return true
     end
     return self
 end

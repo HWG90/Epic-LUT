@@ -25,6 +25,8 @@ PURE_TESTS += ('public_engine_metadata',)
 PURE_TESTS += ('lut_row_files_portable',)
 PURE_TESTS += ('worker_smoke_portable',)
 PURE_TESTS += ('bulk_dds_unicode',)
+PURE_TESTS += ('worker_future_portable', 'worker_consumers_async', 'import_job', 'import_picker')
+PURE_TESTS += ('worker_launch_portable',)
 
 def runtime():
     lua = LuaRuntime(encoding=None, unpack_returned_tuples=True)

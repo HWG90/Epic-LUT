@@ -37,6 +37,15 @@ static int platform_test_refuse_detach;
 typedef struct { HANDLE process,job; uint32_t token; DWORD pid; } Worker;
 static Worker workers[8];
 static uint32_t next_worker;
+#ifdef EPIC_PLATFORM_EXTERNAL
+/* Main-thread reservations include launches that have not produced a receipt. */
+static unsigned pending_workers;
+static unsigned worker_count(void) {
+    unsigned i,count=pending_workers;
+    for(i=0;i<8;i++)if(workers[i].process)count++;
+    return count;
+}
+#endif
 typedef struct { HANDLE handle; uint32_t token; unsigned mode; } OwnedFile;
 static OwnedFile files[8];
 static uint32_t next_file;
@@ -298,6 +307,113 @@ static DWORD executable_path(Buffer *output) {
     free(path);return result;
 #endif
 }
+#ifdef EPIC_PLATFORM_EXTERNAL
+static DWORD create_external_worker(const char *payload,uint32_t length,Worker *worker,volatile LONG *cancel
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    ,unsigned test_mode
+#endif
+    ) {
+    wchar_t *args=NULL,*folder=NULL,*file=NULL,*line=NULL;
+    DWORD first,result=ERROR_SUCCESS,system_length,attributes;
+    size_t file_length,args_length;STARTUPINFOEXW startup={0};PROCESS_INFORMATION info={0};
+    SIZE_T attribute_size=0;int attributes_ready=0;HANDLE job=NULL;
+    const wchar_t suffix[]=L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+    if(length<6)return ERROR_INVALID_DATA;
+    first=word((const unsigned char*)payload);
+    if(!first || first>length-5)return ERROR_INVALID_DATA;
+    result=utf16(payload+4,first,MAX_PATH_CHARS,&args);
+    if(!result)result=utf16(payload+4+first,length-4-first,MAX_PATH_CHARS,&folder);
+    if(result)goto done;
+    attributes=GetFileAttributesW(folder);
+    if(attributes==INVALID_FILE_ATTRIBUTES) {result=last_error();goto done;}
+    if(!(attributes&FILE_ATTRIBUTE_DIRECTORY)) {result=ERROR_DIRECTORY;goto done;}
+    file=(wchar_t*)malloc(MAX_PATH_CHARS*sizeof(wchar_t));
+    if(!file) {result=ERROR_NOT_ENOUGH_MEMORY;goto done;}
+    system_length=GetSystemDirectoryW(file,MAX_PATH_CHARS);
+    if(!system_length || system_length>=MAX_PATH_CHARS
+        || system_length+wcslen(suffix)>=MAX_PATH_CHARS) {result=ERROR_FILENAME_EXCED_RANGE;goto done;}
+    memcpy(file+system_length,suffix,sizeof(suffix));
+    file_length=wcslen(file);args_length=wcslen(args);
+    if(file_length+args_length+4>MAX_PATH_CHARS) {result=ERROR_FILENAME_EXCED_RANGE;goto done;}
+    line=(wchar_t*)malloc((file_length+args_length+4)*sizeof(wchar_t));
+    if(!line) {result=ERROR_NOT_ENOUGH_MEMORY;goto done;}
+    line[0]=L'"';memcpy(line+1,file,file_length*sizeof(wchar_t));
+    line[file_length+1]=L'"';line[file_length+2]=L' ';
+    memcpy(line+file_length+3,args,(args_length+1)*sizeof(wchar_t));
+    job=CreateJobObjectW(NULL,NULL);
+    if(!job) {result=last_error();goto done;}
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit={0};
+        limit.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if(!SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limit,sizeof(limit))) {
+            result=last_error();goto done;
+        }
+    }
+    InitializeProcThreadAttributeList(NULL,1,0,&attribute_size);
+    if(!attribute_size || attribute_size>65536) {result=ERROR_INVALID_DATA;goto done;}
+    startup.lpAttributeList=(LPPROC_THREAD_ATTRIBUTE_LIST)malloc(attribute_size);
+    if(!startup.lpAttributeList) {result=ERROR_NOT_ENOUGH_MEMORY;goto done;}
+    if(!InitializeProcThreadAttributeList(startup.lpAttributeList,1,0,&attribute_size)) {result=last_error();goto done;}
+    attributes_ready=1;
+    if(!UpdateProcThreadAttribute(startup.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_JOB_LIST,&job,sizeof(job),NULL,NULL)) {
+        result=last_error();goto done;
+    }
+    startup.StartupInfo.cb=sizeof(startup);startup.StartupInfo.dwFlags=STARTF_USESHOWWINDOW;
+    startup.StartupInfo.wShowWindow=SW_HIDE;
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    if(test_mode==2)Sleep(350);
+#endif
+    if(cancel && InterlockedCompareExchange(cancel,0,0)) {result=ERROR_CANCELLED;goto done;}
+    /* Atomic job assignment covers cancellation/helper exit inside CreateProcess. */
+    if(!CreateProcessW(file,line,NULL,NULL,FALSE,CREATE_NO_WINDOW|CREATE_SUSPENDED|EXTENDED_STARTUPINFO_PRESENT,
+        NULL,folder,&startup.StartupInfo,&info)) {result=last_error();goto done;}
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    if(test_mode==1)Sleep(INFINITE);
+    if(test_mode==3)Sleep(350);
+#endif
+    if(cancel && InterlockedCompareExchange(cancel,0,0)) {result=ERROR_CANCELLED;goto done;}
+    if(ResumeThread(info.hThread)==(DWORD)-1) {result=last_error();goto done;}
+    if(cancel && InterlockedCompareExchange(cancel,0,0)) {result=ERROR_CANCELLED;goto done;}
+    worker->process=info.hProcess;worker->job=job;worker->pid=info.dwProcessId;
+    info.hProcess=NULL;job=NULL;
+done:
+    if(attributes_ready)DeleteProcThreadAttributeList(startup.lpAttributeList);
+    free(startup.lpAttributeList);
+    if(info.hThread)CloseHandle(info.hThread);
+    if(info.hProcess) {
+        /* Async errors/cancellation retain proof of the terminated child until
+           result confirms its process handle is signaled. */
+        TerminateJobObject(job,1);
+        worker->process=info.hProcess;worker->job=job;worker->pid=info.dwProcessId;
+        job=NULL;
+    }
+    if(job)CloseHandle(job);
+    free(args);free(folder);free(file);free(line);return result;
+}
+static DWORD launch_worker(const char *payload,uint32_t length,Buffer *output) {
+    Worker value={0};unsigned slot;DWORD result;unsigned char receipt[8];
+    if(worker_count()>=8 || next_worker==UINT32_MAX)return ERROR_TOO_MANY_OPEN_FILES;
+    result=create_external_worker(payload,length,&value,NULL
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+        ,platform_test_stall_after_create ? 1u : 0u
+#endif
+        );
+    if(result) {
+        if(value.process)CloseHandle(value.process);
+        if(value.job)CloseHandle(value.job);
+        return result;
+    }
+    for(slot=0;slot<8 && workers[slot].process;slot++);
+    value.token=++next_worker;workers[slot]=value;
+    put_word(receipt,value.token);put_word(receipt+4,value.pid);
+    result=append(output,receipt,sizeof(receipt));
+    if(result) {
+        TerminateJobObject(value.job,1);CloseHandle(value.process);CloseHandle(value.job);
+        memset(&workers[slot],0,sizeof(workers[slot]));
+    }
+    return result;
+}
+#else
 static DWORD launch_worker(const char *payload,uint32_t length,Buffer *output) {
     wchar_t *args=NULL,*folder=NULL,*file=NULL,*line=NULL;
     DWORD first,result=ERROR_SUCCESS,system_length,attributes;unsigned slot;
@@ -392,6 +508,7 @@ done:
     if(job)CloseHandle(job);
     free(args);free(folder);free(file);free(line);return result;
 }
+#endif
 static DWORD worker_operation(uint32_t operation,const char *payload,uint32_t length,Buffer *output) {
     Worker *worker=NULL;unsigned i;DWORD state;unsigned char value[4];uint32_t token;
     if(length!=4)return ERROR_INVALID_DATA;

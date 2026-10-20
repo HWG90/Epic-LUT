@@ -10,6 +10,144 @@ static wchar_t instance_token[65];
 static HANDLE transfer_event;
 static HANDLE main_thread,dispatch_finished;
 static volatile LONG dispatch_expired;
+typedef struct {
+    HANDLE thread,finished,timer;char *payload;uint32_t length,token;
+    volatile LONG cancelled,expired;Worker worker;DWORD error;
+    ULONGLONG cleanup_deadline;int termination_requested;
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    unsigned test_mode;
+#endif
+} WorkerFuture;
+static WorkerFuture worker_futures[8];
+static uint32_t next_future;
+static VOID CALLBACK expire_future(PVOID parameter,BOOLEAN fired) {
+    WorkerFuture *future=(WorkerFuture*)parameter;(void)fired;
+    InterlockedExchange(&future->expired,1);InterlockedExchange(&future->cancelled,1);
+    CancelSynchronousIo(future->thread);
+    if(WaitForSingleObject(future->finished,500)!=WAIT_OBJECT_0)
+        TerminateProcess(GetCurrentProcess(),ERROR_TIMEOUT);
+}
+static DWORD WINAPI create_future(LPVOID parameter) {
+    WorkerFuture *future=(WorkerFuture*)parameter;
+    future->error=create_external_worker(future->payload,future->length,&future->worker,&future->cancelled
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+        ,future->test_mode
+#endif
+        );
+    SetEvent(future->finished);
+    /* Completion removes the watchdog without waiting for a later Lua poll. */
+    if(future->timer) {DeleteTimerQueueTimer(NULL,future->timer,INVALID_HANDLE_VALUE);future->timer=NULL;}
+    return 0;
+}
+/* Only the main thread retires completed futures or mutates worker/token tables.
+   A running launch owns its private storage until process exit; never join it
+   on a game-facing request or free a payload still used by CreateProcess. */
+static void release_future(WorkerFuture *future) {
+    if(future->timer)DeleteTimerQueueTimer(NULL,future->timer,INVALID_HANDLE_VALUE);
+    if(future->worker.process)CloseHandle(future->worker.process);
+    if(future->worker.job)CloseHandle(future->worker.job);
+    if(future->thread)CloseHandle(future->thread);
+    if(future->finished)CloseHandle(future->finished);
+    free(future->payload);memset(future,0,sizeof(*future));pending_workers--;
+}
+static void retire_futures(void) {
+    unsigned i;
+    for(i=0;i<8;i++)if(worker_futures[i].token) {
+        WorkerFuture *future=&worker_futures[i];
+        InterlockedExchange(&future->cancelled,1);CancelSynchronousIo(future->thread);
+        if(WaitForSingleObject(future->thread,0)==WAIT_OBJECT_0)release_future(future);
+    }
+    /* Unfinished threads/jobs are closed atomically by this helper's ExitProcess.
+       Their finite watchdog remains armed until then; no detached child escapes. */
+}
+static DWORD begin_future(const char *payload,uint32_t length,Buffer *output
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    ,unsigned test_mode
+#endif
+    ) {
+    WorkerFuture *future;unsigned slot;DWORD result;unsigned char receipt[4];
+    if(length<6 || !word((const unsigned char*)payload)
+        || word((const unsigned char*)payload)>length-5)return ERROR_INVALID_DATA;
+    if(worker_count()>=8 || next_future==UINT32_MAX || next_worker==UINT32_MAX)return ERROR_TOO_MANY_OPEN_FILES;
+    for(slot=0;slot<8 && worker_futures[slot].token;slot++);
+    future=&worker_futures[slot];
+    /* Allocate reply space before starting work: an allocation failure cannot
+       leave a running future without a deliverable token. */
+    put_word(receipt,next_future+1);result=append(output,receipt,sizeof(receipt));if(result)return result;
+    future->payload=(char*)malloc(length);
+    if(!future->payload)return ERROR_NOT_ENOUGH_MEMORY;
+    memcpy(future->payload,payload,length);future->length=length;
+    future->finished=CreateEventW(NULL,TRUE,FALSE,NULL);
+    if(!future->finished) {result=last_error();goto failed;}
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    future->test_mode=test_mode;
+#endif
+    future->thread=CreateThread(NULL,0,create_future,future,CREATE_SUSPENDED,NULL);
+    if(!future->thread) {result=last_error();goto failed;}
+    if(!CreateTimerQueueTimer(&future->timer,NULL,expire_future,future,TRANSFER_TIMEOUT,0,WT_EXECUTEONLYONCE)) {
+        result=last_error();goto failed;
+    }
+    future->token=++next_future;pending_workers++;
+    if(ResumeThread(future->thread)==(DWORD)-1) {
+        /* A suspended helper thread owns no child yet. Its failure is fatal to
+           the helper so no cancellation can race recycled future storage. */
+        TerminateProcess(GetCurrentProcess(),last_error());
+    }
+    return ERROR_SUCCESS;
+failed:
+    if(future->thread) {TerminateThread(future->thread,1);CloseHandle(future->thread);}
+    if(future->finished)CloseHandle(future->finished);
+    free(future->payload);memset(future,0,sizeof(*future));return result;
+}
+static DWORD future_operation(uint32_t operation,const char *payload,uint32_t length,Buffer *output) {
+    WorkerFuture *future=NULL;unsigned i,slot;uint32_t token,state;unsigned char receipt[12];DWORD result;
+    if(length!=4)return ERROR_INVALID_DATA;
+    token=word((const unsigned char*)payload);
+    for(i=0;i<8;i++)if(worker_futures[i].token==token && token) {future=&worker_futures[i];break;}
+    if(!future)return ERROR_INVALID_HANDLE;
+    if(operation==33) {
+        InterlockedExchange(&future->cancelled,1);CancelSynchronousIo(future->thread);
+        if(!future->cleanup_deadline)future->cleanup_deadline=GetTickCount64()+TRANSFER_TIMEOUT;
+        return ERROR_SUCCESS;
+    }
+    result=WaitForSingleObject(future->thread,0);
+    if(result==WAIT_TIMEOUT) {put_word(receipt,0);return append(output,receipt,4);}
+    if(result!=WAIT_OBJECT_0)return result==WAIT_FAILED ? last_error() : ERROR_INVALID_DATA;
+    /* Join only an already completed thread. Canceling its one-shot timer now
+       also synchronizes any in-flight watchdog before fields are inspected. */
+    if(future->timer) {DeleteTimerQueueTimer(NULL,future->timer,INVALID_HANDLE_VALUE);future->timer=NULL;}
+    if(InterlockedCompareExchange(&future->expired,0,0)) {state=2;future->error=ERROR_TIMEOUT;}
+    else if(InterlockedCompareExchange(&future->cancelled,0,0) || future->error==ERROR_CANCELLED)state=3;
+    else state=future->error ? 2u : 1u;
+    if(state!=1 && future->worker.process) {
+        if(!future->termination_requested) {
+            if(!TerminateJobObject(future->worker.job,1))return last_error();
+            future->termination_requested=1;
+            if(!future->cleanup_deadline)future->cleanup_deadline=GetTickCount64()+TRANSFER_TIMEOUT;
+        }
+        result=WaitForSingleObject(future->worker.process,0);
+        if(result==WAIT_TIMEOUT) {
+            if(GetTickCount64()>=future->cleanup_deadline)return ERROR_TIMEOUT;
+            put_word(receipt,0);return append(output,receipt,4);
+        }
+        if(result!=WAIT_OBJECT_0)return result==WAIT_FAILED ? last_error() : ERROR_INVALID_DATA;
+    }
+    put_word(receipt,state);
+    if(state==1) {
+        for(slot=0;slot<8 && workers[slot].process;slot++);
+        if(slot==8 || next_worker==UINT32_MAX) {state=2;put_word(receipt,state);future->error=ERROR_TOO_MANY_OPEN_FILES;}
+        else {
+            put_word(receipt+4,next_worker+1);put_word(receipt+8,future->worker.pid);
+            result=append(output,receipt,12);if(result)return result;
+            future->worker.token=++next_worker;workers[slot]=future->worker;
+            memset(&future->worker,0,sizeof(future->worker));release_future(future);return ERROR_SUCCESS;
+        }
+    }
+    if(state==2)put_word(receipt+4,future->error);
+    result=append(output,receipt,state==2 ? 8u : 4u);
+    if(!result)release_future(future);
+    return result;
+}
 #ifdef EPIC_PLATFORM_TEST_BLOCK
 static int test_stall_close;
 #endif
@@ -27,7 +165,11 @@ static DWORD bounded_dispatch(uint32_t operation,const char *payload,uint32_t le
     ResetEvent(dispatch_finished);InterlockedExchange(&dispatch_expired,0);
     if(!CreateTimerQueueTimer(&timer,NULL,expire_dispatch,NULL,TRANSFER_TIMEOUT,0,WT_EXECUTEONLYONCE))return last_error();
 #ifdef EPIC_PLATFORM_TEST_BLOCK
-    if(operation==248) {
+    if(operation==243) {
+        if(length<4 || word((const unsigned char*)payload)>3)result=ERROR_INVALID_DATA;
+        else result=begin_future(payload+4,length-4,output,word((const unsigned char*)payload));
+    }
+    else if(operation==248) {
         if(length!=1 || (unsigned char)payload[0]>1)result=ERROR_INVALID_DATA;
         else {platform_test_refuse_detach=payload[0];result=ERROR_SUCCESS;}
     }
@@ -46,9 +188,15 @@ static DWORD bounded_dispatch(uint32_t operation,const char *payload,uint32_t le
 #ifdef EPIC_PLATFORM_TEST_BLOCK
             if(test_stall_close)Sleep(INFINITE);
 #endif
-            close_files();close_hashes();close_workers();
+            close_files();close_hashes();close_workers();retire_futures();
         }
-    } else result=dispatch(operation,payload,length,output);
+    } else if(operation==31)result=begin_future(payload,length,output
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+        ,0
+#endif
+        );
+    else if(operation==32 || operation==33)result=future_operation(operation,payload,length,output);
+    else result=dispatch(operation,payload,length,output);
     SetEvent(dispatch_finished);
     DeleteTimerQueueTimer(NULL,timer,INVALID_HANDLE_VALUE);
     if(InterlockedCompareExchange(&dispatch_expired,0,0))return ERROR_TIMEOUT;
@@ -57,7 +205,8 @@ static DWORD bounded_dispatch(uint32_t operation,const char *payload,uint32_t le
 static DWORD publish_worker(Buffer *output,int delivered) {
     DWORD result=ERROR_INVALID_DATA;
     {
-        unsigned i;uint32_t token=output->length==8 ? word((unsigned char*)output->data) : 0;
+        unsigned i;uint32_t token=output->length==8 ? word((unsigned char*)output->data)
+            : output->length==12 && word((unsigned char*)output->data)==1 ? word((unsigned char*)output->data+4) : 0;
         /* Receipt delivery acknowledges ownership; it does not detach it.
            Kill-on-close remains until the client's explicit worker.close. */
         for(i=0;i<8;i++)if(workers[i].job && workers[i].token==token) {
@@ -182,6 +331,9 @@ static DWORD serve(void) {
         } else if(operation==29)status=ERROR_ACCESS_DENIED;
 #ifdef EPIC_PLATFORM_TEST_BLOCK
         else if(operation==253) {status=bounded_dispatch(12,payload,length,&output);Sleep(1500);}
+        else if(operation==244 || operation==245) {
+            status=bounded_dispatch(operation==244 ? 31u : 32u,payload,length,&output);Sleep(1500);
+        }
 #endif
         else if(operation==30) {
             status=bounded_dispatch(operation,payload,length,&output);
@@ -189,9 +341,9 @@ static DWORD serve(void) {
         } else status=bounded_dispatch(operation,payload,length,&output);
         if(status==ERROR_TIMEOUT) {free(payload);free(output.data);return status;}
         result=send_response(nonce,status,&output);
-        if(!status && (operation==12
+        if(!status && (operation==12 || (operation==32 && output.length==12)
 #ifdef EPIC_PLATFORM_TEST_BLOCK
-            || operation==253
+            || operation==253 || (operation==245 && output.length==12)
 #endif
             )) {
             DWORD published=publish_worker(&output,!result);
@@ -238,9 +390,11 @@ int wmain(int argc,wchar_t **argv) {
     result=connect_client(response_pipe);if(result)goto finished;
     result=serve();
 finished:
-    close_channels();close_workers();
+    close_channels();close_workers();retire_futures();
     if(ready)CloseHandle(ready);if(transfer_event)CloseHandle(transfer_event);
     if(dispatch_finished)CloseHandle(dispatch_finished);if(main_thread)CloseHandle(main_thread);
     if(authenticated_client_process)CloseHandle(authenticated_client_process);
-    return (int)result;
+    /* Never tear down storage underneath a pending native launch. Process
+       retirement closes protected jobs and all finite launch threads together. */
+    ExitProcess(result);
 }

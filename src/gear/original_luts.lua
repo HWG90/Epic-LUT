@@ -14,6 +14,8 @@ function O.new(m, paths, native, targets)
     }
     local folder = paths.originals or paths.files
     local advancing = false
+    local launches = m.worker_launch or require('src.platform.worker_launch')
+    local now = os.clock
     local function exists(path)
         local f = open_file(path, 'rb')
         if not f then
@@ -120,7 +122,7 @@ function O.new(m, paths, native, targets)
         end)
     end
     local function start()
-        if self.worker or self.started or not m.original_snapshot_script then
+        if self.launch_owner or self.started or not m.original_snapshot_script then
             return
         end
         self.started = true
@@ -145,17 +147,36 @@ function O.new(m, paths, native, targets)
             self.status = 'Original snapshot startup failed: ' .. tostring(why)
         end
     end
-    local function cancel_worker()
+    local function cancel_worker(automatic)
+        if not automatic then self.cleanup_attempts, self.cleanup_exhausted = 0, nil end
         local f = open_file(folder .. '/progress.txt.cancel', 'wb')
         if f then
             f:write('cancel')
             f:close()
         end
-        if self.worker then
-            pcall(self.worker.stop)
-            pcall(self.worker.close)
-            self.worker = nil
+        if self.launch_owner then
+            self.stopping = true
+            self.cleanup_attempts = (self.cleanup_attempts or 0) + 1
+            local done, why
+            if self.launch_owner.async then
+                done, why = self.launch_owner.cancel()
+            else
+                -- Preserve the legacy best-effort stop/detach error boundary.
+                if self.worker then pcall(self.worker.stop) end
+                done, why = self.launch_owner.detach()
+            end
+            self.worker = self.launch_owner.worker
+            if not done then
+                if self.cleanup_attempts >= 32 then
+                    self.cleanup_exhausted = true
+                    self.status = 'Original worker cleanup is unconfirmed; close explicitly to retry'
+                end
+                return false, why
+            end
+            self.launch_owner, self.worker = nil, nil
         end
+        self.stopping = nil
+        return true
     end
     local function heartbeat()
         if self.owner and os.time() ~= (self.last_heartbeat or 0) then
@@ -166,6 +187,7 @@ function O.new(m, paths, native, targets)
         end
     end
     function self.launch(index)
+        assert(not self.launch_owner, 'Previous original snapshot worker cleanup pending')
         remove_file(folder .. '/error.txt')
         remove_file(folder .. '/progress.txt')
         local pid
@@ -176,7 +198,8 @@ function O.new(m, paths, native, targets)
         heartbeat()
         self.phase = index and 'index' or 'capture'
         local extra = index and ' -IndexOnly' or ' -Wanted "' .. folder .. '/wanted.txt"'
-        self.worker = m.windows.launch_worker(
+        self.launch_owner = launches.start(
+            m.windows,
             '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
                 .. paths.cache
                 .. '/original_snapshots.ps1" -Output "'
@@ -187,7 +210,8 @@ function O.new(m, paths, native, targets)
                 .. (m.windows.game_data and ' -GameData "' .. m.windows.game_data() .. '"' or ''),
             paths.cache
         )
-        self.began = os.time()
+        self.worker = self.launch_owner.worker
+        self.began, self.last_poll = os.time(), now()
         self.status = index and 'Indexing original LUT resources: 0%' or 'Reading equipped original LUTs: 0%'
     end
     local function match_equipped()
@@ -235,18 +259,29 @@ function O.new(m, paths, native, targets)
         return true
     end
     local function tick()
-        if self.worker then
-            heartbeat()
-            self.status = exists(folder .. '/progress.txt')
-                or (self.phase == 'index' and 'Starting resource index worker...' or 'Starting equipped LUT capture...')
+        if self.cleanup_exhausted then return end
+        if self.launch_owner and self.launch_owner.async then
+            local current = now()
+            if current - (self.last_poll or 0) < 0.25 then return end
+            self.last_poll = current
+        end
+        if self.stopping then cancel_worker(true); return end
+        if self.launch_owner then
+            local phase, detail = self.launch_owner.advance()
+            self.worker = self.launch_owner.worker
             if os.time() - self.began > 120 then
                 cancel_worker()
                 self.status = 'Original snapshot reader timed out; editor remains available'
                 return
             end
+            if phase == 'pending' then return end
+            assert(phase == 'ready', detail or 'Original snapshot worker launch cancelled')
+            heartbeat()
+            self.status = exists(folder .. '/progress.txt')
+                or (self.phase == 'index' and 'Starting resource index worker...' or 'Starting equipped LUT capture...')
             if not self.worker.running() then
-                self.worker.close()
-                self.worker = nil
+                assert(self.launch_owner.release(), 'Original snapshot worker release pending')
+                self.launch_owner, self.worker = nil, nil
                 local error = exists(folder .. '/error.txt')
                 if error then
                     self.status = 'Original snapshot failed: ' .. error
@@ -265,7 +300,7 @@ function O.new(m, paths, native, targets)
                 end
             end
         end
-        if self.waiting_match and not self.job and not self.worker then
+        if self.waiting_match and not self.job and not self.launch_owner then
             self.waiting_match = not match_equipped()
         end
         if self.job then
@@ -320,7 +355,7 @@ function O.new(m, paths, native, targets)
             and not self.attempted[object]
             and m.original_snapshot_script
             and not self.job
-            and not self.worker
+            and not self.launch_owner
         then
             self.attempted[object] = true
             self.waiting_match = true
@@ -340,8 +375,9 @@ function O.new(m, paths, native, targets)
         return self.get(object)
     end
     function self.retry()
+        if self.cleanup_exhausted and not self.close() then return false, self.status end
         self.attempted = {}
-        if not self.worker and not self.job then
+        if not self.launch_owner and not self.job then
             if m.original_snapshot_script then
                 self.started, self.loaded, self.waiting_match, self.validated_stamp = true, false, false, nil
                 self.launch(true)
@@ -351,7 +387,8 @@ function O.new(m, paths, native, targets)
         end
     end
     function self.close()
-        cancel_worker()
+        self.job, self.waiting_match = nil, nil
+        return cancel_worker()
     end
     return self
 end
