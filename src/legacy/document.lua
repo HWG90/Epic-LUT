@@ -1,9 +1,9 @@
 -- Full-float working documents. UI previews are separate from the immutable original source.
-local ffi=require('ffi')
+local buffers=m and m.float_buffer or require('src.core.float_buffer')
 local M={}
 function M.new(dds)
     local self={documents={},undo_stack={},redo_stack={},clipboard=nil}
-    local function clone(lut,data)local out=ffi.new('float[?]',lut.width*lut.height*4);ffi.copy(out,data,lut.width*lut.height*16);return out end
+    local function clone(lut,data)local out=buffers.new(lut.width*lut.height*4);buffers.copy(out,data,lut.width*lut.height*4);return out end
     function self.attach(catalog,folder,handle,prefix)
         self.documents={};self.undo_stack={};self.redo_stack={}
         for _,lut in ipairs(catalog.luts)do
@@ -48,7 +48,7 @@ function M.new(dds)
     function self.redo()return history(self.redo_stack,self.undo_stack)end
     function self.row_copy(name,row)
         local d=assert(self.documents[name]);assert(row>=1 and row<=d.lut.height)
-        local data=ffi.new('float[?]',d.lut.width*4);ffi.copy(data,d.data+(row-1)*d.lut.width*4,d.lut.width*16)
+        local data=buffers.new(d.lut.width*4);buffers.copy(data,d.data,d.lut.width*4,0,(row-1)*d.lut.width*4)
         self.clipboard={width=d.lut.width,data=data};return true
     end
     function self.row_paste(name,row)
@@ -79,7 +79,7 @@ function M.new(dds)
         local d=self.documents[name];if not d or not d.active then return nil end
         local data=clone(d.lut,d.lut.values)
         for row=0,d.lut.height-1 do if handle.get(name..'_r'..(row+1)..'_on')then
-            ffi.copy(data+row*d.lut.width*4,d.data+row*d.lut.width*4,d.lut.width*16)
+            buffers.copy(data,d.data,d.lut.width*4,row*d.lut.width*4,row*d.lut.width*4)
         end end
         return data
     end

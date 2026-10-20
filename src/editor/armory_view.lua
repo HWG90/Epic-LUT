@@ -1,5 +1,5 @@
 -- Saved, named full-LUT palettes. Selecting previews; applying is explicit.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local A = {}
 local categories = { 'armor', 'helmet', 'cape', 'pattern' }
 local titles = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', pattern = 'Patterns' }
@@ -80,7 +80,7 @@ local function update_preview(self, outfit)
                     width = document.width,
                     height = document.height,
                     revision = document.revision,
-                    pixels = ffi.string(document.data, document.width * document.height * 16),
+                    pixels = buffers.bytes(document.data, document.width * document.height * 4),
                 }
                 self.preview_fingerprint_reads = (self.preview_fingerprint_reads or 0) + 1
             end

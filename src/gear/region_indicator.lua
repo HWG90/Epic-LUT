@@ -1,7 +1,7 @@
 -- Temporary live bindings only; editor pixels and preset state remain untouched.
 local R = {}
 function R.new(deps)
-    local ffi = require('ffi')
+    local buffers = m and m.float_buffer or require('src.core.float_buffer')
     local self = {}
     function self.stop()
         local job = self.job
@@ -64,8 +64,8 @@ function R.new(deps)
         local ok, why = pcall(function()
             for _, item in ipairs(items) do
                 local source = item.source
-                local data = ffi.new('float[?]', source.width * source.height * 4)
-                ffi.copy(data, source.data, source.width * source.height * 16)
+                local data = buffers.new(source.width * source.height * 4)
+                buffers.copy(data, source.data, source.width * source.height * 4)
                 -- Camo and bump/curvature colors can cover the primary color.
                 -- Flash those documented RGB contributions too; retain every
                 -- alpha, material/mask value, tint, emission and camo selector.

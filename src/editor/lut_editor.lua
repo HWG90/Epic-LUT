@@ -1,7 +1,7 @@
 -- Imported palette editing. Source pixels are distinct from retained GPU buffers.
 local E = {}
 function E.new(m, document, note, save, presets, live_document, open_export, save_patch, save_bulk, import_rows)
-    local ffi = require('ffi')
+    local floats = m.float_buffer or require('src.core.float_buffer')
     local self = { undo = {}, redo = {}, busy = false, value_scroll = 0 }
     local channels = { { 1, 2, 3 }, { 1, 2, 3, 4 }, { 1 }, { 2 }, { 3 }, { 4 } }
     local function editable(d, column, channel)
@@ -89,7 +89,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         self.busy = false
     end
     local function snapshot(d)
-        return ffi.string(d.data, d.width * d.height * 16)
+        return floats.bytes(d.data, d.width * d.height * 4)
     end
     local function remember()
         local d = assert(document(), 'Import a palette first')
@@ -156,7 +156,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.redo = {}
             note('Palette edited. Live preview updates automatically.')
         else
-            ffi.copy(d.data, session.before, #session.before)
+            floats.copy(d.data, session.before, #session.before / 4)
             d.revision = (d.revision or 0) + 1
         end
         self.sync()
@@ -226,7 +226,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         local d, target, at = scalar_target()
         local value = tonumber(d.data[at])
         assert(value == value and math.abs(value) ~= math.huge, 'Cannot copy a nonfinite value')
-        self.value_clip = { bytes = ffi.string(d.data + at, 4), text = string.format('%.9g', value) }
+        self.value_clip = { bytes = floats.bytes(d.data, 1, at), text = string.format('%.9g', value) }
         if self.clipboard and self.clipboard.set then
             local ok, why = self.clipboard.set(self.value_clip.text)
             assert(ok, why or 'System clipboard unavailable')
@@ -249,17 +249,18 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         text = text:match('^%s*(.-)%s*$')
         local value = tonumber(text)
         assert(value and value == value and math.abs(value) ~= math.huge, 'Paste requires one finite numeric value')
-        local typed = ffi.new('float[1]', value)
+        local typed = floats.new(1)
+        typed[0] = value
         assert(math.abs(tonumber(typed[0])) ~= math.huge, 'Value exceeds the float32 range')
         local control =
             self.api.mods[self.handle.id].controls[({ 'cell_r', 'cell_g', 'cell_b', 'cell_a' })[target.channel]]
         if not (control.raw_numeric or control.allow_out_of_range) then
             assert(value >= control.min and value <= control.max, 'Value exceeds the editor numeric range')
         end
-        local bytes = self.value_clip and text == self.value_clip.text and self.value_clip.bytes or ffi.string(typed, 4)
-        if ffi.string(d.data + at, 4) ~= bytes then
+        local bytes = self.value_clip and text == self.value_clip.text and self.value_clip.bytes or floats.bytes(typed, 1)
+        if floats.bytes(d.data, 1, at) ~= bytes then
             d = remember()
-            ffi.copy(d.data + at, bytes, 4)
+            floats.copy(d.data, bytes, 1, at)
             self.sync()
         end
         return note('Pasted one value; other channels are unchanged.')
@@ -402,8 +403,8 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             self.paste_anchor = nil
             self.value_target = nil
             if not d.original then
-                d.original = ffi.new('float[?]', d.width * d.height * 4)
-                ffi.copy(d.original, d.data, d.width * d.height * 16)
+                d.original = floats.new(d.width * d.height * 4)
+                floats.copy(d.original, d.data, d.width * d.height * 4)
             end
         end
         local h = self.handle
@@ -431,8 +432,8 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             assert(self.can_pick(session.row, session.column, session.mode))
             local current_pixels = snapshot(d)
             local at = m.semantics.index(session.row, session.column, 1, d.width, d.height)
-            local original = ffi.new('float[?]', d.width * d.height * 4)
-            ffi.copy(original, session.before, #session.before)
+            local original = floats.new(d.width * d.height * 4)
+            floats.copy(original, session.before, #session.before / 4)
             local before = rgb(original, at)
             for ch = 1, 3 do
                 if picker_channel(ch, session.mode) then
@@ -460,7 +461,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
                     self.redo = {}
                 end
             elseif session.changed then
-                ffi.copy(d.data, session.before, #session.before)
+                floats.copy(d.data, session.before, #session.before / 4)
                 d.revision = (d.revision or 0) + 1
                 self.sync()
             end
@@ -609,7 +610,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
             return note('No more history')
         end
         to[#to + 1] = snapshot(d)
-        ffi.copy(d.data, value, #value)
+        floats.copy(d.data, value, #value / 4)
         d.revision = (d.revision or 0) + 1
         self.sync()
         return note('Palette history updated. Live preview updates automatically.')
@@ -641,7 +642,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
     end
     function self.reset()
         local d = remember()
-        ffi.copy(d.data, d.original, d.width * d.height * 16)
+        floats.copy(d.data, d.original, d.width * d.height * 4)
         self.sync()
         return note('Custom edits reset to the imported palette. Apply to update the live LUTs.')
     end
@@ -720,9 +721,10 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         m.semantics.index(s.r2, s.c2, 4, d.width, d.height)
         local w, h = s.c2 - s.c1 + 1, s.r2 - s.r1 + 1
         assert(w > 0 and h > 0, 'Invalid selection bounds')
-        local data = ffi.new('float[?]', w * h * 4)
+        local data = floats.new(w * h * 4)
         for r = 0, h - 1 do
-            ffi.copy(data + r * w * 4, d.data + m.semantics.index(s.r1 + r, s.c1, 1, d.width, d.height), w * 16)
+            floats.copy(data, d.data, w * 4, r * w * 4,
+                m.semantics.index(s.r1 + r, s.c1, 1, d.width, d.height))
         end
         self.clip = {
             width = w,
@@ -760,7 +762,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         d = remember()
         for r = 0, clip.height - 1 do
             local target = m.semantics.index(row + r, column, 1, d.width, d.height)
-            ffi.copy(d.data + target, clip.data + r * clip.width * 4, clip.width * 16)
+            floats.copy(d.data, clip.data, clip.width * 4, target, r * clip.width * 4)
         end
         self.selection = {
             rows = clip.rows,
@@ -819,7 +821,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         d = remember()
         for row = s.r1, s.r2 do
             local at = m.semantics.index(row, s.c1, 1, d.width, d.height)
-            ffi.copy(d.data + at, source.data + at, (s.c2 - s.c1 + 1) * 16)
+            floats.copy(d.data, source.data, (s.c2 - s.c1 + 1) * 4, at, at)
         end
         self.sync()
         return note('Restored Arrowhead ' .. scope .. ' values (full RGBA); other edits retained.')
@@ -831,7 +833,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         local at = m.semantics.index(row, full_row and 1 or column, 1, d.width, d.height)
         assert(d.original, 'Original table unavailable')
         d = remember()
-        ffi.copy(d.data + at, d.original + at, width * 16)
+        floats.copy(d.data, d.original, width * 4, at, at)
         self.sync()
         return note(
             'Reset row ' .. row .. (full_row and ' (all columns)' or ', column ' .. column) .. ' to its loaded values'
@@ -855,7 +857,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         local width, changed = selected.c2 - selected.c1 + 1, false
         for row = selected.r1, selected.r2 do
             local at = m.semantics.index(row, selected.c1, 1, d.width, d.height)
-            if ffi.string(d.data + at, width * 16) ~= ffi.string(d.original + at, width * 16) then
+            if floats.bytes(d.data, width * 4, at) ~= floats.bytes(d.original, width * 4, at) then
                 changed = true
                 break
             end
@@ -866,7 +868,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         d = remember()
         for row = selected.r1, selected.r2 do
             local at = m.semantics.index(row, selected.c1, 1, d.width, d.height)
-            ffi.copy(d.data + at, d.original + at, width * 16)
+            floats.copy(d.data, d.original, width * 4, at, at)
         end
         self.sync()
         return note('Reset selected cells to their loaded values (full RGBA).')
@@ -876,7 +878,7 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         if not d or not d.original then
             return false
         end
-        return snapshot(d) ~= (d.saved_pixels or ffi.string(d.original, d.width * d.height * 16))
+        return snapshot(d) ~= (d.saved_pixels or floats.bytes(d.original, d.width * d.height * 4))
     end
     function self.move_selection(row, column)
         local d = assert(document(), 'Import first')

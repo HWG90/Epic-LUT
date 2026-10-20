@@ -1,3 +1,5 @@
+local cooperative=m and m.cooperative or require('src.core.cooperative')
+local buffers=m and m.float_buffer or require('src.core.float_buffer')
 -- Epic LUT appearance sharing. Lobby transport is derived from CowboyBingus v1.3.
 -- Remote writes are scoped to that peer's live garment slots and matching equipped kits.
 local S = {}
@@ -95,8 +97,22 @@ function S.new(deps)
             checkpoint(true)
         end
         local marks = { identity.body or 0, identity.armor or 0, identity.helmet or 0 }
-        for _, entry in ipairs(entries) do
+        local documents, payload_ids, payloads = {}, {}, {}
+        assert(#entries <= 4096, 'Too many LUT bindings to share')
+        for index, entry in ipairs(entries) do
+            if checkpoint and index % 64 == 0 then checkpoint() end
             local d = entry.document
+            local payload = documents[d]
+            if not payload then
+                local bytes = buffers.bytes(d.data, d.width * d.height * 4, nil, checkpoint)
+                local key = d.width .. ':' .. d.height .. ':' .. #bytes .. ':' .. bytes
+                payload = payload_ids[key]
+                if not payload then
+                    payload = #payloads + 1
+                    payload_ids[key], payloads[payload] = payload, key
+                end
+                documents[d] = payload
+            end
             local base = entry.original
             local baseline = base
                     and table.concat({
@@ -114,11 +130,12 @@ function S.new(deps)
                 .. ':'
                 .. baseline
                 .. ':'
-                .. require('ffi').string(d.data, d.width * d.height * 16)
+                .. payload
         end
-        local now = table.concat(marks, '|')
+        -- Retain each immutable palette payload once, rather than once per binding.
+        local now = table.concat(marks, '|') .. '|payloads:' .. #payloads .. '|' .. table.concat(payloads)
         if signature ~= now then
-            local ok, packet = pcall(function()
+            local ok, packet = cooperative.call(function()
                 local encoded = codec.encode(identity, entries, checkpoint)
                 assert(type(encoded) == 'string' and encoded ~= '', 'Shared LUT encoder returned no appearance')
                 return encoded

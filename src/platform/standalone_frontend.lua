@@ -3,48 +3,36 @@ local F={}
 function F.new(m,ctx,deps)
     deps=deps or {};local self={preview_cleanup_guard=true}
     local prior=package.loaded['dbf.epic_lut.frontend.v1'];assert(not prior or prior.closed,'Another Epic LUT frontend is active')
-    package.loaded['dbf.epic_lut.frontend.v1']=self
     if deps.input then
         self.input=deps.input;self.capture=deps.capture;self.view=deps.view;self.resolution=deps.resolution
     else
-            local ffi=require('ffi');local bit=require('bit')
-            if not pcall(ffi.typeof,'epic_front_point')then ffi.cdef([[typedef struct {long x;long y;} epic_front_point;]])end
-            pcall(ffi.cdef,[[
-                short epic_front_key(int) __asm__("GetAsyncKeyState");
-                void *epic_front_foreground(void) __asm__("GetForegroundWindow");
-                int epic_front_cursor(epic_front_point *) __asm__("GetCursorPos");
-                int epic_front_client(void *,epic_front_point *) __asm__("ScreenToClient");
-                int epic_front_rect(void *,long *) __asm__("GetClientRect");
-                uint32_t epic_front_window_pid(void *,uint32_t *) __asm__("GetWindowThreadProcessId");
-                uint32_t epic_front_pid(void) __asm__("GetCurrentProcessId");
-                int mcm_set_cursor_mode(int);int mcm_install(void *);int mcm_capture(int);int mcm_captured(void);void mcm_release(void);int mcm_wheel(void);
-            ]])
-            local user=ffi.load('user32');local kernel=ffi.load('kernel32')
-            local native=ffi.load(ctx.dir..'/'..assert(m.frontend_native_name,'Packaged input runtime missing'))
-            for _,name in ipairs({'mcm_set_cursor_mode','mcm_install','mcm_capture','mcm_captured','mcm_release','mcm_wheel'})do assert(native[name],'Input runtime interface missing '..name)end
-            local sr=assert(rawget(_G,'stingray'));local process=kernel.epic_front_pid();local foreground;local process_out=ffi.new('uint32_t[1]');local point=ffi.new('epic_front_point[1]');local rect=ffi.new('long[4]')
-            self.capture=m.ui_capture.new(native,assert(sr.Window),ctx.log)
-            self.view=m.ui_view.new(sr,nil,ctx.log)
-            self.input={poll=function()foreground=user.epic_front_foreground();user.epic_front_window_pid(foreground,process_out);if process_out[0]~=process then foreground=nil end end,
-                focused=function()return foreground~=nil end,window=function()return foreground end,
-                down=function(code)return foreground and bit.band(tonumber(user.epic_front_key(code)),0x8000)~=0 or false end,
-                wheel=function()return tonumber(native.mcm_wheel())end,
-                mouse=function()
-                    if not foreground or user.epic_front_cursor(point)==0 or user.epic_front_client(foreground,point)==0 or user.epic_front_rect(foreground,rect)==0 then return end
-                    local w,h=sr.Gui.resolution();local cw,ch=tonumber(rect[2]),tonumber(rect[3]);if cw<=0 or ch<=0 then return end
-                    return tonumber(point[0].x)*w/cw,h-tonumber(point[0].y)*h/ch
-                end}
-            self.resolution=sr.Gui.resolution
+        local loader=deps.loader or rawget(_G,'LiveLuaLoader')
+        local shared=loader and loader.capabilities and loader.capabilities.shared_input and loader.input_service
+        local adapter
+        if shared then
+            adapter=assert(m.loader_input,'Shared input adapter unavailable').new(assert(rawget(_G,'stingray')),shared,ctx.log)
+            self.shared_input_service=shared
+        else
+            local legacy=m.legacy_frontend_input or require('src.platform.legacy_frontend_input')
+            adapter=legacy.new(m,ctx)
+        end
+        self.input,self.capture,self.resolution=adapter.input,adapter.capture,adapter.resolution
+        self.view=deps.view or adapter.view or m.ui_view.new(assert(rawget(_G,'stingray')),nil,ctx.log)
     end
     if m.ui_font and deps.memory and deps.game and self.view.set_font_source then
         self.view.set_font_source(m.ui_font.new(deps.memory,deps.game,m.engine and m.engine.at))
     end
-    self.api=m.ui_core.new(m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
+    self.api=m.ui_core.new(deps.storage or ctx.storage or m.ui_store.new(assert(ctx.settings_dir)),ctx.log)
     self.menu=m.ui_menu.new(self.api,self.view.measure,m.text_editor)
     self.menu.text_metrics=self.view.text_metrics
     self.menu.on_dropdown_open=function(id,count)ctx.log('Epic LUT dropdown opened: '..tostring(id)..' ('..tostring(count)..' choices)')end
     if self.view.refresh_font then self.menu.measure_text=self.view.measure end
-    self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({window=function()return self.input.window()end}))
+    self.platform=deps.platform or ctx.platform
+    if not self.platform and m.native_platform_name then
+        self.platform=assert(m.native_platform,'Platform service unavailable').new({library=ctx.dir..'/'..m.native_platform_name})
+        self.platform_owned=true
+    end
+    self.clipboard=deps.clipboard or (m.clipboard and m.clipboard.new({service=self.platform and self.platform.clipboard,window=function()return self.input.window()end}))
     self.api.clipboard=self.clipboard;self.menu.clipboard=self.clipboard
     self.menu.window_width=1420;self.menu.window_height=960;self.menu.toggle_key=121
     self.menu.compact_fonts=true
@@ -151,7 +139,18 @@ function F.new(m,ctx,deps)
             end
             if self.mcm_settings then self.mcm_settings.tick(dt) end
             self.input.poll();local focused=self.input.focused()
+            local returned_focus=focused and self.cleanup_focused==false
+            self.cleanup_focused=focused
             if self.input_cleanup_pending then
+                if self.shared_input_service then
+                    local retry_down=self.input.down(27) or self.input.down(self.menu.toggle_key)
+                    local explicit_retry=retry_down and not self.cleanup_retry_held
+                    self.cleanup_retry_held=retry_down
+                    if not returned_focus and not explicit_retry then
+                        self.menu.notice=tostring(self.input_cleanup_reason or 'Input restoration is pending; close or recover Epic LUT to retry')
+                        return
+                    end
+                end
                 local ready,reason=release_input();if not ready then self.menu.notice=tostring(reason);return end
             end
             local can_draw,w,h=self.render_ready();self.view.suspended=not can_draw
@@ -174,6 +173,7 @@ function F.new(m,ctx,deps)
             end
             self.basic_held=basic_down
             local full_down=self.input.down(self.menu.toggle_key)
+            local full_edge=full_down and not self.full_held
             if focused and process_input and full_down and not self.full_held and self.basic_mode and not self.menu.capture then
                 self.basic_mode=false;self.menu.basic_only=false
                 if self.full_size then self.menu.window_width,self.menu.window_height=unpack(self.full_size)end
@@ -182,11 +182,11 @@ function F.new(m,ctx,deps)
             end
             self.full_held=full_down
 
-            if focused and self.menu.visible and not self.capture.active then
+            if focused and self.menu.visible and not self.capture.active and not self.shared_input_service then
                 local loader=rawget(_G,'LiveLuaLoader')
                 if loader and type(loader.close_manager)=='function'then assert(loader.close_manager()~=false,'Loader cursor restoration pending')end
             end
-            local photo=rawget(_G,'DBF_PHOTO_EDITOR_INPUT')
+            local photo=not self.shared_input_service and rawget(_G,'DBF_PHOTO_EDITOR_INPUT') or nil
             local opening=focused and process_input and (full_down or basic_down)
             if self.menu.visible or opening then
                 local ready,why=borrow_photo(photo)
@@ -197,6 +197,13 @@ function F.new(m,ctx,deps)
             local acquired,reason=self.capture.sync(self.menu.visible,focused,self.input.window(),self.preferences and self.preferences.cursor_mode and self.preferences.cursor_mode()or 'hardware')
             if not acquired then
                 local text=tostring(reason)
+                if self.shared_input_service then
+                    self.menu.notice=text
+                    -- A broker conflict never steals another menu's lease or executes edits.
+                    if full_edge or self.input.down(27) then self.menu.visible=false;release_input() end
+                    self.view.release()
+                    return
+                end
                 if text:find('Cannot acquire input capture',1,true)or text:find('Input capture lost',1,true)or text:find('Window capture unavailable',1,true)then self.view.release();return end
                 error(text,0)
             end
@@ -298,10 +305,12 @@ function F.new(m,ctx,deps)
         if self.mcm_settings then self.mcm_settings.close() end
         local ok,why=self.capture.shutdown();if not ok then ctx.log('Cursor restoration pending: '..tostring(why));return false end
         if not dismissed then return false,reason end
+        if self.platform_owned and self.platform and self.platform.close then self.platform.close() end
         self.closed=true
         if package.loaded['dbf.epic_lut.frontend.v1']==self then package.loaded['dbf.epic_lut.frontend.v1']=nil end
         return true
     end
+    package.loaded['dbf.epic_lut.frontend.v1']=self
     ctx.log('Epic LUT frontend ready; optional MCM settings bridge')
     return self
 end

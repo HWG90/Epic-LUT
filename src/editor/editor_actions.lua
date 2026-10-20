@@ -1,11 +1,11 @@
 -- Registry actions: history boundaries, dialogs, source selection and draft copies.
 -- Activation state changes pass through semantic host callbacks.
 local A = {}
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 
 local function copy_document(source, label)
-    local data = ffi.new('float[?]', source.width * source.height * 4)
-    ffi.copy(data, source.data, source.width * source.height * 16)
+    local data = buffers.new(source.width * source.height * 4)
+    buffers.copy(data, source.data, source.width * source.height * 4)
     return { data = data, width = source.width, height = source.height, source = label }
 end
 

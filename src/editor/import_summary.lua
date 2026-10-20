@@ -1,6 +1,6 @@
 -- Current view data and registered choice presentation.
 -- Reads one synchronous frame; host callbacks own suppressed camo changes.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local S = {}
 
 function S.new(modules, host)
@@ -197,9 +197,9 @@ function S.new(modules, host)
         local picker = host.picker_info()
         local dirty = frame.loaded
                 and frame.loaded.original
-                and ffi.string(frame.loaded.data, frame.loaded.width * frame.loaded.height * 16) ~= (frame.loaded.saved_pixels or ffi.string(
+                and buffers.bytes(frame.loaded.data, frame.loaded.width * frame.loaded.height * 4) ~= (frame.loaded.saved_pixels or buffers.bytes(
                     frame.loaded.original,
-                    frame.loaded.width * frame.loaded.height * 16
+                    frame.loaded.width * frame.loaded.height * 4
                 ))
             or false
         return {

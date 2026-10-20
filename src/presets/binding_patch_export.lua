@@ -1,6 +1,5 @@
 -- Original-byte material/unit edits for assignment-preserving texture variants.
 -- Factual offsets verified against HD2SDK CE 5a886256; no SDK runtime dependency.
-local bit = require('bit')
 local B = { MAX_BINDINGS = 4096, MAX_RECORDS = 12288, MAX_PART_BYTES = 8 * 1024 * 1024, MAX_UNIT_MATERIALS = 64 }
 B.TEXTURE, B.MATERIAL, B.UNIT = 'cd4238c6a0c69e32', 'eac0b497876adedf', 'e0a48d0be9a7453f'
 local function word(n)
@@ -115,25 +114,60 @@ local function unit_sections(source)
     end
     return sections
 end
--- Deterministic CRC32/FNV32 pair; no floating-point64-bit ID conversions.
-local crc = {}
-for n = 0, 255 do
-    local value = n
-    for _ = 1, 8 do
-        value = bit.bxor(bit.rshift(value, 1), bit.band(value, 1) ~= 0 and 0xedb88320 or 0)
+-- Deterministic CRC32/FNV32 pair; exact unsigned32 arithmetic on either VM.
+-- Initialize only on binding export. No startup tables, native import or idle work.
+local fingerprint_bytes
+local function initialize_fingerprint()
+    local native = rawget(_G, 'bit')
+    local bxor, rshift
+    if native then
+        bxor, rshift = native.bxor, native.rshift
+    else
+        local nibble = {}
+        for a = 0, 15 do
+            for b = 0, 15 do
+                local x, y, value, place = a, b, 0, 1
+                for _ = 1, 4 do
+                    if x % 2 ~= y % 2 then value = value + place end
+                    x, y, place = math.floor(x / 2), math.floor(y / 2), place * 2
+                end
+                nibble[a * 16 + b] = value
+            end
+        end
+        bxor = function(a, b)
+            local value, place = 0, 1
+            while a ~= 0 and b ~= 0 do
+                value = value + nibble[(a % 16) * 16 + b % 16] * place
+                a, b, place = math.floor(a / 16), math.floor(b / 16), place * 16
+            end
+            return value + (a + b) * place
+        end
+        rshift = function(a, n) return math.floor(a / 2 ^ n) end
     end
-    crc[n] = value
+    local crc = {}
+    for n = 0, 255 do
+        local value = n
+        for _ = 1, 8 do
+            value = bxor(rshift(value, 1), value % 2 ~= 0 and 0xedb88320 or 0)
+        end
+        crc[n] = value
+    end
+    fingerprint_bytes = function(bytes)
+        local a, b = 4294967295, 2166136261
+        for i = 1, #bytes do
+            local byte = bytes:byte(i)
+            a = bxor(rshift(a, 8), crc[bxor(a % 256, byte)])
+            b = bxor(b, byte) % 4294967296
+            local low, high = b % 65536, math.floor(b / 65536)
+            -- FNV multiplication split at16 bits; all intermediates are exact.
+            b = (low * 403 + ((high * 403 + low * 256) % 65536) * 65536) % 4294967296
+        end
+        return string.format('%08x%08x', 4294967295 - (a % 4294967296), b)
+    end
 end
 local function fingerprint(bytes)
-    local a, b = -1, bit.tobit(2166136261)
-    for i = 1, #bytes do
-        local byte = bytes:byte(i)
-        a = bit.bxor(bit.rshift(a, 8), crc[bit.band(bit.bxor(a, byte), 255)])
-        b = bit.bxor(b, byte)
-        local low, high = bit.band(b, 65535), bit.rshift(b, 16)
-        b = bit.tobit(low * 403 + bit.lshift((high * 403 + low * 256) % 65536, 16))
-    end
-    return string.format('%08x%08x', bit.bnot(a) % 4294967296, b % 4294967296)
+    if not fingerprint_bytes then initialize_fingerprint() end
+    return fingerprint_bytes(bytes)
 end
 function B.archive(archive, records)
     id(archive)

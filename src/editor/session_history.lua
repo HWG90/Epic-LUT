@@ -1,7 +1,7 @@
 -- History snapshots and transactional restoration of owned material/Pattern writes.
 -- UI, persistence and activation state remain with the session controller.
 local H = {}
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 
 function H.new(deps)
     for _, name in ipairs({
@@ -62,7 +62,7 @@ function H.new(deps)
         end
         local signature = {
             tostring(state.imported),
-            state.loaded and ffi.string(state.loaded.data, state.loaded.width * state.loaded.height * 16) or '',
+            state.loaded and buffers.bytes(state.loaded.data, state.loaded.width * state.loaded.height * 4) or '',
             state.loaded and state.loaded.source or '',
         }
         for _, pool in ipairs({

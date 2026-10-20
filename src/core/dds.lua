@@ -1,6 +1,5 @@
 -- Bounded little-endian DDS float interchange; no image decoder or code execution in game.
-local ffi = require('ffi')
-local bit = require('bit')
+local buffer = m and m.float_buffer or require('src.core.float_buffer')
 local D = { MAX_BYTES = 1024 * 1024 }
 local function u32(s, o)
     assert(o >= 0 and o + 4 <= #s, 'Truncated DDS header')
@@ -21,10 +20,14 @@ local function half(n)
     return sign * (1 + f / 1024) * 2 ^ (e - 15)
 end
 function D.validate(data, w, h)
-    assert(w >= 1 and w <= 64 and h >= 1 and h <= 64 and w % 1 == 0 and h % 1 == 0, 'Unsupported LUT dimensions')
+    assert(type(w) == 'number' and type(h) == 'number'
+        and w >= 1 and w <= 64 and h >= 1 and h <= 64 and w % 1 == 0 and h % 1 == 0, 'Unsupported LUT dimensions')
+    local count = buffer.count(data)
+    assert(not count or count >= w * h * 4, 'Truncated LUT buffer')
     for i = 0, w * h * 4 - 1 do
         local v = tonumber(data[i])
-        assert(v == v and math.abs(v) ~= math.huge, 'Nonfinite LUT value')
+        assert(v and v == v and math.abs(v) ~= math.huge, 'Nonfinite LUT value')
+        assert(math.abs(v) <= 3.4028234663852886e38, 'Float32 value out of range')
     end
 end
 function D.decode(s, expected_w, expected_h)
@@ -33,7 +36,7 @@ function D.decode(s, expected_w, expected_h)
     local w, h = u32(s, 16), u32(s, 12)
     local mip = u32(s, 28)
     assert(
-        u32(s, 24) <= 1 and bit.band(u32(s, 8), 0x800000) == 0 and u32(s, 112) == 0,
+        u32(s, 24) <= 1 and math.floor(u32(s, 8) / 0x800000) % 2 == 0 and u32(s, 112) == 0,
         'Only 2D LUTs are supported; cube and volume textures are unsupported'
     )
     local format, offset = u32(s, 84), 128
@@ -62,7 +65,6 @@ function D.decode(s, expected_w, expected_h)
     end
     assert(levels <= max_levels, 'DDS mip count exceeds texture dimensions')
     local n = w * h * 4
-    local size = n * (format == 2 and 4 or 2)
     local total = 0
     for level = 0, levels - 1 do
         total = total
@@ -72,14 +74,14 @@ function D.decode(s, expected_w, expected_h)
                 * (format == 2 and 4 or 2)
     end
     assert(#s == offset + total, 'DDS payload size mismatch')
-    local out = ffi.new('float[?]', n)
+    local out
     if format == 2 then
-        ffi.copy(out, s:sub(offset + 1, offset + size), size)
+        out = buffer.from_bytes(s, n, offset)
     else
-        local b = ffi.new('uint16_t[?]', n)
-        ffi.copy(b, s:sub(offset + 1, offset + size), size)
+        out = buffer.new(n)
         for i = 0, n - 1 do
-            out[i] = half(tonumber(b[i]))
+            local a, b = s:byte(offset + i * 2 + 1, offset + i * 2 + 2)
+            out[i] = half(a + b * 256)
         end
     end
     D.validate(out, w, h)
@@ -98,7 +100,7 @@ function D.encode(data, w, h)
     for _, v in ipairs(words) do
         chunks[#chunks + 1] = word(v)
     end
-    chunks[#chunks + 1] = ffi.string(data, w * h * 16)
+    chunks[#chunks + 1] = buffer.bytes(data, w * h * 4)
     return table.concat(chunks)
 end
 function D.read(path, w, h)

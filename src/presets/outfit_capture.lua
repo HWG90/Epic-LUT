@@ -2,7 +2,7 @@
 -- Entries borrow certified session buffers; persistence must consume them before
 -- controller cleanup. Destination keys and differing shared-resource values stay
 -- intact, and optional provenance never prevents an ordinary palette save.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local C = {}
 function C.new(modules, host)
     local self = {}
@@ -153,7 +153,7 @@ function C.new(modules, host)
     function self.mark_saved(entries)
         for _, entry in ipairs(entries) do
             local d = entry.document
-            d.saved_pixels = ffi.string(d.data, d.width * d.height * 16)
+            d.saved_pixels = buffers.bytes(d.data, d.width * d.height * 4)
         end
     end
     return self

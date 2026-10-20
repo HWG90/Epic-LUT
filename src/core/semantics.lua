@@ -187,9 +187,9 @@ function S.safe_lookup_cell(width, column, channel)
     return S.is_color(width, column) and channel <= 3
 end
 function S.protect(original, data, width, height)
-    local ffi = require('ffi')
-    local out = ffi.new('float[?]', width * height * 4)
-    ffi.copy(out, original, width * height * 16)
+    local buffers = m and m.float_buffer or require('src.core.float_buffer')
+    local out = buffers.new(width * height * 4)
+    buffers.copy(out, original, width * height * 4)
     for row = 1, height do
         for column = 1, width do
             for channel = 1, 4 do

@@ -1,4 +1,4 @@
-"""Maintained Lua bundle inventory. Upstream vendor sources remain unchanged."""
+"""Maintained Lua bundle inventory. Vendor adaptations retain upstream attribution."""
 VENDOR = ['bingus_runtime', 'bingus_memory', 'engine', 'avatar', 'lobby_sync', 'armory_watch']
 MENU = ['core', 'store', 'menu', 'view', 'capture']
 OWN = ['binding_patch_export', 'binding_provenance', 'binding_source_cache', 'outfit_targets', 'texture_lifetime', 'live_edit', 'basic_camo', 'camo_patterns', 'ui_font', 'export_pairing', 'appearance_state', 'text_editor', 'clipboard', 'bulk_dds_export', 'scratch_tool', 'sdk_catalog', 'file_io', 'lut_files', 'paydex_rows', 'patch_export', 'dds', 'palette', 'semantics', 'windows', 'paths', 'preferences', 'frontend', 'lut_editor_controls', 'editor_tools', 'lut_editor_view', 'lut_editor', 'direct_setup', 'import_view', 'table_groups', 'original_luts', 'basic_view', 'armory_view', 'outfit_presets', 'basic_state', 'resource_ids', 'import_matches', 'import_protocol', 'import_job', 'import_picker', 'table_index', 'binding_session', 'gear_catalog', 'configuration', 'configuration_view', 'mcm_settings', 'preset_export', 'editor_registry', 'armory_collection', 'control_help', 'region_indicator', 'action_history', 'update_check', 'shared_lut_codec', 'shared_appearance', 'pattern_luts', 'armory_mirror']
@@ -31,3 +31,32 @@ SOURCE_GROUPS.update({'appearance_recovery':'editor','editor_registration':'edit
 
 OWN.append('setup_restore')
 SOURCE_GROUPS['setup_restore'] = 'editor'
+
+# Shared numeric-buffer boundary for stock Lua 5.1 and legacy native adapters.
+OWN.insert(0, 'float_buffer')
+SOURCE_GROUPS['float_buffer'] = 'core'
+
+# Portable wire compression precedes the Shared LUT codec.
+OWN.insert(0, 'lznt1')
+SOURCE_GROUPS['lznt1'] = 'core'
+OWN.insert(0, 'xpress')
+SOURCE_GROUPS['xpress'] = 'core'
+
+OWN.insert(0, 'cooperative')
+SOURCE_GROUPS['cooperative'] = 'core'
+
+# Portable host adapters precede frontend construction.
+OWN.insert(0, 'loader_input')
+SOURCE_GROUPS['loader_input'] = 'platform'
+OWN.insert(0, 'loader_store')
+SOURCE_GROUPS['loader_store'] = 'platform'
+OWN.insert(0, 'native_platform')
+SOURCE_GROUPS['native_platform'] = 'platform'
+OWN.insert(0, 'legacy_frontend_input')
+SOURCE_GROUPS['legacy_frontend_input'] = 'platform'
+
+OWN.insert(0, 'legacy_clipboard')
+SOURCE_GROUPS['legacy_clipboard'] = 'platform'
+
+OWN.insert(0, 'legacy_paths')
+SOURCE_GROUPS['legacy_paths'] = 'platform'

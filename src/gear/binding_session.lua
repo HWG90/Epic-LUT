@@ -1,7 +1,7 @@
 -- Owns only Epic LUT's writes. Keeps immutable GPU buffers and rolls back partial writes.
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local B = { MAX_BYTES = 64 * 1024 * 1024, MAX_TEXTURES = 16384 }
 function B.new(deps)
-    local ffi = require('ffi')
     local retain = assert(deps.retain, 'Texture retention state required')
     local self = { owned = {} }
     local cohort = deps.cohort or retain.cohort
@@ -53,7 +53,7 @@ function B.new(deps)
             and document.height >= 1 and document.height <= 64, 'Unsupported LUT dimensions')
         assert(#targets <= 4096, 'LUT binding budget exceeded')
         local bytes = document.width * document.height * 16
-        local key = document.width .. ':' .. document.height .. ':' .. ffi.string(document.data, bytes)
+        local key = document.width .. ':' .. document.height .. ':' .. buffers.bytes(document.data, bytes / 4)
         local texture = retain.cache[key]
         if texture and (texture.retiring or texture.cohort ~= cohort) then
             texture = nil
@@ -69,8 +69,8 @@ function B.new(deps)
                     .. string.format('%.2f/%.0f MiB', retain.bytes / (1024 * 1024), B.MAX_BYTES / (1024 * 1024))
                     .. '). Reload Epic LUT to reclaim eligible textures; game restart clears all. Local draft kept. Restore alone does not clear the budget.'
             )
-            local data = ffi.new('float[?]', document.width * document.height * 4)
-            ffi.copy(data, document.data, bytes)
+            local data = buffers.new(document.width * document.height * 4)
+            buffers.copy(data, document.data, bytes / 4)
             local keep = { data = data, bytes = bytes, cohort = cohort }
             retain.records[#retain.records + 1] = keep
             retain.bytes = retain.bytes + bytes
