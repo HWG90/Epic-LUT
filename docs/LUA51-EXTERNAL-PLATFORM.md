@@ -1,9 +1,10 @@
 # Explicit external OS-service backend
 
-This source-only backend runs the shared Windows platform operations in a
+This explicit backend runs the shared Windows platform operations in a
 separate EXE. It does not load a DLL into the consumer, access game memory,
 install hooks, modify code-integrity policy, or change the default runtime.
-No game deployment or gameplay acceptance is established by the tests below.
+Standalone tests do not establish gameplay acceptance. The separate OS-only
+game probe is recorded below.
 
 ## Selection
 
@@ -112,15 +113,22 @@ no full-runtime gameplay acceptance.
 
 ## OS-only game probe status
 
-An approved isolated one-shot reached the game's stock Lua 5.1 runtime, started
-the external service, and completed Unicode binary write/read. It then failed
-before SHA256 because the prepared project omitted the model's cooperative
-module dependency. Normal cleanup and the actual helper's exit were verified;
-the temporary project and its owned settings were retired. This is partial
-OS-service evidence, not a completed smoke or an Epic LUT gameplay result.
+The corrected isolated one-shot completed the full OS-service smoke in the
+game's stock Lua 5.1 runtime. The unchanged external EXE
+`1771465861bcddc373e59cff1ccbe4cec27fe7b8e0c191333c2b8ba2e8c29161`
+passed Unicode binary write/read of 1280 bytes, atomic replacement, rename,
+the independent SHA256 vector, and its owned loader-store roundtrip. Normal
+cleanup, platform closure and the actual helper's exit were verified. The
+temporary project and its owned settings were retired with hashes checked.
 
-The earlier standalone candidate fixture allowed a global import from the
-repository, which concealed that missing packaged dependency. The public
+Loader entry health recorded 1068 ms for this entire one-shot. That includes
+startup and smoke work; it is neither steady-state request latency nor a
+gameplay performance measurement. This establishes the tested OS-service route,
+not armor/weapon binding, recovery, or full Epic LUT runtime acceptance.
+
+An earlier probe failed before digest because its prepared project omitted the
+model's cooperative dependency. Its standalone candidate fixture allowed a
+global repository import, which concealed that packaging error. The public
 `test_lua51_external_project.py` now runs the actual LLL project/config code with
 the real EXE in private Temp. Its working directory is private, both package
 paths are empty, and global `require`, `dofile`, and DLL loading are forbidden.
@@ -128,6 +136,5 @@ Only declared project modules, including cooperative and the production smoke
 runner, can load. It reproduces the missing dependency as a failure, verifies
 cleanup, and passes the corrected complete OS smoke. Repeat enable and actual
 config reload perform no additional launch or settings write; helper exit is
-checked independently. Completion of the corrected OS-only probe in the game
-remains pending. Armor/weapon binding, recovery and deployed performance remain
-separate.
+checked independently. These hermetic standalone checks and the completed
+OS-only game probe remain separate from gameplay and deployed performance.

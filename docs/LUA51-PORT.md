@@ -26,6 +26,11 @@ match the legacy writer. SharedLUT serialization/dictionary/baseline/XOR handlin
 uses exact portable bytes. Portable LZNT1 encoding/decoding and XPRESS decoding
 are cross-checked against Windows compression APIs; the portable compression
 code itself loads no DLL.
+Named row-preset saves also use an owned row copy with an explicit source
+offset, replacing pointer arithmetic that failed on portable arrays. Production
+DDS/file-service round trips cover all RGBA channels, exact signed-zero and
+subnormal/HDR values, previous-file preservation and rejection before IO for
+invalid rows or short owned buffers. Saving retains no alias to later edits.
 Publication forwards cooperative yields through protected calls using Lua 5.1
 coroutines, avoiding the old non-yieldable pcall boundary. Expensive work runs only
 for changed state and reuses palette bytes within each job. Offline staged tests
@@ -246,16 +251,29 @@ Lua 5.1 VM, but Windows rejected package.loadlib with error 577 (digital
 signature verification) before any helper export ran. Its failure capture was
 preserved and its hash-verified project/settings retired. The standalone result
 does not establish that this DLL can run inside the current game. No signing or
-code-integrity policy was changed. A different deployment requires new approval.
+code-integrity policy was changed. Further deployments follow the task's
+authorization and retain separate installation and runtime evidence.
 
 An explicit [external OS-service backend](LUA51-EXTERNAL-PLATFORM.md) now shares
 those operations with a separate EXE, using ordinary Lua process launch and pipe
 streams. Standalone tests use the real service with DLL loading forbidden;
 they cover authenticated ownership, bounded active failures and idle silence.
-This route remains opt-in. An approved OS-only game probe verified helper
-startup, Unicode binary IO and cleanup. Its incomplete declared-module list
-stopped the hash/settings checks; a corrected isolated package is prepared.
-The complete in-game smoke check and gameplay acceptance remain pending.
+This route remains opt-in. Its corrected OS-only probe passed in the game's
+Lua 5.1 VM: Unicode binary IO, atomic replace/rename, independent SHA256 and
+the public loader-settings round trip. Helper exit and owned-file retirement
+were verified. The probe loads every dependency explicitly; its integration
+test now forbids global imports and checkout-path fallback. This establishes
+the tested OS-service path, not engine rendering or gameplay acceptance.
+
+A further one-shot raw metadata capture inspected six fixed public engine
+namespaces in the running Lua 5.1 VM. It returned 256 entries across seven tables
+and 8,778 bytes of metadata without truncation or engine-function calls. The
+capture includes numeric format/view constants and Float32Array's constructor
+metamethod, but no upload signatures, completion/lifetime rules or effective
+binding getter. It therefore does not establish a safe LUT binding provider.
+The temporary project/settings were retired and their hashes verified. The
+collector's text budget also accounts for JSON escaping under the loader's
+64KiB config-read limit; large hostile captures are covered separately.
 
 Full current-runtime activation is still unproven. Regular package builders
 eagerly select legacy engine/avatar/lobby/Armory modules and the old input DLL.
