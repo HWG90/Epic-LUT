@@ -248,6 +248,12 @@ preserved and its hash-verified project/settings retired. The standalone result
 does not establish that this DLL can run inside the current game. No signing or
 code-integrity policy was changed. A different deployment requires new approval.
 
+An explicit [external OS-service backend](LUA51-EXTERNAL-PLATFORM.md) now shares
+those operations with a separate EXE, using ordinary Lua process launch and pipe
+streams. Standalone tests use the real service with DLL loading forbidden;
+they cover authenticated ownership, bounded active failures and idle silence.
+This route remains opt-in and has not been activated in the game.
+
 Full current-runtime activation is still unproven. Regular package builders
 eagerly select legacy engine/avatar/lobby/Armory modules and the old input DLL.
 They do not yet select a complete new engine provider. Remaining work includes

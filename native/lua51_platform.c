@@ -22,6 +22,17 @@
 #define MAX_STREAM_POSITION UINT64_C(9007199254740991)
 static HANDLE request_pipe=INVALID_HANDLE_VALUE,response_pipe=INVALID_HANDLE_VALUE;
 static volatile LONG active;
+#ifdef EPIC_PLATFORM_EXTERNAL
+static DWORD authenticated_client_pid;
+static HANDLE authenticated_client_process;
+static wchar_t authenticated_client_image[MAX_PATH_CHARS];
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+static int platform_test_stall_after_create;
+#endif
+#define PLATFORM_CLIENT_PID authenticated_client_pid
+#else
+#define PLATFORM_CLIENT_PID GetCurrentProcessId()
+#endif
 typedef struct { HANDLE process,job; uint32_t token; DWORD pid; } Worker;
 static Worker workers[8];
 static uint32_t next_worker;
@@ -276,17 +287,24 @@ finished:
     close_hash(hash);return result;
 }
 static DWORD executable_path(Buffer *output) {
+#ifdef EPIC_PLATFORM_EXTERNAL
+    return utf8(output,authenticated_client_image,wcslen(authenticated_client_image));
+#else
     wchar_t *path=(wchar_t*)malloc(MAX_PATH_CHARS*sizeof(wchar_t));DWORD length,result;
     if(!path)return ERROR_NOT_ENOUGH_MEMORY;
     length=GetModuleFileNameW(NULL,path,MAX_PATH_CHARS);
     result=length && length<MAX_PATH_CHARS ? utf8(output,path,length) : ERROR_FILENAME_EXCED_RANGE;
     free(path);return result;
+#endif
 }
 static DWORD launch_worker(const char *payload,uint32_t length,Buffer *output) {
     wchar_t *args=NULL,*folder=NULL,*file=NULL,*line=NULL;
     DWORD first,result=ERROR_SUCCESS,system_length,attributes;unsigned slot;
     size_t file_length,args_length;STARTUPINFOW startup={0};PROCESS_INFORMATION info={0};
     HANDLE job=NULL;unsigned char receipt[8];
+#ifdef EPIC_PLATFORM_EXTERNAL
+    STARTUPINFOEXW extended={0};SIZE_T attribute_size=0;int attributes_ready=0;
+#endif
     const wchar_t suffix[]=L"\\WindowsPowerShell\\v1.0\\powershell.exe";
     if(length<6)return ERROR_INVALID_DATA;
     first=word((const unsigned char*)payload);
@@ -315,11 +333,46 @@ static DWORD launch_worker(const char *payload,uint32_t length,Buffer *output) {
     memcpy(line+file_length+3,args,(args_length+1)*sizeof(wchar_t));
     job=CreateJobObjectW(NULL,NULL);
     if(!job) {result=last_error();goto done;}
+#ifdef EPIC_PLATFORM_EXTERNAL
+    /* An unacknowledged external launch must not leave a suspended child if
+       the active-request watchdog retires this service during CreateProcess. */
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit={0};
+        limit.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if(!SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limit,sizeof(limit))) {
+            result=last_error();goto done;
+        }
+    }
+#endif
     startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
-    if(!CreateProcessW(file,line,NULL,NULL,FALSE,CREATE_NO_WINDOW|CREATE_SUSPENDED,NULL,folder,&startup,&info)) {
+#ifdef EPIC_PLATFORM_EXTERNAL
+    /* Assign the provisional job atomically at process creation. If a startup
+       API stalls, helper retirement cannot leave an unassigned suspended child. */
+    InitializeProcThreadAttributeList(NULL,1,0,&attribute_size);
+    if(!attribute_size || attribute_size>65536) {result=ERROR_INVALID_DATA;goto done;}
+    extended.lpAttributeList=(LPPROC_THREAD_ATTRIBUTE_LIST)malloc(attribute_size);
+    if(!extended.lpAttributeList) {result=ERROR_NOT_ENOUGH_MEMORY;goto done;}
+    if(!InitializeProcThreadAttributeList(extended.lpAttributeList,1,0,&attribute_size)) {result=last_error();goto done;}
+    attributes_ready=1;
+    if(!UpdateProcThreadAttribute(extended.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_JOB_LIST,&job,sizeof(job),NULL,NULL)) {
         result=last_error();goto done;
     }
+    extended.StartupInfo=startup;extended.StartupInfo.cb=sizeof(extended);
+    if(!CreateProcessW(file,line,NULL,NULL,FALSE,CREATE_NO_WINDOW|CREATE_SUSPENDED|EXTENDED_STARTUPINFO_PRESENT,
+        NULL,folder,&extended.StartupInfo,&info)) {
+#else
+    if(!CreateProcessW(file,line,NULL,NULL,FALSE,CREATE_NO_WINDOW|CREATE_SUSPENDED,NULL,folder,&startup,&info)) {
+#endif
+        result=last_error();goto done;
+    }
+#ifdef EPIC_PLATFORM_EXTERNAL
+#ifdef EPIC_PLATFORM_TEST_BLOCK
+    if(platform_test_stall_after_create)Sleep(INFINITE);
+#endif
+    if(ResumeThread(info.hThread)==(DWORD)-1) {
+#else
     if(!AssignProcessToJobObject(job,info.hProcess) || ResumeThread(info.hThread)==(DWORD)-1) {
+#endif
         result=last_error();TerminateProcess(info.hProcess,1);goto done;
     }
     workers[slot].process=info.hProcess;workers[slot].job=job;
@@ -329,6 +382,10 @@ static DWORD launch_worker(const char *payload,uint32_t length,Buffer *output) {
     if(result) {TerminateJobObject(job,1);memset(&workers[slot],0,sizeof(workers[slot]));}
     else {info.hProcess=NULL;job=NULL;}
 done:
+#ifdef EPIC_PLATFORM_EXTERNAL
+    if(attributes_ready)DeleteProcThreadAttributeList(extended.lpAttributeList);
+    free(extended.lpAttributeList);
+#endif
     if(info.hThread)CloseHandle(info.hThread);
     if(info.hProcess)CloseHandle(info.hProcess);
     if(job)CloseHandle(job);
@@ -353,7 +410,7 @@ static DWORD worker_operation(uint32_t operation,const char *payload,uint32_t le
 static DWORD own_foreground(HWND *window) {
     DWORD pid=0;HWND value=GetForegroundWindow();
     if(value)GetWindowThreadProcessId(value,&pid);
-    if(!value || pid!=GetCurrentProcessId())return ERROR_ACCESS_DENIED;
+    if(!value || pid!=PLATFORM_CLIENT_PID)return ERROR_ACCESS_DENIED;
     *window=value;return ERROR_SUCCESS;
 }
 static DWORD clipboard_get(Buffer *output) {
@@ -496,6 +553,7 @@ static void close_channels(void) {
     close_files();
     close_hashes();
 }
+#ifndef EPIC_PLATFORM_EXTERNAL
 static int connected(HANDLE pipe) {
     DWORD peer=0,error;
     if(pipe==INVALID_HANDLE_VALUE)return 0;
@@ -566,3 +624,4 @@ finished:
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID reserved) {
     (void)instance;(void)reserved;if(reason==DLL_PROCESS_DETACH) {close_channels();close_workers();}return TRUE;
 }
+#endif
