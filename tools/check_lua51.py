@@ -18,6 +18,7 @@ PURE_TESTS += ('windows_portable', 'direct_setup_portable')
 PURE_TESTS += ('direct_editor_load_portable', 'public_engine_api_inventory', 'gear_buffers_portable', 'preset_file_io_portable', 'update_check_portable', 'export_provenance_portable')
 
 PURE_TESTS += ('runtime_services_portable',)
+PURE_TESTS += ('external_platform_portable',)
 PURE_TESTS += ('preview_source_io_portable', 'player_authored_clip_io')
 
 def runtime():

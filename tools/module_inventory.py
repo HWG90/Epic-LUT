@@ -66,3 +66,7 @@ SOURCE_GROUPS['legacy_windows'] = 'platform'
 
 OWN.append('runtime_services')
 SOURCE_GROUPS['runtime_services'] = 'platform'
+
+# Explicit external OS transport is inert until its backend is selected.
+OWN.insert(0, 'external_platform')
+SOURCE_GROUPS['external_platform'] = 'platform'

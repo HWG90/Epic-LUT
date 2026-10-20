@@ -59,14 +59,20 @@ function R.start(model, ctx)
     local ok, why = pcall(function()
         if not platform and model.native_platform_name ~= nil then
             local name, directory = model.native_platform_name, ctx.dir
+            local external = model.platform_backend == 'external'
+            assert(model.platform_backend == nil or model.platform_backend == 'dll' or external,
+                'Unsupported Epic LUT platform backend')
             assert(type(name) == 'string' and #name > 0 and #name <= 240
-                and name:match('^[%w_.-]+%.dll$'), 'Explicit packaged platform DLL filename required')
+                and name:match(external and '^[%w_.-]+%.exe$' or '^[%w_.-]+%.dll$'),
+                external and 'Explicit packaged platform EXE filename required' or 'Explicit packaged platform DLL filename required')
             assert(type(directory) == 'string' and #directory > 0 and not directory:find('%z'),
                 'Platform package directory required')
             local provider = assert(model.native_platform, 'Native platform module unavailable')
             assert(type(provider.new) == 'function', 'Native platform constructor unavailable')
             local tail = directory:sub(-1)
-            platform = provider.new({ library = directory .. ((tail == '/' or tail == '\\') and '' or '/') .. name })
+            local filename = directory .. ((tail == '/' or tail == '\\') and '' or '/') .. name
+            platform = provider.new(external and { backend = 'external', service = filename,
+                sha256 = model.native_platform_sha256 } or { library = filename })
             owned_platform = true
             assert(type(platform) == 'table' and type(platform.close) == 'function', 'Invalid created platform service')
         end

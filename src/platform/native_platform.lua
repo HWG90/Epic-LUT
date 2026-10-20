@@ -22,9 +22,14 @@ local function path(value)
 end
 function N.new(options)
     options=options or {}
-    local library=path(assert(options.library, 'Packaged platform library required'))
-    local directory=assert(library:match('^(.*)[/\\][^/\\]+$'), 'Absolute platform library path required')
-    assert(directory:match('^%a:[/\\]') or directory:match('^[/\\][/\\]'), 'Absolute platform library path required')
+    local external=options.backend=='external'
+    assert(options.backend==nil or options.backend=='dll' or external,'Unsupported platform backend')
+    local library
+    if not external then
+        library=path(assert(options.library, 'Packaged platform library required'))
+        local directory=assert(library:match('^(.*)[/\\][^/\\]+$'), 'Absolute platform library path required')
+        assert(directory:match('^%a:[/\\]') or directory:match('^[/\\][/\\]'), 'Absolute platform library path required')
+    else assert(options.library==nil,'External backend does not load a platform DLL') end
     local sr=rawget(_G,'stingray')
     local pid=options.process_id or sr and sr.Application and sr.Application.process_id()
     assert(type(pid)=='number' and pid>0 and pid<4294967296 and pid%1==0, 'Current process identity required')
@@ -36,21 +41,33 @@ function N.new(options)
         assert(type(fn)=='function',why or ('Platform export unavailable: '..name))
         return fn
     end
-    local begin,invoke,finish=symbol('epic_lut_platform_open'),symbol('epic_lut_platform'),symbol('epic_lut_platform_close')
+    local begin,invoke,finish
+    if not external then
+        begin,invoke,finish=symbol('epic_lut_platform_open'),symbol('epic_lut_platform'),symbol('epic_lut_platform_close')
+    end
     local base='\\\\.\\pipe\\EpicLutPlatform-'..string.format('%.0f',pid)
     local request,response
     local streams={}
     local hash_leases={}
-    local busy,nonce,closed=false,0,false
+    local busy,nonce,closed,broken,closing=false,0,false,false,false
+    local transact
     local owner={}
     owners.active=owner
     local self={}
     function self.close()
         assert(not busy,'Platform request is active')
         if closed then return true end
+        local stopped,why=true
+        if external and request and response and not broken and not closing then
+            closing=true
+            stopped,why=pcall(function()
+                local code=transact(30)
+                assert(code==0,'External platform cleanup refused')
+            end)
+        end
         if request then pcall(request.close,request);request=nil end
         if response then pcall(response.close,response);response=nil end
-        local stopped,why=pcall(finish)
+        if not external then stopped,why=pcall(finish) end
         closed=true
         for stream,state in pairs(streams) do state.closed=true;streams[stream]=nil end
         for token,state in pairs(hash_leases) do state.cancelled=true;hash_leases[token]=nil end
@@ -63,7 +80,7 @@ function N.new(options)
         assert(type(bytes)=='string' and #bytes==count,'Platform response is truncated')
         return bytes
     end
-    local function transact(op,payload)
+    transact=function(op,payload)
         payload=payload or ''
         assert(not closed,'Platform service is closed')
         assert(type(payload)=='string' and #payload<=MAX_PAYLOAD,'Platform request exceeds budget')
@@ -73,7 +90,7 @@ function N.new(options)
             nonce=nonce%2147483647+1
             assert(request:write('ELP1'..word(nonce)..word(op)..word(#payload)..payload))
             assert(request:flush())
-            invoke()
+            if invoke then invoke() end
             local header=exact(16)
             assert(header:sub(1,4)=='ELR1' and number(header,5)==nonce,'Platform response identity differs')
             local size=number(header,13)
@@ -81,7 +98,7 @@ function N.new(options)
             return number(header,9),size>0 and exact(size) or ''
         end)
         busy=false
-        if not ok then self.close();error(status,0) end
+        if not ok then broken=true;self.close();error(status,0) end
         return status,result
     end
     local function checked(op,payload)
@@ -90,10 +107,18 @@ function N.new(options)
         return result
     end
     local ready,reason=pcall(function()
-        begin()
-        request=assert(io.open(base..'-request','wb'))
-        response=assert(io.open(base..'-response','rb'))
-        assert(request:setvbuf('no'));assert(response:setvbuf('no'))
+        if external then
+            local provider=m and m.external_platform or require('src.platform.external_platform')
+            local channel=provider.start(options,pid)
+            request,response=channel.request,channel.response
+            local identity=checked(29,channel.token..word(pid)..word(channel.server_pid))
+            assert(identity==word(pid)..word(channel.server_pid)..channel.image,'External platform identity differs')
+        else
+            begin()
+            request=assert(io.open(base..'-request','wb'))
+            response=assert(io.open(base..'-response','rb'))
+            assert(request:setvbuf('no'));assert(response:setvbuf('no'))
+        end
         assert(checked(0)=='1', 'Unsupported Windows platform service version')
     end)
     if not ready then self.close();error(reason,0) end
