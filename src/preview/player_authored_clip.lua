@@ -360,8 +360,12 @@ function Clip.load(folder, files)
     local resources = {}
     for key, name in pairs(Clip.FILES) do
         local file = assert(open_file(folder .. '/' .. name, 'rb'), 'Authored animation cache missing: ' .. name)
-        local bytes = file:read(Clip.MAX_BYTES + 1)
-        file:close()
+        local ok, bytes, read_error = pcall(file.read, file, Clip.MAX_BYTES + 1)
+        local closed, done, close_error = pcall(file.close, file)
+        if not ok then error(bytes, 0) end
+        assert(closed, done)
+        assert(done, close_error or 'Authored animation cache close failed')
+        assert(type(bytes) == 'string', read_error or 'Authored animation cache read failed')
         assert(#bytes <= Clip.MAX_BYTES, 'Authored resource exceeds size bound')
         resources[key] = bytes
     end

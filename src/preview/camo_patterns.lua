@@ -7,11 +7,12 @@ function Source.new(m, host)
     local folder = paths.cache .. '/' .. Source.CACHE_FOLDER
     local scripts = paths.cache .. '/camo-worker'
     local self = { state = 'idle', status = 'Loading camo previews', data = nil }
-    local io_api = host.io or io
+    local io_api = host.io or m.file_io or io
     local now = host.time or os.clock
     local function read(path, limit)
-        local file = io_api.open(path, 'rb')
+        local file, why, code = io_api.open(path, 'rb')
         if not file then
+            assert(code == nil or code == 2 or code == 3, why or 'Camo preview cache read failed')
             return nil
         end
         local ok, value = pcall(file.read, file, limit + 1)

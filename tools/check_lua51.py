@@ -19,6 +19,7 @@ PURE_TESTS += ('direct_editor_load_portable', 'public_engine_api_inventory', 'ge
 PURE_TESTS += ('weapon_runtime_portable', 'weapon_bridge_portable')
 
 PURE_TESTS += ('runtime_services_portable',)
+PURE_TESTS += ('preview_source_io_portable', 'player_authored_clip_io')
 
 def runtime():
     lua = LuaRuntime(encoding=None, unpack_returned_tuples=True)
