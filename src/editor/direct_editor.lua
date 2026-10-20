@@ -2716,12 +2716,8 @@ local function close()
         return false
     end
     pending = nil
-    if original_luts then
-        original_luts.close()
-    end
-    if updates then
-        updates.close()
-    end
+    if original_luts and original_luts.close() == false then return false end
+    if updates and updates.close() == false then return false end
     if not restore(operations.texture_lifetime ~= nil) then
         return false
     end

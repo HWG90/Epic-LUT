@@ -44,4 +44,31 @@ assert(modules.platform == expected_platform and modules.storage == expected_sto
 assert(descriptor.on_disable() == true and closed == 0)
 assert(modules.platform == nil and modules.storage == nil and context.platform == expected_platform
     and context.storage == expected_storage, 'Cleanup did not restore only the bootstrap-owned publications')
+-- Keep the actual editor cleanup closure and its shared lease alive while a
+-- consumer is still canceling an external launch; no native engine is needed.
+local function upvalue(name, value, replace)
+    for index = 1, 100 do
+        local found, current = debug.getupvalue(descriptor.on_disable, index)
+        if not found then break end
+        if found == name then
+            if replace then debug.setupvalue(descriptor.on_disable, index, value) end
+            return current
+        end
+    end
+    error('Cleanup fixture seam missing: ' .. name)
+end
+local original_ready, update_ready, platform_retirements = false, false, 0
+upvalue('original_luts', { close = function() return original_ready end }, true)
+upvalue('updates', { close = function() return update_ready end }, true)
+upvalue('operations').runtime_services = { close = function()
+    platform_retirements = platform_retirements + 1; return true
+end }
+assert(descriptor.on_disable() == false and platform_retirements == 0,
+    'Pending original-source launch lost its platform owner')
+original_ready = true
+assert(descriptor.on_disable() == false and platform_retirements == 0,
+    'Pending update launch lost its platform owner')
+update_ready = true
+assert(descriptor.on_disable() == true and platform_retirements == 1)
+upvalue('original_luts', nil, true); upvalue('updates', nil, true)
 print('PASS portable Direct Editor descriptor: lazy legacy buffers, cold cleanup and unsupported-build rejection before native imports/calls')

@@ -9,6 +9,7 @@ local phases = {
 }
 function P.new(deps)
     local jobs, paths = deps.jobs, deps.paths
+    local launches = deps.worker_launch or (m and m.worker_launch) or require('src.platform.worker_launch')
     local clock, open = deps.clock or os.time, deps.open or (m and m.file_io and m.file_io.open) or io.open
     local self, last_rows_mode = {}, nil
     local function sync()
@@ -55,13 +56,14 @@ function P.new(deps)
             .. base
             .. '.txt" -OwnerPID '
             .. pid
-        local worker = native_import.launch_worker(args, paths.cache)
+        local launch = launches.start(native_import, args, paths.cache)
         local menu = deps.get_menu()
         jobs.start({
             base = base,
             pick = pick,
             rows_mode = rows_mode,
-            worker = worker,
+            launch = launch,
+            worker = launch.worker,
             menu_visible = menu and menu.visible,
             menu_page = menu and menu.page,
         })

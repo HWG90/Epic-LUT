@@ -36,11 +36,12 @@ def main():
     receipt = {'exe': str(addressed), 'sha256': digest,
         'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'shared_source_sha256': hashlib.sha256(common.read_bytes()).hexdigest(),
-        'protocol': 'ELP1/ELR1 operations shared with DLL; external auth29/close30',
+        'protocol': 'ELP1/ELR1 operations shared with DLL; external auth29/close30/worker-begin31/result32/cancel33',
         'startup_timeout_ms': 8000, 'active_transfer_timeout_ms': 3000,
         'idle': 'overlapped read waits on pipe event and retained client process; no timer',
         'auth': 'private 256-bit token, both actual pipe-client PIDs, retained client process/image',
-        'max_payload': 1048576, 'max_owned_workers': 8, 'max_owned_files': 8, 'max_owned_hashes': 8,
+        'max_payload': 1048576, 'max_owned_workers': 8, 'max_pending_and_owned_workers': 8,
+        'async_worker_launch': True, 'max_owned_files': 8, 'max_owned_hashes': 8,
         'game_memory_access': False, 'deployed': False}
     receipt['test_block_injection'] = args.test_block
     (output / 'build.json').write_text(json.dumps(receipt, indent=2), encoding='utf8')

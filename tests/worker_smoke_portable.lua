@@ -79,7 +79,7 @@ local function fixture()
         return {read=function(_,count)call();assert(not closed and count<=#BODY+11);return state.files[value]:sub(1,count)end,
             close=function()call();assert(not closed);closed=true;return true end}
     end
-    function platform.launch_worker(args,folder)
+    local function make_worker(args,folder)
         call();assert(folder==directory and state.owned)
         local script=decode_script(args)
         assert(not script:find('ExecutionPolicy',1,true) and script:find('[IO.File]::WriteAllBytes($p,$v);exit 0',1,true))
@@ -92,7 +92,7 @@ local function fixture()
         assert(table.concat(data)==BODY and script:find('[string]$PID',1,true),'Worker binary/PID vector differs')
         local record={pid=1000+#state.jobs,running=true,marker=marker,status=0,stops=0,closes=0}
         state.jobs[#state.jobs+1]=record
-        return {pid=record.pid,
+        local worker={pid=record.pid,
             running=function()call();record.status=record.status+1;assert(not record.closed);return record.running end,
             stop=function()
                 call();assert(not record.closed);record.stops=record.stops+1
@@ -107,6 +107,33 @@ local function fixture()
                 if state.fail_close then return false,'close failed'end
                 record.closed=true;return true
             end}
+        return worker,record
+    end
+    function platform.launch_worker()error('Synchronous worker launch is forbidden in this smoke')end
+    function platform.begin_worker(args,folder)
+        local worker,record=make_worker(args,folder)
+        local state_name,value='pending'
+        local future={}
+        function future.status()
+            if state_name~='pending' then return state_name,value end
+            call();record.launch_checks=(record.launch_checks or 0)+1
+            if state.future_error then
+                state_name,value='error',state.future_error;record.running,record.closed=false,true
+            elseif state.future_cancelled then
+                state_name='cancelled';record.running,record.closed=false,true
+            elseif state.future_pending then return 'pending'
+            else state_name,value='ready',worker end
+            return state_name,value
+        end
+        function future.cancel()
+            if state_name=='error' or state_name=='cancelled' then return true end
+            if state_name=='ready' then return false,'Worker transferred' end
+            call();record.cancels=(record.cancels or 0)+1
+            if state.future_cancel_throws then error('Sidecar transport is closed')end
+            if state.cancel_pending then return false,'Launch cancellation pending'end
+            state_name='cancelled';record.running,record.closed=false,true;return true
+        end
+        return future
     end
     function platform.close()
         state.calls=state.calls+1
@@ -130,6 +157,11 @@ local function fixture()
         local job=assert(state.jobs[1]);job.running=false
         if payload~=false then state.files[job.marker]=payload or BODY..job.pid end
     end
+    state.writing=function()
+        local controller=state.start();state.time=0.25
+        assert(not controller.tick() and controller.report.phase=='writing')
+        return controller
+    end
     state.inert=function(controller)
         local before,clock=state.calls,state.clock
         for _=1,1000 do assert(controller.tick())end
@@ -151,52 +183,58 @@ assert(invalid_done and not invalid_report.success and invalid_report.error:find
     'Invalid UTF-8 worker directory was accepted')
 assert(invalid.calls==0 and invalid.clock==0 and #invalid.jobs==0,'Invalid UTF-8 acquired OS owners')
 
-local s=fixture();local c=s.start();assert(not c.tick() and #s.jobs==1 and s.jobs[1].status==0)
-s.time=0.24;assert(not c.tick() and s.jobs[1].status==0)
-s.finish_first();s.time=0.25;assert(not c.tick() and #s.jobs==2 and s.jobs[1].closed and s.jobs[2].stops==1)
-s.time=0.49;assert(not c.tick() and s.jobs[2].status==0)
-s.time=0.5;local done,report=c.tick()
+local s=fixture();local c=s.start();assert(not c.tick() and #s.jobs==1 and s.jobs[1].status==0 and c.report.first_pid==nil)
+s.time=0.24;assert(not c.tick() and s.jobs[1].launch_checks==nil)
+s.finish_first();s.time=0.25;assert(not c.tick() and #s.jobs==2 and s.jobs[1].closed and s.jobs[2].stops==0)
+s.time=0.49;assert(not c.tick() and s.jobs[2].launch_checks==nil)
+s.time=0.5;assert(not c.tick() and s.jobs[2].stops==1)
+s.time=0.75;local done,report=c.tick()
 assert(done and report.success and report.pid_verified and report.marker_verified and report.normal_completion
     and report.stop_verified and report.delayed_marker_absent and report.cleanup_complete and report.platform_closed
-    and report.checks==2 and s.closed==1 and not s.owned and next(s.files)==nil)
+    and report.checks==3 and s.closed==1 and not s.owned and next(s.files)==nil)
 s.inert(c);assert(c.close() and s.closed==1)
 
 for _,payload in ipairs({'wrong-marker',BODY..'999',false})do
-    s=fixture();c=s.start();s.finish_first(payload);s.time=0.25
+    s=fixture();c=s.writing();s.finish_first(payload);s.time=0.5
     done,report=c.tick();assert(done and not report.success and report.error and report.cleanup_complete and #s.jobs==1)
     s.inert(c)
 end
-s=fixture();c=s.start();assert(c.close() and c.report.cancelled and not c.report.success and s.jobs[1].stops==1)
+s=fixture();c=s.start();assert(c.close() and c.report.cancelled and not c.report.success and s.jobs[1].cancels==1)
+s.inert(c)
+s=fixture();c=s.writing();assert(c.close() and c.report.cancelled and s.jobs[1].stops==1)
 s.inert(c)
 
-s=fixture();c=s.start();s.finish_first();s.time=0.25;assert(not c.tick())
-s.files[s.jobs[2].marker]=BODY..s.jobs[2].pid;s.time=0.5;done,report=c.tick()
+local function stopping()
+    local state=fixture();local controller=state.writing();state.finish_first();state.time=0.5;assert(not controller.tick())
+    state.time=0.75;assert(not controller.tick() and controller.report.phase=='stopping')
+    return state,controller
+end
+s,c=stopping();s.files[s.jobs[2].marker]=BODY..s.jobs[2].pid;s.time=1;done,report=c.tick()
 assert(done and not report.success and report.error:find('delayed marker',1,true) and report.cleanup_complete)
 s.inert(c)
 
-s=fixture();c=s.start();s.fail_stop=true
+s=fixture();c=s.writing();s.fail_stop=true
 assert(not c.close() and c.report.cleanup_pending and s.closed==0 and s.owned and not s.jobs[1].closed)
 s.inert(c);s.fail_stop=false;assert(c.close() and s.closed==1 and c.report.cleanup_complete)
 
-s=fixture();c=s.start();s.stop_throws=true
+s=fixture();c=s.writing();s.stop_throws=true
 assert(not c.close() and c.report.cleanup_pending and not c.report.cleanup_complete
     and not c.report.platform_closed and not c.report.success and s.closed==0 and not s.jobs[1].closed)
 s.inert(c);assert(not c.close() and s.closed==0,'Broken service ownership was silently discarded')
 s.stop_throws=false;assert(c.close() and s.closed==1)
 
-s=fixture();c=s.start();s.finish_first();s.time=0.25;assert(not c.tick())
-s.fail_close=true;s.time=0.5;done,report=c.tick()
+s,c=stopping();s.fail_close=true;s.time=1;done,report=c.tick()
 assert(done and not report.success and report.cleanup_pending and not s.jobs[2].closed and s.closed==0)
 s.inert(c);s.fail_close=false;assert(c.close() and s.closed==1)
 
-s=fixture();c=s.start();s.finish_first();s.time=0.25;assert(not c.tick());s.time=0.5;s.fail_remove=true
+s,c=stopping();s.time=1;s.fail_remove=true
 done,report=c.tick();assert(done and not report.success and report.cleanup_pending and s.closed==0 and s.owned)
 s.inert(c);s.fail_remove=false;assert(c.close() and s.closed==1)
 
-s=fixture();c=s.start();s.stop_pending=true;assert(not c.close() and c.report.cleanup_pending and s.closed==0)
+s=fixture();c=s.writing();s.stop_pending=true;assert(not c.close() and c.report.cleanup_pending and s.closed==0)
 s.inert(c);s.stop_pending=false;assert(c.close() and s.closed==1)
 
-s=fixture();c=s.start()
+s=fixture();c=s.writing()
 for i=1,119 do s.time=i*0.25;assert(not c.tick())end
 s.time=30;done,report=c.tick();assert(done and not report.success and report.checks==119 and report.cleanup_complete)
 s.inert(c)
@@ -207,10 +245,24 @@ s=fixture();c=s.start();assert(not c.tick() and s.jobs[1].status==0)
 s.time=30;done,report=c.tick();assert(done and report.max_seconds==30 and not report.success and report.cleanup_complete)
 Smoke.MIN_INTERVAL,Smoke.MAX_SECONDS,Smoke.MAX_CHECKS=interval,seconds,checks
 
-s=fixture();c=s.start();s.finish_first();s.time=0.25;assert(not c.tick())
-s.fail_platform_close=true;s.time=0.5;done,report=c.tick()
+s,c=stopping();s.fail_platform_close=true;s.time=1;done,report=c.tick()
 assert(done and not report.success and report.cleanup_pending and s.closed==0 and not s.owned)
 s.inert(c);s.fail_platform_close=false;assert(c.close() and c.report.success and s.closed==1)
+
+s=fixture();s.future_pending=true;c=s.start()
+for i=1,4 do s.time=i*0.25;assert(not c.tick() and s.jobs[1].status==0 and c.report.first_pid==nil)end
+s.cancel_pending=true;assert(not c.close() and c.report.cleanup_pending and s.closed==0 and not s.jobs[1].closed)
+s.inert(c);s.cancel_pending=false;assert(c.close() and s.closed==1)
+s=fixture();c=s.start();s.future_cancel_throws=true
+assert(not c.close() and c.report.cleanup_pending and s.closed==0)
+s.inert(c);s.future_cancel_throws=false;assert(c.close() and s.closed==1)
+for _,mode in ipairs({'future_error','future_cancelled'})do
+    s=fixture();s[mode]=mode=='future_error' and 'Windows 87' or true;c=s.start();s.time=0.25
+    done,report=c.tick();assert(done and not report.success and report.error and report.cleanup_complete and report.first_pid==nil)
+    s.inert(c)
+end
+s=fixture();c=s.writing();s.finish_first();s.time=0.5;assert(not c.tick())
+assert(c.close() and s.jobs[2].cancels==1 and s.jobs[2].status==0,'Pending second launch was not cancelled')
 
 s=fixture();s.collision=true;c=s.start();done,report=c.tick()
 assert(done and not report.success and #s.jobs==0 and s.closed==1 and not s.owned)

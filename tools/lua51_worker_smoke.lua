@@ -26,7 +26,7 @@ function Smoke.start(modules,host,directory,now)
     local report={schema=1,runtime=_VERSION,success=false,checks=0,max_checks=MAX_CHECKS,
         max_seconds=MAX_SECONDS,min_interval=MIN_INTERVAL,cleanup_complete=false,platform_closed=false}
     local self={report=report}
-    local lease,platform,files,windows,worker,owned,cleaned,terminal,delayed_arguments
+    local lease,platform,files,windows,worker,future,owned,cleaned,terminal,delayed_arguments
     local needs_stop,phase,started,last,next_check,outcome=false,'starting'
     local marker=directory..'/worker-\230\156\141\232\163\133.bin'
     local stopped_marker=directory..'/stopped-\230\156\141\232\163\133.bin'
@@ -38,6 +38,11 @@ function Smoke.start(modules,host,directory,now)
     end
     local function cleanup()
         if cleaned then return true end
+        if future then
+            local ok,why=future.cancel()
+            if ok~=true then return false,why or 'Owned worker launch cleanup pending' end
+            future=nil
+        end
         if worker then
             if needs_stop then
                 local ok,why=worker.stop();assert(ok==true,why or 'Owned worker stop failed')
@@ -95,6 +100,22 @@ function Smoke.start(modules,host,directory,now)
             if at<next_check then return end
             assert(report.checks<MAX_CHECKS,'Worker smoke exceeded status-check budget')
             next_check=at+MIN_INTERVAL;report.checks=report.checks+1
+            if future then
+                local state,value=future.status()
+                if state=='pending' then return end
+                assert(state=='ready',value or 'Owned worker launch '..tostring(state))
+                worker,future,needs_stop=value,nil,true
+                assert(type(worker)=='table' and type(worker.pid)=='number' and worker.pid>0
+                    and worker.pid<4294967296 and worker.pid%1==0,'Owned worker identity unavailable')
+                if phase=='launching' then
+                    report.first_pid,report.phase=worker.pid,'writing';phase='writing'
+                elseif phase=='launching_stop_test' then
+                    report.stopped_pid=worker.pid
+                    local stopped,reason=worker.stop();assert(stopped==true,reason or 'Delayed worker stop failed')
+                    phase='stopping';report.phase=phase
+                    return
+                else error('Invalid worker launch phase',0)end
+            end
             local running=worker.running();assert(type(running)=='boolean','Owned worker status invalid')
             if running then return end
             needs_stop=false
@@ -105,10 +126,8 @@ function Smoke.start(modules,host,directory,now)
                 report.normal_completion=true
                 local closed,reason=worker.close();assert(closed==true,reason or 'Completed worker close failed')
                 worker=nil
-                worker=windows.launch_worker(delayed_arguments,directory)
-                needs_stop=true;report.stopped_pid=worker.pid
-                local stopped,reason=worker.stop();assert(stopped==true,reason or 'Delayed worker stop failed')
-                phase='stopping';report.phase=phase
+                future=windows.begin_worker(delayed_arguments,directory)
+                phase='launching_stop_test';report.phase=phase
             elseif phase=='stopping' then
                 assert(platform.stat(stopped_marker)==nil,'Stopped worker wrote its delayed marker')
                 report.stop_verified,report.delayed_marker_absent=true,true
@@ -129,12 +148,13 @@ function Smoke.start(modules,host,directory,now)
         assert(lease and lease.ready,reason or 'Worker runtime bootstrap cleanup pending')
         platform=assert(lease.platform,'Worker platform unavailable')
         windows=modules.windows.new(platform)
+        assert(windows.supports_async_workers(),'Asynchronous worker launch unavailable')
         files=modules.file_io.new(platform)
         assert(platform.mkdir_new(directory)==true,'Worker smoke directory already exists')
         owned=true
         started=clock();next_check=started+MIN_INTERVAL
-        worker=windows.launch_worker(first,directory);needs_stop=true
-        report.first_pid,report.phase=worker.pid,'writing';phase='writing'
+        future=windows.begin_worker(first,directory)
+        report.phase='launching';phase='launching'
     end)
     if not ok then finish(false,why)end
     return self

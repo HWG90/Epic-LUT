@@ -9,6 +9,7 @@ function Source.new(m, host)
     local self = { state = 'idle', status = 'Loading preview poses', data = nil }
     local io_api = host.io or m.file_io or io
     local now = host.time or os.clock
+    local launches = m.worker_launch or require('src.platform.worker_launch')
     local function read(path, limit)
         local file, why, code = io_api.open(path, 'rb')
         if not file then
@@ -71,19 +72,19 @@ function Source.new(m, host)
                 not data:find('["\r\n]') and not folder:find('["\r\n]') and not scripts:find('["\r\n]'),
                 'Invalid animation helper path'
             )
-            self.worker = assert(
-                m.windows.launch_worker(
-                    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
-                        .. scripts
-                        .. '/authored_preview.ps1" -GameData "'
-                        .. data
-                        .. '" -Output "'
-                        .. folder
-                        .. '" -OwnerPID '
-                        .. self.owner,
-                    scripts
-                )
+            self.launch_owner = launches.start(
+                m.windows,
+                '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+                    .. scripts
+                    .. '/authored_preview.ps1" -GameData "'
+                    .. data
+                    .. '" -Output "'
+                    .. folder
+                    .. '" -OwnerPID '
+                    .. self.owner,
+                scripts
             )
+            self.worker = self.launch_owner.worker
             self.began, self.last_poll = now(), now()
         end)
         if not ok then
@@ -93,24 +94,32 @@ function Source.new(m, host)
     function self.get()
         return self.data
     end
-    function self.close()
-        if self.worker then
+    local function close(automatic)
+        if not automatic then self.cleanup_attempts, self.cleanup_exhausted = 0, nil end
+        if self.launch_owner then
+            self.stopping = true
+            self.cleanup_attempts = (self.cleanup_attempts or 0) + 1
             pcall(write, folder .. '/progress.txt.cancel', 'cancel')
-            local ok, done = pcall(self.worker.stop)
-            if not ok or done == false then
-                return false
+            local done, why = self.launch_owner.cancel()
+            self.worker = self.launch_owner.worker
+            if not done then
+                if self.cleanup_attempts >= 32 then
+                    self.cleanup_exhausted = true
+                    self.error = 'Worker cleanup is unconfirmed; close explicitly to retry'
+                    self.status = self.error
+                end
+                return false, why
             end
-            if self.worker.running() then
-                return false
-            end
-            self.worker.close()
-            self.worker = nil
+            self.launch_owner, self.worker = nil, nil
         end
+        self.stopping = nil
         self.state, self.data = 'closed', nil
         return true
     end
+    function self.close() return close(false) end
     function self.tick()
-        if self.state ~= 'loading' then
+        if self.cleanup_exhausted then return end
+        if self.state ~= 'loading' and not self.stopping then
             return
         end
         local current = now()
@@ -118,18 +127,21 @@ function Source.new(m, host)
             return
         end
         self.last_poll = current
+        if self.stopping then close(true); return end
         local ok, why = pcall(function()
             heartbeat()
             if current - self.began > 190 then
                 assert(self.close(), 'Authored animation worker could not stop')
                 error('Authored animation cache timed out')
             end
-            if self.worker and self.worker.running() then
-                return
-            end
-            if self.worker then
-                self.worker.close()
-                self.worker = nil
+            if self.launch_owner then
+                local phase, detail = self.launch_owner.advance()
+                self.worker = self.launch_owner.worker
+                if phase == 'pending' then return end
+                assert(phase == 'ready', detail or 'Preview worker launch cancelled')
+                if self.worker.running() then return end
+                assert(self.launch_owner.release(), 'Preview worker release pending')
+                self.launch_owner, self.worker = nil, nil
             end
             local problem = read(folder .. '/error.txt', 4096)
             assert(not problem or problem == '', problem)
@@ -149,6 +161,7 @@ function Source.new(m, host)
             end
         end)
         if not ok then
+            if self.launch_owner and not self.stopping then self.close() end
             report(why)
         end
     end

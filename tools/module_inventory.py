@@ -97,3 +97,7 @@ SOURCE_GROUPS['runtime_services'] = 'platform'
 # Explicit external OS transport is inert until its backend is selected.
 OWN.insert(0, 'external_platform')
 SOURCE_GROUPS['external_platform'] = 'platform'
+
+# Shared explicit worker-launch ownership precedes all cache/import consumers.
+OWN.insert(0, 'worker_launch')
+SOURCE_GROUPS['worker_launch'] = 'platform'

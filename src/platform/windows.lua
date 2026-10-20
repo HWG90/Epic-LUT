@@ -58,6 +58,17 @@ function W.new(platform)
         -- In particular, close releases handles; only explicit stop terminates it.
         return worker
     end
+    function self.begin_worker(args, folder)
+        args, folder = text(args), text(folder)
+        local future, why = operation(platform, 'begin_worker')(args, folder)
+        assert(type(future) == 'table' and future.pid == nil, why or 'Owned Windows worker launch unavailable')
+        for _, name in ipairs({ 'status', 'cancel' }) do
+            assert(type(future[name]) == 'function', 'Owned Windows worker launch interface missing ' .. name)
+        end
+        -- Preserve the service's exact future. Only its ready result owns a PID.
+        return future
+    end
+    function self.supports_async_workers() return type(platform.begin_worker) == 'function' end
     function self.replace(source, destination)
         local ok, why = operation(platform, 'replace')(text(source), text(destination))
         return ok == true, why
@@ -121,7 +132,7 @@ local function current()
     if not legacy then legacy = require('src.platform.legacy_windows') end
     return legacy
 end
-for _, name in ipairs({ 'verify_interface', 'game_data', 'files', 'row_presets', 'launch_worker', 'replace' }) do
+for _, name in ipairs({ 'verify_interface', 'game_data', 'files', 'row_presets', 'launch_worker', 'begin_worker', 'replace' }) do
     W[name] = function(...) return current()[name](...) end
 end
 function W.process_id()
@@ -129,5 +140,9 @@ function W.process_id()
     if target.process_id then return target.process_id() end
     local _, kernel = target.verify_interface()
     return tonumber(kernel.epic_native_pid())
+end
+function W.supports_async_workers()
+    local platform = m and m.platform
+    return type(platform) == 'table' and type(platform.begin_worker) == 'function'
 end
 return W

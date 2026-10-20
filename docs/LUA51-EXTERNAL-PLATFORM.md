@@ -85,11 +85,49 @@ the token and owner for an explicit cleanup decision. Failed receipt delivery
 terminates the unreported worker; unexpected helper/client exit and service
 retirement terminate still-owned jobs. Explicitly detached workers survive.
 
+### Asynchronous worker creation
+
+The external EXE additionally supports explicit asynchronous launch. The old
+synchronous operation 12 and the existing DLL remain compatible. Operations
+31–33 are external-only; 22–25 remain the digest protocol.
+
+| Operation | Request | Successful response |
+| --- | --- | --- |
+| 31 begin | Existing operation-12 payload: argument byte count, UTF-8 arguments, UTF-8 working folder | Future token, one little-endian `u32` |
+| 32 result | Future token `u32` | State `u32`: 0 pending; 1 followed by worker token and PID; 2 followed by Win32 error; 3 cancelled |
+| 33 cancel | Future token `u32` | Empty acknowledgement of the cancellation request |
+
+Pending results are four bytes; ready results are twelve; failed results are
+eight; cancelled results are four. A terminal result consumes the future exactly
+once. The worker receipt has the same ownership contract as synchronous launch.
+Unknown, consumed and stale future tokens are refused. Cancellation acknowledges
+the request promptly; a later terminal state 3 confirms native launch cleanup.
+Cancellation after the worker receipt has transferred ownership is refused;
+the worker's explicit stop/close methods then control its lifetime.
+
+Each begin copies its bounded request and starts a finite helper-owned thread.
+That thread never mutates the shared worker table. Result promotes a completed
+launch into a worker only after the launch thread has stopped. Pending futures,
+ready but unconsumed futures, and synchronous/asynchronous owned workers share
+one eight-slot budget. Atomic process/job assignment and kill-on-close protect
+the child throughout creation, cancellation and receipt delivery. A lost begin
+or result response retires the service and kills any unreported owned launch.
+
+Every active launch has its own three-second one-shot watchdog with 500 ms
+cancellation grace; an uncancellable operation terminates only this helper.
+Completion removes that watchdog immediately, without waiting for a result
+request. Service retirement cancels pending launches and exits without joining
+a blocked creation thread; process exit closes its protected jobs and threads
+together. No launch thread or launch timer remains after completion/consumption.
+There is no idle status loop. Callers make bounded result requests only while
+they explicitly own active launch work, then cache the terminal result.
+
 ## Standalone validation
 
 ```powershell
 py -3.14 tools/build_lua51_platform_service.py
 py -3.14 tests/test_lua51_platform_external.py
+py -3.14 tests/test_lua51_async_workers.py
 py -3.14 tests/test_lua51_external_project.py
 ```
 
@@ -108,6 +146,11 @@ production build contains none of those operations. Tests prove EOF after a
 noncancellable dispatch, provisional-worker cleanup, explicit-close timeout,
 an injected detach failure that preserves the token/job for explicit stop,
 and an ambiguous response after an already completed filesystem side effect.
+The asynchronous suite checks real process creation, UTF-8/filesystem errors,
+pending and ready cancellation, suspended-child cancellation, shared capacity,
+lost begin/result replies, background watchdogs, service/client loss and idle
+handle/CPU stability. `async-timing.json` separates begin/result/cancel request
+latency from complete OS worker creation; those are standalone measurements.
 
 `dist/native-lua51-platform-service/build.json` records exact shared-source,
 host-source and EXE hashes. `test-timing.json` records one-shot startup, steady

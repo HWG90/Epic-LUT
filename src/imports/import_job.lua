@@ -24,7 +24,10 @@ function J.new(protocol, deps)
     local clock, read, cancel = deps.clock or os.time, deps.read or read_file, deps.cancel or cancel_file
     local self = { job = nil }
     local function finish(job)
-        job.worker.close()
+        local done, why
+        if job.launch then done, why = job.launch.release()
+        elseif job.worker then done, why = job.worker.close() end
+        assert(done ~= false, why or 'Import worker cleanup pending')
         if self.job == job then
             self.job = nil
         end
@@ -41,7 +44,7 @@ function J.new(protocol, deps)
         if not job then
             return false
         end
-        cancel(protocol.paths(job.base).cancel)
+        if job.worker then cancel(protocol.paths(job.base).cancel) end
         job.canceling, job.retry = clock(), retry
         return true
     end
@@ -50,7 +53,40 @@ function J.new(protocol, deps)
         if not job then
             return
         end
+        if job.launch_exhausted then return end
         local now = clock()
+        if job.launch and job.launch.async then
+            if job.last_poll and now - job.last_poll < 0.25 then return end
+            job.last_poll = now
+        end
+        if job.launch and not job.worker then
+            -- Only an active launch is checked; no progress/PID reads until the
+            -- helper has returned the actual owned worker. Cap automatic work.
+            if job.launch_last and now - job.launch_last < 0.25 then return end
+            job.launch_last = now
+            job.launch_checks = (job.launch_checks or 0) + 1
+            if job.launch_checks > 128 then
+                job.launch_exhausted = true
+                return { kind = 'error', message = 'Import launch cleanup is still pending; close before retrying.' }
+            end
+            if now - job.started > 20 and not job.canceling then self.cancel(false) end
+            if job.canceling then
+                local done = job.launch.cancel()
+                if not done then return end
+                self.job = nil
+                return { kind = job.retry and 'retry' or 'canceled', job = job,
+                    message = 'Import canceled; current palette retained.' }
+            end
+            local state, value = job.launch.advance()
+            if state == 'pending' then return end
+            if state ~= 'ready' then
+                if job.launch.future then return end
+                self.job = nil
+                return { kind = 'error', message = tostring(value or 'Import worker launch canceled') }
+            end
+            job.worker = value
+            job.last_beat = now
+        end
         local paths = protocol.paths(job.base)
         local text = read(paths.progress, protocol.MAX_PROGRESS + 1)
         if text then
@@ -78,6 +114,7 @@ function J.new(protocol, deps)
         end
         text = read(paths.result, protocol.MAX_RESULT + 1)
         if text then
+            if job.launch and job.worker.running() then return end
             finish(job)
             return { kind = 'result', text = text, job = job }
         end
@@ -98,13 +135,35 @@ function J.new(protocol, deps)
     function self.abort()
         local job = self.job
         if job then
+            if job.launch then
+                local done = job.launch.cancel()
+                if not done then return false end
+                self.job = nil
+                return true
+            end
             job.worker.stop()
             finish(job)
         end
+        return true
     end
     function self.close()
         local job = self.job
         if not job then
+            return true
+        end
+        if job.launch and job.launch.async then
+            local now = clock()
+            if job.cleanup_poll and now - job.cleanup_poll < 0.25 then return false end
+            job.cleanup_poll = now
+        end
+        if job.launch and not job.worker then
+            job.canceling = job.canceling or clock()
+            -- Explicit cleanup can retry an owner retained after a bounded
+            -- active launch; do not lose it on a failed cancellation.
+            if job.launch_last and clock() - job.launch_last < 0.25 then return false end
+            job.launch_last = clock()
+            if not job.launch.cancel() then return false end
+            self.job = nil
             return true
         end
         if not job.canceling then
@@ -113,8 +172,7 @@ function J.new(protocol, deps)
         if job.worker.running() and clock() - job.canceling < 5 then
             return false
         end
-        self.abort()
-        return true
+        return self.abort()
     end
     return self
 end

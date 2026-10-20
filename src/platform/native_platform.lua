@@ -323,10 +323,12 @@ function N.new(options)
         return stream
     end
     function self.executable_path() return path(checked(11)) end
-    function self.launch_worker(args,folder)
+    local function worker_payload(args,folder)
         assert(type(args)=='string' and #args>0 and #args<=MAX_UTF8_PATH_BYTES and not args:find('%z'), 'Invalid worker arguments')
         folder=path(folder)
-        local receipt=checked(12,word(#args)..args..folder)
+        return word(#args)..args..folder
+    end
+    local function owned_worker(receipt)
         assert(#receipt==8,'Invalid worker receipt')
         local token,worker_pid=number(receipt,1),number(receipt,5)
         assert(token>0 and worker_pid>0,'Invalid worker identity')
@@ -354,6 +356,57 @@ function N.new(options)
             return true
         end
         return worker
+    end
+    function self.launch_worker(args,folder)
+        return owned_worker(checked(12,worker_payload(args,folder)))
+    end
+    if external then
+        function self.begin_worker(args,folder)
+            local token=checked(31,worker_payload(args,folder))
+            if #token~=4 or number(token,1)==0 then pcall(self.close);error('Invalid worker launch token',0) end
+            local future,state,value,cancel_requested={},'pending'
+            local function invalid(why)
+                -- An invalid ownership receipt cannot be retried or forgotten.
+                -- Retire this service and keep the future's outcome uncertain.
+                pcall(self.close);error(why,0)
+            end
+            function future.status()
+                if state~='pending' then return state,value end
+                local bytes=checked(32,token)
+                if #bytes<4 then invalid('Truncated worker launch state') end
+                local phase=number(bytes,1)
+                if phase==0 and #bytes==4 then return 'pending' end
+                if phase==1 and #bytes==12 then
+                    local ok,worker=pcall(owned_worker,bytes:sub(5))
+                    if not ok then invalid(worker) end
+                    state,value='ready',worker
+                elseif phase==2 and #bytes==8 and number(bytes,5)>0 then
+                    state,value='error','Could not launch owned worker (Windows '..number(bytes,5)..')'
+                elseif phase==3 and #bytes==4 then state='cancelled'
+                else invalid('Invalid worker launch state') end
+                return state,value
+            end
+            function future.cancel()
+                if state=='cancelled' or state=='error' then return true end
+                if state=='ready' then return false,'Worker already transferred; stop and close the returned worker' end
+                if closed then return false,'Platform closed; worker launch cleanup is unconfirmed' end
+                if not cancel_requested then
+                    local ok,code,receipt=pcall(transact,33,token)
+                    if not ok then return false,tostring(code) end
+                    if code~=0 then return false,'Could not cancel owned worker launch (Windows '..code..')' end
+                    if #receipt~=0 then
+                        pcall(self.close);return false,'Invalid worker launch cancellation receipt'
+                    end
+                    cancel_requested=true
+                end
+                local ok,phase,why=pcall(future.status)
+                if not ok then return false,tostring(phase) end
+                if phase=='cancelled' or phase=='error' then return true end
+                if phase=='ready' then return false,'Worker transferred; stop and close the returned worker' end
+                return false,why or 'Worker launch cancellation pending'
+            end
+            return future
+        end
     end
     function self.stat(name)
         local status,bytes=transact(5,path(name))

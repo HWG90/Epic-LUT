@@ -15,6 +15,7 @@ function C.new(m, host)
     local partition = effective and '-weapon-effective' or ''
     local folder, scripts = paths.cache .. '/' .. C.FOLDER .. partition, paths.cache .. '/binding-worker' .. partition
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {}, mode = mode }
+    local launches = m.worker_launch or require('src.platform.worker_launch')
     local loaded_bytes = 0
     local scope_thread, scope_receipt, scope_cancel
     local function open_file(path, mode)
@@ -64,24 +65,34 @@ function C.new(m, host)
             pcall(host.log, 'binding: ' .. self.error)
         end
     end
-    function self.close()
+    local function close(automatic)
+        if not automatic then self.cleanup_attempts, self.cleanup_exhausted = 0, nil end
         if scope_thread then
             scope_cancel = true
             coroutine.resume(scope_thread)
             scope_thread, scope_receipt = nil, nil
         end
-        if self.worker then
+        if self.launch_owner then
+            self.stopping = true
+            self.cleanup_attempts = (self.cleanup_attempts or 0) + 1
             pcall(write, folder .. '/progress.txt.cancel', 'cancel')
-            local ok, done = pcall(self.worker.stop)
-            if not ok or done == false or self.worker.running() then
-                return false
+            local done, why = self.launch_owner.cancel()
+            self.worker = self.launch_owner.worker
+            if not done then
+                if self.cleanup_attempts >= 32 then
+                    self.cleanup_exhausted = true
+                    self.error = 'Worker cleanup is unconfirmed; close explicitly to retry'
+                    self.status = self.error
+                end
+                return false, why
             end
-            self.worker.close()
-            self.worker = nil
+            self.launch_owner, self.worker = nil, nil
         end
+        self.stopping = nil
         self.state, self.records, loaded_bytes = 'closed', {}, 0
         return true
     end
+    function self.close() return close(false) end
     function self.start(units, force)
         assert(type(units) == 'table' and #units > 0 and #units <= 64, 'No bounded current units to capture')
         local list, seen = {}, {}
@@ -94,10 +105,10 @@ function C.new(m, host)
         end
         table.sort(list)
         local request = table.concat(list, '\n') .. '\n'
-        if self.request == request and (self.state == 'loading' or self.state == 'ready' and not force) then
+        if not self.cleanup_exhausted and self.request == request and (self.state == 'loading' or self.state == 'ready' and not force) then
             return true
         end
-        if (self.worker or scope_thread) and not self.close() then
+        if (self.launch_owner or scope_thread) and not self.close() then
             return false, 'Previous binding worker cleanup pending'
         end
         scope_receipt, self.scope_error = nil, nil
@@ -121,22 +132,22 @@ function C.new(m, host)
             for _, path in ipairs({ folder, scripts, game }) do
                 assert(not path:find('["\r\n]'), 'Invalid binding worker path')
             end
-            self.worker = assert(
-                m.windows.launch_worker(
-                    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
-                        .. scripts
-                        .. '/binding_provenance.ps1" -GameData "'
-                        .. game
-                        .. '" -Output "'
-                        .. folder
-                        .. '" -Request "'
-                        .. folder
-                        .. '/request.tsv" -OwnerPID '
-                        .. self.owner
-                        .. (effective and ' -Mode weapon_effective' or ''),
-                    scripts
-                )
+            self.launch_owner = launches.start(
+                m.windows,
+                '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+                    .. scripts
+                    .. '/binding_provenance.ps1" -GameData "'
+                    .. game
+                    .. '" -Output "'
+                    .. folder
+                    .. '" -Request "'
+                    .. folder
+                    .. '/request.tsv" -OwnerPID '
+                    .. self.owner
+                    .. (effective and ' -Mode weapon_effective' or ''),
+                scripts
             )
+            self.worker = self.launch_owner.worker
             self.began, self.last_poll = now(), now()
             self.status, self.error = 'Reading exact binding sources', nil
         end)
@@ -243,32 +254,37 @@ function C.new(m, host)
         self.records, self.state, self.status, self.error = records, 'ready', 'Exact binding sources ready', nil
     end
     function self.busy()
-        return self.state == 'loading' or scope_thread ~= nil
+        return self.state == 'loading' or self.stopping == true or scope_thread ~= nil
     end
     function self.tick()
+        if self.cleanup_exhausted then return end
         if scope_thread then self.tick_scope() end
-        if self.state ~= 'loading' or now() - (self.last_poll or 0) < 0.25 then
+        if self.state ~= 'loading' and not self.stopping or now() - (self.last_poll or 0) < 0.25 then
             return
         end
         self.last_poll = now()
+        if self.stopping then close(true); return end
         local ok, why = pcall(function()
             heartbeat()
             if now() - self.began > 190 then
                 assert(self.close(), 'Binding worker cleanup pending')
                 error('Binding source worker timed out')
             end
-            if self.worker and self.worker.running() then
-                return
-            end
-            if self.worker then
-                self.worker.close()
-                self.worker = nil
+            if self.launch_owner then
+                local phase, detail = self.launch_owner.advance()
+                self.worker = self.launch_owner.worker
+                if phase == 'pending' then return end
+                assert(phase == 'ready', detail or 'Binding worker launch cancelled')
+                if self.worker.running() then return end
+                assert(self.launch_owner.release(), 'Binding worker release pending')
+                self.launch_owner, self.worker = nil, nil
             end
             local problem = read(folder .. '/error.txt', 4096)
             assert(not problem or problem == '', problem)
             load()
         end)
         if not ok then
+            if self.launch_owner and not self.stopping then self.close() end
             failed(why)
         end
     end
