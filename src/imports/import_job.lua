@@ -1,7 +1,8 @@
 -- Owns one external import worker. Emits events; never edits palettes or native gear.
 local J = {}
+local open_file = m and m.file_io and m.file_io.open or io.open
 local function read_file(path, limit)
-    local file = io.open(path, 'rb')
+    local file = open_file(path, 'rb')
     if not file then
         return
     end
@@ -13,7 +14,7 @@ local function read_file(path, limit)
     return text or ''
 end
 local function cancel_file(path)
-    local file = assert(io.open(path, 'wb'))
+    local file = assert(open_file(path, 'wb'))
     local ok, why = file:write('cancel')
     file:close()
     assert(ok, why)

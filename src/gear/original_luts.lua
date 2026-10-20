@@ -1,7 +1,10 @@
 -- Read installed-source snapshots and match resource IDs to the original live object.
 -- No identity guesses, zero-value guesses, GPU probing or archive decoding on the game thread.
 local O = {}
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 function O.new(m, paths, native, targets)
+    local remove_file = m.file_io and m.file_io.remove or os.remove
+    local open_file = m.file_io and m.file_io.open or io.open
     local self = {
         snapshots = {},
         loaded = false,
@@ -12,7 +15,7 @@ function O.new(m, paths, native, targets)
     local folder = paths.originals or paths.files
     local advancing = false
     local function exists(path)
-        local f = io.open(path, 'rb')
+        local f = open_file(path, 'rb')
         if not f then
             return nil
         end
@@ -61,13 +64,13 @@ function O.new(m, paths, native, targets)
                     local object = m.engine.texture_object(native, hash)
                     if object then
                         local ok, document = pcall(function()
-                            local f = assert(io.open(snapshot_folder .. '/' .. name, 'rb'))
+                            local f = assert(open_file(snapshot_folder .. '/' .. name, 'rb'))
                             local bytes = f:read(m.dds.MAX_BYTES + 1)
                             f:close()
                             local data, w, h = m.dds.decode(bytes)
                             assert(w == 23 or (w == 3 and h == 1))
                             local source_file =
-                                io.open(snapshot_folder .. '/' .. name:gsub('%.dds$', '.patch-source'), 'rb')
+                                open_file(snapshot_folder .. '/' .. name:gsub('%.dds$', '.patch-source'), 'rb')
                             local patch_source
                             if source_file then
                                 patch_source = source_file:read(358)
@@ -79,7 +82,7 @@ function O.new(m, paths, native, targets)
                             local source_archives =
                                 exists(snapshot_folder .. '/' .. name:gsub('%.dds$', '.source-archives'))
                             local arrowhead
-                            local base = io.open(snapshot_folder .. '/arrowhead/' .. name, 'rb')
+                            local base = open_file(snapshot_folder .. '/arrowhead/' .. name, 'rb')
                             if base then
                                 local raw = base:read(m.dds.MAX_BYTES + 1)
                                 base:close()
@@ -123,7 +126,7 @@ function O.new(m, paths, native, targets)
         self.started = true
         self.loaded = false
         local function write(name, hex)
-            local f = assert(io.open(paths.cache .. '/' .. name, 'wb'))
+            local f = assert(open_file(paths.cache .. '/' .. name, 'wb'))
             assert(f:write((hex:gsub('%x%x', function(pair)
                 return string.char(tonumber(pair, 16))
             end))))
@@ -131,7 +134,7 @@ function O.new(m, paths, native, targets)
         end
         write('original_snapshots.ps1', m.original_snapshot_script)
         write('original_snapshots.cs', m.original_snapshot_reader)
-        os.remove(folder .. '/error.txt')
+        remove_file(folder .. '/error.txt')
         self.launch(true)
         -- A previous base-only cache is not proof of the installed mod scope.
         -- Wait for this index worker before exposing any cached pixels.
@@ -143,7 +146,7 @@ function O.new(m, paths, native, targets)
         end
     end
     local function cancel_worker()
-        local f = io.open(folder .. '/progress.txt.cancel', 'wb')
+        local f = open_file(folder .. '/progress.txt.cancel', 'wb')
         if f then
             f:write('cancel')
             f:close()
@@ -156,17 +159,18 @@ function O.new(m, paths, native, targets)
     end
     local function heartbeat()
         if self.owner and os.time() ~= (self.last_heartbeat or 0) then
-            local f = assert(io.open(folder .. '/owner-heartbeat.txt', 'wb'))
+            local f = assert(open_file(folder .. '/owner-heartbeat.txt', 'wb'))
             assert(f:write(tostring(self.owner)))
             assert(f:close())
             self.last_heartbeat = os.time()
         end
     end
     function self.launch(index)
-        os.remove(folder .. '/error.txt')
-        os.remove(folder .. '/progress.txt')
-        local _, kernel = m.windows.verify_interface()
-        local pid = tonumber(kernel.epic_native_pid())
+        remove_file(folder .. '/error.txt')
+        remove_file(folder .. '/progress.txt')
+        local pid
+        if m.windows.process_id then pid = m.windows.process_id()
+        else local _, kernel = m.windows.verify_interface();pid = tonumber(kernel.epic_native_pid()) end
         self.owner = pid
         self.last_heartbeat = nil
         heartbeat()
@@ -202,7 +206,7 @@ function O.new(m, paths, native, targets)
         local stamp =
             assert(exists(folder .. '/index-complete.txt'), 'Original resource index missing'):match('^([%x]+)')
         assert(stamp and #stamp == 64)
-        local f = assert(io.open(folder .. '/' .. stamp .. '/catalog.txt', 'rb'))
+        local f = assert(open_file(folder .. '/' .. stamp .. '/catalog.txt', 'rb'))
         local text = f:read(1024 * 1024 + 1)
         f:close()
         assert(#text <= 1024 * 1024, 'Original index budget exceeded')
@@ -223,7 +227,7 @@ function O.new(m, paths, native, targets)
             end
             assert(#matched > 0, 'No equipped LUT resource IDs matched the installed source index')
             self.wanted = matched
-            local out = assert(io.open(folder .. '/wanted.txt', 'wb'))
+            local out = assert(open_file(folder .. '/wanted.txt', 'wb'))
             assert(out:write(table.concat(matched, '\n')))
             out:close()
             self.launch(false)
@@ -369,10 +373,9 @@ function O.preserve(document, original, retain_rows)
         document.height >= original.height,
         'Imported LUT has fewer rows than this original game LUT; cannot preserve missing color rows'
     )
-    local ffi = require('ffi')
     local height = retain_rows and document.height or original.height
-    local data = ffi.new('float[?]', document.width * height * 4)
-    ffi.copy(data, document.data, document.width * height * 16)
+    local data = buffers.new(document.width * height * 4)
+    buffers.copy(data, document.data, document.width * height * 4)
     for row = 0, original.height - 1 do
         data[row * document.width * 4 + 3] = original.data[row * original.width * 4 + 3]
         for ch = 0, 3 do

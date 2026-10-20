@@ -103,6 +103,14 @@ def worker(directory, library):
     expected_error(service.validate_utf8, b'\xc0\xaf', contains='(1113)')
     expected_error(service.stat, b'x\0y', contains='Invalid Windows path')
     assert service.validate_utf8(b'Operation errors preserve connection') == b'Operation errors preserve connection'
+    # UTF-8 byte bounds must not reject valid multibyte text before the native
+    # UTF-16 check. These deliberately overlong components never create files.
+    expected_error(service.stat, ('C:/' + '\u754c' * 14000).encode(), contains='Windows stat failed (')
+    expected_error(service.stat, b'C:/' + b'x' * 40000, contains='Windows stat failed (206)')
+    expected_error(service.stat, b'x' * 131065, contains='Invalid Windows path')
+    # The native unit limit rejects this before any worker is launched.
+    expected_error(service.launch_worker, b'x' * 40000, encoded, contains='operation 12 failed (206)')
+    assert service.validate_utf8(b'Native Unicode preflight preserved connection') == b'Native Unicode preflight preserved connection'
 
     timings = {}
     for name, callback, argument in [('UTF8', service.validate_utf8, b'Production driver'),

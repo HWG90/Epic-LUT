@@ -199,6 +199,9 @@ function O.read(m, path, label)
     return result
 end
 function O.new(m, folder)
+    local open_file = m.file_io.open or function(...) return io.open(...) end
+    local move_file = m.file_io.rename or function(...) return os.rename(...) end
+    local remove_file = m.file_io.remove or function(...) return os.remove(...) end
     local self = {}
     local name = valid_name
     function self.names()
@@ -339,17 +342,21 @@ function O.new(m, folder)
         for _, file in ipairs(files) do
             m.file_io.write(folder .. '/' .. file[1], file[2])
         end
-        local f = assert(io.open(target .. '.tmp', 'wb'))
-        assert(f:write(manifest))
-        assert(f:close())
+        m.file_io.write(target .. '.tmp', manifest)
         if previous then
             m.file_io.write(target .. '.previous', previous)
-            assert(os.remove(target))
         end
-        local published, why = os.rename(target .. '.tmp', target)
+        if m.platform then
+            assert(type(m.platform.replace) == 'function', 'Atomic preset publication service required')
+            local published, why = m.platform.replace(target .. '.tmp', target)
+            assert(published == true, why or 'Could not publish preset manifest')
+            return true
+        end
+        if previous then assert(remove_file(target)) end
+        local published, why = move_file(target .. '.tmp', target)
         if not published then
             if previous then
-                os.rename(target .. '.previous', target)
+                move_file(target .. '.previous', target)
             end
             error(why, 0)
         end
@@ -371,12 +378,12 @@ function O.new(m, folder)
         assert(old:lower() ~= new:lower(), 'Enter a different preset name')
         self.load(old)
         local destination = folder .. '/outfit-' .. new .. '.tsv'
-        local existing = io.open(destination, 'rb')
+        local existing = open_file(destination, 'rb')
         if existing then
             existing:close()
             error('A preset with that name already exists')
         end
-        assert(os.rename(folder .. '/outfit-' .. old .. '.tsv', destination))
+        assert(move_file(folder .. '/outfit-' .. old .. '.tsv', destination))
         return true
     end
     function self.delete(label)
@@ -387,7 +394,7 @@ function O.new(m, folder)
         local backup = target .. '.deleted'
         local i = 0
         while true do
-            local f = io.open(backup, 'rb')
+            local f = open_file(backup, 'rb')
             if not f then
                 break
             end
@@ -395,7 +402,7 @@ function O.new(m, folder)
             i = i + 1
             backup = target .. '.deleted-' .. i
         end
-        assert(os.rename(target, backup))
+        assert(move_file(target, backup))
         return true
     end
     return self

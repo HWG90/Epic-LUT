@@ -1,3 +1,4 @@
+local open_file = m.file_io and m.file_io.open or io.open
 -- Active edit session, service composition and controller-owned gear transitions.
 local ffi = require('ffi')
 local ctx, memory, native, game, frontend, preferences, handle, api, paths, palette_editor
@@ -306,6 +307,7 @@ local function accept_import(text, job)
             local names, created = m.paydex_rows
                 .new({
                     folder = paths.presets,
+                    file_io = m.file_io,
                     read = m.file_io.read,
                     write = m.file_io.write,
                     dds = m.dds,
@@ -341,7 +343,7 @@ local function accept_import(text, job)
         for _, name in ipairs(labels) do
             extracted[#extracted + 1] = job.base .. '/' .. name
         end
-        local metadata = io.open(job.base .. '/resources.tsv', 'rb')
+        local metadata = open_file(job.base .. '/resources.tsv', 'rb')
         if metadata and m.import_matches then
             local text = metadata:read(16385) or ''
             metadata:close()
@@ -356,7 +358,7 @@ local function accept_import(text, job)
         load_dds(extracted[1])
         palettes = extracted
         palette_choices(labels)
-        local info = io.open(job.base .. '/import-info.txt', 'rb')
+        local info = open_file(job.base .. '/import-info.txt', 'rb')
         if info then
             local label = info:read(1024)
             info:close()
@@ -2118,6 +2120,7 @@ local function gear_exports()
             end,
             write_patch = function(name, documents)
                 return m.patch_export.new(paths.exports, {
+                    file_io = m.file_io,
                     available_name = m.lut_files.available_name, dds = m.dds,
                     directory_exists = paths.directory_exists, mkdir_new = paths.mkdir_new, rmdir = paths.rmdir,
                     binding_writer = m.binding_patch_export,
@@ -3315,6 +3318,7 @@ return {
                 export_patch = function(name, document, original)
                     assert(original, 'Original Pattern LUT snapshot is not ready')
                     local exporter = m.patch_export.new(paths.exports, {
+                        file_io = m.file_io,
                         available_name = m.lut_files.available_name,
                         dds = m.dds,
                         directory_exists = paths.directory_exists,
@@ -3550,6 +3554,7 @@ return {
                                 end
                             end
                             local exporter = m.patch_export.new(paths.exports, {
+                                file_io = m.file_io,
                                 available_name = m.lut_files.available_name,
                                 dds = m.dds,
                                 directory_exists = paths.directory_exists,
@@ -3586,6 +3591,7 @@ return {
                             operations.lut_names and operations.lut_names.get(original.resource), m.resource_ids, handle.get('lut'))
                         local function available_name(name, exists) return m.lut_files.available_name(name, exists, suffix) end
                         local exporter = m.patch_export.new(paths.exports, {
+                            file_io = m.file_io,
                             available_name = available_name,
                             dds = m.dds,
                             directory_exists = paths.directory_exists,
@@ -3607,6 +3613,7 @@ return {
                                 documents[#documents + 1] = entry
                             end
                             exporter = m.patch_export.new(paths.exports, {
+                                file_io = m.file_io,
                                 available_name = available_name,
                                 dds = m.dds,
                                 directory_exists = paths.directory_exists,

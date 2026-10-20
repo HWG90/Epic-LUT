@@ -15,8 +15,10 @@ function P.manifest(text)
     return names
 end
 function P.new(deps)
-    local read, write = assert(deps.read), assert(deps.write)
-    local move, remove = deps.move or os.rename, deps.remove or os.remove
+    local files = deps.file_io or (m and m.file_io) or {}
+    local read, write = assert(deps.read or files.read), assert(deps.write or files.write)
+    local move = deps.move or files.rename or function(...) return os.rename(...) end
+    local remove = deps.remove or files.remove or function(...) return os.remove(...) end
     local folder, dds = assert(deps.folder), assert(deps.dds)
     local self = {}
     function self.import(base, manifest)

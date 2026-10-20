@@ -1,4 +1,5 @@
 -- Equality uses every finite float, including alpha, masks and emissive fields.
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local T = {}
 local cache = setmetatable({}, { __mode = 'k' })
 function T.key(table)
@@ -7,16 +8,15 @@ function T.key(table)
     if cached and cached.revision == revision and cached.width == table.width and cached.height == table.height then
         return cached.key
     end
-    local ffi = require('ffi')
     local n = table.width * table.height * 4
-    local values = ffi.new('float[?]', n)
-    ffi.copy(values, table.data, n * 4)
+    local values = buffers.new(n)
+    buffers.copy(values, table.data, n)
     for i = 0, n - 1 do
         if values[i] == 0 then
             values[i] = 0
         end
     end -- +0 and -0 are equal values.
-    local key = table.width .. ':' .. table.height .. ':' .. ffi.string(values, n * 4)
+    local key = table.width .. ':' .. table.height .. ':' .. buffers.bytes(values, n)
     cache[table.data] = { key = key, revision = revision, width = table.width, height = table.height }
     return key
 end

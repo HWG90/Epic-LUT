@@ -234,6 +234,11 @@ function P.encode_set(dds, documents, options)
     return encode_set(dds, documents, options)
 end
 function P.new(folder, deps)
+    local files = deps.file_io or (m and m.file_io)
+    local open_file = deps.open or files and files.open or function(...) return io.open(...) end
+    local write_file = deps.write or files and files.write
+    local move_file = deps.move or deps.rename or files and files.rename or function(...) return os.rename(...) end
+    local remove_file = deps.remove or files and files.remove or function(...) return os.remove(...) end
     local self = {}
     function self.save(name, document, original)
         assert(
@@ -273,17 +278,21 @@ function P.new(folder, deps)
                 { staging .. '/' .. name .. '.zip', zip },
             }) do
                 files[#files + 1] = item[1]
-                local f = assert(io.open(item[1], 'wb'))
-                local wrote, error = f:write(item[2])
-                local closed, close_error = f:close()
-                assert(wrote, error)
-                assert(closed, close_error)
+                if write_file then
+                    assert(write_file(item[1], item[2]))
+                else
+                    local f = assert(open_file(item[1], 'wb'))
+                    local wrote, error = f:write(item[2])
+                    local closed, close_error = f:close()
+                    assert(wrote, error)
+                    assert(closed, close_error)
+                end
             end
-            assert(os.rename(staging, destination)) -- Publish the complete triplet together.
+            assert(move_file(staging, destination)) -- Publish the complete triplet together.
         end)
         if not ok then
             for _, path in ipairs(files) do
-                os.remove(path)
+                remove_file(path)
             end
             deps.rmdir(staging)
             error(why, 0)

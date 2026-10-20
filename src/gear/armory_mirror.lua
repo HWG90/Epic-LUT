@@ -1,7 +1,7 @@
 -- Mirrors only applied tables onto this player's matching Armory actor. Never thumbnails or other kits.
 local A = {}
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 function A.new(deps)
-    local ffi = require('ffi')
     local self = { age = 0 }
     local watch, where, slot, signature
     local session = deps.session()
@@ -53,7 +53,7 @@ function A.new(deps)
             if allowed[kind] then
                 parts[#parts + 1] = key
                     .. ':'
-                    .. ffi.string(entry.document.data, entry.document.width * entry.document.height * 16)
+                    .. buffers.bytes(entry.document.data, entry.document.width * entry.document.height * 4)
             end
         end
         table.sort(parts, function(a, b)

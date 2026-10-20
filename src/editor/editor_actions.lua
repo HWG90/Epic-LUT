@@ -10,6 +10,7 @@ local function copy_document(source, label)
 end
 
 function A.new(deps)
+    local open_file = deps.open or (m and m.file_io and m.file_io.open) or io.open
     local function sync_palette()
         local editor = deps.palette_editor()
         if editor then
@@ -279,7 +280,7 @@ function A.new(deps)
             end
             deps.action(function()
                 local name = assert(deps.basic_preset_name(index))
-                local file = assert(io.open(deps.presets_directory() .. '/palette-' .. name .. '.dds', 'rb'))
+                local file = assert(open_file(deps.presets_directory() .. '/palette-' .. name .. '.dds', 'rb'))
                 local bytes = file:read(deps.dds.MAX_BYTES + 1)
                 file:close()
                 local data, w, h = deps.dds.decode(bytes)

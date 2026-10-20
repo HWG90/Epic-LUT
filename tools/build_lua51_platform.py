@@ -46,7 +46,7 @@ def main():
         assert not any(char in str(path) for char in '%!\r\n'), 'Unsupported command path'
     build = output/'build-platform.cmd'
     build.write_text('@echo off\ncall "'+str(VCVARS)+'" >nul\nif errorlevel 1 exit /b %errorlevel%\n'
-        +'cl /nologo /LD /MT /O2 /W4 /WX "'+str(source)+'" /link /OUT:EpicLutLua51Platform.dll /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO /Brepro user32.lib shell32.lib\n',newline='\r\n')
+        +'cl /nologo /LD /MT /O2 /W4 /WX "'+str(source)+'" /link /OUT:EpicLutLua51Platform.dll /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO /Brepro user32.lib shell32.lib bcrypt.lib\n',newline='\r\n')
     subprocess.run(['cmd.exe','/d','/c',str(build)],cwd=output,check=True)
     data=(output/'EpicLutLua51Platform.dll').read_bytes()
     names=exports(data)
@@ -59,6 +59,12 @@ def main():
         'protocol':'ELP1/ELR1 v1 over local same-process named pipes','max_payload':1048576,'dll':str(dll),
         'sha256':digest,'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
         'exports':names,'game_api_calls':False,'deployed':False,
+        'explicit_worker':'System32 WindowsPowerShell; hidden; no inherited handles', 'max_owned_workers':8,
+        'unicode_streams':'owned generation tokens; binary rb/wb/ab; explicit bounded transfers',
+        'max_owned_files':8,'max_file_bytes':67108864,'max_stream_position':9007199254740991,
+        'max_stream_allocation':67108864,'seek64_operation':28,'stream_operations':[16,17,18,19,20,21,28],
+        'digest_service':'Windows BCrypt SHA256; owned state; 65536-byte updates; explicit finish/cancel',
+        'max_owned_hashes':8,'digest_operations':[22,23,24,25],'file_remove_rename_operations':[26,27],
         'verification':'PE x64 and export checked; native platform tests remain separate'}
     (output/'build.json').write_text(json.dumps(receipt,indent=2),encoding='utf8')
     (output/'SHA256SUMS.txt').write_text(digest+'  '+dll.name+'\n',encoding='ascii')

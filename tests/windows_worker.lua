@@ -25,10 +25,14 @@ proxy.load = function(name)
     end })
 end
 local function module()
-    local chunk = assert(loadfile('src/platform/windows.lua'))
-    setfenv(chunk, setmetatable({ require = function(name)
+    local scope = setmetatable({ require = function(name)
         return name == 'ffi' and proxy or require(name)
-    end }, { __index = _G }))
+    end }, { __index = _G })
+    local legacy = assert(loadfile('src/platform/legacy_windows.lua'))
+    setfenv(legacy, scope)
+    scope.m = { legacy_windows = legacy() }
+    local chunk = assert(loadfile('src/platform/windows.lua'))
+    setfenv(chunk, scope)
     return chunk()
 end
 if not pcall(function() return kernel.epic_worker_test_sleep end) then

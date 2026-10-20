@@ -11,7 +11,7 @@ function C.new(m, host)
     local effective = mode == 'weapon_effective'
     local expected_schema = effective and '2' or C.SCHEMA
     local paths = host.paths or m.paths.new(m)
-    local io_api, now = host.io or io, host.time or os.clock
+    local io_api, now = host.io or m.file_io or io, host.time or os.clock
     local partition = effective and '-weapon-effective' or ''
     local folder, scripts = paths.cache .. '/' .. C.FOLDER .. partition, paths.cache .. '/binding-worker' .. partition
     local self = { state = 'idle', status = 'Binding source cache not requested', records = {}, mode = mode }
@@ -112,8 +112,8 @@ function C.new(m, host)
             hexfile('binding_provenance_reader.cs', m.binding_provenance_reader)
             hexfile('original_snapshots.cs', m.original_snapshot_reader)
             write(folder .. '/request.tsv', request)
-            local _, kernel = m.windows.verify_interface()
-            self.owner = tonumber(kernel.epic_native_pid())
+            if m.windows.process_id then self.owner = m.windows.process_id()
+            else local _, kernel = m.windows.verify_interface();self.owner = tonumber(kernel.epic_native_pid()) end
             assert(self.owner and self.owner > 0, 'Binding worker owner unavailable')
             heartbeat()
             local game = m.windows.game_data()
@@ -196,7 +196,7 @@ function C.new(m, host)
         local rows, digest = meta:match('^(%d+)\r?\n(%x+)')
         rows = tonumber(rows)
         assert(rows and rows >= 1 and rows <= 6000000 and #digest == 64, 'Binding collision catalog metadata invalid')
-        local f = assert(io_api.open(path .. '/collisions.tsv', 'rb'))
+        local f = assert(open_file(path .. '/collisions.tsv', 'rb'))
         local size = f:seek('end')
         assert(f:seek('set', 0))
         local hashed, value = pcall(m.binding_provenance.digest, function()
@@ -326,7 +326,8 @@ function C.new(m, host)
         if self.state ~= 'ready' then
             return false, self.status
         end
-        local ok, why = pcall(function()
+        local call = checkpoint and (m.cooperative or require('src.core.cooperative')).call or pcall
+        local ok, why = call(function()
             assert(self.game and m.windows.files, 'Current patch scope enumeration unavailable')
             local names, all = {}, {}
             for _, name in ipairs(m.windows.files(self.game, '*.patch_*')) do
@@ -353,7 +354,7 @@ function C.new(m, host)
                     else
                         local size = assert(file:seek('end'))
                         assert(file:seek('set', 0))
-                        local hashed, digest = pcall(m.binding_provenance.digest, function()
+                        local hashed, digest = call(m.binding_provenance.digest, function()
                             if checkpoint then checkpoint() end
                             local chunk = file:read(65536)
                             return chunk and #chunk > 0 and chunk or nil
@@ -440,7 +441,7 @@ function C.new(m, host)
     function self.id_available(kind, resource)
         assert(self.state == 'ready', 'Complete resource collision catalog unavailable')
         local wanted = id(kind) .. '\t' .. id(resource)
-        local f = assert(io_api.open(self.path .. '/collisions.tsv', 'rb'))
+        local f = assert(open_file(self.path .. '/collisions.tsv', 'rb'))
         local ok, result = pcall(function()
             assert(f:seek('end') == self.collision_count * 34, 'Binding collision catalog changed')
             local low, high = 0, self.collision_count - 1

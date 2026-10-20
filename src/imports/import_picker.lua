@@ -9,7 +9,7 @@ local phases = {
 }
 function P.new(deps)
     local jobs, paths = deps.jobs, deps.paths
-    local clock, open = deps.clock or os.time, deps.open or io.open
+    local clock, open = deps.clock or os.time, deps.open or (m and m.file_io and m.file_io.open) or io.open
     local self, last_rows_mode = {}, nil
     local function sync()
         deps.on_job(jobs.job)
@@ -30,7 +30,9 @@ function P.new(deps)
             end
         end
         local native_import = deps.get_native_import()
-        local _, kernel = native_import.verify_interface()
+        local pid
+        if native_import.process_id then pid = native_import.process_id()
+        else local _, kernel = native_import.verify_interface();pid = tonumber(kernel.epic_native_pid()) end
         assert(not paths.files:find('"', 1, true) and not paths.cache:find('"', 1, true), 'Invalid import path')
         local script = paths.cache .. '/import-zip.ps1'
         local f = assert(open(script, 'wb'))
@@ -39,7 +41,6 @@ function P.new(deps)
         end))))
         assert(f:close())
         deps.counter.value = deps.counter.value + 1
-        local pid = tonumber(kernel.epic_native_pid())
         local base = paths.cache .. '/zip-' .. pid .. '-' .. clock() .. '-' .. deps.counter.value
         local extension = deps.get('format') == 3 and '.rar' or '.zip'
         local input = pick and ' -Pick' or ' -Package "' .. paths.files .. '/' .. name .. extension .. '"'

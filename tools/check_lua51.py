@@ -10,7 +10,13 @@ import zipfile
 from lupa.lua51 import LuaRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
-PURE_TESTS = ('appearance_recovery_events', 'appearance_state', 'export_pairing', 'file_io', 'resource_labels', 'lut_editor_portable', 'binding_session_portable', 'cooperative', 'shared_publication_slices', 'shared_publication_cache', 'shared_publication_portable', 'shared_publication_large_portable', 'shared_lut_codec_portable', 'clipboard_portable', 'loader_input_portable', 'loader_store_portable', 'paths_portable', 'frontend_loader_portable')
+PURE_TESTS = ('appearance_recovery_events', 'appearance_state', 'export_pairing', 'file_io', 'dds_file_portable', 'resource_labels', 'lut_editor_portable', 'binding_session_portable', 'cooperative', 'shared_publication_slices', 'shared_publication_cache', 'shared_publication_portable', 'shared_publication_large_portable', 'shared_lut_codec_portable', 'clipboard_portable', 'loader_input_portable', 'loader_store_portable', 'paths_portable', 'frontend_loader_portable')
+
+PURE_TESTS += ('ui_font_portable', 'ui_font', 'ui_font_render', 'native_text_metrics', 'table_groups_portable')
+
+PURE_TESTS += ('windows_portable', 'direct_setup_portable')
+PURE_TESTS += ('public_engine_api_inventory', 'gear_buffers_portable', 'preset_file_io_portable', 'update_check_portable', 'export_provenance_portable')
+PURE_TESTS += ('weapon_runtime_portable',)
 
 def runtime():
     lua = LuaRuntime(encoding=None, unpack_returned_tuples=True)

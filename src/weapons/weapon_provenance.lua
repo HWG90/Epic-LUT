@@ -4,7 +4,7 @@ local W = {
     PENDING = 'Reading exact weapon binding sources; retry after the background cache is ready',
     DESTINATION_PENDING = 'Weapon patch destination has not yet been verified in-game',
 }
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local function hex(value, length, label)
     assert(type(value) == 'string' and #value == (length or 16) and value:match('^%x+$'), 'Invalid ' .. label)
     return value:lower()
@@ -431,7 +431,10 @@ function W.new(m, host)
                 and (document.width ~= 3 or document.height == 1),
             'Saved weapon LUT pixels unavailable'
         )
-        return ffi.string(document.data, document.width * document.height * 16)
+        local count = document.width * document.height * 4
+        assert(buffers.count(document.data) and buffers.count(document.data) >= count,
+            'Saved weapon LUT must own its complete float32 array')
+        return buffers.bytes(document.data, count)
     end
     -- Missing assignment sidecars follow the same current-match policy as legacy
     -- garment presets. Palette saves remain useful while the worker is loading;

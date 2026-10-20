@@ -67,7 +67,10 @@ def worker(directory,dll):
         value=text.encode('utf8');assert exchange(1,value)==value
     for invalid in [b'x\0y',b'\xc0\xaf',b'\xed\xa0\x80',b'\xff']:
         exchange(1,invalid,13 if b'\0' in invalid else 1113)
-    exchange(11,b'',50)
+    exchange(255,b'',50)
+    for operation in (13,14,15):
+        exchange(operation,b'',13)
+        exchange(operation,struct.pack('<I',4294967295),6)
     work=root/'\u8863\u88c5 \U0001f986';exchange(4,str(work).encode());exchange(4,str(work).encode())
     exchange(7,str(work).encode(),183)
     exclusive=root/'exclusive';exchange(7,str(exclusive).encode());exchange(8,str(exclusive).encode())

@@ -45,6 +45,7 @@ function L.available_name(name, exists, suffix)
     error('Too many exports with this name')
 end
 function L.new(folder, deps)
+    local open_file = deps.open or (m and m.file_io and m.file_io.open) or io.open
     local self = {}
     local function path(name, prefix)
         assert(
@@ -54,7 +55,7 @@ function L.new(folder, deps)
         return folder .. '/' .. (prefix or '') .. name .. '.dds'
     end
     function self.exists(name, prefix)
-        local f = io.open(path(name, prefix), 'rb')
+        local f = open_file(path(name, prefix), 'rb')
         if not f then
             return false
         end
@@ -80,14 +81,14 @@ function L.new(folder, deps)
     local function delete_named(name, prefix)
         local source = path(name, prefix)
         local function file_exists(filename)
-            local file = io.open(filename, 'rb')
+            local file = open_file(filename, 'rb')
             if not file then
                 return false
             end
             file:close()
             return true
         end
-        local exists, move = deps.exists or file_exists, deps.move or os.rename
+        local exists, move = deps.exists or file_exists, deps.move or (m and m.file_io and m.file_io.rename) or os.rename
         assert(exists(source), 'Saved preset not found')
         for index = 1, 10000 do
             local backup = source .. '.deleted' .. (index == 1 and '' or '-' .. index)

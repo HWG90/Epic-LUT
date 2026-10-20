@@ -2,6 +2,7 @@
 -- Cancellation state is shared explicitly with manual actions and teardown.
 local C = {}
 function C.new(m, host)
+    local open_file = m.file_io and m.file_io.open or io.open
     local S = {}
 function S.update()
     if host.resume_state.done or not host.setup() then
@@ -52,7 +53,7 @@ function S.update()
             local total = 0
             for _, file in pairs(plan) do
                 if not documents[file] then
-                    local f = assert(io.open(host.paths().presets .. '/' .. file, 'rb'), 'Saved palette missing')
+                    local f = assert(open_file(host.paths().presets .. '/' .. file, 'rb'), 'Saved palette missing')
                     local bytes = f:read(m.dds.MAX_BYTES + 1)
                     f:close()
                     local data, w, h = m.dds.decode(bytes)

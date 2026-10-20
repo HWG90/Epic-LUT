@@ -3,6 +3,8 @@ local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LU
 local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', weapon = 'Weapon' }
 local weapon_labels = { 'Primary', 'Secondary', 'Support' }
 function B.new(m, paths)
+    local move_file = m.file_io and m.file_io.rename or function(...) return os.rename(...) end
+    local remove_file = m.file_io and m.file_io.remove or function(...) return os.remove(...) end
     local self = {}
     function self.save(prefix, entries, naming)
         naming = naming or 1
@@ -120,13 +122,13 @@ function B.new(m, paths)
                 m.file_io.write(path, file.bytes)
             end
             assert(not paths.directory_exists(destination), 'Export folder already exists')
-            assert(os.rename(staging, destination), 'Could not publish DDS export folder')
+            assert(move_file(staging, destination), 'Could not publish DDS export folder')
             owned = false
         end)
         if not ok then
             if owned then
                 for _, path in ipairs(written) do
-                    os.remove(path)
+                    remove_file(path)
                 end
                 paths.rmdir(staging) -- Nonrecursive: unrelated files are never removed.
             end

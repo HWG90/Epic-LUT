@@ -196,9 +196,14 @@ function E.bundle(m, preset, include_capes, include_patterns)
 end
 function E.new(m, paths, options)
     options = options or {}
+    local move_file = m.file_io and m.file_io.rename or function(...) return os.rename(...) end
+    local remove_file = m.file_io and m.file_io.remove or function(...) return os.remove(...) end
     local self = {}
-    local raw = m.lut_files.new(paths.exports, { dds = m.dds })
+    local raw = m.lut_files.new(paths.exports, {
+        dds = m.dds, open = m.file_io and m.file_io.open, read = m.file_io and m.file_io.read,
+    })
     local patch = m.patch_export.new(paths.exports, {
+        file_io = m.file_io,
         available_name = m.lut_files.available_name,
         dds = m.dds,
         directory_exists = paths.directory_exists,
@@ -281,10 +286,10 @@ function E.new(m, paths, options)
         local bytes = m.patch_export.zip_entries(E.bundle(m, { entries = saved_entries }))
         local ok, why = pcall(function()
             m.file_io.write(staging, bytes)
-            assert(os.rename(staging, output), 'Could not publish preset export')
+            assert(move_file(staging, output), 'Could not publish preset export')
         end)
         if not ok then
-            os.remove(staging)
+            remove_file(staging)
             error(why, 0)
         end
         return output, tostring(#saved_entries) .. ' saved LUTs', output

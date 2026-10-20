@@ -1,8 +1,8 @@
 -- Weapon palette documents and owned main/Pattern binding sessions. The host
 -- supplies verified native writes; discovery proves local identity and privacy.
 local R = { SLOTS = 3, MATERIAL = 0x7e662968, PATTERN = 0x81d4c49d }
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 function R.new(deps)
-    local ffi = require('ffi')
     local discovery = assert(deps.discovery, 'Weapon discovery service required')
     local factory = assert(deps.binding_session, 'Binding session module required')
     assert(
@@ -38,12 +38,11 @@ function R.new(deps)
                 and w >= 1
                 and w <= 64
                 and h >= 1
-                and h <= 64
-                and type(document.data) == 'cdata',
+                and h <= 64,
             'Invalid weapon LUT document'
         )
         assert(
-            ffi.istype('float[?]', document.data) and ffi.sizeof(document.data) >= w * h * 16,
+            buffers.count(document.data) and buffers.count(document.data) >= w * h * 4,
             'Weapon LUT must own its complete float32 array'
         )
         for index = 0, w * h * 4 - 1 do
@@ -57,17 +56,15 @@ function R.new(deps)
         for name, value in pairs(document) do
             copied[name] = value
         end
-        copied.data = ffi.new('float[?]', w * h * 4)
-        ffi.copy(copied.data, document.data, w * h * 16)
+        copied.data = buffers.new(w * h * 4)
+        buffers.copy(copied.data, document.data, w * h * 4)
         if document.original then
             assert(
-                type(document.original) == 'cdata'
-                    and ffi.istype('float[?]', document.original)
-                    and ffi.sizeof(document.original) >= w * h * 16,
+                buffers.count(document.original) and buffers.count(document.original) >= w * h * 4,
                 'Invalid original weapon LUT array'
             )
-            copied.original = ffi.new('float[?]', w * h * 4)
-            ffi.copy(copied.original, document.original, w * h * 16)
+            copied.original = buffers.new(w * h * 4)
+            buffers.copy(copied.original, document.original, w * h * 4)
         end
         return copied
     end
@@ -253,7 +250,7 @@ function R.new(deps)
                 .. ':'
                 .. copy.height
                 .. ':'
-                .. ffi.string(copy.data, copy.width * copy.height * 16)
+                .. buffers.bytes(copy.data, copy.width * copy.height * 4)
             if signature and signature ~= bytes then
                 mixed = true
             end
@@ -361,7 +358,7 @@ function R.new(deps)
                 'weapon', kind, weapon_slot, group.weapon_resource64, group.weapon_resource64
             copy.resource = group.source_resource or copy.resource
             copy.mixed, copy.binding_documents = nil, nil
-            local bytes = ffi.string(copy.data, copy.width * copy.height * 16)
+            local bytes = buffers.bytes(copy.data, copy.width * copy.height * 4)
             local chosen = entry.targets or group.bindings
             assert(
                 type(chosen) == 'table' and #chosen > 0 and #chosen <= #group.bindings,
@@ -665,7 +662,7 @@ function R.new(deps)
                             for _, b in ipairs(group.bindings) do
                                 if b.current ~= b.original and b.document then
                                     local document = by_key[b.save_key]
-                                    local bytes = ffi.string(document.data, document.width * document.height * 16)
+                                    local bytes = buffers.bytes(document.data, document.width * document.height * 4)
                                     local entry = variants[bytes]
                                     if not entry then
                                         entry = {
@@ -889,7 +886,7 @@ function R.new(deps)
                             for _, b in ipairs(catalog[kind][index].bindings) do
                                 local document = saved[b.save_key]
                                 if document then
-                                    local bytes = ffi.string(document.data, document.width * document.height * 16)
+                                    local bytes = buffers.bytes(document.data, document.width * document.height * 4)
                                     local entry = grouped[bytes]
                                     if not entry then
                                         entry = {

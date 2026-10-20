@@ -1,5 +1,6 @@
 -- Bounded little-endian DDS float interchange; no image decoder or code execution in game.
 local buffer = m and m.float_buffer or require('src.core.float_buffer')
+local files = m and m.file_io or require('src.core.file_io')
 local D = { MAX_BYTES = 1024 * 1024 }
 local function u32(s, o)
     assert(o >= 0 and o + 4 <= #s, 'Truncated DDS header')
@@ -104,14 +105,21 @@ function D.encode(data, w, h)
     return table.concat(chunks)
 end
 function D.read(path, w, h)
-    local f = assert(io.open(path, 'rb'), 'LUT file not found')
-    local bytes = f:read(D.MAX_BYTES + 1)
-    f:close()
+    local bytes = files.read(path, D.MAX_BYTES)
     return D.decode(bytes, w, h), bytes
 end
 function D.write(path, data, w, h)
     local bytes = D.encode(data, w, h)
     local tmp = path .. '.pending'
+    if m and m.platform then
+        assert(type(m.platform.replace) == 'function', 'Atomic file replacement service required')
+        files.write(tmp, bytes)
+        local previous = files.read(path, D.MAX_BYTES, true)
+        if previous then files.write(path .. '.previous', previous) end
+        local ok, why = m.platform.replace(tmp, path)
+        assert(ok == true, why or 'Could not publish DDS file')
+        return path
+    end
     local f = assert(io.open(tmp, 'wb'))
     assert(f:write(bytes))
     assert(f:close())
