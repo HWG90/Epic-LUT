@@ -242,6 +242,9 @@ function C.new(m, host)
         self.path, self.index_stamp, self.collision_count, self.collision_sha256 = path, stamp, rows, id(digest, 64)
         self.records, self.state, self.status, self.error = records, 'ready', 'Exact binding sources ready', nil
     end
+    function self.busy()
+        return self.state == 'loading' or scope_thread ~= nil
+    end
     function self.tick()
         if scope_thread then self.tick_scope() end
         if self.state ~= 'loading' or now() - (self.last_poll or 0) < 0.25 then
@@ -392,6 +395,9 @@ function C.new(m, host)
             return false, 'Patch files changed; verify weapon export sources again'
         end
         return validate_scope_full()
+    end
+    function self.scope_ready()
+        return self.state == 'ready' and scope_receipt ~= nil and scope_thread == nil
     end
     function self.prepare_scope()
         if self.state ~= 'ready' then return false, self.status end

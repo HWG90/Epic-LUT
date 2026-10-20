@@ -83,9 +83,26 @@ do
     assert(read(at, 40) == original and writes() == 2 and not s.pending())
 end
 do
-    local s, b, number, _, at, _, writes = fixture()
+    local s, b, number, read, at, _, writes = fixture()
     number(at + 8, 7)
-    assert(not pcall(s.sync, { b }) and writes() == 0, 'Explicit skin source was overwritten')
+    local original = read(at, 40)
+    assert(s.sync({ b }) and read(at + 8, 8) == original:sub(9, 16), 'Selected LUT override blocked or overwritten')
+    s.sync({})
+    assert(read(at, 40) == original and writes() == 2, 'Explicit LUT source did not restore exactly')
+end
+for _, offset in ipairs({4, 16, 24, 32}) do
+    local s, b, number, _, at, _, writes = fixture()
+    number(at + offset, 7)
+    assert(not pcall(s.sync, { b }) and writes() == 0, 'Unselected texture override or padding was suppressed')
+end
+do
+    local s, b, number, read, at = fixture()
+    number(at + 24, 9)
+    b.slot = 0x81d4c49d
+    local original = read(at,40)
+    assert(s.sync({b}) and read(at+24,8)==original:sub(25,32))
+    s.sync({})
+    assert(read(at,40)==original, 'Selected Pattern override did not restore exactly')
 end
 do
     local s, b, number, _, _, _, writes = fixture()
@@ -128,6 +145,21 @@ end
 print(
     'PASS weapon source leases: exact restore, no repeat writes, skin/shared refusal, foreign/reused owner and rollback'
 )
+
+do
+    local s, b, number, _, _, deps = fixture()
+    for _, map in ipairs({{0x278,0x700000},{0x2b8,0x710000}}) do
+        number(0x200000+map[1]+8,256)
+        for row=1,255 do number(map[2]+row*8,0xffffffff) end
+    end
+    local read, calls = deps.read, 0
+    deps.read=function(address,size) calls=calls+1;return read(address,size) end
+    assert(s.sync({b}))
+    assert(calls<120, 'Source proof made a native read for every hash bucket')
+    number(0x710000+255*8,250)
+    number(0x710000+255*8+4,0)
+    assert(not pcall(s.sync,{b}), 'Batched proof missed an alias in the last bucket')
+end
 
 do
     local s, b, number, _, at, _, writes = fixture()

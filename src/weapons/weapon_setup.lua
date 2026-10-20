@@ -2,6 +2,7 @@
 -- Palette persistence waits for exact sources; a user action cancels resume.
 local S = { TIMEOUT = 120 }
 function S.new(m, host)
+    if m.weapon_intent and host.restore_slot then return m.weapon_intent.new(m, host) end
     local P, M = assert(m.binding_provenance), assert(m.weapon_mapping)
     local self, job, unresolved = {}, nil, false
     local function bridge()
@@ -26,12 +27,40 @@ function S.new(m, host)
     function self.pending()
         return job ~= nil
     end
+    function self.recovering()
+        return job ~= nil or unresolved
+    end
     function self.capture()
         assert(not job and not unresolved, 'Saved weapon setup is awaiting recovery; previous setup retained')
         local editor, entries, receipts, copies = bridge(), {}, {}, {}
-        local discovery = editor.discovery()
-        for _, b in ipairs(editor.runtime().all_owned()) do
+        local discovery, active = editor.discovery(), editor.runtime()
+        local replacements = {}
+        local function replaced(b)
+            local slot = b.weapon_slot
+            local catalog = active.catalog(slot)
+            if not catalog or not catalog.available or catalog.receipt.unit == b.unit then return false end
+            if editor.recovery_pending and editor.recovery_pending(slot) then return false end
+            if replacements[slot] == catalog then return true end
+            if not discovery.validate(catalog.receipt) then return false end
+            local assigned = false
+            for _, kind in ipairs({ 'material', 'pattern' }) do
+                for _, group in ipairs(active.groups(slot, kind)) do
+                    for _, current in ipairs(group.bindings) do
+                        if current.texture and current.current == current.texture.object then
+                            assert(discovery.present(current) and discovery.binding(current) == current.current,
+                                'Current weapon changed during capture; previous setup retained')
+                            assigned = true
+                        end
+                    end
+                end
+            end
+            if assigned then replacements[slot] = catalog end
+            return assigned
+        end
+        for _, b in ipairs(active.all_owned()) do
             if b.texture and b.current == b.texture.object then
+                assert(not editor.recovery_pending or not editor.recovery_pending(b.weapon_slot),
+                    'Applied weapon setup is awaiting recovery; previous setup retained')
                 if discovery.present(b) then
                     if discovery.binding(b) == b.current then
                         local original =
@@ -52,10 +81,18 @@ function S.new(m, host)
                         }
                         receipts[#receipts + 1] = { binding = b, current = b.current, bytes = bytes }
                     end
-                else
+                elseif not replaced(b) then
                     error('Applied weapon setup is awaiting recovery; previous setup retained', 0)
                 end
             end
+        end
+        -- Old sessions retain textures until the renderer can release them.
+        -- They are not save intent after a different, freshly verified unit in
+        -- that slot has successfully acquired its current assignment.
+        for slot, catalog in pairs(replacements) do
+            assert(active.catalog(slot) == catalog and discovery.validate(catalog.receipt)
+                    and (not editor.recovery_pending or not editor.recovery_pending(slot)),
+                'Weapon replacement changed during capture; previous setup retained')
         end
         assert(#entries <= 4096, 'Weapon startup binding budget exceeded')
         for _, receipt in ipairs(receipts) do
@@ -70,6 +107,14 @@ function S.new(m, host)
             )
         end
         return entries
+    end
+    local capture = self.capture
+    function self.capture()
+        local discovery = bridge().discovery()
+        if discovery.with_validation_batch then
+            return discovery.with_validation_batch(capture)
+        end
+        return capture()
     end
     function self.start(preset)
         assert(not job, 'Weapon startup already in progress')
@@ -112,6 +157,7 @@ function S.new(m, host)
             copy.binding_provenance = P.validate(refs, 'weapon', entry.key, entry.original)
             saved[#saved + 1], by_proof[proof] = copy, copy
         end
+        self.next_tick = nil
         local started = host.time()
         unresolved = true
         job = coroutine.create(function()
@@ -123,7 +169,7 @@ function S.new(m, host)
                     catalog = runtime.refresh(slot)
                     if not catalog then
                         assert(host.time() - started < S.TIMEOUT, 'Saved weapons are not available; setup retained')
-                        coroutine.yield()
+                        coroutine.yield('waiting')
                     end
                 until catalog
                 if (catalog.weapon_resource or catalog.weapon_resource64) == resource then
@@ -170,7 +216,7 @@ function S.new(m, host)
                                             host.time() - started < S.TIMEOUT,
                                             'Exact weapon startup sources are not ready; setup retained'
                                         )
-                                        coroutine.yield()
+                                        coroutine.yield('waiting')
                                     end
                                 until refs
                                 local entry = by_proof[signature(refs, original)]
@@ -206,7 +252,7 @@ function S.new(m, host)
                                     plan.targets[#plan.targets + 1] = b
                                     checked[#checked + 1] = { binding = b, current = b.current }
                                 end
-                                coroutine.yield()
+                                coroutine.yield('progress')
                             end
                         end
                     end
@@ -232,7 +278,7 @@ function S.new(m, host)
                     end
                     assert(tostring(why):find(m.weapon_provenance.PENDING, 1, true), why)
                     assert(host.time() - started < S.TIMEOUT, 'Exact weapon startup sources are not ready; setup retained')
-                    coroutine.yield()
+                    coroutine.yield('waiting')
                 end
                 for _, receipt in ipairs(checked) do
                     assert(
@@ -270,13 +316,26 @@ function S.new(m, host)
         if self.next_tick and now < self.next_tick then
             return
         end
-        self.next_tick = now + 0.1
-        local ok, why = coroutine.resume(job)
-        if not ok then
-            job = nil
-            host.message('Saved weapon setup could not resume: ' .. tostring(why))
-        elseif coroutine.status(job) == 'dead' then
-            job = nil
+        -- Ready bindings advance in bounded cooperative batches, instead of
+        -- paying an unconditional 100 ms per binding. Cold external sources
+        -- retain their bounded retry; completed/unchanged setups remain idle.
+        self.next_tick = nil
+        local clock = host.clock or os.clock
+        local began = clock()
+        for _ = 1, 8 do
+            local ok, why = coroutine.resume(job)
+            if not ok then
+                job = nil
+                host.message('Saved weapon setup could not resume: ' .. tostring(why))
+                return
+            elseif coroutine.status(job) == 'dead' then
+                job = nil
+                return
+            elseif why == 'waiting' then
+                self.next_tick = now + 0.1
+                return
+            end
+            if clock() - began >= 0.002 then return end
         end
     end
     return self

@@ -434,7 +434,7 @@ assert(#exports == 1 and exports[1].kind == 'all', 'Export Tools bypassed the ex
 assert(formats[4] == 'All Custom LUTs (DDS)', 'Bulk DDS format was not appended without renumbering old choices')
 for _, format in ipairs({ 1, 2, 3 }) do
     assert(handle.set('export_format', format))
-    assert(not label(compose(), 'LUT# + HEX'), 'DDS naming leaked into a different export format')
+    assert((label(compose(), 'LUT# + HEX') ~= nil) == (format ~= 3), 'Single DDS/patch naming visibility is incorrect')
 end
 assert(handle.set('export_format', 1))
 tap_label('Export...')

@@ -36,3 +36,25 @@ OWN.append('weapon_source_lease')
 SOURCE_GROUPS['weapon_source_lease'] = 'weapons'
 OWN.append('weapon_private_config')
 SOURCE_GROUPS['weapon_private_config'] = 'weapons'
+
+
+OWN += ['weapon_events', 'weapon_event_binary']
+SOURCE_GROUPS.update({'weapon_events': 'weapons', 'weapon_event_binary': 'weapons'})
+
+OWN += ['appearance_events', 'appearance_event_binary']
+SOURCE_GROUPS.update({'appearance_events':'gear','appearance_event_binary':'gear'})
+
+OWN.append('appearance_recovery')
+SOURCE_GROUPS['appearance_recovery'] = 'editor'
+
+OWN.append('weapon_services')
+SOURCE_GROUPS['weapon_services'] = 'editor'
+
+OWN.append('editor_registration')
+SOURCE_GROUPS['editor_registration'] = 'editor'
+
+OWN.append('setup_restore')
+SOURCE_GROUPS['setup_restore'] = 'editor'
+
+OWN.append('weapon_intent')
+SOURCE_GROUPS['weapon_intent']='weapons'

@@ -609,4 +609,24 @@ test('post-serialization scope failure prevents filesystem staging in the real p
     })
     assert(not pcall(saver.save, 'Scoped Weapon', entries) and staged == 0)
 end)
+test('source completions fire once, wait for active scope work and cancel on close', function()
+    local f = setup()
+    assert(f.sources.request())
+    local count, busy = 0, true
+    f.cache.busy = function() return busy end
+    f.sources.when_ready(function(ok) assert(ok);count=count+1 end)
+    f.sources.poll(false)
+    assert(count==0, 'Callback ran while scope verification was busy')
+    busy=false;f.sources.poll(false);f.sources.poll(false)
+    assert(count==1, 'Source completion callback repeated')
+    local cancel=f.sources.when_ready(function() error('Cancelled callback fired') end)
+    cancel();f.sources.poll(false)
+    f.sources.when_ready(function() error('Closed callback fired') end)
+    assert(f.sources.close());f.sources.poll(false)
+    local failed=setup();failed.sources.request()
+    failed.cache.tick=function() failed.cache.state='failed';failed.cache.error='worker failed' end
+    local problem
+    failed.sources.when_ready(function(ok,why) assert(not ok);problem=why end)
+    failed.sources.poll(false);assert(problem=='worker failed')
+end)
 print('PASS weapon provenance: ' .. cases .. ' focused contracts')

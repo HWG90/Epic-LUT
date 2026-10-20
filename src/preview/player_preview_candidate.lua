@@ -736,6 +736,7 @@ editor.on_update = function(ctx, dt)
     local request = read_request(dt)
     if resumed then
         pressed = key
+        if not single_frame or first then due = true end
     end
     if request == 'close' then
         close()
@@ -904,7 +905,7 @@ editor.on_update = function(ctx, dt)
                     assert(current, 'Equipped source changed: ' .. tostring(reason))
                     assert(signature(current) == source_signature, 'Equipped source changed; rebuild preview')
                 end
-                adapter.apply_luts(controller.model, { armor = true, helmet = true })
+                return adapter.apply_luts(controller.model, { armor = true, helmet = true })
             end)
             if not ok then
                 close()
@@ -921,7 +922,9 @@ editor.on_update = function(ctx, dt)
                         dock_hidden = docked
                     end
                 end
-            elseif not single_frame or first then
+            elseif (why == true or first) and (not single_frame or first) then
+                -- An unchanged static copy must not submit another render job.
+                -- Camera and animation changes request their own redraw above.
                 due = true
             end
         end

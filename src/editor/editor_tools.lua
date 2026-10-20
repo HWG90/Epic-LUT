@@ -524,7 +524,7 @@ function T.new(deps)
                 choice('export_format', cursor, format_width)
             end
             cursor = cursor - step
-            if h.get('export_format') == 4 then
+            if h.get('export_format') == 1 or h.get('export_format') == 2 or h.get('export_format') == 4 then
                 choice('dds_naming', cursor, choice_width('dds_naming'))
                 cursor = cursor - step
             end

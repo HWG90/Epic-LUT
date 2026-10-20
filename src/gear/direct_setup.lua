@@ -1,6 +1,6 @@
 -- Persist applied DDS snapshots by local piece/mesh/material slot, never process pointers.
 local S = { MAX_BINDINGS = 4096, MAX_PAYLOAD_BYTES = 8 * 1024 * 1024 }
-local function weapon_entries(m, entries)
+local function weapon_entries(m, entries, slot_intent)
     assert(type(entries) == 'table' and #entries <= S.MAX_BINDINGS, 'Invalid saved weapon bindings')
     local count, seen, resources = 0, {}, {}
     for index in pairs(entries) do
@@ -44,6 +44,14 @@ local function weapon_entries(m, entries)
         assert(not resources[slot] or resources[slot] == resource, 'Conflicting saved weapon slot configurations')
         resources[slot] = resource
         local original, document = entry.original, entry.document
+        assert(type(document) == 'table' and document.data
+            and document.width == (pattern and 3 or 23)
+            and type(document.height) == 'number' and document.height % 1 == 0
+            and document.height >= 1 and document.height <= 64
+            and (not pattern or document.height == 1), 'Invalid saved weapon LUT dimensions')
+        if slot_intent then
+            m.dds.validate(document.data, document.width, document.height)
+        else
         assert(
             type(original) == 'table'
                 and type(original.patch_source) == 'string'
@@ -70,6 +78,7 @@ local function weapon_entries(m, entries)
             proof.version == 4 and proof.weapon_slot == slot and proof.weapon_resource == resource,
             'Weapon setup requires complete matching version4 assignment proof'
         )
+        end
     end
     return entries
 end
@@ -105,7 +114,7 @@ function S.new(m, paths)
         f:close()
         local version = text:sub(1, 9)
         assert(
-            #text <= 524288 and (version == 'setup-v1\n' or version == 'setup-v2\n' or version == 'setup-v3\n'),
+            #text <= 524288 and (version == 'setup-v1\n' or version == 'setup-v2\n' or version == 'setup-v3\n' or version == 'setup-v4\n'),
             'Invalid saved LUT setup'
         )
         local plan = {}
@@ -113,7 +122,7 @@ function S.new(m, paths)
         local count = 0
         local weapon_label
         for line in text:sub(10):gmatch('[^\r\n]+') do
-            if version == 'setup-v3\n' and line:match('^weapons\t') then
+            if (version == 'setup-v3\n' or version == 'setup-v4\n') and line:match('^weapons\t') then
                 local label = line:match('^weapons\toutfit%-(setup%-%d+%-%d+%-weapons)%.tsv$')
                 assert(
                     label and #label <= 48 and not weapon_label,
@@ -145,12 +154,13 @@ function S.new(m, paths)
             end
         end
         local weapons
-        if version == 'setup-v3\n' then
+        if version == 'setup-v3\n' or version == 'setup-v4\n' then
             assert(weapon_label, 'Saved weapon manifest pointer missing')
             weapons =
                 assert(m.outfit_presets, 'Weapon setup storage unavailable').new(m, paths.settings).load(weapon_label)
             assert(#weapons.entries > 0, 'Saved weapon manifest is empty')
-            weapon_entries(m, weapons.entries)
+            weapons.slot_intent = version == 'setup-v4\n'
+            weapon_entries(m, weapons.entries, weapons.slot_intent)
             local destinations = count - (plan['armor-all'] and 1 or 0) - (plan['helmet-all'] and 1 or 0)
             assert(destinations + #weapons.entries <= S.MAX_BINDINGS, 'Combined saved setup exceeds binding budget')
             local bytes, seen_payloads, files = 0, {}, {}
@@ -179,17 +189,19 @@ function S.new(m, paths)
             end
             for _, entry in ipairs(weapons.entries) do
                 budget(m.dds.encode(entry.document.data, entry.document.width, entry.document.height), 'weapon-dds:')
+                if not weapons.slot_intent then
                 budget(entry.original.patch_source, 'weapon-source:')
                 budget(
                     m.binding_provenance.encode(entry.binding_provenance, 'weapon', entry.key, entry.original),
                     'weapon-proof:'
                 )
+                end
             end
         end
         return plan, capes, weapons
     end
-    function self.save(bindings, defaults, weapons)
-        weapons = weapon_entries(m, weapons or {})
+    function self.save(bindings, defaults, weapons, slot_intent)
+        weapons = weapon_entries(m, weapons or {}, slot_intent)
         assert(
             type(bindings) == 'table' and #bindings + #weapons > 0 and #bindings + #weapons <= S.MAX_BINDINGS,
             'Apply a palette before saving; combined binding budget exceeded'
@@ -210,11 +222,13 @@ function S.new(m, paths)
             if not weapon_documents[payload] then
                 weapon_documents[payload], weapon_count = true, weapon_count + 1
             end
+            if not slot_intent then
             budget(entry.original.patch_source, 'weapon-source:')
             budget(
                 m.binding_provenance.encode(entry.binding_provenance, 'weapon', entry.key, entry.original),
                 'weapon-proof:'
             )
+            end
         end
         for _, b in ipairs(bindings) do
             if b.cape then
@@ -253,7 +267,7 @@ function S.new(m, paths)
             local label = prefix .. 'weapons'
             assert(m.outfit_presets, 'Weapon setup storage unavailable').new(m, paths.settings).save(label, weapons)
             rows[#rows + 1] = 'weapons\toutfit-' .. label .. '.tsv'
-            version = 'setup-v3\n'
+            version = slot_intent and 'setup-v4\n' or 'setup-v3\n'
         end
         for kind, texture in pairs(defaults or {}) do
             assert(kind == 'armor' or kind == 'helmet', 'Invalid saved target')

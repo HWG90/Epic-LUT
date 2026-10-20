@@ -47,7 +47,7 @@ local m = {
                 destroy = function() end,
                 apply = function(model, palettes)
                     if palettes.helmet then
-                        host.apply_palette(model.pieces[1], palettes.helmet)
+                        return host.apply_palette(model.pieces[1], palettes.helmet)
                     end
                 end,
             }
@@ -135,11 +135,11 @@ local a = N.new(E, m, {
 local model = a.create_model('owned', { plan = { pieces = { piece } } })
 assert(#writes == 1 and writes[1][1] == 110000 and writes[1][2] == 123 and writes[1][3] == 300000 and commits == 1)
 local scans_before = material_scans
-a.apply_luts(model, { helmet = true })
+assert(a.apply_luts(model, { helmet = true }) == false, 'Unchanged material reported a redraw')
 assert(material_scans == scans_before + 1, 'Preview rescanned source materials more than once per piece')
 assert(#writes == 1 and commits == 1, 'Unchanged palettes generated material commits')
 blocks[200000] = pack32(123) .. pack32(0) .. pack64(300004)
-a.apply_luts(model, { helmet = true })
+assert(a.apply_luts(model, { helmet = true }) == true, 'Changed material lost its redraw signal')
 assert(#writes == 2 and commits == 2 and writes[2][3] == 300004, 'Changed live LUT was not copied')
 local reads_before, commits_before = reads, commits
 source_remapped = true

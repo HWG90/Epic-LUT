@@ -11,7 +11,8 @@ local m,native,palettes,source_tables,groups,pattern_editor,operations,handle,or
     e.m,{},e.palettes,e.documents,e.groups,e.pattern_editor,e.operations,e.handle,e.originals
 local present,binding,apply_bindings,basic_documents,stop_identification,refresh,message,remember_appearance =
     e.present,e.binding,e.material_apply,e.basic,e.stop,e.refresh,e.message,e.remember
-local index_job,resume_done,resume_job
+local index_job
+local resume_state={}
 ]] .. implementation .. '\nreturn {plan=matching_plan,apply=apply_matching}'))
 local function fixture()
     local e = {

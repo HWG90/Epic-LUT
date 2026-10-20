@@ -27,6 +27,20 @@ local function resource(value)
     )
     return value:lower()
 end
+-- Preserve every channel while adapting saved palettes to another weapon's rows.
+function M.fit(document, width, height)
+    M.bytes(document)
+    assert(
+        document.width == width and height >= 1 and height <= 64 and height % 1 == 0,
+        'Incompatible weapon LUT family'
+    )
+    assert(width ~= 3 or height == 1, 'Invalid Pattern LUT shape')
+    local data = ffi.new('float[?]', width * height * 4)
+    for row = 0, height - 1 do
+        ffi.copy(data + row * width * 4, document.data + (row % document.height) * width * 4, width * 16)
+    end
+    return { data = data, width = width, height = height }
+end
 function M.bytes(document)
     assert(
         type(document) == 'table'
@@ -69,7 +83,8 @@ function M.copy(document)
     return result
 end
 -- Runtime.target re-proves the local/configuration ownership and live bindings.
-function M.freeze(runtime, descriptors)
+function M.freeze(runtime, descriptors, options)
+    local application_only = options and options.application_only == true
     assert(
         type(runtime) == 'table' and type(runtime.target) == 'function' and type(runtime.load) == 'function',
         'Weapon runtime receipt operations unavailable'
@@ -105,7 +120,9 @@ function M.freeze(runtime, descriptors)
             'Invalid weapon group locator'
         )
         local group = runtime.target(slot, index, kind)
-        if not group.source_document then
+        if application_only and runtime.shape then
+            group = runtime.shape(slot, index, kind)
+        elseif not group.source_document then
             runtime.load(slot, index, kind)
             group = runtime.target(slot, index, kind)
         end
@@ -121,8 +138,12 @@ function M.freeze(runtime, descriptors)
         local key = slot .. ':' .. kind .. ':' .. index
         assert(not seen[key], 'Duplicate weapon group locator')
         seen[key] = true
-        local original = assert(group.source_document, 'Original weapon LUT pixels unavailable')
-        assert(original.width == (kind == 'pattern' and 3 or 23), 'Weapon group family differs from source shape')
+        local original = group.source_document
+        assert(application_only or original, 'Original weapon LUT pixels unavailable')
+        local width, height = group.width or original and original.width, group.height or original and original.height
+        assert(width == (kind == 'pattern' and 3 or 23) and type(height) == 'number'
+            and height >= 1 and height <= 64 and height % 1 == 0 and (kind ~= 'pattern' or height == 1),
+            'Weapon group family differs from source shape')
         dense(group.bindings, M.MAX_BINDINGS, 'Weapon group bindings')
         assert(#group.bindings > 0, 'Weapon LUT group has no bindings')
         local wanted = {}
@@ -145,9 +166,9 @@ function M.freeze(runtime, descriptors)
             weapon_resource = id,
             source_resource = group.source_resource,
             source_document = original,
-            source_bytes = M.bytes(original),
-            width = original.width,
-            height = original.height,
+            source_bytes = original and M.bytes(original),
+            width = width,
+            height = height,
             members = {},
             scope_members = {},
         }
@@ -171,7 +192,7 @@ function M.freeze(runtime, descriptors)
                     assert(requested[field] == binding[field], 'Weapon subset receipt changed: ' .. field)
                 end
                 local current = binding.document or group.applied_document or original
-                member.document, member.bytes = current, M.bytes(current)
+                member.document, member.bytes = current, current and M.bytes(current)
                 saved.members[#saved.members + 1] = member
                 wanted[binding.save_key] = nil
             end
@@ -182,12 +203,17 @@ function M.freeze(runtime, descriptors)
     local function validate()
         for _, saved in ipairs(frozen) do
             local group = runtime.target(saved.weapon_slot, saved.index, saved.family)
+            if application_only and runtime.shape then
+                group = runtime.shape(saved.weapon_slot, saved.index, saved.family)
+                assert(group.width == saved.width and group.height == saved.height,
+                    'Loaded weapon shape changed; reopen the operation')
+            end
             assert(
                 group == saved.group
                     and resource(group.weapon_resource or group.weapon_resource64) == saved.weapon_resource
                     and group.source_resource == saved.source_resource
                     and group.source_document == saved.source_document
-                    and M.bytes(group.source_document) == saved.source_bytes
+                    and (not saved.source_bytes or M.bytes(group.source_document) == saved.source_bytes)
                     and #group.bindings == #saved.scope_members,
                 'Weapon/source LUT changed; reopen the operation'
             )

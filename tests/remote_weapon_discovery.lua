@@ -177,7 +177,8 @@ test('peer-scoped session checks authorization immediately before every write', 
         end,
     })
     local ok, why = pcall(session.apply, f.documents[f.A], targets)
-    assert(not ok and tostring(why):find('Remote write permission changed', 1, true))
+    assert(not ok and (tostring(why):find('Remote write permission changed', 1, true)
+        or tostring(why):find('LUT target changed after preparation', 1, true)))
     assert(#f.writes == 0 and f.authorization_calls > 1)
 end)
 test('revoked consent and departed membership permit only checked restoration of owned objects', function()

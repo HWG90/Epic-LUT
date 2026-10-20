@@ -94,7 +94,13 @@ for _, font in ipairs({ 12, 16, 20, 28 }) do
             end
             local view = View.new(f.controller)
             local ui, commands = canvas(size[1], size[2], font, scale)
+            local snapshots, snapshot = 0, f.host.snapshot
+            f.host.snapshot = function(...)
+                snapshots = snapshots + 1
+                return snapshot(...)
+            end
             view.draw(ui)
+            assert(snapshots == 1, 'Weapon draw rebuilt its state more than once')
             assert(view.grid.cell_width <= 40 and view.grid.row_height <= 40, 'Window width inflated LUT cells')
             local labels, rows, scrollbars = {}, {}, {}
             for _, item in ipairs(commands) do
@@ -119,6 +125,9 @@ for _, font in ipairs({ 12, 16, 20, 28 }) do
             if size[2] == 1100 then
                 assert(rows['Row 8'] and view.table_maximum == 0, 'Full window needlessly hid weapon LUT rows')
             end
+            view.section = 'presets'
+            ui, commands = canvas(size[1], size[2], font, scale)
+            view.draw(ui)
             if view.action_maximum > 0 then
                 assert(
                     scrollbars.weapon_actions and view.wheel(view.action_bounds.x + 2, view.action_bounds.y + 2, -12000)
@@ -173,8 +182,12 @@ end
 local view = View.new(f.controller)
 local ui, commands = canvas(1800, 1100, 16, 1)
 view.draw(ui)
+view.section = 'presets'
+local preset_ui, preset_commands = canvas(1800, 1100, 16, 1)
+view.draw(preset_ui)
+view.section = 'edit'
 local preset_choice = false
-for _, item in ipairs(commands) do
+for _, item in ipairs(preset_commands) do
     if item.kind == 'choice' and item.label == 'outfit_preset' then
         preset_choice = true
     end
@@ -210,6 +223,10 @@ for id, action in pairs({
     weapon_export = 'export',
     weapon_share = 'share',
 }) do
+    local section = (id == 'weapon_import' or id == 'weapon_map' or id == 'weapon_auto_map') and 'import'
+        or (id == 'weapon_preset' or id == 'weapon_export' or id == 'weapon_share') and 'presets'
+        or 'edit'
+    view.section = section
     if not actions[id] then
         view.action_scroll = view.action_maximum
         ui, commands = canvas(1800, 1100, 16, 1)

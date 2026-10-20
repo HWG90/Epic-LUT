@@ -82,7 +82,7 @@ local function collection(preset, include_capes, include_patterns)
     )
     return selected
 end
-function E.lut_choices(preset)
+function E.lut_choices(preset, lookup)
     local choices, counts = {}, {}
     validate(preset and preset.entries or {})
     for _, entry in ipairs(preset and preset.entries or {}) do
@@ -94,8 +94,7 @@ function E.lut_choices(preset)
         end
         local label = kind .. (pattern and ' Pattern LUT ' or ' LUT ')
         counts[label] = (counts[label] or 0) + 1
-        choices[#choices + 1] = label
-            .. counts[label]
+        choices[#choices + 1] = (lookup and entry.original and lookup(entry.original.resource) or (label .. counts[label]))
             .. (entry.original and (' [' .. entry.original.resource .. ']') or '')
     end
     return #choices > 0 and choices or { 'Choose a saved preset first' }
@@ -247,6 +246,7 @@ function E.new(m, paths, options)
                     original = entry.original,
                     kind = entry.kind,
                     ordinal = counts[key],
+                    label = options.lut_label and entry.original and options.lut_label(entry.original.resource),
                     weapon_slot = weapon_slot,
                     weapon_resource = entry.weapon_resource and entry.weapon_resource:lower(),
                 }

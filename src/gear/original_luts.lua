@@ -10,6 +10,7 @@ function O.new(m, paths, native, targets)
         requested = {},
     }
     local folder = paths.originals or paths.files
+    local advancing = false
     local function exists(path)
         local f = io.open(path, 'rb')
         if not f then
@@ -279,7 +280,10 @@ function O.new(m, paths, native, targets)
         end
     end
     function self.tick()
+        if advancing then return end
+        advancing = true
         local ok, why = pcall(tick)
+        advancing = false
         if not ok then
             self.status = 'Original snapshot feature paused: ' .. tostring(why)
             self.job = nil
@@ -287,6 +291,10 @@ function O.new(m, paths, native, targets)
         end
     end
     function self.scan()
+        -- Matching refreshes the gear list. Its Cape availability check reads
+        -- this resolver again; that read must remain pending, not start another
+        -- matching pass or replace the coroutine/worker currently advancing.
+        if advancing then return end
         if m.original_snapshot_script then
             self.start()
             if self.loaded and not self.job then

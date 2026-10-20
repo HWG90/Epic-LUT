@@ -75,6 +75,14 @@ local m = {
     binding_session = {},
     weapon_controller = Controller,
 }
+do
+    local wakes = 0
+    local actor = Bridge.new(m, { actor_changed = function() wakes = wakes + 1 end })
+    actor.equipment_changed(7)
+    assert(wakes == 0, 'Weapon-only event woke armor recovery')
+    actor.equipment_changed(15)
+    assert(wakes == 1, 'Actor replacement did not wake armor recovery')
+end
 local bridge = Bridge.new(m, {
     memory = function()
         return {
@@ -169,7 +177,7 @@ end
 assert(not bridge.close() and bridge.close(true), 'Weapon restoration exception escaped cleanup')
 fake.restore = restore
 local fixture = dofile('tests/weapon_fixture.lua')
-local function recovery_fixture(prepare)
+local function recovery_fixture(prepare, remap)
     local f, invalidations = fixture(), {}
     if prepare then
         prepare(f)
@@ -193,7 +201,9 @@ local function recovery_fixture(prepare)
         binding_session = {},
         weapon_controller = Controller,
     }
-    local recovery_bridge = Bridge.new(adapter, {
+    local recovery_bridge
+    adapter.weapon_mapping = dofile('src/editor/weapon_mapping.lua')
+    recovery_bridge = Bridge.new(adapter, {
         memory = function()
             return {}
         end,
@@ -229,6 +239,12 @@ local function recovery_fixture(prepare)
             end
         end,
         message = function() end,
+        recover_preset = remap and function(preset, slot)
+            local workflow = dofile('src/editor/weapon_workflow.lua').new(adapter, {
+                bridge = function() return recovery_bridge end,
+            })
+            return workflow.plan(preset, {slots = {[slot] = true}}).apply()
+        end or nil,
     })
     assert(recovery_bridge.load_current())
     local initial = recovery_bridge.controller().state()
@@ -301,6 +317,25 @@ pending.documents[pending.A] = stock
 pending_bridge.equipment_changed()
 pending_bridge.update(0.2)
 assert(#pending.writes == writes + 5 and pending.runtime.load(1, 1).data[0] == 0.625, 'Pending recovery was lost')
+
+-- Ship units disappear before mission units exist. Exhausting the first
+-- event's three-slot pass must retain intent until player_spawned wakes it.
+local mission, mission_bridge = recovery_fixture()
+local mission_writes = #mission.writes
+mission.units[100].alive = false
+mission.snapshots[1] = nil
+mission_bridge.equipment_changed()
+for _ = 1, 5 do mission_bridge.update(0.2) end
+assert(#mission.writes == mission_writes and mission_bridge.recovery_pending(1),
+    'Scene loading gap discarded the weapon assignment or wrote dead units')
+mission.respawn(1, 101, resource)
+mission_bridge.equipment_changed() -- forwarded player_spawned lifecycle
+for _ = 1, 3 do mission_bridge.update(0.2) end
+assert(#mission.writes == mission_writes + 5 and mission.runtime.load(1, 1).data[0] == 0.625,
+    'Mission spawn did not replay the retained ship weapon palette')
+mission_writes = #mission.writes
+for _ = 1, 30 do mission_bridge.update(0.2) end
+assert(#mission.writes == mission_writes, 'Stable mission weapon was repeatedly reapplied')
 
 local dropped, dropped_bridge = recovery_fixture()
 writes = #dropped.writes
@@ -459,3 +494,160 @@ assert(
 print(
     'PASS weapon bridge: editor routing, raw values, stale guard, exact respawn recovery, pending cache retries, drop/configuration/foreign refusal and cleanup'
 )
+
+do
+    local old_groups, old_load = fake.groups, fake.load
+    local loads = 0
+    fake.groups = function(slot, kind)
+        return slot == 1 and kind == 'material' and { group, group } or {}
+    end
+    fake.load = function(_, index)
+        loads = loads + 1
+        if index == 1 then error('Original weapon LUT pixels unavailable', 0) end
+        return document, group
+    end
+    local writes = applied
+    local ok, why = pcall(bridge.descriptors, nil, { [1] = true })
+    assert(not ok and tostring(why):find('still loading', 1, true) and loads == 2,
+        'First cold table prevented other weapon source requests')
+    assert(applied == writes, 'Cold source preflight applied a partial preset')
+    fake.groups, fake.load = old_groups, old_load
+end
+
+-- Startup discovery joins one source snapshot batch, including Pattern LUTs,
+-- without fetching pixels or touching materials. Repeated reads use catalogs.
+do
+    local old_catalog, old_groups, old_refresh, old_load = fake.catalog, fake.groups, fake.refresh, fake.load
+    local catalogs, captures, writes = {}, 0, applied
+    fake.catalog = function(slot) return catalogs[slot] end
+    fake.refresh = function(slot)
+        captures = captures + 1
+        catalogs[slot] = { available = slot < 3 }
+        return catalogs[slot].available and catalogs[slot] or nil
+    end
+    fake.groups = function(slot, kind)
+        if slot == 3 then return {} end
+        return { { object = kind == 'pattern' and 70001 or 65536 } }
+    end
+    fake.load = function() error('Startup source discovery loaded pixels synchronously') end
+    local objects = bridge.source_objects()
+    local count = 0
+    for _ in pairs(objects) do count = count + 1 end
+    assert(count == 2 and objects[65536] and objects[70001] and captures == 3,
+        'Startup omitted an equipped material/Pattern source or failed to deduplicate')
+    bridge.source_objects()
+    assert(captures == 3 and applied == writes, 'Unchanged startup source census repeated discovery or applied a LUT')
+    fake.catalog, fake.groups, fake.refresh, fake.load = old_catalog, old_groups, old_refresh, old_load
+end
+print('PASS startup weapon source batch: all slots, material/Pattern deduplication, no pixel reads or writes, idle cache')
+
+do
+    local f, editor = recovery_fixture()
+    local writes = #f.writes
+    f.respawn(1, 101)
+    f.units[100].alive = true -- native Armory may keep its previous display unit alive
+    local descriptors = editor.descriptors(nil, { [1] = true })
+    assert(#descriptors > 0 and descriptors[1].bindings[1].unit == 101,
+        'Automatic preset mapping retained the native Armory stale weapon')
+    assert(#f.writes == writes, 'Preset discovery applied a LUT or changed the previous display weapon')
+end
+print('PASS native Armory replacement: fresh automatic preset targets without identity polling')
+
+-- Slot intent follows a different equipped weapon, even while Armory keeps the
+-- previous display Unit alive. Stable frames must not call the writer again.
+do
+    local f, editor = recovery_fixture(nil, true)
+    local writes = #f.writes
+    f.respawn(1, 101, '9988776655443322')
+    f.units[100].alive = true
+    editor.equipment_changed(1)
+    editor.update(0.01)
+    assert(#f.writes > writes, 'Native Armory replacement did not auto-map retained slot palette')
+    assert(f.runtime.load(1, 1).data[0] == 0.625, 'Replacement weapon lost assigned colors')
+    writes = #f.writes
+    for n=1,100 do editor.update(0.01) end
+    assert(#f.writes == writes, 'Unchanged recovery wrote repeatedly')
+end
+print('PASS event-driven slot recovery: different weapon, live previous preview unit, shared mapper and idle writer')
+
+do
+    local f, editor = recovery_fixture(nil, true)
+    f.documents[f.A], f.documents[f.B], f.documents[f.P] = nil, nil, nil
+    local writes = #f.writes
+    f.respawn(1, 101, '9988776655443322')
+    editor.equipment_changed(1)
+    editor.update(0.01)
+    assert(#f.writes > writes and not editor.recovery_pending(1),
+        'Cold archive pixels prevented event-driven slot recovery')
+    local group = f.runtime.groups(1, 'material')[1]
+    assert(not group.source_document and group.applied_document.data[0] == 0.625,
+        'Cold recovery fabricated original pixels or lost the saved palette')
+    assert(not pcall(f.runtime.load, 1, 1), 'Pixel-dependent loading silently accepted a missing original')
+    writes = #f.writes
+    for n=1,100 do editor.update(0.01) end
+    assert(#f.writes == writes, 'Cold recovery continued applying after completion')
+end
+print('PASS cold equip recovery uses verified loaded dimensions, retains originals and goes idle')
+do
+    local f, editor = recovery_fixture(nil, true)
+    f.documents[f.A], f.documents[f.B], f.documents[f.P] = nil, nil, nil
+    local writes = #f.writes
+    f.respawn(1, 101) -- same weapon resource, new actor, cold original cache
+    editor.equipment_changed(15)
+    editor.update(0.01)
+    assert(#f.writes > writes and not editor.recovery_pending(1),
+        'Same-resource respawn discarded retained pixels while the original cache was cold')
+    assert(f.runtime.groups(1, 'material')[1].applied_document.data[0] == 0.625)
+    writes = #f.writes
+    for _=1,100 do editor.update(0.01) end
+    assert(#f.writes == writes, 'Respawn recovery did not become idle')
+end
+print('PASS same-weapon cold respawn: shared slot mapper restores intent without archived pixels or idle writes')
+
+do
+    local f, editor = recovery_fixture(nil, true)
+    local document = f.runtime.groups(1, 'material')[1].applied_document
+    f.documents[f.A], f.documents[f.B], f.documents[f.P] = nil, nil, nil
+    f.respawn(1, 101, '9988776655443322')
+    local workflow = dofile('src/editor/weapon_workflow.lua').new({
+        weapon_mapping = dofile('src/editor/weapon_mapping.lua'),
+    }, {bridge=function()return editor end})
+    local plan = workflow.plan({entries={{kind='weapon',weapon_slot=1,
+        weapon_resource='5fecab819f96a3e8',key='3:1:0:0',document=document}}}, {slots={[1]=true}})
+    local writes, allocations = #f.writes, f.allocations
+    f.texture_shapes[f.A][2] = 5
+    assert(not pcall(plan.apply) and #f.writes == writes and f.allocations == allocations,
+        'Changed loaded dimensions escaped the frozen apply receipt')
+end
+print('PASS cold mapping rechecks native dimensions before any allocation or write')
+
+-- Cleanup validates native identities while restoring bindings. Those reads
+-- cannot recreate an engine subscription after it has been stopped.
+do
+    local on_snapshot, starts, stops, watched = nil, 0, 0, 0
+    local adapter = {}
+    for k,v in pairs(m) do adapter[k]=v end
+    adapter.primary_identity = {new=function(deps) on_snapshot=deps.on_snapshot;return {} end}
+    adapter.weapon_events = {new=function()
+        starts=starts+1
+        return {watch=function() watched=watched+1 end,close=function() stops=stops+1 end}
+    end}
+    adapter.weapon_runtime = {new=function()
+        return {restore=function() on_snapshot({});return true end}
+    end}
+    local editor=Bridge.new(adapter, {
+        memory=function() return {} end,native=function()return {}end,
+        engine=function()return {}end,event_cache=function()return 'unused'end,
+        retain=function()return {}end,cohort=function()return {}end,
+    })
+    editor.runtime();on_snapshot({})
+    assert(starts==1 and watched==1)
+    assert(editor.reset())
+    assert(starts==1 and stops==0 and watched==2,
+        'Restore Arrowhead shut down equip recovery or replaced its subscription')
+    editor.suspend_events();assert(editor.close())
+    assert(starts==1 and stops==1 and watched==2,'Restoration rearmed native callbacks during teardown')
+    on_snapshot({})
+    assert(starts==1 and watched==2,'Retired bridge accepted a later identity receipt')
+end
+print('PASS native event lifecycle: Restore retains equip recovery, teardown prevents rearming')

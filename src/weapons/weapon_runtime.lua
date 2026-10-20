@@ -313,6 +313,25 @@ function R.new(deps)
         end
         return document, group
     end
+    function self.shape(weapon_slot, selected_index, kind)
+        kind = family(kind)
+        local group = self.target(weapon_slot, selected_index, kind)
+        local width, height
+        if discovery.shape then width, height = discovery.shape(group.bindings[1]) end
+        if not width then
+            if not group.source_document then self.load(weapon_slot, selected_index, kind) end
+            width, height = group.source_document.width, group.source_document.height
+        end
+        assert((kind == 'pattern' and width == 3 and height == 1 or kind == 'material' and width == 23)
+            and height >= 1 and height <= 64 and height % 1 == 0, 'Unsupported weapon LUT dimensions')
+        if group.source_document then
+            assert(group.source_document.width == width and group.source_document.height == height,
+                'Loaded weapon shape differs from original snapshot')
+        end
+        group.width, group.height = width, height
+        for _, b in ipairs(group.bindings) do b.width, b.height = width, height end
+        return group
+    end
     function self.apply_plan(entries, restore_targets, temporary)
         assert(temporary == nil or temporary == true, 'Invalid temporary weapon plan flag')
         assert(type(entries) == 'table' and #entries <= 3072, 'Weapon application plan bounds')
@@ -320,8 +339,12 @@ function R.new(deps)
         for _, entry in ipairs(entries) do
             local weapon_slot, kind = slot(entry.weapon_slot), family(entry.family)
             local group = selected(weapon_slot, entry.index, kind)
-            if not group.width then
+            if entry.source_resource and not group.source_resource then
+                -- Exact startup/export plans still require their named source
+                -- proof; dimension-only slot mapping deliberately supplies none.
                 self.load(weapon_slot, entry.index, kind)
+            elseif not group.width then
+                self.shape(weapon_slot, entry.index, kind)
             end
             local expected_resource = entry.weapon_resource or entry.weapon_resource64
             assert(
@@ -431,6 +454,11 @@ function R.new(deps)
         end
         sync_sources(acquiring)
         local operation_ok, results = pcall(operation, targets, function()
+            -- The operation proves private target ownership before allocation.
+            -- Prepare every palette before the first live texture binding write.
+            for _, entry in ipairs(plan) do
+                entry.prepared = sessions[entry.weapon_slot][entry.family].prepare(entry.document, entry.targets)
+            end
             local results = {}
             local ok, why = pcall(function()
                 for _, b in ipairs(restore_targets) do
@@ -445,7 +473,7 @@ function R.new(deps)
                 end
                 for _, entry in ipairs(plan) do
                     local count, texture =
-                        sessions[entry.weapon_slot][entry.family].apply(entry.document, entry.targets)
+                        sessions[entry.weapon_slot][entry.family].commit(entry.prepared)
                     results[#results + 1] = { count = count, texture = texture }
                 end
             end)
@@ -698,8 +726,11 @@ function R.new(deps)
         local omitted = {}
         for _, b in ipairs(self.all_owned()) do
             if not desired[key(b)] and b.current ~= b.original then
-                if discovery.dead(b) then
-                    -- Dead receipts need no native mutation; retirement still
+                local catalog = catalogs[b.weapon_slot]
+                local superseded = catalog and catalog.available and catalog.receipt
+                    and catalog.receipt.unit ~= b.unit and discovery.validate(catalog.receipt)
+                if discovery.dead(b) or superseded then
+                    -- Dead/superseded receipts need no native mutation; retirement still
                     -- requires the caller's ordinary render fences.
                 else
                     assert(
@@ -885,6 +916,20 @@ function R.new(deps)
             self.apply_plan(entries)
         end
         return catalog, #entries
+    end
+    -- These paths only discover/read identity and pixels. Validate one receipt
+    -- per synchronous read operation instead of rebuilding World.units for
+    -- every material/LOD. Mutation paths retain their per-write checks.
+    if discovery.with_validation_batch then
+        for _, name in ipairs({ 'refresh', 'load', 'capture_state' }) do
+            local fn = self[name]
+            self[name] = function(...)
+                local args, count = { ... }, select('#', ...)
+                return discovery.with_validation_batch(function()
+                    return fn(unpack(args, 1, count))
+                end)
+            end
+        end
     end
     return self
 end

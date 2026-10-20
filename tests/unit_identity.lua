@@ -333,3 +333,29 @@ end, 'Local garment list bounds changed')
 print(
     'PASS Lua Unit identity: genuine tagged handles preserved, main-world plus deduplicated bounded worlds, local non-preview membership, immutable receipts and stale/freed/ambiguous rejection; read-only'
 )
+-- Receipt validation remains fresh but does not allocate the entire World.
+garments = { { unit = 123, type = 0, slot = 1, preview = false } }
+current_identity, current_worlds, current_main = identity, { 'game', 'portrait' }, 'game'
+world_units.game, alive, excluded, world_changed = { handle, other }, true, false, false
+local _, direct_receipt = helper.handle(123)
+local direct_world = 'game'
+E.Unit.world = function(value)
+    assert(value == handle, 'Direct ownership query received a fabricated handle')
+    return direct_world
+end
+local before_units = calls.units
+for _ = 1, 1000 do assert(helper.validate(direct_receipt)) end
+assert(calls.units == before_units, 'Receipt validation enumerated World Units')
+direct_world = 'portrait'
+refuse(function() helper.validate(direct_receipt) end, 'handle or world changed')
+direct_world, garments = 'game', {}
+refuse(function() helper.validate(direct_receipt) end, 'not a current local garment')
+garments = { { unit = 123, type = 0, slot = 1, preview = false } }
+excluded = true
+refuse(function() helper.validate(direct_receipt) end, 'Preview-owned Unit refused')
+excluded, resources = false, '#ID[ABCDEF0123456789]'
+assert(helper.resource(123) == 'abcdef0123456789')
+before_units = calls.units
+for _ = 1, 1000 do assert(helper.resource(123) == 'abcdef0123456789') end
+assert(calls.units == before_units, 'Known genuine garment handle was rediscovered from the entire World')
+print('PASS direct garment receipt validation: no world enumeration, moved/removed/preview owners refused')

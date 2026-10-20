@@ -166,7 +166,8 @@ function W.new(m, host)
     end
     local export_job, export_elapsed
     local function finish_export(job)
-        local ok, output, description, archive = pcall(job.exporter.save, job.name, job.preset, job.format, 1, job.naming)
+        local ok, output, description, archive =
+            pcall(job.exporter.save, job.name, job.preset, job.format, job.lut or 1, job.naming)
         if not ok then
             if host.export_pending and host.export_pending(output) then
                 return false
@@ -174,12 +175,25 @@ function W.new(m, host)
             error(output, 0)
         end
         export_job = nil
-        return true, host.message('Exported weapons (' .. description .. ') to ' .. (archive or output))
+        return true,
+            host.message(
+                'Exported ' .. (job.label or 'weapons') .. ' (' .. description .. ') to ' .. (archive or output)
+            )
     end
     function self.tick(dt)
-        if not export_job then return end
-        export_elapsed = (export_elapsed or 0) + math.max(0, dt or 0)
-        if export_elapsed < 0.25 then return end
+        if not export_job then
+            return
+        end
+        local elapsed = math.max(0, dt or 0)
+        export_job.age = (export_job.age or 0) + elapsed
+        if export_job.age > 120 then
+            export_job = nil
+            return host.message('Export timed out while waiting for source verification; saved preset retained.')
+        end
+        export_elapsed = (export_elapsed or 0) + elapsed
+        if export_elapsed < 0.25 then
+            return
+        end
         export_elapsed = 0
         local ok, why = pcall(finish_export, export_job)
         if not ok then
@@ -187,21 +201,75 @@ function W.new(m, host)
             host.message('Weapon export stopped: ' .. tostring(why))
         end
     end
+    function self.export_saved(preset, name, format, lut, naming, factory)
+        assert(not export_job, 'An export is already being prepared')
+        assert(
+            type(preset.entries) == 'table' and #preset.entries > 0 and #preset.entries <= 4096,
+            'Invalid export preset'
+        )
+        local memo, total = {}, 0
+        local function freeze(value)
+            if type(value) ~= 'table' then
+                return value
+            end
+            if memo[value] then
+                return memo[value]
+            end
+            local result = {}
+            memo[value] = result
+            if value.data and value.width and value.height then
+                local copied = m.weapon_mapping.copy(value)
+                total = total + value.width * value.height * 16
+                assert(total <= 8 * 1024 * 1024, 'Queued preset export exceeds pixel budget')
+                result.data = copied.data
+            end
+            for key, item in pairs(value) do
+                if key ~= 'data' or result.data == nil then
+                    result[key] = freeze(item)
+                end
+            end
+            return result
+        end
+        local snapshot = freeze(preset)
+        export_job = {
+            preset = snapshot,
+            name = name,
+            format = format,
+            lut = lut,
+            naming = naming,
+            label = snapshot.name or 'preset',
+            exporter = (factory or host.exporter)(snapshot),
+        }
+        export_elapsed = 0
+        local ok, done, result = pcall(finish_export, export_job)
+        if not ok then
+            export_job = nil
+            error(done, 0)
+        end
+        if not done then
+            return host.message('Preparing preset export; it will finish automatically when source checks are ready.')
+        end
+        return result
+    end
     function self.export(targets)
         assert(not export_job, 'A weapon export is already being prepared')
         local entries = presets().capture(bridge().descriptors(targets))
         local name, format, naming = host.export_options()
         local preset = { name = name, entries = entries }
-        export_job = { name = name, format = format, naming = naming, preset = preset, exporter = host.exporter(preset) }
+        export_job =
+            { name = name, format = format, naming = naming, preset = preset, exporter = host.exporter(preset) }
         export_elapsed = 0
         local ok, done, result = pcall(finish_export, export_job)
-        if not ok then export_job = nil; error(done, 0) end
+        if not ok then
+            export_job = nil
+            error(done, 0)
+        end
         if not done then
             return host.message('Preparing weapon export; it will finish automatically when source checks are ready.')
         end
         return result
     end
-    function self.export_editor(target, document, name, entire)
+    local function export_editor_now(target, document, name, entire)
         bridge().check(target)
         local descriptors, selected_keys, chosen = bridge().descriptors(), {}, {}
         for _, binding in ipairs(target.bindings or { target }) do
@@ -256,114 +324,179 @@ function W.new(m, host)
         local output, description, archive = host.exporter(preset).save(name, preset, entire and 3 or 2, 1, 1)
         return host.message('Exported weapon (' .. description .. ') to ' .. (archive or output))
     end
+    local editor_export
+    function self.export_editor(target, document, name, entire)
+        assert(not editor_export and not export_job, 'An export is already being prepared')
+        bridge().check(target)
+        local frozen = m.weapon_mapping.copy(document)
+        local receipts = {}
+        for _, descriptor in ipairs(bridge().descriptors()) do
+            if descriptor.weapon_slot == target.weapon_slot then
+                for _, b in ipairs(descriptor.bindings) do
+                    receipts[#receipts + 1] = { binding = b, current = b.current, original = b.original,
+                        unit = b.unit, material = b.material }
+                end
+            end
+        end
+        local job = { attempts = 0 }
+        editor_export = job
+        local function run()
+            assert(editor_export == job, 'Weapon export was cancelled')
+            bridge().check(target)
+            for _, proof in ipairs(receipts) do
+                local b = proof.binding
+                assert(b.current == proof.current and b.original == proof.original
+                    and b.unit == proof.unit and b.material == proof.material,
+                    'Weapon changed while preparing export; export cancelled')
+            end
+            local ok, result = pcall(export_editor_now, target, frozen, name, entire)
+            if ok then editor_export = nil; return result end
+            if not (host.export_pending and host.export_pending(result) and host.when_sources_ready) then
+                editor_export = nil
+                error(result, 0)
+            end
+            job.attempts = job.attempts + 1
+            assert(job.attempts <= 8, 'Weapon export source requests did not converge')
+            host.when_sources_ready(function(ready, why)
+                if editor_export ~= job then return end
+                if not ready then
+                    editor_export = nil
+                    return host.message('Weapon export stopped: ' .. tostring(why))
+                end
+                local success, problem = pcall(run)
+                if not success then
+                    editor_export = nil
+                    host.message('Weapon export stopped: ' .. tostring(problem))
+                end
+            end)
+            return host.message('Preparing weapon export; it will finish automatically when sources are ready.')
+        end
+        local ok, result = pcall(run)
+        if not ok then editor_export = nil; error(result, 0) end
+        return result
+    end
     function self.plan(preset, options)
         options = options or {}
-        local descriptors, choices, by_id, receipts = bridge().descriptors(), {}, {}, {}
-        local _, validate_targets = m.weapon_mapping.freeze(bridge().runtime(), descriptors)
-        local live = {}
-        for _, descriptor in ipairs(descriptors) do
-            for _, binding in ipairs(descriptor.bindings) do
-                local key = (descriptor.family == 'pattern' and 'p:' or '') .. binding.save_key
-                live[key] = descriptor
-            end
-        end
+        local editor, sources, seen, slots, receipts = bridge(), {}, {}, {}, {}
         for _, entry in ipairs(preset.entries) do
             if entry.kind == 'weapon' then
-                local pattern = entry.key:sub(1, 2) == 'p:'
-                local id = 'weapon:'
-                    .. entry.weapon_slot
+                local slot = entry.weapon_slot
+                assert(slot == 1 or slot == 2 or slot == 3, 'Invalid saved weapon slot')
+                local family = entry.key:sub(1, 2) == 'p:' and 'pattern' or 'material'
+                sources[slot] = sources[slot] or { material = {}, pattern = {} }
+                slots[slot] = entry.weapon_resource
+                local bytes = m.weapon_mapping.bytes(entry.document)
+                local id = slot
                     .. ':'
-                    .. entry.weapon_resource:lower()
+                    .. family
                     .. ':'
-                    .. (pattern and 'pattern:' or 'material:')
-                    .. (entry.original and entry.original.resource or entry.key)
-                local choice = by_id[id]
-                if not choice then
-                    choice = {
-                        id = id,
-                        weapon_slot = entry.weapon_slot,
-                        weapon_resource = entry.weapon_resource,
-                        label = labels[entry.weapon_slot] .. (pattern and ' Pattern LUT ' or ' LUT ') .. (#choices + 1),
-                        enabled = true,
-                        entries = {},
-                        pattern = pattern,
-                    }
-                    by_id[id], choices[#choices + 1] = choice, choice
+                    .. tostring(entry.original and entry.original.resource)
+                    .. ':'
+                    .. bytes
+                if not seen[id] then
+                    seen[id] = true
+                    table.insert(sources[slot][family], m.weapon_mapping.copy(entry.document))
                 end
-                choice.entries[#choice.entries + 1] = entry
-                local descriptor = live[entry.key]
-                choice.enabled = choice.enabled
-                    and descriptor ~= nil
-                    and descriptor.weapon_resource == entry.weapon_resource
-                receipts[#receipts + 1] = {
-                    entry = entry,
-                    key = entry.key,
-                    resource = entry.weapon_resource,
-                    bytes = m.weapon_mapping.bytes(entry.document),
-                }
+                receipts[#receipts + 1] =
+                    { entry = entry, key = entry.key, resource = entry.weapon_resource, bytes = bytes }
             end
         end
-        local chosen, selected_keys = {}, {}
-        for _, choice in ipairs(choices) do
-            local selected = options.selected and options.selected[choice.id] == true
-                or not options.selected and choice.enabled
-            local slot_selected = not options.slots or options.slots[choice.weapon_slot] == true
-            if not choice.enabled then
-                choice.detail = 'Requires the saved weapon configuration and LUT destinations'
+        local runtime = editor.runtime()
+        if runtime.refresh then
+            for slot in pairs(slots) do
+                runtime.refresh(slot)
             end
-            if selected and slot_selected and not options.preview then
-                assert(choice.enabled, 'Saved weapon differs from current slot; choose its matching weapon')
-                for _, entry in ipairs(choice.entries) do
-                    chosen[entry], selected_keys[entry.weapon_resource .. ':' .. entry.key:gsub('^p:', '')] = true, true
+        end
+        local descriptors = {}
+        for _, descriptor in ipairs(editor.descriptors(nil, slots, true)) do
+            local family = descriptor.family == 'main' and 'material' or descriptor.family
+            if sources[descriptor.weapon_slot] and #sources[descriptor.weapon_slot][family] > 0 then
+                descriptors[#descriptors + 1] = descriptor
+            end
+        end
+        table.sort(descriptors, function(a, b)
+            if a.weapon_slot ~= b.weapon_slot then
+                return a.weapon_slot < b.weapon_slot
+            end
+            if a.family ~= b.family then
+                return a.family < b.family
+            end
+            return a.index < b.index
+        end)
+        local frozen, validate_targets = m.weapon_mapping.freeze(runtime, descriptors, { application_only = true })
+        local plan, ordinal, selected_keys = { choices = {}, count = 0 }, {}, {}
+        local entries, choices, pattern_keys = {}, {}, {}
+        for index, target in ipairs(frozen) do
+            local slot, family = target.weapon_slot, target.family
+            local key = slot .. ':' .. family
+            ordinal[key] = (ordinal[key] or 0) + 1
+            local cycle = sources[slot][family]
+            local source = cycle[(ordinal[key] - 1) % #cycle + 1]
+            local document = m.weapon_mapping.fit(source, target.width, target.height)
+            local choice = {
+                id = target.id,
+                weapon_slot = slot,
+                weapon_resource = target.weapon_resource,
+                saved_weapon_resource = slots[slot],
+                pattern = family == 'pattern',
+                enabled = true,
+                label = labels[slot] .. (family == 'pattern' and ' Pattern LUT ' or ' LUT ') .. target.index,
+                detail = 'Auto-mapped from saved ' .. labels[slot] .. ' LUT ' .. ((ordinal[key] - 1) % #cycle + 1),
+            }
+            choices[index], plan.choices[index] = choice, choice
+            entries[index] = {
+                weapon_slot = slot,
+                weapon_resource = target.weapon_resource,
+                source_resource = target.source_resource,
+                family = family,
+                index = target.index,
+                document = document,
+                targets = {},
+            }
+            for _, member in ipairs(target.members) do
+                entries[index].targets[#entries[index].targets + 1] = member.binding
+            end
+            if family == 'pattern' then
+                for _, member in ipairs(target.members) do
+                    pattern_keys[slot .. ':' .. member.binding.save_key] = true
+                end
+            end
+            local selected = (not options.slots or options.slots[slot])
+                and (not options.selected or options.selected[choice.id] == true)
+            choice.selected = selected
+            if selected and family == 'material' then
+                for _, member in ipairs(target.members) do
+                    selected_keys[slot .. ':' .. member.binding.save_key] = true
                 end
             end
         end
-        -- A selected material always includes its exact saved Pattern companions.
-        for _, choice in ipairs(choices) do
-            if choice.pattern then
-                for _, entry in ipairs(choice.entries) do
-                    if selected_keys[entry.weapon_resource .. ':' .. entry.key:gsub('^p:', '')] then
-                        chosen[entry] = true
+        local plans = {}
+        for index, target in ipairs(frozen) do
+            local choice, entry = choices[index], entries[index]
+            if choice.pattern and not choice.selected then
+                local subset = {}
+                for _, member in ipairs(target.members) do
+                    if selected_keys[target.weapon_slot .. ':' .. member.binding.save_key] then
+                        subset[#subset + 1] = member.binding
                     end
                 end
-            else
-                for _, entry in ipairs(choice.entries) do
-                    if live['p:' .. entry.key] then
+                if #subset > 0 then
+                    entry.targets, choice.selected = subset, true
+                end
+            elseif not choice.pattern then
+                for _, member in ipairs(target.members) do
+                    if pattern_keys[target.weapon_slot .. ':' .. member.binding.save_key] then
                         choice.has_pattern = true
                     end
                 end
             end
-        end
-        local selected_preset = { entries = {} }
-        for _, entry in ipairs(preset.entries) do
-            if chosen[entry] then
-                selected_preset.entries[#selected_preset.entries + 1] = entry
+            if choice.selected and not options.preview then
+                plans[#plans + 1] = entry
+                plan.count = plan.count + #entry.targets
             end
         end
-        local plan = { choices = choices, count = #selected_preset.entries }
-        local plans, context
         if not options.preview then
-            assert(plan.count > 0, 'Choose at least one weapon LUT')
-            local selected_descriptors = {}
-            for _, descriptor in ipairs(descriptors) do
-                local matches = false
-                for _, entry in ipairs(selected_preset.entries) do
-                    if
-                        entry.weapon_slot == descriptor.weapon_slot
-                        and entry.weapon_resource == descriptor.weapon_resource
-                        and (entry.key:sub(1, 2) == 'p:') == (descriptor.family == 'pattern')
-                    then
-                        matches = matches or entry.original and entry.original.resource == descriptor.source_resource
-                        for _, binding in ipairs(descriptor.bindings) do
-                            matches = matches or entry.key:gsub('^p:', '') == binding.save_key
-                        end
-                    end
-                end
-                if matches then
-                    selected_descriptors[#selected_descriptors + 1] = descriptor
-                end
-            end
-            plans, context = presets().plan(selected_preset, selected_descriptors)
+            assert(plan.count > 0, 'Choose at least one available weapon LUT')
         end
         function plan.validate()
             validate_targets()
@@ -375,15 +508,12 @@ function W.new(m, host)
                     'Saved weapon preset changed; reopen Apply Preset'
                 )
             end
-            if context then
-                context.validate()
-            end
             return true
         end
         function plan.apply()
             plan.validate()
-            assert(plans, 'Choose weapon LUTs before applying')
-            local results = bridge().runtime().apply_plan(plans)
+            assert(not options.preview and #plans > 0, 'Choose weapon LUTs before applying')
+            local results = runtime.apply_plan(plans)
             if type(results) == 'number' then
                 return results
             end

@@ -64,6 +64,7 @@ local function fixture()
         end,
     }
     local bridge = {
+        recovery_pending = function() return f.recovery_pending == true end,
         runtime = function()
             return f.runtime
         end,
@@ -83,6 +84,7 @@ local function fixture()
             original = function(b)
                 return f.documents[b.original]
             end,
+            clock = function() return f.cpu or 0 end,
             time = function()
                 return f.now
             end,
@@ -143,6 +145,7 @@ local f = fixture()
 local entries = applied(f)
 local saved_bytes = M.bytes(entries[1].document)
 f.service.start({ entries = entries })
+assert(f.service.recovering(), 'Pending startup lost its saved intent')
 assert(not pcall(f.service.capture), 'An unfinished startup job permitted an empty setup overwrite')
 entries[1].document.data[0] = 9 -- queued pixels must already be immutable.
 f.cold = true
@@ -274,3 +277,41 @@ assert(not pcall(bad.service.start, { entries = invalid }), 'Legacy ordinal-only
 print(
     'PASS weapon startup: owned immutable snapshots, exact named roles, independent shared Patterns, cooperative cache, source/configuration/stale/foreign/manual/death guards'
 )
+
+-- Retained native ownership is not current save intent. A recovered instance
+-- must supersede the old unit without freeing any retained renderer resources.
+do
+    local moved = fixture()
+    moved.runtime.refresh(1)
+    local document = moved.runtime.load(1, 1)
+    document.data[0] = 0.625
+    moved.runtime.apply(document, 1, 1)
+    moved.respawn(1, 101)
+    for index, mesh in ipairs(moved.units[101].meshes) do mesh.named_id = index + 100 end
+    assert(moved.runtime.recovery(1, true))
+    document = moved.runtime.load(1, 1)
+    document.data[0] = 0.875
+    moved.runtime.apply(document, 1, 1)
+    local retained = #moved.runtime.all_owned()
+    local entries = moved.service.capture()
+    assert(#entries == 5, 'Recovered capture duplicated the retired weapon instance')
+    for _, entry in ipairs(entries) do assert(entry.document.data[0] == 0.875, 'Capture saved retired weapon pixels') end
+    assert(#moved.runtime.all_owned() == retained, 'Capture reclaimed retained native ownership')
+    moved.recovery_pending = true
+    assert(not pcall(moved.service.capture), 'An unresolved slot permitted replacement of the saved intent')
+end
+print('PASS save after respawn/edit captures current instance only; unresolved recovery and native retention preserved')
+
+-- Warm ready sources must not pay the old 100 ms/binding scheduling tax.
+do
+    local warm = fixture()
+    local entries = applied(warm)
+    warm.service.start({entries=entries})
+    local calls=0
+    while warm.service.pending() and calls<20 do calls=calls+1;warm.service.tick() end
+    assert(not warm.service.pending() and calls<=3, 'Warm recovery retained per-binding/frame or 100 ms pacing')
+    local idle=#warm.writes
+    for _=1,20 do warm.service.tick() end
+    assert(#warm.writes==idle, 'Completed recovery repeated application')
+end
+print('PASS warm weapon startup: ready-source batches finish without per-binding delays; completed state idle')

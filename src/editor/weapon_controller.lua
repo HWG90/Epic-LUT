@@ -182,8 +182,8 @@ function C.new(host)
         return state.target
             and state.target.weapon_slot .. ':' .. state.target.weapon_resource .. ':' .. state.target.group_id
     end
-    function self.camo_selection()
-        local state = self.state()
+    function self.camo_selection(state)
+        state = state or self.state()
         local key = camo_key(state)
         return key and camo_rows[key] or {}
     end
@@ -442,11 +442,11 @@ function C.new(host)
         self.labels_fingerprint = nil
         self.sync()
     end
-    function self.sync()
+    function self.sync(state)
         if not registry or syncing then
             return
         end
-        local state = self.state()
+        state = state or self.state()
         local labels = {}
         for index, group in ipairs(state.groups or {}) do
             labels[index] = group.label or ('LUT ' .. index)
@@ -478,7 +478,7 @@ function C.new(host)
                 update('weapon_slot', self.weapon_slot)
                 update('weapon_family', self.family == 'main' and 1 or 2)
                 if registry.weapon_camo_pattern and host.camo_state then
-                    local rows = self.camo_selection()
+                    local rows = self.camo_selection(state)
                     local recipe = host.camo_state(state.document, rows)
                     update('weapon_camo_pattern', recipe.pattern)
                     update('weapon_camo_colorway', recipe.colorway)

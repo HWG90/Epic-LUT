@@ -437,6 +437,15 @@ function I.new(deps)
                 weapon_at = primary_at,
                 weapon_record = record,
             }
+        elseif deps.on_snapshot then
+            -- A validated identity read arms the native lifecycle subscription.
+            -- This is not a new periodic identity probe.
+            deps.on_snapshot({
+                game = game, owner = owner, inventory = inv,
+                avatar = avatar_id, avatar_ref = avatar_ref,
+                inventory_index = inventory_index,
+                players = players, player_id = player, player_index = player_index,
+            })
         end
         return result
     end

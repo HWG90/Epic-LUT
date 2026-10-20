@@ -262,12 +262,14 @@ function Model.new(E, host)
         end
     end
     function self.apply(model, palettes)
+        local changed = false
         for _, piece in ipairs(model.pieces) do
             assert(U.alive(piece.unit), 'Preview garment disappeared')
             if palettes[piece.kind] then
-                host.apply_palette(piece, palettes[piece.kind])
+                changed = host.apply_palette(piece, palettes[piece.kind]) == true or changed
             end
         end
+        return changed
     end
     return self
 end

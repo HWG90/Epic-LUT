@@ -1,6 +1,24 @@
 -- Validated named DDS files. UI and gear state are deliberately outside this service.
 local L = {}
-function L.available_name(name, exists)
+-- Shared suffix formatting keeps exact IDs out of the user-name truncation budget.
+function L.naming_suffix(document, original, naming, label, ids, ordinal)
+    naming = naming or 1
+    assert(type(naming) == 'number' and naming % 1 == 0 and naming >= 1 and naming <= 6, 'Choose an export naming format')
+    if naming == 6 then return '' end
+    local resource = original and original.resource or document.resource
+    local display = label or ((document.width == 3 and document.height == 1 and 'PatternLUT' or 'LUT') .. tostring(ordinal or 1))
+    display = display:gsub('[^%w _()%-]', '_'):sub(1, 64)
+    local id = resource
+    if id then
+        assert(type(id) == 'string' and #id == 16 and id:match('^%x+$'), 'Invalid LUT resource ID')
+        id = id:lower()
+        if naming == 2 or naming == 5 then id = assert(ids.format(id, true):match('^%[(%d+)%]$')) end
+    end
+    if naming == 1 or naming == 2 then return ' ' .. display .. (id and '-' .. id or '') end
+    if naming == 3 then return ' ' .. display end
+    return ' ' .. (id or display)
+end
+function L.available_name(name, exists, suffix)
     assert(
         type(name) == 'string'
             and #name > 0
@@ -10,14 +28,16 @@ function L.available_name(name, exists)
             and not name:match('%s$'),
         'Invalid export name'
     )
-    local stamp = '-' .. os.date('%Y-%m-%d_%H-%M-%S')
-    local candidate = name:sub(1, 48 - #stamp):gsub('%s+$', '') .. stamp
+    suffix = suffix or ''
+    assert(type(suffix) == 'string' and #suffix <= 120 and not suffix:find('[^%w _()%-]'), 'Invalid export suffix')
+    local stamp = suffix .. '-' .. os.date('%Y-%m-%d_%H-%M-%S')
+    local candidate = name:sub(1, math.max(1, 48 - (#stamp - #suffix))):gsub('%s+$', '') .. stamp
     if not exists(candidate) then
         return candidate
     end
     for i = 1, 10000 do
-        local suffix = stamp .. '-' .. string.format('%02d', i)
-        candidate = name:sub(1, 48 - #suffix):gsub('%s+$', '') .. suffix
+        local numbered = stamp .. '-' .. string.format('%02d', i)
+        candidate = name:sub(1, math.max(1, 48 - (#numbered - #suffix))):gsub('%s+$', '') .. numbered
         if not exists(candidate) then
             return candidate
         end
@@ -44,8 +64,8 @@ function L.new(folder, deps)
     function self.save(name, document, prefix)
         return deps.dds.write(path(name, prefix), document.data, document.width, document.height)
     end
-    function self.save_unique(name, document)
-        local chosen = L.available_name(name, self.exists)
+    function self.save_unique(name, document, suffix)
+        local chosen = L.available_name(name, self.exists, suffix)
         self.save(chosen, document)
         return chosen
     end

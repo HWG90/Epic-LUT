@@ -140,6 +140,12 @@ return function(source_lease)
     }
     local function read(address, size)
         state.reads = state.reads + 1
+        for object, shape in pairs(state.texture_shapes or {}) do
+            if address == object and size == 36 then
+                return u32(1) .. u32(0) .. u32(0x13) .. u32(0) .. u32(0)
+                    .. u32(shape[1]) .. u32(shape[2]) .. u32(1) .. u32(1)
+            end
+        end
         for material, slots in pairs(state.textures) do
             local keys = {}
             for slot in pairs(slots) do
@@ -163,6 +169,7 @@ return function(source_lease)
     state.discovery_deps = { identity = state.identity, native = native, read = read }
     state.discovery = Discovery.new(E, state.discovery_deps)
     local documents = {}
+    state.texture_shapes = {}
     for object, spec in pairs({
         [A] = { 23, 8, 'babd338977faa2ff' },
         [B] = { 23, 8, 'd1c943c12a564150' },
@@ -175,6 +182,7 @@ return function(source_lease)
         data[0], data[2], data[3] = -3.25, 42.5, 0.125
         ffi.cast('uint32_t *', data)[1] = 0x80000000
         documents[object] = { data = data, width = spec[1], height = spec[2], resource = spec[3] }
+        state.texture_shapes[object] = { spec[1], spec[2] }
     end
     state.documents = documents
     state.retain, state.cohort = { records = {}, cache = {}, bytes = 0 }, { sessions = {} }

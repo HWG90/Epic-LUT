@@ -142,3 +142,16 @@ assert(kernel.epic_lut_files_rmdir(folder) ~= 0)
 print(
     'PASS LUT files: validated names/exact rows; reversible row/palette deletion, sibling/backup preservation, bounded conflicts and failed/raced rename guards'
 )
+
+-- Exact identity suffixes survive timestamp/name truncation; no intermediate floats.
+local L = dofile('src/presets/lut_files.lua')
+local ids = dofile('src/core/resource_ids.lua')
+local d, o = {width=23,height=8}, {resource='ffffffffffffffff'}
+assert(L.naming_suffix(d,o,2,nil,ids,3)==' LUT3-18446744073709551615')
+assert(L.naming_suffix(d,o,3,'Desert',ids,3)==' Desert')
+assert(L.naming_suffix(d,o,4,nil,ids,3)==' ffffffffffffffff')
+assert(L.naming_suffix(d,o,6,'Desert',ids,3)=='')
+local calls = 0
+local named=L.available_name(string.rep('A',48),function() calls=calls+1; return calls==1 end,L.naming_suffix(d,o,2,nil,ids,3))
+assert(named:find('LUT3-18446744073709551615-',1,true) and named:match('%-01$'))
+assert(not pcall(L.available_name,'Safe',function()return false end,'/escape'))

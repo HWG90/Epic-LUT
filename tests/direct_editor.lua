@@ -46,6 +46,11 @@ local pattern_deps
 local bulk_entries, bulk_naming
 local Pattern = dofile('src/editor/pattern_luts.lua')
 local m = {
+    appearance_recovery = dofile('src/editor/appearance_recovery.lua'),
+    weapon_services = dofile('src/editor/weapon_services.lua'),
+    weapon_intent = dofile('src/weapons/weapon_intent.lua'),
+    editor_registration = dofile('src/editor/editor_registration.lua'),
+    setup_restore = dofile('src/editor/setup_restore.lua'),
     gear_edit = dofile('src/editor/gear_edit.lua'),
     editor_actions = dofile('src/editor/editor_actions.lua'),
     gear_export = dofile('src/presets/gear_export.lua'),
@@ -147,6 +152,7 @@ local m = {
         end,
     },
     engine = {
+        batch_commits = dofile('vendor/engine.lua').batch_commits,
         LUT_SLOT = 1,
         open = function()
             return native
@@ -298,6 +304,12 @@ assert(
     'Loading worn colors changed target choices'
 )
 assert(bound[3] == 100, 'Population wrote game bindings')
+-- Export must retain its callback through activation service resets.
+assert(handle.set('export_format', 5))
+local choose_status = activate('export_selected')
+assert(test_frontend.menu.lut_apply_dialog, 'Production export chooser failed: ' .. tostring(choose_status))
+test_frontend.menu.lut_apply_dialog = nil
+assert(handle.set('export_format', 1))
 assert(handle.get('cell_r') == 0.25, 'Stock game pixels did not populate editor')
 assert(handle.get('lut') == 2, 'Load Current Gear left the hidden live selector on Helmet')
 assert(activate('identify_region'):find('Flashing region', 1, true))
@@ -339,6 +351,15 @@ assert(
         and bound[3] == 100,
     'Patch export changed bindings or used an imported identity'
 )
+assert(handle.set('dds_naming', 4))
+activate('save_patch')
+local exact_name = patch_saved.deps.available_name('Named', function() return false end)
+assert(exact_name:find(' ffffffffffffffff-', 1, true), 'Single patch ignored HEX naming')
+assert(handle.set('dds_naming', 6))
+activate('save_patch')
+local plain_name = patch_saved.deps.available_name('Named', function() return false end)
+assert(not plain_name:find('ffffffffffffffff', 1, true), 'Name only patch kept a resource suffix')
+assert(handle.set('dds_naming', 1))
 patch_saved = nil
 bound[3], bound[4] = 777, 777
 assert(
@@ -798,6 +819,7 @@ assert(bound[8] ~= helmet_object, 'Editor apply did not use the edited table')
 activate('undo')
 activate('apply_editor')
 assert(bound[8] == helmet_object)
+assert(handle.set('dds_naming', 6))
 assert(handle.set('save_name', 'shared-palette'))
 local actual_date = os.date
 os.date = function()

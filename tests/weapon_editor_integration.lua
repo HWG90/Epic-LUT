@@ -150,7 +150,7 @@ assert(reload_actions.populate_worn_activate() and weapon_reload_count == 1,
 assert(handle.activate('populate_worn'))
 assert(base.info().editor and base.info().editor.kind == 'weapon' and base.palette.gear == 'weapon',
     'Reloading from the shared LUT editor lost its weapon context')
-local function buttons()
+local function buttons(section)
     local result = {}
     page.render_layout({
         x = 0,
@@ -185,9 +185,13 @@ local function buttons()
             end
         end,
     })
+    if section then
+        assert(result['weapon_section_' .. section])()
+        return buttons()
+    end
     return result
 end
-assert(buttons().weapon_editor())
+assert(buttons('edit').weapon_editor())
 local selected_page = base.frontend().menu.page
 for index, candidate in ipairs(mod.pages) do
     if candidate.id == 'colors' then base.frontend().menu.page = index end
@@ -304,7 +308,7 @@ for material, value in pairs(gear) do
     assert(base.bound[material] == value, 'Weapon live edit contaminated garment scope')
 end
 assert(handle.set('weapon_family', 2))
-assert(buttons().weapon_editor())
+assert(buttons('edit').weapon_editor())
 loaded = base.info().editor
 assert(loaded.kind == 'weapon' and loaded.family == 'pattern' and loaded.width == 3 and loaded.height == 1)
 assert(handle.set('edit_column', 3))
@@ -335,14 +339,14 @@ assert(
         and loaded.data[11] == 0.3125
         and ffi.string(loaded.data, 48):sub(1, 44) == pattern_before:sub(1, 44)
 )
-assert(handle.set('weapon_family', 1) and buttons().weapon_editor())
+assert(handle.set('weapon_family', 1) and buttons('edit').weapon_editor())
 local weapon_writes = #f.writes
 assert(handle.activate('apply_armor'))
 assert(#f.writes == weapon_writes, 'Explicit Apply Armor from a weapon draft was routed into the weapon runtime')
 assert(base.bound[3] ~= gear[3], 'Explicit Apply Armor did not reach its garment scope')
 -- Import and Send must retain the selected weapon destination, including Pattern DDS.
 for _, sample in ipairs({{name='weapon-import', object=f.A, width=23, height=8}, {name='weapon-pattern-import', object=f.P, width=3, height=1}}) do
-    assert(buttons().weapon_editor())
+    assert(buttons('edit').weapon_editor())
     local before = #f.writes
     m.dds.write('tests/tmp/files/' .. sample.name .. '.dds', f.documents[sample.object].data, sample.width, sample.height)
     assert(handle.set('format', 1) and handle.set('file', sample.name))
@@ -357,7 +361,7 @@ for _, sample in ipairs({{name='weapon-import', object=f.A, width=23, height=8},
     assert(handle.activate('apply_checked'))
     assert(base.info().editor.kind == 'weapon', 'Apply imported file lost weapon scope')
 end
-assert(handle.set('weapon_family', 1) and buttons().weapon_editor())
+assert(handle.set('weapon_family', 1) and buttons('edit').weapon_editor())
 local reset_document = base.info().editor
 assert(handle.set('auto_populate_worn', true))
 editor.on_update(ctx, 1.1)
@@ -510,7 +514,7 @@ for _, fault in ipairs({ 'foreign', 'throw' }) do
             page = candidate
         end
     end
-    assert(handle.activate('editor_load_weapon') and buttons().weapon_editor())
+    assert(handle.activate('editor_load_weapon') and buttons('edit').weapon_editor())
     assert(handle.set('cell_r', fault == 'foreign' and 0.4375 or 0.5625))
     closing_editor.on_update(ctx, 0.1)
     assert(handle.activate('apply_armor') and base.bound[3] ~= gear[3])
@@ -676,21 +680,21 @@ for activation = 1, 2 do
     end
     assert(handle.activate('editor_load_weapon'))
     local before = #workflow_history.undo
-    local applied, texture = buttons().weapon_apply()
+    local applied, texture = buttons('edit').weapon_apply()
     assert(applied == 5 and texture.object, 'Weapon mutation lost its native count/texture return values')
     assert(#workflow_history.undo == before + 1, 'Weapons Apply omitted global Undo history')
     assert(handle.activate('global_undo'))
     assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
     assert(handle.activate('global_redo'))
     before = #workflow_history.undo
-    assert(buttons().weapon_restore())
+    assert(buttons('edit').weapon_restore())
     assert(#workflow_history.undo == before + 1, 'Weapons Restore omitted global Undo history')
     assert(handle.activate('global_undo'))
     assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] ~= f.A, 'Undo Restore lost its catalog')
     assert(handle.activate('global_redo'))
     assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
     assert(handle.activate('editor_load_weapon'))
-    assert(buttons().weapon_map())
+    assert(buttons('import').weapon_map())
     local mapping = assert(base.frontend().menu.lut_apply_dialog)
     before = #workflow_history.undo
     assert(mapping.on_map('source:1', 'weapon:1:material:1'))
@@ -698,9 +702,9 @@ for activation = 1, 2 do
     assert(handle.activate('global_undo'))
     assert(f.textures[f.units[100].meshes[1].materials[1]][0x7e662968] == f.A)
     assert(handle.activate('global_redo'))
-    assert(buttons().weapon_auto_map())
+    assert(buttons('import').weapon_auto_map())
     assert(workflow_factories == activation, 'Workflow service was recreated or erased during activation')
-    buttons().weapon_preset()
+    buttons('presets').weapon_preset()
     local naming = assert(base.frontend().menu.outfit_dialog)
     if naming.phase == 'confirm' then
         assert(naming.on_confirm())
@@ -717,9 +721,21 @@ for activation = 1, 2 do
         if name == 'weapon-factory-fixture' then preset_index = index end
     end
     assert(preset_index and handle.set('outfit_preset', preset_index))
-    assert(buttons().weapon_apply_preset(), 'Registered weapon preset action failed')
-    assert(buttons().weapon_export():find('Exported weapons', 1, true))
-    assert(buttons().weapon_share())
+    assert(buttons('presets').weapon_apply_preset(), 'Registered weapon preset action failed')
+    local shared_chooser = assert(base.frontend().menu.lut_apply_dialog)
+    assert(shared_chooser.title == 'Apply Preset' and not shared_chooser.on_map,
+        'Weapons page used a separate import mapping flow for a saved preset')
+    local chosen = {}
+    for _, column in ipairs(shared_chooser.columns) do
+        for _, item in ipairs(column.items) do
+            assert(item.kind == 'weapon', 'Weapon page offered a garment destination')
+            if item.enabled then chosen[item.id] = true end
+        end
+    end
+    assert(next(chosen) and shared_chooser.on_apply(chosen), 'Shared weapon preset chooser failed to apply')
+
+    assert(buttons('presets').weapon_export():find('Exported weapons', 1, true))
+    assert(buttons('presets').weapon_share())
     workflow_editor.on_update(ctx, 0)
     assert(#shared_entries == 15 and shared_entries[1].kind == 'weapon', 'Weapon sharing factory lost local entries')
     assert(workflow_editor.on_disable(ctx))
@@ -845,7 +861,7 @@ local function activate_persistence()
     )
     assert(handle.activate('editor_load_weapon'))
     local writes = #f.writes
-    assert(buttons().weapon_apply())
+    assert(buttons('edit').weapon_apply())
     assert(
         #f.writes == writes + 5 and not service.pending() and service.explicit_cancels > 0,
         'Manual registered weapon apply did not cancel queued startup before native writes'
@@ -857,7 +873,7 @@ local function activate_persistence()
     return service
 end
 local startup_service = activate_persistence()
-assert(buttons().weapon_editor())
+assert(buttons('edit').weapon_editor())
 assert(handle.set('cell_r', 0.4375))
 persistence_editor.on_update(ctx, 0.1)
 local clears = storage.clears

@@ -81,6 +81,9 @@ function C.new(deps)
                 max = 1e10,
                 step = 0.001,
                 default = 0,
+                slider_begin = function() return self.slider_begin(channel) end,
+                slider_preview = self.slider_preview,
+                slider_end = self.slider_end,
                 on_change = function(value)
                     change(self.handle.get('edit_column'), channel, value)
                 end,
@@ -445,15 +448,15 @@ function C.new(deps)
                         type = 'choice',
                         label = 'Export format',
                         description = 'Include Pattern LUTs in Exports controls matching companions for loaded gear tables. DDS exports write companion files in one folder.',
-                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)' },
+                        choices = { 'DDS', 'Selected LUT Patch', 'Entire Palette Patch', 'All Custom LUTs (DDS)', 'Choose LUT Patches' },
                         default = 1,
                     },
                     {
                         id = 'dds_naming',
                         type = 'choice',
                         presentation = 'dropdown',
-                        label = 'DDS filenames',
-                        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
+                        label = 'Export filenames',
+                        choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal', 'Name only' },
                         default = 1,
                     },
                     {
@@ -473,7 +476,7 @@ function C.new(deps)
                             end
                             return assert(deps.save_patch, 'Patch exporter unavailable')(
                                 self.handle.get('save_name'),
-                                format == 3
+                                format == 5 and 'choose' or format == 3
                             )
                         end,
                     },

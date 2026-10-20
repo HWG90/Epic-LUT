@@ -250,8 +250,9 @@ function Native.new(E, m, host)
         for _, material in ipairs(piece.materials) do
             assert(live[material.source], 'Equipped source changed; rebuild preview')
         end
+        local changed, meshes = false, {}
         for _, material in ipairs(piece.materials) do
-            local changed = false
+            local material_changed = false
             for _, resource in ipairs(bindings(material.source)) do
                 if
                     (resource.slot == m.engine.LUT_SLOT or resource.slot == m.engine.PATTERN_SLOT)
@@ -259,20 +260,20 @@ function Native.new(E, m, host)
                 then
                     m.engine.bind(native, material.material, resource.slot, resource.object)
                     material.objects[resource.slot] = resource.object
-                    changed = true
+                    material_changed, changed = true, true
                 end
             end
-            if changed then
-                native.commit(material.mesh)
-            end
+            if material_changed then meshes[material.mesh] = true end
         end
+        for mesh in pairs(meshes) do native.commit(mesh) end
+        return changed
     end
     local model_host = {
         animate = host.animate == true,
         note = host.log,
         copy_materials = copy_materials,
         apply_palette = host.apply_palette or function(piece)
-            sync_materials(piece)
+            return sync_materials(piece)
         end,
         retain_failed = function(model, why)
             host.failed_model = model

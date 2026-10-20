@@ -19,7 +19,7 @@ local function rgb(document, row, column, alpha)
 end
 function V.new(controller)
     assert(controller and type(controller.state) == 'function', 'Weapon controller unavailable')
-    local self = { action_scroll = 0, table_scroll = 0 }
+    local self = { action_scroll = 0, table_scroll = 0, section = 'edit' }
     function self.wheel(x, y, delta)
         for _, region in ipairs({
             { self.action_bounds, 'action_scroll', self.action_maximum },
@@ -33,8 +33,9 @@ function V.new(controller)
         end
     end
     function self.draw(ui)
-        controller.sync()
         local state, theme = controller.state(), ui.theme
+        controller.sync(state)
+        local selected_rows = controller.camo_selection(state)
         local basic = ui.basic_only and state.quick_ready
         local gap = ui.spacing and ui.spacing(6) or 6
         local height = ui.control_height and ui.control_height(14, 4, 28) or 28
@@ -205,7 +206,6 @@ function V.new(controller)
                     local camo = state.quick_ready and controller.available('apply_camo')
                     local box = camo and math.min(20, row_height - 6) or 0
                     if camo and ui.checkbox then
-                        local selected_rows = controller.camo_selection()
                         ui.checkbox(
                             main_x,
                             y + (row_height - box) / 2,
@@ -353,84 +353,94 @@ function V.new(controller)
                 height = height + gap,
             }
         end
-        action(
-            'Load Current Weapons',
-            'weapon_load',
-            controller.load_current,
-            not state.busy and controller.available('load_current'),
-            'Load Weapons'
-        )
-        action(
-            'Open LUT Table / Values',
-            'weapon_editor',
-            function()
-                return controller.open_editor(nil, nil, state.target)
-            end,
-            ready and controller.available(state.family == 'pattern' and 'open_pattern' or 'load_editor'),
-            'Table/Values'
-        )
-        action('Pattern LUT Editor', 'weapon_pattern_editor', function()
-            return controller.open_pattern(state.pattern_target)
-        end, not state.busy and state.pattern_target and controller.available('open_pattern'), 'Pattern Editor')
-        action('Apply LUT', 'weapon_apply', function()
-            return controller.apply(state.target)
-        end, ready and controller.available('apply'))
-        action('Restore LUT', 'weapon_restore', function()
-            return controller.restore(state.target)
-        end, ready and controller.available('restore'))
-        if controller.available('apply_camo') then
-            heading('Camo: checked rows')
-            action('Select all Camo rows', 'weapon_camo_all', function()
-                return controller.select_camo_rows(true)
-            end, state.quick_ready, 'Check rows')
-            action('Clear Camo rows', 'weapon_camo_clear', function()
-                return controller.select_camo_rows(false)
-            end, state.quick_ready, 'Clear rows')
-            actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_pattern', height = height + gap }
-            actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_colorway', height = height + gap }
+        actions[#actions + 1] = { kind = 'tabs', height = height + gap }
+        if self.section == 'edit' then
+            action(
+                'Load Current Weapons',
+                'weapon_load',
+                controller.load_current,
+                not state.busy and controller.available('load_current'),
+                'Load Weapons'
+            )
+            action(
+                'Open LUT Table / Values',
+                'weapon_editor',
+                function()
+                    return controller.open_editor(nil, nil, state.target)
+                end,
+                ready and controller.available(state.family == 'pattern' and 'open_pattern' or 'load_editor'),
+                'Table/Values'
+            )
+            action('Pattern LUT Editor', 'weapon_pattern_editor', function()
+                return controller.open_pattern(state.pattern_target)
+            end, not state.busy and state.pattern_target and controller.available('open_pattern'), 'Pattern Editor')
+            action('Apply LUT', 'weapon_apply', function()
+                return controller.apply(state.target)
+            end, ready and controller.available('apply'))
+            action('Restore LUT', 'weapon_restore', function()
+                return controller.restore(state.target)
+            end, ready and controller.available('restore'))
+            if controller.available('apply_camo') then
+                heading('Camo: checked rows')
+                action('Select all Camo rows', 'weapon_camo_all', function()
+                    return controller.select_camo_rows(true)
+                end, state.quick_ready, 'Check rows')
+                action('Clear Camo rows', 'weapon_camo_clear', function()
+                    return controller.select_camo_rows(false)
+                end, state.quick_ready, 'Clear rows')
+                actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_pattern', height = height + gap }
+                actions[#actions + 1] = { kind = 'choice', id = 'weapon_camo_colorway', height = height + gap }
+            end
         end
-        heading('Selected weapons')
-        for slot = 1, 3 do
-            actions[#actions + 1] = { kind = 'target', slot = slot, label = SLOT_NAMES[slot], height = height + gap }
+        if self.section ~= 'edit' then
+            heading('Selected weapons')
+            for slot = 1, 3 do
+                actions[#actions + 1] =
+                    { kind = 'target', slot = slot, label = SLOT_NAMES[slot], height = height + gap }
+            end
         end
-        heading('Import and mapping')
-        action(
-            'Import DDS / ZIP / RAR...',
-            'weapon_import',
-            controller.import,
-            not state.busy and controller.available('import'),
-            'Import...'
-        )
-        action('Map LUTs to Weapons', 'weapon_map', function()
-            return controller.map_imports(false)
-        end, ready and controller.available('map_imports'), 'Map LUTs')
-        action('Auto-map LUTs', 'weapon_auto_map', function()
-            return controller.map_imports(true)
-        end, ready and controller.available('map_imports'), 'Auto-map')
-        heading('Armory Presets')
-        actions[#actions + 1] = { kind = 'choice', id = 'outfit_preset', height = height + gap }
-        action(
-            'Map selected Armory preset',
-            'weapon_apply_preset',
-            controller.apply_preset,
-            ready and controller.available('apply_preset'),
-            'Apply Preset'
-        )
-        action(
-            'Save to Armory',
-            'weapon_preset',
-            controller.save_preset,
-            ready and controller.available('save_preset'),
-            'Save Preset'
-        )
-        action(
-            'Export Weapon LUTs...',
-            'weapon_export',
-            controller.export,
-            ready and controller.available('export'),
-            'Export...'
-        )
-        action('Shared LUT', 'weapon_share', controller.share, ready and controller.available('share'))
+        if self.section == 'import' then
+            heading('Import and mapping')
+            action(
+                'Import DDS / ZIP / RAR...',
+                'weapon_import',
+                controller.import,
+                not state.busy and controller.available('import'),
+                'Import...'
+            )
+            action('Map LUTs to Weapons', 'weapon_map', function()
+                return controller.map_imports(false)
+            end, ready and controller.available('map_imports'), 'Map LUTs')
+            action('Auto-map LUTs', 'weapon_auto_map', function()
+                return controller.map_imports(true)
+            end, ready and controller.available('map_imports'), 'Auto-map')
+        end
+        if self.section == 'presets' then
+            heading('Armory Presets')
+            actions[#actions + 1] = { kind = 'choice', id = 'outfit_preset', height = height + gap }
+            action(
+                'Apply Preset...',
+                'weapon_apply_preset',
+                controller.apply_preset,
+                ready and controller.available('apply_preset'),
+                'Apply Preset'
+            )
+            action(
+                'Save to Armory',
+                'weapon_preset',
+                controller.save_preset,
+                ready and controller.available('save_preset'),
+                'Save Preset'
+            )
+            action(
+                'Export Weapon LUTs...',
+                'weapon_export',
+                controller.export,
+                ready and controller.available('export'),
+                'Export...'
+            )
+            action('Shared LUT', 'weapon_share', controller.share, ready and controller.available('share'))
+        end
         local depth = 0
         for _, item in ipairs(actions) do
             item.depth = depth
@@ -441,9 +451,39 @@ function V.new(controller)
         self.action_scroll = clamp(self.action_scroll, 0, self.action_maximum)
         local function draw_actions()
             for _, item in ipairs(actions) do
-                local y = body_top - item.depth - item.height + self.action_scroll
-                if y >= body_bottom - 0.01 and y + item.height <= body_top + 0.01 then
-                    if item.kind == 'heading' then
+                local y = item.kind == 'tabs' and body_top - item.height
+                    or body_top - item.depth - item.height + self.action_scroll
+                if
+                    y >= body_bottom - 0.01
+                    and y + item.height <= body_top - (item.kind == 'tabs' and 0 or height + gap) + 0.01
+                then
+                    if item.kind == 'tabs' then
+                        local width = (action_width - gap * 4) / 3
+                        for index, tab in ipairs({
+                            { 'Edit', 'edit' },
+                            { 'Import', 'import' },
+                            { 'Presets', 'presets' },
+                        }) do
+                            local section = tab[2]
+                            local compact = ({ 'Edit', 'Files', 'Sets' })[index]
+                            if measure(compact) + gap * 2 + 8 > width then
+                                compact = tab[1]:sub(1, 1)
+                            end
+                            button(
+                                action_x + (index - 1) * (width + gap),
+                                y,
+                                width,
+                                tab[1],
+                                'weapon_section_' .. section,
+                                function()
+                                    self.section, self.action_scroll = section, 0
+                                    return true
+                                end,
+                                true,
+                                compact
+                            )
+                        end
+                    elseif item.kind == 'heading' then
                         bounded(action_x, y + gap, item.label, action_width - gap * 2, 'heading')
                     elseif item.kind == 'choice' then
                         ui.choice(

@@ -86,6 +86,28 @@ pattern.attach(handle, api.mods.patterns.controls)
 pattern.gear = 'helmet'
 assert(handle.activate('pattern_load'))
 assert(writes == 0, 'Loading original pattern changed native binding')
+
+local scalar = api.mods.patterns.controls.pattern_opacity
+local start = ffi.string(pattern.document.data, 48)
+local count = #pattern.undo
+local starting_setting = handle.get('pattern_opacity')
+local gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.25)
+scalar.slider_preview(gesture, 0.75)
+assert(pattern.document.data[7] == 0.75 and #pattern.undo == count and writes > 0
+    and handle.get('pattern_opacity') == starting_setting,
+    'Pattern slider failed to preview natively without intermediate history')
+scalar.slider_end(gesture, true)
+assert(#pattern.undo == count + 1)
+assert(handle.activate('pattern_undo'))
+assert(ffi.string(pattern.document.data, 48) == start, 'Pattern slider Undo missed its starting pixels')
+assert(handle.activate('pattern_redo') and pattern.document.data[7] == 0.75)
+assert(handle.activate('pattern_undo'))
+gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.125)
+scalar.slider_end(gesture, false)
+assert(ffi.string(pattern.document.data, 48) == start and #pattern.undo == count)
+print('PASS Pattern scalar drag: native preview, endpoint Undo/Redo and cancellation')
 assert(handle.set('pattern_color', '#FF0000'))
 assert(pattern.document.data[0] == 1 and pattern.document.data[1] == 0 and pattern.document.data[2] == 0)
 assert(pattern.document.data[3] == 2.75 and pattern.document.data[11] == -0.25, 'Color edit changed unknown channels')

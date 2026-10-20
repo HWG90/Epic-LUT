@@ -74,7 +74,7 @@ local function actor(generation, armor_materials)
     for index = 2, armor_materials or 1 do
         local material = generation * 1000 + 100 + index
         materials[armor_unit][index] = {
-            mesh = material + 20,
+            mesh = generation * 1000 + 21 + math.floor((index - 1) / 64),
             material = material,
             mesh_index = math.floor((index - 1) / 64),
             material_index = (index - 1) % 64,
@@ -84,11 +84,12 @@ local function actor(generation, armor_materials)
     emit('player_spawned')
 end
 actor(1)
+local committed_meshes = {}
 local native = {
     alive = function(unit)
         return live[unit] and 1 or 0
     end,
-    commit = function() end,
+    commit = function(mesh) committed_meshes[#committed_meshes+1] = mesh end,
 }
 local memory = {
     verify_build = function()
@@ -110,6 +111,11 @@ local pattern_doc = { width = 3, height = 1, data = ffi.new('float[12]') }
 pattern_doc.data[0], pattern_doc.data[3], pattern_doc.data[7], pattern_doc.data[11] = 0.875, -0.125, 0.75, 17.5
 local files = { material = D.encode(material_doc.data, 23, 8), pattern = D.encode(pattern_doc.data, 3, 1) }
 local m = {
+    appearance_recovery = dofile('src/editor/appearance_recovery.lua'),
+    weapon_services = dofile('src/editor/weapon_services.lua'),
+    weapon_intent = dofile('src/weapons/weapon_intent.lua'),
+    editor_registration = dofile('src/editor/editor_registration.lua'),
+    setup_restore = dofile('src/editor/setup_restore.lua'),
     gear_edit = dofile('src/editor/gear_edit.lua'),
     editor_actions = dofile('src/editor/editor_actions.lua'),
     gear_export = dofile('src/presets/gear_export.lua'),
@@ -195,6 +201,7 @@ local m = {
         end,
     },
     engine = {
+        batch_commits = dofile('vendor/engine.lua').batch_commits,
         LUT_SLOT = 1,
         PATTERN_SLOT = 2,
         open = function()
@@ -208,7 +215,7 @@ local m = {
         end,
         create_texture = function(_, width, height, data)
             created = created + 1
-            return { object = 90000 + created, data = data, width = width, height = height }
+            return { object = 900000 + created, data = data, width = width, height = height }
         end,
         bind = function(_, material, slot, object)
             binds = binds + 1
@@ -501,7 +508,10 @@ live = {}
 recover()
 actor(9, 256)
 scene = true
+local commits_before_large = #committed_meshes
 recover()
+assert(#committed_meshes - commits_before_large == 4,
+    '256 recovered armor materials must commit exactly four meshes, not one per material')
 for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Large Armor recovery lost a Transmog destination')
 end
@@ -521,7 +531,79 @@ for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Canceled recovery failed to restart with fresh proof')
 end
 assert(discovery_readers > 0, 'Activation discarded the read-only discovery helper')
+-- Scalar drags must also coalesce the native session's global action history.
+frontend.menu.visible, frontend.basic_mode = true, false
+assert(h.set('file', 'material'))
+activate('load')
+assert(h.set('target_armor', true) and h.set('target_helmet', false))
+assert(h.set('unlock', true))
+local scalar = api.mods.epic_direct_lut.controls.cell_r
+history.undo, history.redo = {}, {}
+local starting_value = h.get('cell_r')
+local gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.25)
+frame(0.1)
+scalar.slider_preview(gesture, 0.75)
+frame(0.1)
+assert(#history.undo == 0, 'Live scalar preview recorded intermediate native action history')
+scalar.slider_end(gesture, true)
+frame(0.1)
+assert(#history.undo == 1, 'Scalar release did not record one global endpoint action')
+activate('global_undo')
+assert(h.get('cell_r') == starting_value, 'Global slider Undo missed the drag starting value')
+activate('global_redo')
+assert(h.get('cell_r') == 0.75, 'Global slider Redo missed the final value')
+local endpoint_count = #history.undo
+for _, commit in ipairs({ false, true }) do
+    gesture = scalar.slider_begin()
+    scalar.slider_preview(gesture, 0.125)
+    frame(0.1)
+    if commit then scalar.slider_preview(gesture, 0.75); frame(0.1) end
+    scalar.slider_end(gesture, commit)
+    frame(0.1)
+    assert(#history.undo == endpoint_count and h.get('cell_r') == 0.75,
+        'Canceled/no-op scalar drag changed global endpoint history')
+end
+print('PASS global scalar transaction: live native updates, endpoint Undo/Redo, no-op and cancel')
+-- The common lifecycle path must wake weapons even when no weapon-equip
+-- event is emitted across the ship/mission loading gap.
+do
+    local operations
+    for i = 1, 120 do
+        local name, value = debug.getupvalue(runtime.on_update, i)
+        if not name then break end
+        if name == 'operations' then operations = value end
+    end
+    assert(operations, 'Runtime operations unavailable for lifecycle regression')
+    local capture, captures = history.capture, 0
+    history.capture = function(...)
+        captures = captures + 1
+        return capture(...)
+    end
+    assert(operations.weapon_mutation(function() return true, 'recovered' end, true))
+    assert(captures == 0, 'Automatic weapon recovery captured the entire outfit history')
+    assert(operations.weapon_mutation(function() return true end, false))
+    assert(captures == 2, 'Manual weapon action lost endpoint history')
+    history.capture = capture
+    local prior, wakes = operations.weapon_editor, 0
+    operations.weapon_editor = {
+        equipment_changed = function() wakes = wakes + 1 end,
+        update = function() end,
+        tick_highlight = function() end,
+    }
+    for _, event in ipairs({ 'mission_ended', 'player_died', 'mission_started', 'player_spawned' }) do
+        local before = wakes
+        emit(event)
+        assert(wakes == before + 1, 'Appearance lifecycle did not wake weapon recovery: ' .. event)
+    end
+    for _ = 1, 20 do frame(0) end
+    assert(wakes == 4, 'Unchanged frames repeatedly woke weapon recovery')
+    operations.weapon_editor = prior
+end
+print('PASS shared ship/mission and player lifecycle wakes weapon recovery; unchanged frames idle')
 assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'
 )
+
+print('PASS armor recovery commit batching: 256 material destinations -> four mesh commits; exact immutable texture reuse retained')

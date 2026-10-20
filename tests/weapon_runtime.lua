@@ -138,7 +138,7 @@ test('private-material proof precedes allocation and current target proof preced
         f.snapshots[1].weapon_object = f.snapshots[1].weapon_object + 1
     end
     ok, why = pcall(f.runtime.apply, doc, 1, 1)
-    assert(not ok and tostring(why):find('Weapon changed during native binding write', 1, true))
+    assert(not ok and (tostring(why):find('Weapon changed during native binding write', 1, true) or tostring(why):find('LUT target changed after preparation', 1, true)), why)
     assert(f.allocations == 1 and #f.writes == 0)
 end)
 test('foreign writes are never overwritten and prevent retirement certification', function()
@@ -501,3 +501,34 @@ test('frame assignment gate uses no native identity scans while stable and resto
 end)
 
 print('PASS weapon runtime: ' .. cases .. ' focused contracts')
+
+do
+    local f = fixture()
+    f.runtime.refresh(1)
+    f.runtime.apply(f.runtime.load(1, 1), 1, 1)
+    f.respawn(1, 101)
+    f.units[100].alive = true
+    f.runtime.refresh(1)
+    local before = f.runtime.capture_state()
+    f.runtime.apply(f.runtime.load(1, 1), 1, 1)
+    local writes = #f.writes
+    f.runtime.restore_state(before)
+    assert(#f.writes == writes + 5, 'Rollback wrote to the superseded native Armory unit')
+    for i = writes + 1, #f.writes do assert(f.writes[i].binding.unit == 101) end
+end
+print('PASS rollback ignores superseded live Armory display units; current targets still restored')
+
+do
+    local f=fixture()
+    f.runtime.refresh(1)
+    local material=f.runtime.load(1,1,'material')
+    local pattern=f.runtime.load(1,1,'pattern')
+    material.data[0]=0.25;pattern.data[0]=0.5
+    f.create_hook=function() if f.allocations==2 then error('allocation refused',0) end end
+    local ok,why=pcall(f.runtime.apply_plan,{
+        {weapon_slot=1,family='material',index=1,document=material},
+        {weapon_slot=1,family='pattern',index=1,document=pattern}})
+    assert(not ok and tostring(why):find('allocation refused',1,true),why)
+    assert(#f.writes==0,'First palette was bound before all allocations succeeded')
+end
+print('PASS prepared weapon transaction: later allocation failure leaves every binding untouched')

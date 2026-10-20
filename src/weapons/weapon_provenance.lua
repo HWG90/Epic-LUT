@@ -27,6 +27,7 @@ function W.new(m, host)
     local P, L = assert(m.binding_provenance), assert(m.binding_unit_layout)
     local cache, materials, request_set = nil, nil, {}
     local serializing = false
+    local completion = {}
     local self = {}
     local function ensure()
         if cache then
@@ -723,15 +724,38 @@ function W.new(m, host)
     function self.id_available(kind, resource)
         return ensure().id_available(kind, resource)
     end
+    -- One-shot subscribers run only when the existing worker completes.
+    function self.when_ready(callback)
+        assert(type(callback) == 'function', 'Source completion callback required')
+        local token = { callback = callback }
+        assert(#completion < 8, 'Too many pending source actions')
+        completion[#completion + 1] = token
+        return function() token.callback = nil end
+    end
     function self.poll(waiting)
         if not cache then
             return nil
         end
         local ok, why = pcall(cache.tick)
+        if #completion > 0 and (not ok or cache.state == 'failed' or cache.state == 'stale'
+            or cache.state == 'ready' and (not cache.busy or not cache.busy())) then
+            local ready = ok and cache.state == 'ready'
+            local callbacks = completion
+            completion = {} -- A callback may request another bounded worker job.
+            for _, token in ipairs(callbacks) do
+                if token.callback then
+                    local called, problem = pcall(token.callback, ready, ready and nil or (cache.error or why or cache.status))
+                    if not called and host.log then host.log('Source completion failed: ' .. tostring(problem)) end
+                end
+            end
+        end
         if waiting then
             if not ok then
                 return 'Weapon binding source cache update failed: ' .. tostring(why)
             elseif cache.state == 'ready' and not cache.scope_error then
+                if cache.scope_ready and not cache.scope_ready() then
+                    return 'Verifying weapon patch sources; queued export is waiting'
+                end
                 return 'Exact weapon binding sources ready'
             elseif cache.state == 'failed' or cache.state == 'stale' then
                 return cache.error or cache.status
@@ -739,6 +763,7 @@ function W.new(m, host)
         end
     end
     function self.close()
+        completion = {}
         return not cache or cache.close()
     end
     function self.patch_archive(entries)

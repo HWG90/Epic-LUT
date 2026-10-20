@@ -202,7 +202,19 @@ do
                 end,
             },
         }
-        local reader = O.new(modules, { originals = prefix .. 'originals', cache = prefix .. 'cache' }, {}, function()
+        local reader
+        local resolve_cape, in_refresh, recursive_refreshes = false, false, 0
+        reader = O.new(modules, { originals = prefix .. 'originals', cache = prefix .. 'cache' }, {}, function()
+            -- Production chain: targets -> refresh -> sync_armory_cape ->
+            -- armory_cape_available -> appearance_resource -> original.get.
+            -- Bound the old recursion here so a failing test cannot freeze.
+            if in_refresh then
+                recursive_refreshes = recursive_refreshes + 1
+                return { [123] = true }
+            end
+            in_refresh = true
+            if resolve_cape then reader.get(123) end
+            in_refresh = false
             return { [123] = true }
         end)
         assert(
@@ -227,7 +239,9 @@ do
             indexed == 2 and reader.get(123) == nil and not reader.loaded,
             'Load Current Gear reused pixels from an earlier custom patch scope'
         )
+        resolve_cape = true -- A Cape-bearing preset is now selected after Restore.
         complete(updated_stamp, 'updated')
+        assert(recursive_refreshes == 0, 'Snapshot metadata read recursively advanced the active matching job')
         assert(
             reader.get(123).data == custom.data and captures == 2,
             'Current custom source did not replace the previous snapshot at the same texture object'

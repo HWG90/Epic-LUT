@@ -49,7 +49,9 @@ function A.new(modules, host)
             if choice.enabled then
                 assert(
                     type(choice.weapon_resource) == 'string'
-                        and choice.weapon_resource:lower() == identities[choice.weapon_slot],
+                        and choice.weapon_resource:match('^%x+$')
+                        and #choice.weapon_resource == 16
+                        and choice.saved_weapon_resource == identities[choice.weapon_slot],
                     'Weapon preset configuration differs from current target'
                 )
             end
@@ -91,9 +93,11 @@ function A.new(modules, host)
                 end
             end
         end
-        host.refresh()
-        if host.has_patterns() then
-            host.scan_patterns()
+        if scope.armor or scope.helmet or scope.cape then
+            host.refresh()
+            if host.has_patterns() then
+                host.scan_patterns()
+            end
         end
         if selection then
             selection.validate(true)
@@ -208,28 +212,22 @@ function A.new(modules, host)
                 end
             end
         end
+        local prepared = {}
+        if host.prepare_batch then
+            for _, kind in ipairs({{batches,false},{patterns,true}}) do
+                for document, targets in pairs(kind[1]) do
+                    prepared[document] = host.prepare_batch(document, targets, kind[2], cape_proof)
+                end
+            end
+        end
         local function apply_batch(document, targets, pattern)
-            return host.apply_batch(document, targets, pattern, cape_proof, selection and selection.proofs or nil)
+            return host.apply_batch(document, targets, pattern, cape_proof,
+                selection and selection.proofs or nil, prepared[document])
         end
         local function log_applied(targets, pattern)
-            if not host.log then
-                return
-            end
-            for _, b in ipairs(targets) do
-                host.log(
-                    'ARMORY_APPLY preset='
-                        .. selected_outfit.name
-                        .. ' kind='
-                        .. modules.gear_catalog.kind(b)
-                        .. ' slot='
-                        .. (pattern and 'p:' or '')
-                        .. b.save_key
-                        .. ' resource='
-                        .. host.resource_id(b.original)
-                        .. ' match='
-                        .. matches[b]
-                        .. ' verified=true'
-                )
+            if host.log then
+                host.log('ARMORY_APPLY preset=' .. selected_outfit.name .. ' family='
+                    .. (pattern and 'Pattern' or 'Material') .. ' verified_bindings=' .. #targets)
             end
         end
         local before = combined and (next(batches) or next(patterns)) and host.capture()
@@ -256,9 +254,6 @@ function A.new(modules, host)
                 applied = applied + apply_batch(d, targets, true)
                 log_applied(targets, true)
             end
-            if gear then
-                host.finish_application()
-            end
             if weapon_plan then
                 local valid, reason = weapon_plan.validate()
                 assert(valid == true, reason or 'Weapon changed before preset application')
@@ -279,6 +274,11 @@ function A.new(modules, host)
             end
             error(count, 0)
         end
+        -- Persistence is outside the native transaction: failure to serialize
+        -- restart data must not roll back already verified live bindings.
+        local saved, save_reason = pcall(host.finish_application, weapon_plan ~= nil)
+        local save_notice = not saved and (' Restart setup unchanged: ' .. tostring(save_reason))
+            or ''
         return host.message(
             'Applied '
                 .. selected_outfit.name
@@ -289,18 +289,22 @@ function A.new(modules, host)
                 .. ' matched bindings; '
                 .. skipped
                 .. ' unmatched left unchanged.'
+                .. save_notice
         )
     end
-    local function choose_outfit_luts()
+    local function choose_outfit_luts(options)
+        options = options or {}
         local preset = assert(host.selected(), 'Choose an outfit preset first')
         assert(host.menu(), 'Preset chooser requires the editor menu')
         assert(host.stop_identification(), 'Highlight restoration pending')
         if host.has_patterns() then
             assert(host.stop_patterns(), 'Pattern highlight restoration pending')
         end
-        host.refresh()
-        if host.has_patterns() then
-            host.scan_patterns()
+        if not options.weapon_slots then
+            host.refresh()
+            if host.has_patterns() then
+                host.scan_patterns()
+            end
         end
         local preview_weapon_plan
         for _, entry in ipairs(preset.entries) do
@@ -309,7 +313,7 @@ function A.new(modules, host)
                 break
             end
         end
-        local proof = host.proof()
+        local proof = not options.weapon_slots and host.proof()
         assert(proof or preview_weapon_plan, 'Current gear identity unavailable; load current gear again')
         proof = proof or {}
         local exact = host.documents(preset)
@@ -345,7 +349,7 @@ function A.new(modules, host)
             }
         end
         local pattern_bindings = {}
-        for _, group in ipairs(host.pattern_groups()) do
+        for _, group in ipairs(options.weapon_slots and {} or host.pattern_groups()) do
             for _, b in ipairs(group.bindings) do
                 pattern_bindings[modules.gear_catalog.kind(b) .. ':' .. host.key(b)] = b
             end
@@ -395,7 +399,7 @@ function A.new(modules, host)
             return receipt(b, true)
         end
         local represented = {}
-        for column, container in ipairs({ 'armor', 'helmet' }) do
+        for column, container in ipairs(options.weapon_slots and {} or { 'armor', 'helmet' }) do
             for _, choice in ipairs(host.choices(container)) do
                 local group = host.groups()[choice.group]
                 local record =
@@ -514,6 +518,25 @@ function A.new(modules, host)
                     columns[#columns + 1] = { title = slot_titles[slot] .. ' Weapons', items = items }
                 end
             end
+        end
+        if options.weapon_slots then
+            local filtered = {}
+            for _, column in ipairs(columns) do
+                local items = {}
+                for _, item in ipairs(column.items) do
+                    local record = records[item.id]
+                    local choice = record and record.weapon_choice
+                    if choice and options.weapon_slots[choice.weapon_slot] then
+                        items[#items + 1] = item
+                    else
+                        records[item.id] = nil
+                    end
+                end
+                if #items > 0 then
+                    filtered[#filtered + 1] = { title = column.title, items = items }
+                end
+            end
+            columns = filtered
         end
         local dialog = { title = 'Apply Preset', columns = columns }
         dialog.select_all = true

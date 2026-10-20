@@ -38,12 +38,20 @@ function B.new(deps)
         retirement_targets[#retirement_targets + 1] = captured
         retirement_seen[key] = captured
     end
-    function self.apply(document, targets)
+    -- Preparation owns immutable texture bytes but makes no live material writes.
+    function self.prepare(document, targets)
         assert(not cohort or not cohort.closing, 'Texture cohort is closing; reload Epic LUT before applying')
         assert(#targets > 0, 'No matching live LUTs; refresh first')
         for _, b in ipairs(targets) do
             assert(deps.present(b) and deps.binding(b) == b.current, 'Live LUT changed; refresh before applying')
         end
+        -- Shared DDS/editor contract; weapon callers separately prove their
+        -- exact 23-column material or 3-column Pattern destination dimensions.
+        assert(type(document.width) == 'number' and document.width % 1 == 0
+            and type(document.height) == 'number' and document.height % 1 == 0
+            and document.width >= 1 and document.width <= 64
+            and document.height >= 1 and document.height <= 64, 'Unsupported LUT dimensions')
+        assert(#targets <= 4096, 'LUT binding budget exceeded')
         local bytes = document.width * document.height * 16
         local key = document.width .. ':' .. document.height .. ':' .. ffi.string(document.data, bytes)
         local texture = retain.cache[key]
@@ -74,6 +82,30 @@ function B.new(deps)
             keep.owned = true
             retain.cache[key] = texture
         end
+        local receipts = {}
+        for i, b in ipairs(targets) do
+            receipts[i] = { binding=b, current=b.current, original=b.original,
+                unit=b.unit, mesh=b.mesh, material=b.material, slot=b.slot, key=deps.key(b) }
+        end
+        local plan = {session=self, document=document, texture=texture, receipts=receipts}
+        function plan.validate()
+            assert(not cohort or not cohort.closing, 'Texture cohort is closing')
+            for _, r in ipairs(receipts) do
+                local b=r.binding
+                assert(b.current==r.current and b.original==r.original and b.unit==r.unit
+                    and b.mesh==r.mesh and b.material==r.material and b.slot==r.slot and deps.key(b)==r.key
+                    and deps.present(b) and deps.binding(b)==r.current,
+                    'LUT target changed after preparation')
+            end
+            return true
+        end
+        return plan
+    end
+    function self.commit(plan)
+        assert(plan.session == self, 'LUT plan belongs to another session')
+        plan.validate()
+        local document, texture, targets = plan.document, plan.texture, {}
+        for i, r in ipairs(plan.receipts) do targets[i]=r.binding end
         local known = {}
         for _, b in ipairs(self.owned) do
             known[deps.key(b)] = true
@@ -126,6 +158,9 @@ function B.new(deps)
             b.document = document
         end
         return #targets, texture
+    end
+    function self.apply(document, targets)
+        return self.commit(self.prepare(document, targets))
     end
     function self.reconcile()
         assert(not cohort or not cohort.closing, 'Texture cohort is closing')
@@ -206,4 +241,6 @@ function B.new(deps)
     end
     return self
 end
+-- Explicit user/event actions stay cold; no accumulating JIT traces.
+if type(jit)=='table' and type(jit.off)=='function' then jit.off(B.new, true) end
 return B

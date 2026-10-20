@@ -392,6 +392,7 @@ local metadata_version = 'original'
 local files_before = m.windows.files
 m.windows.files = function() return patch_names, {[patch] = metadata_version} end
 assert(not async.prepare_scope())
+assert(not async.scope_ready(), 'Unverified patch scope was reported ready')
 async.tick_scope()
 assert(not async.prepare_scope(), 'Large scope verification did not yield')
 local steps = 1
@@ -399,7 +400,7 @@ while not async.prepare_scope() do
     assert(not async.scope_error, async.scope_error)
     async.tick_scope(); steps = steps + 1; assert(steps < 100)
 end
-assert(steps >= 2 and async.validate_scope())
+assert(steps >= 2 and async.validate_scope() and async.scope_ready())
 metadata_version = 'changed'
 assert(not async.validate_scope(), 'Changed file metadata retained an export certificate')
 assert(not async.prepare_scope())

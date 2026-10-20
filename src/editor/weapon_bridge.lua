@@ -12,9 +12,14 @@ function B.new(m, host)
     )
     local self, runtime, discovery, controller, identity = {}, nil, nil, nil, nil
     local status, recovery = 'Load current weapons to begin.', {}
-    local subscriptions, pending_slots = {}, 0
-    local function equipment_changed()
-        pending_slots = 3
+    local subscriptions, pending_slots, events, events_suspended = {}, 0, nil, false
+    local bit = require('bit')
+    local function equipment_changed(mask)
+        if host.restart_wake then host.restart_wake(mask) end
+        pending_slots = bit.bor(pending_slots, type(mask) == 'number' and bit.band(mask, 7) or 7)
+        if type(mask) == 'number' and bit.band(mask, 8) ~= 0 and host.actor_changed then
+            host.actor_changed()
+        end
     end
     self.equipment_changed = equipment_changed
     local function get_runtime()
@@ -32,6 +37,16 @@ function B.new(m, host)
                 return memory.read(require('ffi').cast('const uint8_t *', address), size)
             end,
             verify_build = memory.verify_build,
+            on_snapshot = m.weapon_events and host.event_cache and function(receipt)
+                if events_suspended then return end
+                -- The identity reader verifies the executable and game hashes
+                -- before the engine plugin's build-specific API is registered.
+                if not events then
+                    events = m.weapon_events.new(m.weapon_event_binary, assert(host.engine()),
+                        host.event_cache(), equipment_changed)
+                end
+                events.watch(receipt)
+            end,
         })
         discovery = m.weapon_discovery.new(assert(host.engine()), {
             identity = identity,
@@ -334,6 +349,26 @@ function B.new(m, host)
         end
         return out
     end
+    -- Join the initial snapshot batch without loading pixels, changing the
+    -- selected weapon, or applying anything. Cached catalogs keep this idle
+    -- between explicit load/equipment invalidation events.
+    function self.source_objects()
+        local active, objects = get_runtime(), {}
+        for slot = 1, 3 do
+            local catalog = active.catalog(slot)
+            if not catalog then
+                catalog = active.refresh(slot)
+            end
+            if catalog and catalog.available then
+                for _, kind in ipairs({ 'material', 'pattern' }) do
+                    for _, group in ipairs(active.groups(slot, kind)) do
+                        objects[group.object] = true
+                    end
+                end
+            end
+        end
+        return objects
+    end
     function self.load_current()
         assert(self.stop_highlight(), 'Weapon highlight restoration pending')
         local active, count = get_runtime(), 0
@@ -431,7 +466,6 @@ function B.new(m, host)
         host.load_editor(copy, target)
         return host.open_editor(cell or { target = target })
     end
-    local poll_slot = 1
     function self.update(dt)
         if not runtime then
             return
@@ -439,15 +473,21 @@ function B.new(m, host)
         if pending_slots == 0 then
             return
         end
-        pending_slots = pending_slots - 1
+        local poll_slot = 1
+        while bit.band(pending_slots, bit.lshift(1, poll_slot - 1)) == 0 do
+            poll_slot = poll_slot + 1
+        end
+        pending_slots = bit.band(pending_slots, bit.bnot(bit.lshift(1, poll_slot - 1)))
         local prior = {}
         for slot = poll_slot, poll_slot do
             local catalog = runtime.catalog(slot)
             if catalog and catalog.available then
                 local candidate = {
                     resource = catalog.weapon_resource or catalog.weapon_resource64,
+                    unit_ref = catalog.receipt and catalog.receipt.weapon_unit_ref,
                     bindings = {},
                     applied = false,
+                    entries = {},
                 }
                 for _, kind in ipairs({ 'material', 'pattern' }) do
                     for _, group in ipairs(catalog[kind]) do
@@ -455,6 +495,15 @@ function B.new(m, host)
                             candidate.bindings[#candidate.bindings + 1] = binding
                             candidate.applied = candidate.applied
                                 or binding.current ~= binding.original and binding.document ~= nil
+                            if binding.document and m.weapon_mapping then
+                                candidate.entries[#candidate.entries + 1] = {
+                                    kind = 'weapon', weapon_slot = slot,
+                                    weapon_resource = candidate.resource,
+                                    key = (kind == 'pattern' and 'p:' or '') .. binding.save_key,
+                                    original = { resource = group.source_resource or tostring(binding.original) },
+                                    document = m.weapon_mapping.copy(binding.document),
+                                }
+                            end
                         end
                     end
                 end
@@ -463,7 +512,6 @@ function B.new(m, host)
         end
         -- One validation per equipped slot after an equipment event only.
         local changed = runtime.update(poll_slot)
-        poll_slot = poll_slot % 3 + 1
         if #changed > 0 then
             status = 'Weapon changed; load current weapons again.'
             host.invalidate(changed)
@@ -475,6 +523,9 @@ function B.new(m, host)
             end
         end
         for slot, candidate in pairs(recovery) do
+            local current = identity.snapshot(slot)
+            local replaced = current and candidate.unit_ref
+                and current.weapon_unit_ref ~= candidate.unit_ref
             local dead, foreign, present, all_present, reset = true, false, false, true, false
             for _, binding in ipairs(candidate.bindings) do
                 dead = discovery.dead(binding) == true and dead
@@ -490,16 +541,26 @@ function B.new(m, host)
                 -- An external writer owns this change. A later death must not
                 -- turn it into permission to restore our earlier draft.
                 recovery[slot] = nil
-            elseif dead or (all_present and reset) or not present then
-                local current = identity.snapshot(slot)
+            elseif replaced or dead or (all_present and reset) or not present then
                 local resource = current and (current.weapon_resource or current.weapon_resource64)
-                if resource and resource ~= candidate.resource then
+                if resource and host.recover_preset and #candidate.entries > 0 then
+                    -- Respawn can keep the same resource while replacing every
+                    -- material. Replay retained pixels through the shared slot
+                    -- mapper; the archive/source-draft cache is not application
+                    -- intent and may still be cold for this new Unit.
+                    local count = host.recover_preset({ entries = candidate.entries }, slot)
+                    assert(type(count) == 'number' and count > 0, 'Weapon recovery applied no bindings; intent retained')
+                    recovery[slot] = nil
+                    status = 'Recovered ' .. names[slot] .. ' LUTs after equipment change.'
+                    host.message(status)
+                    if controller then controller.sync() end
+                elseif resource and resource ~= candidate.resource then
                     recovery[slot] = nil
                 elseif resource then
                     local ok, catalog, count = pcall(runtime.recovery, slot, true)
                     if ok and catalog then
-                        recovery[slot] = nil
                         if count > 0 then
+                            recovery[slot] = nil
                             status = 'Recovered ' .. names[slot] .. ' LUTs after weapon reload.'
                             host.message(status)
                         end
@@ -528,8 +589,22 @@ function B.new(m, host)
         get_runtime()
         return identity.snapshot_remote(peer, slot)
     end
-    function self.descriptors(targets)
-        local active, out, selected = get_runtime(), {}, {}
+    function self.descriptors(targets, slots, application_only)
+        assert(application_only == nil or application_only == true, 'Invalid weapon descriptor mode')
+        local active, out, selected, waiting = get_runtime(), {}, {}, false
+        -- Automatic preset mapping must use the currently equipped instance.
+        -- Explicit editor targets remain immutable and fail if they went stale.
+        if not targets then
+            for slot = 1, 3 do
+                if not slots or slots[slot] then
+                    local catalog = active.catalog(slot)
+                    if not catalog or not catalog.available
+                        or catalog.receipt and not discovery.validate(catalog.receipt) then
+                        active.refresh(slot)
+                    end
+                end
+            end
+        end
         if targets then
             for _, target in ipairs(targets) do
                 source_group(target)
@@ -539,8 +614,18 @@ function B.new(m, host)
         for slot = 1, 3 do
             for _, kind in ipairs({ 'material', 'pattern' }) do
                 for index, group in ipairs(active.groups(slot, kind)) do
-                    if not targets or selected[slot .. ':' .. kind .. ':' .. index] then
-                        active.load(slot, index, kind)
+                    if
+                        (not slots or slots[slot]) and (not targets or selected[slot .. ':' .. kind .. ':' .. index])
+                    then
+                        local inspect = application_only and active.shape or active.load
+                        local ready, why = pcall(inspect, slot, index, kind)
+                        if not ready then
+                            if tostring(why):find('Original weapon LUT pixels unavailable', 1, true) then
+                                waiting = true
+                            else
+                                error(why, 0)
+                            end
+                        end
                         out[#out + 1] = {
                             index = index,
                             family = kind,
@@ -553,15 +638,20 @@ function B.new(m, host)
                 end
             end
         end
+        assert(not waiting, 'Weapon LUT source colors are still loading; retry Apply Preset shortly. No preset changes were made.')
         return out
     end
-    function self.close(allow_quarantine)
-        for _, token in ipairs(subscriptions) do
-            if token.unsubscribe then
-                pcall(token.unsubscribe, token)
-            end
-        end
-        subscriptions, pending_slots = {}, 0
+    function self.suspend_events()
+        -- Restoration itself validates identities. It must never register a
+        -- replacement subscription while the addon is being torn down.
+        events_suspended = true
+        if events then events.close(); events = nil end
+        pending_slots = 0
+    end
+    function self.reset(allow_quarantine)
+        -- Restore Arrowhead is an edit action, not addon teardown. Keep equip
+        -- subscriptions available for the next Apply without an idle scan.
+        pending_slots = 0
         local flash_restored = self.stop_highlight()
         recovery = {}
         if not runtime then
@@ -575,6 +665,16 @@ function B.new(m, host)
             return false
         end
         return allow_quarantine == true or flash_restored and ok and restored
+    end
+    function self.close(allow_quarantine)
+        self.suspend_events()
+        for _, token in ipairs(subscriptions) do
+            if token.unsubscribe then
+                pcall(token.unsubscribe, token)
+            end
+        end
+        subscriptions = {}
+        return self.reset(allow_quarantine)
     end
     function self.controller()
         if controller then

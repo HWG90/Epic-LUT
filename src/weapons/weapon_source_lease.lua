@@ -29,12 +29,15 @@ function S.new(deps)
     end
     local function lookup(address, entity)
         local data, count, empty = rows(address)
+        -- Copy one bounded map per proof, rather than crossing the safe-read
+        -- boundary for every empty hash bucket. Never cache across proofs.
+        local entries = read(data, count * 8)
         local result
         for index = 0, count - 1 do
-            local bytes = read(data + index * 8, 8)
-            if u32(bytes, 0) == entity and entity ~= empty then
+            local offset = index * 8
+            if u32(entries, offset) == entity and entity ~= empty then
                 assert(not result, 'Duplicate weapon source identity')
-                result = u32(bytes, 4)
+                result = u32(entries, offset + 4)
                 assert(result < 4096, 'Weapon source index bounds')
             end
         end
@@ -71,11 +74,12 @@ function S.new(deps)
             index = assert(lookup(manager + 0x2b8, entity), 'Private weapon source creation readback failed')
         end
         local data, count, empty = rows(manager + 0x2b8)
+        local entries = read(data, count * 8)
         local aliases = 0
         for row = 0, count - 1 do
-            local bytes = read(data + row * 8, 8)
-            if u32(bytes, 0) ~= empty and u32(bytes, 4) == index then
-                assert(u32(bytes, 0) == entity, 'Weapon appearance configuration is shared')
+            local offset = row * 8
+            if u32(entries, offset) ~= empty and u32(entries, offset + 4) == index then
+                assert(u32(entries, offset) == entity, 'Weapon appearance configuration is shared')
                 aliases = aliases + 1
             end
         end
@@ -97,10 +101,12 @@ function S.new(deps)
                 return false
             end
             local data, count, empty = rows(manager + 0x2b8)
+            local entries = read(data, count * 8)
             for row = 0, count - 1 do
-                local bytes = read(data + row * 8, 8)
+                local offset = row * 8
                 assert(
-                    u32(bytes, 0) == empty or u32(bytes, 4) ~= live_index or u32(bytes, 0) == entity,
+                    u32(entries, offset) == empty or u32(entries, offset + 4) ~= live_index
+                        or u32(entries, offset) == entity,
                     'Weapon appearance configuration is shared'
                 )
             end
@@ -147,8 +153,17 @@ function S.new(deps)
         end
         -- Validate the whole plan before touching a selector.
         for _, selected in pairs(by_slot) do
-            assert(deps.discovery.prove_private(selected), 'Weapon source privacy unavailable')
+            local private, reason = deps.discovery.prove_private(selected)
+            assert(private, reason or 'Weapon source privacy unavailable')
             local base, current, unit = locate(selected[1].weapon_slot, selected[1])
+            local selected_roles = {}
+            for _, binding in ipairs(selected) do
+                local count = u32(read(binding.mesh + 0x58, 4), 0)
+                assert(count > 0 and count <= 64 and binding.material_index >= 0 and binding.material_index < count)
+                local role = u32(read(pointer(binding.mesh + 0x60) + binding.material_index * 4, 4), 0)
+                selected_roles[role] = selected_roles[role] or {}
+                selected_roles[role][binding.slot or 0x7e662968] = true
+            end
             for _, binding in ipairs(selected) do
                 assert(binding.unit == unit, 'Weapon source Unit differs from binding')
                 assert(
@@ -170,8 +185,18 @@ function S.new(deps)
                         if held then
                             assert(held.current() and bytes == held.masked, 'Weapon source lease changed')
                         else
+                            -- game.dll 6eb330 consumes +8 as material LUT and
+                            -- +24 as Pattern LUT. Existing overrides in slots
+                            -- explicitly replaced by this plan are intentional.
+                            -- Keep all 36 payload bytes intact; refuse unrelated
+                            -- decal/other overrides and unknown padding.
+                            local slots = selected_roles[role]
                             assert(
-                                bytes:sub(5) == string.rep('\0', 36),
+                                bytes:sub(5, 8) == ZERO
+                                    and (slots[0x7e662968] or bytes:sub(9, 16) == ZERO .. ZERO)
+                                    and bytes:sub(17, 24) == ZERO .. ZERO
+                                    and (slots[0x81d4c49d] or bytes:sub(25, 32) == ZERO .. ZERO)
+                                    and bytes:sub(33, 40) == ZERO .. ZERO,
                                 'Explicit weapon skin overrides must be preserved'
                             )
                             additions[address] = {

@@ -1,5 +1,5 @@
 -- Transactional raw DDS export; all pixels and names validate before creating a folder.
-local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' } }
+local B = { MAX_BINDINGS = 4096, formats = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal', 'Name only' } }
 local kind_labels = { armor = 'Armor', helmet = 'Helmet', cape = 'Cape', weapon = 'Weapon' }
 local weapon_labels = { 'Primary', 'Secondary', 'Support' }
 function B.new(m, paths)
@@ -61,6 +61,9 @@ function B.new(m, paths)
             end
             local ordinal = (document.width == 3 and document.height == 1 and 'PatternLUT' or 'LUT')
                 .. string.format('%.0f', entry.ordinal)
+            local display = entry.label or ordinal
+            assert(type(display) == 'string' and #display > 0 and not display:find('[%c\\/:*?"<>|]'),
+                'Invalid custom LUT filename')
             local key = (weapon ~= '' and weapon .. ':' or '') .. (resource or (entry.kind .. ':' .. ordinal))
             local identity = resource and ('resource ID ' .. resource) or (entry.kind .. ' ' .. ordinal)
             local target = key .. ':' .. entry.kind .. ':' .. ordinal
@@ -74,13 +77,14 @@ function B.new(m, paths)
                     id = m.resource_ids.format(resource, true):match('^%[(%d+)%]$')
                     assert(id, 'Could not format LUT resource ID')
                 end
-                local suffix = ordinal
+                local suffix = display
                 if naming == 1 or naming == 2 then
-                    suffix = ordinal .. (id and '-' .. id or '')
+                    suffix = display .. (id and '-' .. id or '')
                 elseif naming == 4 or naming == 5 then
                     suffix = id or ordinal
                 end
-                local stem = prefix .. (weapon ~= '' and ' ' .. weapon or '') .. ' ' .. suffix
+                if naming == 6 then suffix = '' end
+                local stem = prefix .. (weapon ~= '' and ' ' .. weapon or '') .. (suffix ~= '' and ' ' .. suffix or '')
                 stems[stem:lower()] = (stems[stem:lower()] or 0) + 1
                 files[#files + 1] = { stem = stem, kind = entry.kind, bytes = bytes }
             end

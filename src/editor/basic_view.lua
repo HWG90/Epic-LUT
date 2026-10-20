@@ -494,7 +494,7 @@ function B.new(info, select_row, help, select_camo_row)
             )
             drawing.choice('export_format', right + width * 0.35 + gap / 2, y, width * 0.65 - gap / 2)
         end)
-        if bulk_dds then
+        if bulk_dds or (state.export_format or 1) == 1 or state.export_format == 2 then
             choice('dds_naming')
         end
         buttons({ { 'Open Export Location', 'open_export' } }, state.dirty and gap * 2 or gap)

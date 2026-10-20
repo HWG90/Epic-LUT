@@ -5,8 +5,8 @@ local D = {
     MAX_UNITS = 131072,
     MAX_MESHES = 64,
     MAX_MATERIALS = 512,
-    MAX_CENSUS_UNITS = 8192,
-    MAX_CENSUS_MATERIALS = 32768,
+    MAX_CENSUS_UNITS = 65536,
+    MAX_CENSUS_MATERIALS = 262144,
     LUT = 0x7e662968,
     PATTERN = 0x81d4c49d,
 }
@@ -136,6 +136,13 @@ function D.new(E, deps)
         return all
     end
     local function units(world)
+        -- Refuse an invalid native count before World.units allocates its Lua
+        -- table. A post-allocation length check cannot protect that boundary.
+        if type(W.num_units) == 'function' then
+            local count = W.num_units(world)
+            assert(type(count) == 'number' and count % 1 == 0 and count >= 0 and count <= D.MAX_UNITS,
+                'Weapon World Unit count unavailable or out of bounds')
+        end
         local listed = W.units(world)
         assert(type(listed) == 'table' and #listed <= D.MAX_UNITS, 'Weapon World Unit bounds changed')
         return listed
@@ -216,16 +223,25 @@ function D.new(E, deps)
             world_present = world_present or world == kept.world
         end
         assert(world_present, 'Weapon World disappeared')
-        for _, handle in ipairs(units(kept.world)) do
-            if reference(handle) == kept.unit then
-                assert(handle == kept.lua_unit, 'Weapon Lua handle changed')
-                matches = matches + 1
-            end
-        end
         assert(
-            matches == 1 and U.alive(kept.lua_unit) == true and N.alive(kept.unit) ~= 0,
+            U.alive(kept.lua_unit) == true and N.alive(kept.unit) ~= 0,
             'Weapon Unit disappeared or became ambiguous'
         )
+        if type(U.world) == 'function' then
+            -- capture() already established this genuine handle and exact native
+            -- identity. Query its current owner directly: World.units allocates
+            -- wrappers for the entire mission on every per-binding guard.
+            assert(reference(kept.lua_unit) == kept.unit, 'Weapon Lua handle changed')
+            assert(U.world(kept.lua_unit) == kept.world, 'Weapon Unit changed World')
+        else
+            for _, handle in ipairs(units(kept.world)) do
+                if reference(handle) == kept.unit then
+                    assert(handle == kept.lua_unit, 'Weapon Lua handle changed')
+                    matches = matches + 1
+                end
+            end
+            assert(matches == 1, 'Weapon Unit disappeared or became ambiguous')
+        end
         assert(resource(kept.lua_unit) == kept.resource, 'Weapon Unit resource changed')
         if validation_batch and not kept.peer and not cleanup then
             validation_batch[receipt] = kept
@@ -233,7 +249,9 @@ function D.new(E, deps)
         return kept
     end
     function self.with_validation_batch(fn)
-        assert(not validation_batch, 'Nested weapon validation batches are unsupported')
+        -- Nested read-only preflights share the enclosing synchronous receipt
+        -- proof. Its final fresh validation still runs after the complete task.
+        if validation_batch then return fn() end
         local batch = {}
         validation_batch = batch
         local function pack(...)
@@ -345,33 +363,46 @@ function D.new(E, deps)
         local ok, why = pcall(validate, receipt)
         return ok, not ok and tostring(why) or nil
     end
-    local function materials(handle, ref)
+    local function materials(handle, ref, wanted)
         assert(U.alive(handle) == true and N.alive(ref) ~= 0, 'Weapon material Unit is dead')
         local count = tonumber(N.meshes(ref))
         assert(
             index(count, D.MAX_MESHES + 1) and tonumber(U.num_meshes(handle)) == count,
             'Lua and native weapon mesh counts differ'
         )
-        local found = {}
+        local found, scanned = {}, 0
         for mesh_index = 0, count - 1 do
             local mesh = tonumber(N.mesh(ref, mesh_index))
-            local lua_mesh = U.mesh(handle, mesh_index + 1)
-            assert(pointer(mesh) and address(lua_mesh) == mesh, 'Lua and native weapon Mesh pointers differ')
+            assert(pointer(mesh), 'Invalid weapon Mesh pointer')
+            local checked = not wanted
+            if checked then
+                assert(address(U.mesh(handle, mesh_index + 1)) == mesh, 'Lua and native weapon Mesh pointers differ')
+            end
             local total = tonumber(N.materials(mesh))
             assert(index(total, 65), 'Weapon material count bounds changed')
             for material_index = 0, total - 1 do
-                assert(#found < D.MAX_MATERIALS, 'Weapon total material bounds changed')
+                scanned = scanned + 1
+                assert(scanned <= D.MAX_MATERIALS, 'Weapon total material bounds changed')
                 local material = tonumber(N.material(mesh, material_index))
                 assert(pointer(material), 'Invalid weapon Material pointer')
-                found[#found + 1] = {
-                    mesh = mesh,
-                    material = material,
-                    mesh_index = mesh_index,
-                    material_index = material_index,
-                }
+                if not wanted or wanted[material] then
+                    -- The privacy census only returns exact pointer matches.
+                    -- Do not allocate a Lua Mesh wrapper for unrelated scenery;
+                    -- every matching mesh still receives both API proofs.
+                    if not checked then
+                        assert(address(U.mesh(handle, mesh_index + 1)) == mesh, 'Lua and native weapon Mesh pointers differ')
+                        checked = true
+                    end
+                    found[#found + 1] = {
+                        mesh = mesh,
+                        material = material,
+                        mesh_index = mesh_index,
+                        material_index = material_index,
+                    }
+                end
             end
         end
-        return found
+        return found, scanned
     end
     function self.materials(receipt)
         local kept = validate(receipt)
@@ -493,6 +524,26 @@ function D.new(E, deps)
         local value = bindings(b.material)[b.slot]
         return value ~= 0 and value or nil
     end
+    -- Loaded RGBA16F texture metadata on the verified game build. Shape reads
+    -- neither fetch pixels nor call the renderer. Recheck the live destination
+    -- and copied header before using it to adapt a complete saved palette.
+    function self.shape(b)
+        local ok, width, height = pcall(function()
+            assert(present(b) and self.binding(b) == b.current, 'Weapon changed before shape read')
+            assert(pointer(b.original), 'Weapon source texture pointer unavailable')
+            local header = read(b.original, 36)
+            local w, h, depth, mips = u32(header, 20), u32(header, 24), u32(header, 28), u32(header, 32)
+            assert(u32(header, 8) == 0x13 and u32(header, 0) % 16777216 ~= 0xffffff,
+                'Unsupported loaded weapon texture metadata')
+            assert((w == 23 and h >= 1 and h <= 64 or w == 3 and h == 1)
+                and depth == 1 and mips >= 1 and mips <= 7, 'Unsupported loaded weapon LUT shape')
+            assert(read(b.original, 36) == header and present(b) and self.binding(b) == b.current,
+                'Weapon source changed during shape read')
+            return w, h
+        end)
+        if ok then return width, height end
+        return nil, tostring(width)
+    end
     -- Negative-only frame gate: safe byte reads, never native Unit/Mesh calls.
     -- A mismatch is only a request for fresh ownership validation, not write permission.
     -- Only immutable decoded bytes are reused, never ownership/write proof.
@@ -562,7 +613,9 @@ function D.new(E, deps)
     -- This census has no yield. A proof is used only inside one synchronous write
     -- operation, never cached across frames or inferred from shared texture IDs.
     local function prove_private(targets, cleanup)
-        local ok, why = pcall(function()
+        -- Hundreds of target checks share one read-only receipt scope. No
+        -- material write or yield occurs before its final fresh validation.
+        local ok, why = pcall(self.with_validation_batch, function()
             assert(
                 type(targets) == 'table' and #targets > 0 and #targets <= D.MAX_MATERIALS * 6,
                 'Weapon privacy target bounds'
@@ -579,15 +632,14 @@ function D.new(E, deps)
             for _, world in ipairs(worlds()) do
                 local listed = units(world)
                 assert(total_units + #listed <= D.MAX_CENSUS_UNITS, 'Weapon material privacy census Unit bounds')
-                local copy = {}
-                for position, handle in ipairs(listed) do
-                    copy[position] = handle
+                for _, handle in ipairs(listed) do
                     total_units = total_units + 1
                     if U.alive(handle) == true then
                         local ref = assert(reference(handle), 'Unknown genuine Unit handle representation')
-                        for _, row in ipairs(materials(handle, ref)) do
-                            total_materials = total_materials + 1
-                            assert(total_materials <= D.MAX_CENSUS_MATERIALS, 'Weapon material privacy census bounds')
+                        local matches, scanned = materials(handle, ref, wanted)
+                        total_materials = total_materials + scanned
+                        assert(total_materials <= D.MAX_CENSUS_MATERIALS, 'Weapon material privacy census bounds')
+                        for _, row in ipairs(matches) do
                             if wanted[row.material] then
                                 local key = ref .. ':' .. row.mesh_index .. ':' .. row.material_index
                                 assert(
@@ -600,7 +652,7 @@ function D.new(E, deps)
                         end
                     end
                 end
-                captured[world] = copy
+                captured[world] = listed
             end
             for key in pairs(destinations) do
                 assert(found[key], 'Weapon material missing from privacy census')

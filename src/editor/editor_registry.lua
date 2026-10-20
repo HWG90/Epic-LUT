@@ -252,7 +252,7 @@ function R.pages(callbacks, defaults)
                     type = 'choice',
                     presentation = 'dropdown',
                     label = 'DDS naming',
-                    choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal' },
+                    choices = { 'LUT# + HEX', 'LUT# + Decimal', 'LUT#', 'HEX', 'Decimal', 'Name only' },
                     default = 1,
                 },
                 {

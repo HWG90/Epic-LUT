@@ -81,6 +81,31 @@ table.insert(pages, 1, {
 local h = api.register({ id = 'palette_test', name = 'Epic LUT', pages = pages })
 editor.attach(api, h)
 api.mods.palette_test.tabs_top = true
+
+-- A live scalar drag changes pixels immediately, but records only its endpoints.
+local scalar = api.mods.palette_test.controls.cell_r
+local start_pixels, start_history = ffi.string(d.data, d.width * d.height * 16), #editor.undo
+local gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.25)
+scalar.slider_preview(gesture, 0.75)
+assert(d.data[0] == 0.75 and #editor.undo == start_history and h.get('cell_r') == 0,
+    'Scalar preview wrote intermediate settings or Undo history')
+scalar.slider_end(gesture, true)
+assert(#editor.undo == start_history + 1 and h.get('cell_r') == 0.75)
+assert(h.activate('undo'))
+assert(ffi.string(d.data, d.width * d.height * 16) == start_pixels, 'Slider Undo missed its starting pixels')
+assert(h.activate('redo') and d.data[0] == 0.75)
+assert(h.activate('undo'))
+gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.5)
+scalar.slider_end(gesture, false)
+assert(ffi.string(d.data, d.width * d.height * 16) == start_pixels and #editor.undo == start_history)
+gesture = scalar.slider_begin()
+scalar.slider_preview(gesture, 0.5)
+scalar.slider_preview(gesture, 0)
+scalar.slider_end(gesture, true)
+assert(#editor.undo == start_history, 'No-op slider drag created Undo history')
+print('PASS material scalar drag: live pixels, endpoint-only history, exact Undo/Redo and cancellation')
 local alpha = d.data[3]
 local other = d.data[4]
 assert(h.set('cell_color', '#FF0080'))

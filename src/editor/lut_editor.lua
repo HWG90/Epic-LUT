@@ -126,6 +126,59 @@ function E.new(m, document, note, save, presets, live_document, open_export, sav
         self.sync()
         note('Palette edited. Live preview updates automatically.')
     end
+    function self.slider_begin(channel)
+        local d = assert(document(), 'Load a LUT first')
+        local row, column = self.handle.get('edit_row'), self.handle.get('edit_column')
+        assert(not d.stale and editable(d, column, channel), 'Load an editable current LUT first')
+        local session = { document = d, before = snapshot(d), row = row, column = column, channel = channel }
+        if self.action_history and not self.action_history.busy then
+            local ok, before = pcall(self.action_history.capture)
+            if ok then session.action_before = before end
+        end
+        self.active_slider = session
+        return session
+    end
+    function self.slider_preview(session, value)
+        local d = session.document
+        assert(document() == d and not d.stale and not d.read_only, 'Slider target changed; select a current LUT')
+        assert(self.handle.get('edit_row') == session.row and self.handle.get('edit_column') == session.column,
+            'Slider target changed; select a value again')
+        assert(editable(d, session.column, session.channel), 'This channel is locked')
+        local at = m.semantics.index(session.row, session.column, session.channel, d.width, d.height)
+        local previous = tonumber(d.data[at])
+        d.data[at] = value
+        if tonumber(d.data[at]) ~= previous then
+            d.revision = (d.revision or 0) + 1
+        end
+    end
+    function self.slider_end(session, commit)
+        local d = session.document
+        self.active_slider = nil
+        if self.action_history and document() == d then
+            self.pending_slider = { before = session.action_before, commit = commit }
+        end
+        if document() ~= d or d.stale or d.read_only or snapshot(d) == session.before then return end
+        if commit then
+            self.undo[#self.undo + 1] = session.before
+            if #self.undo > 64 then table.remove(self.undo, 1) end
+            self.redo = {}
+            note('Palette edited. Live preview updates automatically.')
+        else
+            ffi.copy(d.data, session.before, #session.before)
+            d.revision = (d.revision or 0) + 1
+        end
+        self.sync()
+    end
+    function self.flush_slider_history()
+        local pending = self.pending_slider
+        self.pending_slider = nil
+        if pending and pending.commit and pending.before then
+            local ok, why = pcall(function()
+                self.action_history.record(pending.before, self.action_history.capture())
+            end)
+            if not ok then note('Action history unavailable: ' .. tostring(why)) end
+        end
+    end
     function self.focus_cell(row, column)
         self.value_target = nil
         self.sync()

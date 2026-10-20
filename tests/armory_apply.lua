@@ -119,13 +119,13 @@ local function fixture()
         begin_application = function()
             values.begins = values.begins + 1
         end,
-        finish_application = function()
+        finish_application = function(weapons_applied)
+            values.saved_weapons = weapons_applied
+            assert(not weapons_applied or values.weapon_writes > 0, 'Saved combined preset before applying weapons')
             values.finishes = values.finishes + 1
-            if stale_after_gear then
-                stale = true
-            end
         end,
         apply_batch = function(d, targets)
+            if stale_after_gear then stale = true end
             values.writes, values.gear = values.writes + 1, tonumber(d.data[0])
             return #targets
         end,
@@ -156,7 +156,8 @@ local function fixture()
                         label = 'Primary Body LUT 1',
                         enabled = true,
                         weapon_slot = 1,
-                        weapon_resource = mismatch and 'ffffffffffffffff' or resource,
+                        weapon_resource = resource,
+                        saved_weapon_resource = mismatch and 'ffffffffffffffff' or resource,
                         has_pattern = true,
                     },
                 },
@@ -210,12 +211,18 @@ f.service.apply({ armor = true, weapon = true })
 assert(f.values.writes == 1 and f.values.weapon_writes == 1 and f.values.finishes == 1 and f.values.begins == 1)
 assert(math.abs(f.values.gear - 0.5) < 0.001 and math.abs(f.values.weapon - 0.8) < 0.001)
 assert(f.values.plans[1].count == 3 and f.values.message:find('Weapons', 1, true))
+local save_failure = fixture()
+save_failure.host.finish_application = function() error('Exact source proof unavailable') end
+save_failure.service.apply({ armor = true, weapon = true })
+assert(save_failure.values.writes == 1 and save_failure.values.weapon_writes == 1
+    and save_failure.values.restored == 0, 'Persistence failure rolled back committed live bindings')
+assert(save_failure.values.message:find('Restart setup unchanged:', 1, true))
 local only = fixture()
 only.service.apply({ weapon = true })
 assert(
     only.values.writes == 0
         and only.values.begins == 0
-        and only.values.finishes == 0
+        and only.values.finishes == 1
         and #only.values.clears == 0
         and only.values.weapon_writes == 1
 )
@@ -254,6 +261,25 @@ assert(dialog.select_all and #dialog.columns == 3 and dialog.columns[3].title ==
 assert(dialog.columns[3].items[1].detail == 'Pattern included' and dialog.columns[3].items[1].checked)
 assert(dialog.on_apply({ ['gear:armor:1'] = true, ['weapon:1:body'] = true }))
 assert(chooser.values.writes == 1 and chooser.values.weapon_writes == 1 and chooser.menu.lut_apply_dialog == nil)
+local weapon_only = fixture()
+weapon_only.host.refresh = function()
+    error('Weapon preset unnecessarily refreshed garment materials')
+end
+weapon_only.service.choose_luts({ weapon_slots = { [1] = true } })
+local weapon_dialog = weapon_only.menu.lut_apply_dialog
+assert(
+    #weapon_dialog.columns == 1 and weapon_dialog.columns[1].title == 'Primary Weapons',
+    'Weapon page exposed garment targets'
+)
+assert(
+    not pcall(weapon_dialog.on_apply, { ['gear:armor:1'] = true }),
+    'Weapon-only chooser accepted hidden garment targets'
+)
+assert(weapon_dialog.on_apply({ ['weapon:1:body'] = true }))
+assert(
+    weapon_only.values.writes == 0 and weapon_only.values.weapon_writes == 1,
+    'Shared chooser changed unselected gear'
+)
 local saved_identity = fixture()
 saved_identity.service.choose_luts()
 saved_identity.preset.entries[2].weapon_resource = 'ffffffffffffffff'

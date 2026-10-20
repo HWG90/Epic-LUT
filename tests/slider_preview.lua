@@ -96,3 +96,44 @@ menu.visible = false
 input(bar.x + (bar.w / 0.2) * 0.1, y, false)
 assert(math.abs(h.get('value') - 0.8) < 1e-9 and changes == 1, 'Closing the menu committed an unfinished drag')
 print('PASS slider transaction: responsive draft display, zero intermediate callbacks, one release commit and no-op rejection')
+
+-- Owners with transient pixels can preview live without committing settings.
+local runtime, previews, finishes = h.get('value'), 0, 0
+local control = api.mods[h.id].controls.value
+control.slider_begin = function() return { before = runtime } end
+control.slider_preview = function(session, value)
+    previews = previews + 1
+    runtime = value
+end
+control.slider_end = function(session, commit)
+    finishes = finishes + 1
+    if commit then assert(h.set('value', runtime)) else runtime = session.before end
+end
+menu.visible = true
+input(x, y, false)
+menu.compose(1920, 1080)
+local function at(value, down) input(bar.x + (bar.w / 0.2) * value, y, down) end
+at(0.1, true)
+at(0.2, true)
+assert(runtime ~= 0.8 and changes == 1, 'Held slider did not preview independently of its settings')
+for i = 1, 5 do at(0.2, true) end -- Flush the pending changed value.
+local count = previews
+for i = 1, 120 do at(0.2, true) end
+assert(previews == count, 'Stationary slider repeated preview work')
+for i = 1, 60 do at(0.2 + i / 100, true) end
+assert(previews - count <= 15, 'Numeric preview exceeded its 15 Hz work budget')
+at(0.8, false)
+assert(runtime == 0.8 and h.get('value') == 0.8 and finishes == 1 and changes == 1,
+    'Returning to the starting value committed history')
+at(0.1, true)
+at(0.3, true)
+at(0.3, false)
+assert(math.abs(runtime - 0.3) < 1e-9 and changes == 2 and finishes == 2,
+    'Release failed to flush the final value as one commit')
+at(0.7, true)
+at(0.6, true)
+menu.visible = false
+at(0.6, false)
+assert(math.abs(runtime - 0.3) < 1e-9 and changes == 2 and finishes == 3,
+    'Closing the menu failed to restore the drag starting value')
+print('PASS live numeric preview: bounded changed-value work, exact endpoint commit and close rollback')

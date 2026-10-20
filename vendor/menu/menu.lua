@@ -620,6 +620,34 @@ function M.new(api, measure, Text)
 
     local drag, window_drag, window_resize, color_drag, palette_drag, split_drag, preview_drag, scroll_drag, custom_drag
     local text_repeat
+    -- Numeric previews are opt-in, like color pickers. Their owners retain the
+    -- starting pixels; intermediate values never enter settings or Undo history.
+    local function finish_numeric_drag(commit)
+        local item = drag
+        drag = nil
+        if item and item.session then
+            local ok, why = pcall(item.control.slider_end, item.session, commit)
+            if not ok then self.notice = tostring(why) end
+            return ok, why
+        end
+        return true
+    end
+    local function preview_numeric_drag(item, force, dt)
+        if not item.control.slider_preview then return end
+        item.preview_age = (item.preview_age or 1) + (dt or 1 / 60)
+        if item.preview_value == item.value or (not force and item.preview_age < 1 / 15) then return end
+        local ok, why = pcall(function()
+            item.session = item.session or item.control.slider_begin()
+            item.control.slider_preview(item.session, item.value)
+        end)
+        if not ok then
+            finish_numeric_drag(false)
+            self.notice = tostring(why)
+            return false
+        end
+        item.preview_value, item.preview_age = item.value, 0
+        return true
+    end
     local function cancel_custom_drag(reason)
         local item = custom_drag
         custom_drag = nil
@@ -675,7 +703,7 @@ function M.new(api, measure, Text)
         self.dropdown = nil
         self.mouse_held = false
 
-        drag = nil
+        finish_numeric_drag(false)
         window_drag = nil
         window_resize = nil
         color_drag = nil
@@ -1008,7 +1036,7 @@ function M.new(api, measure, Text)
         if toggle then
             text_repeat = nil
             cancel_custom_drag('menu closed')
-            drag = nil
+            finish_numeric_drag(false)
             window_drag = nil
             window_resize = nil
             self.dropdown = nil
@@ -1695,7 +1723,7 @@ function M.new(api, measure, Text)
             if console then
                 console.release()
             end
-            drag = nil
+            finish_numeric_drag(false)
             window_drag = nil
             window_resize = nil
             scroll_drag, color_drag, palette_drag, split_drag, preview_drag = nil, nil, nil, nil, nil
@@ -1724,6 +1752,7 @@ function M.new(api, measure, Text)
         end
 
         if not self.visible then
+            if drag then finish_numeric_drag(false) end
             local key = self.toggle_key or 121
             local down = input.down(key)
             if down and not held[key] then
@@ -2023,22 +2052,28 @@ function M.new(api, measure, Text)
 
             if drag then
                 if not self.visible then
-                    drag = nil
+                    finish_numeric_drag(false)
                 elseif input.down(1) then
                     if x then
-                        -- Preview the draft only; edit/history callbacks run once on release.
                         drag.move(x, y)
+                        preview_numeric_drag(drag, false, dt)
                     end
                 else
-                    local current = drag.mod.handle.get(drag.control.id)
-                    local ok, err = true, nil
-                    if current ~= drag.value then
-                        ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
+                    if drag.control.slider_preview then
+                        local item = drag
+                        if preview_numeric_drag(item, true, dt) ~= false then
+                            finish_numeric_drag(true)
+                        end
+                    else
+                        local current = drag.mod.handle.get(drag.control.id)
+                        local ok, err = true, nil
+                        if current ~= drag.value then
+                            ok, err = (drag.mod.handle.edit or drag.mod.handle.set)(drag.control.id, drag.value)
+                        end
+                        self.notice = ok and saved_notice(drag.control, drag.mod.handle)
+                            or ('Could not save: ' .. tostring(err))
+                        drag = nil
                     end
-
-                    self.notice = ok and saved_notice(drag.control, drag.mod.handle)
-                        or ('Could not save: ' .. tostring(err))
-                    drag = nil
                 end
             end
 
@@ -2100,7 +2135,7 @@ function M.new(api, measure, Text)
             cancel_custom_drag('menu closed')
             self.release_console()
             hits = {}
-            drag = nil
+            finish_numeric_drag(false)
             window_drag = nil
             window_resize = nil
             self.dropdown = nil
@@ -4325,7 +4360,7 @@ function M.new(api, measure, Text)
             self.text_edit = nil
         end
         if drag and drag.floating_owner and not floating_by_id[drag.floating_owner] then
-            drag = nil
+            finish_numeric_drag(false)
         end
         if scroll_drag and scroll_drag.floating_owner and not floating_by_id[scroll_drag.floating_owner] then
             scroll_drag = nil
@@ -5241,6 +5276,12 @@ function M.new(api, measure, Text)
                 drawing.button(px + pad + 148, toolbar_y, 140, bh, 'Clear All', function()
                     select_all(false)
                 end)
+                if dialog.allow_combine then
+                    drawing.button(px + pad + 296, toolbar_y, dw - pad * 2 - 296, bh,
+                        dialog.combine and 'One combined patch' or 'Separate patches', function()
+                            dialog.combine = not dialog.combine
+                        end)
+                end
             end
             local caption_y = toolbar_y - hint_height - 4
             bounded(
@@ -5248,7 +5289,7 @@ function M.new(api, measure, Text)
                 caption_y,
                 gear_columns and 'Choose an imported LUT, then its destination. Auto-map uses the checked gear columns.'
                     or mapping and 'Choose an imported LUT, then click its destination. Auto-map repeats imports in slot order.'
-                    or 'Matching Pattern LUTs are always included.',
+                    or dialog.hint or 'Matching Pattern LUTs are always included.',
                 12,
                 muted,
                 dw - pad * 2,
@@ -5395,7 +5436,7 @@ function M.new(api, measure, Text)
                     py + pad,
                     (dw - pad * 2 - 8) / 2,
                     bh,
-                    'Apply',
+                    dialog.action_label or 'Apply',
                     apply,
                     { enabled = any, accent = any and accent, ink = T.background }
                 )

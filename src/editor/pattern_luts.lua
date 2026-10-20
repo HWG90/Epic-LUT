@@ -257,7 +257,7 @@ function P.new(deps)
         sync()
         return note('3x1 Pattern DDS ready. Load a destination Pattern LUT, then apply the imported table.')
     end
-    local function apply()
+    local function apply(preview)
         local group = selected()
         for _, b in ipairs(group.bindings) do
             local current = deps.binding(b)
@@ -284,7 +284,7 @@ function P.new(deps)
             deps.applied(group.bindings)
         end
         remember()
-        sync()
+        if not preview then sync() end
     end
     local function edit(fn)
         if deps.indicator then
@@ -1459,6 +1459,43 @@ function P.new(deps)
     end
     function self.attach(h, c)
         handle, controls = h, c
+        for id, index in pairs({ pattern_metal_r = 4, pattern_metal_g = 5, pattern_metal_b = 6,
+            pattern_opacity = 7, pattern_unknown_a = 11, pattern_color_alpha = 3,
+            pattern_unknown_r = 8, pattern_unknown_g = 9, pattern_unknown_b = 10 }) do
+            local at = index
+            controls[id].slider_begin = function()
+                local d = assert(self.document, 'Load a Pattern LUT first')
+                assert(not d.stale and not d.read_only, 'Load an editable current Pattern LUT')
+                assert(self.stop_flash(), 'Pattern highlight restoration pending')
+                return { document = d, before = pixels(d), object = selected().object }
+            end
+            controls[id].slider_preview = function(session, value)
+                local d = session.document
+                assert(self.document == d and not d.stale and not d.read_only
+                    and selected().object == session.object, 'Pattern slider target changed; load current patterns')
+                local before = pixels(d)
+                d.data[at] = value
+                if pixels(d) ~= before then
+                    local ok, why = pcall(function() validate(d); apply(true) end)
+                    if not ok then ffi.copy(d.data, before, 48); sync(); error(why, 0) end
+                end
+            end
+            controls[id].slider_end = function(session, commit)
+                local d = session.document
+                if self.document ~= d or d.stale or d.read_only or selected().object ~= session.object then return end
+                if pixels(d) == session.before then return end
+                if commit then
+                    push_history(session.before)
+                    note('Selected Pattern LUT updated live.')
+                else
+                    local before = pixels(d)
+                    ffi.copy(d.data, session.before, 48)
+                    local ok, why = pcall(apply)
+                    if not ok then ffi.copy(d.data, before, 48); sync(); error(why, 0) end
+                end
+                sync()
+            end
+        end
         controls.pattern_picker.can_open_picker = function()
             return self.document ~= nil and not self.document.read_only and not self.document.stale,
                 'Load a current editable Pattern LUT first.'
