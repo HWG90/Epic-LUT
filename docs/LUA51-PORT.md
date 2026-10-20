@@ -252,7 +252,10 @@ An explicit [external OS-service backend](LUA51-EXTERNAL-PLATFORM.md) now shares
 those operations with a separate EXE, using ordinary Lua process launch and pipe
 streams. Standalone tests use the real service with DLL loading forbidden;
 they cover authenticated ownership, bounded active failures and idle silence.
-This route remains opt-in and has not been activated in the game.
+This route remains opt-in. An approved OS-only game probe verified helper
+startup, Unicode binary IO and cleanup. Its incomplete declared-module list
+stopped the hash/settings checks; a corrected isolated package is prepared.
+The complete in-game smoke check and gameplay acceptance remain pending.
 
 Full current-runtime activation is still unproven. Regular package builders
 eagerly select legacy engine/avatar/lobby/Armory modules and the old input DLL.
