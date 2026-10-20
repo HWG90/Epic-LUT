@@ -1,5 +1,5 @@
 -- Planning and frozen receipts only. The runtime owns all native writes and rollback.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local M = { MAX_BINDINGS = 4096, MAX_GROUPS = 3072 }
 local roles = { 'primary', 'secondary', 'support' }
 local labels = { 'Primary', 'Secondary', 'Support' }
@@ -35,9 +35,9 @@ function M.fit(document, width, height)
         'Incompatible weapon LUT family'
     )
     assert(width ~= 3 or height == 1, 'Invalid Pattern LUT shape')
-    local data = ffi.new('float[?]', width * height * 4)
+    local data = buffers.new(width * height * 4)
     for row = 0, height - 1 do
-        ffi.copy(data + row * width * 4, document.data + (row % document.height) * width * 4, width * 16)
+        buffers.copy(data, document.data, width * 4, row * width * 4, (row % document.height) * width * 4)
     end
     return { data = data, width = width, height = height }
 end
@@ -54,31 +54,29 @@ function M.bytes(document)
     )
     local size = document.width * document.height * 16
     assert(
-        type(document.data) == 'cdata' and ffi.istype('float[?]', document.data) and ffi.sizeof(document.data) >= size,
+        (buffers.count(document.data) or -1) >= size / 4,
         'Weapon LUT must own its complete float32 array'
     )
     for index = 0, size / 4 - 1 do
         local value = tonumber(document.data[index])
         assert(value == value and math.abs(value) <= 1e10, 'Invalid weapon LUT float')
     end
-    return ffi.string(document.data, size)
+    return buffers.bytes(document.data, size / 4)
 end
 function M.copy(document)
     local bytes, result = M.bytes(document), {}
     for key, value in pairs(document) do
         result[key] = value
     end
-    result.data = ffi.new('float[?]', #bytes / 4)
-    ffi.copy(result.data, bytes, #bytes)
+    result.data = buffers.new(#bytes / 4)
+    buffers.copy(result.data, bytes, #bytes / 4)
     if document.original ~= nil then
         assert(
-            type(document.original) == 'cdata'
-                and ffi.istype('float[?]', document.original)
-                and ffi.sizeof(document.original) >= #bytes,
+            (buffers.count(document.original) or -1) >= #bytes / 4,
             'Invalid original weapon LUT array'
         )
-        result.original = ffi.new('float[?]', #bytes / 4)
-        ffi.copy(result.original, document.original, #bytes)
+        result.original = buffers.new(#bytes / 4)
+        buffers.copy(result.original, document.original, #bytes / 4)
     end
     return result
 end

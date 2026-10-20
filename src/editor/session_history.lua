@@ -1,7 +1,7 @@
 -- History snapshots and transactional restoration of owned material/Pattern writes.
 -- UI, persistence and activation state remain with the session controller.
 local H = {}
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local function field(value)
     local kind = type(value)
     value = value == nil and '' or tostring(value)
@@ -29,7 +29,7 @@ local function weapon_signature(state)
             field(table.concat(keys)),
             field(d.width),
             field(d.height),
-            field(ffi.string(d.data, d.width * d.height * 16)),
+            field(buffers.bytes(d.data, d.width * d.height * 4)),
             field(d.source),
             field(d.resource),
             field(d.revision),
@@ -39,7 +39,7 @@ local function weapon_signature(state)
             field(d.weapon_slot or entry.weapon_slot),
             field(d.weapon_resource or entry.weapon_resource or entry.weapon_resource64),
             field(d.weapon_resource64 or entry.weapon_resource64 or entry.weapon_resource),
-            field(d.original and ffi.string(d.original, d.width * d.height * 16)),
+            field(d.original and buffers.bytes(d.original, d.width * d.height * 4)),
         }
         entries[#entries + 1] = table.concat(parts)
     end
@@ -176,7 +176,7 @@ function H.new(deps)
         end
         local signature = {
             tostring(state.imported),
-            state.loaded and ffi.string(state.loaded.data, state.loaded.width * state.loaded.height * 16) or '',
+            state.loaded and buffers.bytes(state.loaded.data, state.loaded.width * state.loaded.height * 4) or '',
             state.loaded and state.loaded.source or '',
         }
         local weapon_runtime = deps.weapon_runtime and deps.weapon_runtime()

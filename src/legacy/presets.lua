@@ -1,5 +1,5 @@
 -- Strict data-only presets: legacy armor RGB v1 and full-float target-specific v2.
-local ffi=require('ffi')
+local buffers=m and m.float_buffer or require('src.core.float_buffer')
 local P={MAX_BYTES=4*1024*1024}
 local function item(c)return string.format('%08x',c.identity.target_id or c.identity.armor)end
 local function kind(c)return c.identity.target_kind or 'armor'end
@@ -46,7 +46,7 @@ function P.decode(text,c)
         elseif f[1]=='lut' then
             local lut=expected[f[2]];assert(#f==4 and lut and not declared[f[2]] and f[3]==tostring(lut.width) and f[4]==tostring(lut.height),'Unknown, duplicate or incompatible LUT')
             declared[f[2]]=true
-            if version==2 then documents[f[2]]=ffi.new('float[?]',lut.width*lut.height*4)end
+            if version==2 then documents[f[2]]=buffers.new(lut.width*lut.height*4)end
         elseif f[1]=='row' then
             local lut=expected[f[2]];local n=tonumber(f[3]);assert(#f==5 and lut and declared[f[2]] and n and n%1==0 and n>=1 and n<=lut.height and f[3]==tostring(n),'Invalid row')
             local id=f[2]..'_r'..n;assert(not seen[id] and (f[4]=='0'or f[4]=='1') and color(f[5]),'Invalid or duplicate color row')

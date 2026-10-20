@@ -2,7 +2,7 @@
 -- Column 3 Alpha controls roughness; its unmapped RGB values remain intact.
 local P = {}
 function P.new(deps)
-    local ffi = require('ffi')
+    local buffers = m and m.float_buffer or require('src.core.float_buffer')
     local self = { groups = {}, undo = {}, redo = {}, busy = false, documents = {}, selections = {}, scroll = 0 }
     local handle, controls
     local function note(text)
@@ -13,7 +13,7 @@ function P.new(deps)
         return assert(self.groups[handle.get('pattern_lut')], 'Load current Pattern LUTs first')
     end
     local function pixels(d)
-        return ffi.string(d.data, 48)
+        return buffers.bytes(d.data, 12)
     end
     local function remember()
         local group = selected()
@@ -240,8 +240,8 @@ function P.new(deps)
         end
         validate(source)
         self.ready, self.requested, self.waiting = true, true, nil
-        local data = ffi.new('float[12]')
-        ffi.copy(data, source.data, 48)
+        local data = buffers.new(12)
+        buffers.copy(data, source.data, 12)
         self.document = { data = data, width = 3, height = 1, original = original and pixels(original) or nil }
         self.undo, self.redo = {}, {}
         remember()
@@ -250,8 +250,8 @@ function P.new(deps)
     end
     function self.import(source)
         validate(source)
-        local data = ffi.new('float[12]')
-        ffi.copy(data, source.data, 48)
+        local data = buffers.new(12)
+        buffers.copy(data, source.data, 12)
         self.imported = { data = data, width = 3, height = 1 }
         self.ready = true
         sync()
@@ -305,7 +305,7 @@ function P.new(deps)
         end)
 
         if not ok then
-            ffi.copy(d.data, before, 48)
+            buffers.copy(d.data, before, 12)
             sync()
             error(why, 0)
         end
@@ -323,10 +323,10 @@ function P.new(deps)
             return note('No more Pattern LUT history')
         end
         local before = pixels(d)
-        ffi.copy(d.data, value, 48)
+        buffers.copy(d.data, value, 12)
         local ok, why = pcall(apply)
         if not ok then
-            ffi.copy(d.data, before, 48)
+            buffers.copy(d.data, before, 12)
             sync()
             error(why, 0)
         end
@@ -454,7 +454,7 @@ function P.new(deps)
                 end
                 assert(self.document, 'Destination Pattern LUT is still loading; wait before applying the import')
                 return edit(function(target)
-                    ffi.copy(target, source.data, 48)
+                    buffers.copy(target, source.data, 12)
                 end)
             end,
         }
@@ -1477,7 +1477,7 @@ function P.new(deps)
                 d.data[at] = value
                 if pixels(d) ~= before then
                     local ok, why = pcall(function() validate(d); apply(true) end)
-                    if not ok then ffi.copy(d.data, before, 48); sync(); error(why, 0) end
+                    if not ok then buffers.copy(d.data, before, 12); sync(); error(why, 0) end
                 end
             end
             controls[id].slider_end = function(session, commit)
@@ -1489,9 +1489,9 @@ function P.new(deps)
                     note('Selected Pattern LUT updated live.')
                 else
                     local before = pixels(d)
-                    ffi.copy(d.data, session.before, 48)
+                    buffers.copy(d.data, session.before, 12)
                     local ok, why = pcall(apply)
-                    if not ok then ffi.copy(d.data, before, 48); sync(); error(why, 0) end
+                    if not ok then buffers.copy(d.data, before, 12); sync(); error(why, 0) end
                 end
                 sync()
             end
@@ -1526,8 +1526,8 @@ function P.new(deps)
             local d = session.document
             local current_pixels = pixels(d)
             local at = (session.column - 1) * 4
-            local original = ffi.new('float[12]')
-            ffi.copy(original, session.before, 48)
+            local original = buffers.new(12)
+            buffers.copy(original, session.before, 12)
             if session.column ~= 3 or self.raw then
                 for ch = 1, 3 do
                     local displayed = math.floor(math.max(0, math.min(1, original[at + ch - 1])) * 255 + 0.5)
@@ -1543,7 +1543,7 @@ function P.new(deps)
                     apply()
                 end)
                 if not ok then
-                    ffi.copy(d.data, current_pixels, 48)
+                    buffers.copy(d.data, current_pixels, 12)
                     sync()
                     error(why, 0)
                 end
@@ -1564,10 +1564,10 @@ function P.new(deps)
                 push_history(session.before)
             elseif not commit and session.changed then
                 local before = pixels(d)
-                ffi.copy(d.data, session.before, 48)
+                buffers.copy(d.data, session.before, 12)
                 local ok, why = pcall(apply)
                 if not ok then
-                    ffi.copy(d.data, before, 48)
+                    buffers.copy(d.data, before, 12)
                     sync()
                     error(why, 0)
                 end

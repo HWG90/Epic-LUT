@@ -7,7 +7,7 @@ function V.new(deps)
     local format_resource_id = deps.format_resource_id
     local document, note, paint = deps.document, deps.note, deps.paint
     local rgb, editable, color_columns = deps.rgb, deps.editable, deps.color_columns
-    local ffi = require('ffi')
+    local buffers = m and m.float_buffer or require('src.core.float_buffer')
     local function pattern_document(d)
         return d and d.kind == 'weapon' and d.family == 'pattern' and d.width == 3 and d.height == 1
     end
@@ -970,8 +970,8 @@ function V.new(deps)
                         nil,
                         function()
                             local at = semantics.index(selected_row, selected_col, 1, d.width, d.height)
-                            local data = ffi.new('float[4]')
-                            ffi.copy(data, d.data + at, 16)
+                            local data = buffers.new(4)
+                            buffers.copy(data, d.data, 4, 0, at)
                             self.clip = { data = data, width = 1, height = 1 }
                             local color = rgb(d.data, at)
                             self.scratch = { color[1], color[2], color[3] }

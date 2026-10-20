@@ -7,7 +7,6 @@ local P = { MAX_BINDINGS = 4096, ZIP_MAX_MEMBERS = 12289 }
 -- archive is provenance, not a reliable loaded patch destination. Match the
 -- SDK's PatchBaseArchiveOnly default so one resource replacement is global.
 P.BASE_ARCHIVE = '9ba626afa44a3aa3'
-local bit = require('bit')
 local function short(n)
     return string.char(n % 256, math.floor(n / 256) % 256)
 end
@@ -294,20 +293,55 @@ function P.new(folder, deps)
     return self
 end
 -- Standard ZIP, stored entries. LUT triplets are tiny; no compression library is needed.
-local crc_table = {}
-for n = 0, 255 do
-    local crc = n
-    for _ = 1, 8 do
-        crc = bit.bxor(bit.rshift(crc, 1), bit.band(crc, 1) ~= 0 and 0xedb88320 or 0)
+-- CRC work is export-only and initialized on first ZIP, never on idle updates.
+-- LuaJIT keeps its native bit fast path; stock Lua 5.1 needs no extension.
+local crc32
+local function initialize_crc()
+    local native = rawget(_G, 'bit')
+    local bxor, rshift
+    if native then
+        bxor, rshift = native.bxor, native.rshift
+    else
+        local nibble = {}
+        for a = 0, 15 do
+            for b = 0, 15 do
+                local x, y, value, place = a, b, 0, 1
+                for _ = 1, 4 do
+                    if x % 2 ~= y % 2 then value = value + place end
+                    x, y, place = math.floor(x / 2), math.floor(y / 2), place * 2
+                end
+                nibble[a * 16 + b] = value
+            end
+        end
+        bxor = function(a, b)
+            local value, place = 0, 1
+            for _ = 1, 8 do
+                value = value + nibble[(a % 16) * 16 + b % 16] * place
+                a, b, place = math.floor(a / 16), math.floor(b / 16), place * 16
+            end
+            return value
+        end
+        rshift = function(a, n) return math.floor(a / 2 ^ n) end
     end
-    crc_table[n] = crc
+    local crc_table = {}
+    for n = 0, 255 do
+        local crc = n
+        for _ = 1, 8 do
+            crc = bxor(rshift(crc, 1), crc % 2 ~= 0 and 0xedb88320 or 0)
+        end
+        crc_table[n] = crc
+    end
+    crc32 = function(bytes)
+        local crc = 4294967295
+        for i = 1, #bytes do
+            crc = bxor(rshift(crc, 8), crc_table[bxor(crc % 256, bytes:byte(i))])
+        end
+        return 4294967295 - (crc % 4294967296)
+    end
 end
-local function crc32(bytes)
-    local crc = -1
-    for i = 1, #bytes do
-        crc = bit.bxor(bit.rshift(crc, 8), crc_table[bit.band(bit.bxor(crc, bytes:byte(i)), 255)])
-    end
-    return bit.bnot(crc)
+local function checksum(bytes)
+    if not crc32 then initialize_crc() end
+    return crc32(bytes)
 end
 function P.zip(patch)
     local base = patch.archive .. '.patch_0'
@@ -337,7 +371,7 @@ function P.zip_entries(entries)
         )
         assert(type(bytes) == 'string' and #bytes <= 8 * 1024 * 1024, 'Export ZIP entry too large')
         seen[name] = true
-        local crc = word(crc32(bytes))
+        local crc = word(checksum(bytes))
         local common = short(20)
             .. short(0)
             .. short(0)

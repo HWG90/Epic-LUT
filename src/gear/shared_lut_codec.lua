@@ -1,15 +1,36 @@
 -- Full RGBA32F tables and stable gear/material destinations. No lossy color conversion.
 local C = { MAX_RAW = 65536, MAX_TEXT = 3600, MAX_DOCS = 32, MAX_BINDINGS = 4096, LEGACY_BINDINGS = 128 }
-local ffi = require('ffi')
-local bit = require('bit')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
+local cooperative = m and m.cooperative or require('src.core.cooperative')
+local loaded_bit = package and package.loaded and package.loaded.bit
+local xor_nibbles
+local function byte_xor(a, b)
+    if loaded_bit and loaded_bit.bxor then return loaded_bit.bxor(a, b) end
+    if not xor_nibbles then
+        xor_nibbles = {}
+        for left = 0, 15 do
+            for right = 0, 15 do
+                local x, y, value, place = left, right, 0, 1
+                for _ = 1, 4 do
+                    if x % 2 ~= y % 2 then value = value + place end
+                    x, y, place = math.floor(x / 2), math.floor(y / 2), place * 2
+                end
+                xor_nibbles[left * 16 + right] = value
+            end
+        end
+    end
+    return xor_nibbles[(a % 16) * 16 + b % 16]
+        + xor_nibbles[math.floor(a / 16) * 16 + math.floor(b / 16)] * 16
+end
 local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 local digits = {}
 for i = 1, #alphabet do
     digits[alphabet:sub(i, i)] = i - 1
 end
-local function base64(bytes)
+local function base64(bytes, checkpoint)
     local out = {}
     for i = 1, #bytes, 3 do
+        if checkpoint and i % 768 == 1 then checkpoint() end
         local a, b, c = bytes:byte(i, i + 2)
         local n = a * 65536 + (b or 0) * 256 + (c or 0)
         local function char(v)
@@ -40,6 +61,26 @@ local function unbase64(text)
     return table.concat(out)
 end
 function C.compression(native)
+    -- Supported hosts supply the established LZNT1/XPRESS wire compressor.
+    -- LuaJIT may reuse an already-loaded legacy backend; never load FFI here.
+    if type(native) == 'table' and type(native.compress) == 'function' and type(native.decompress) == 'function' then
+        return native
+    end
+    local ffi = package and package.loaded and package.loaded.ffi
+    if not ffi or type(ffi.new) ~= 'function' then
+        local portable = m and m.lznt1 or require('src.core.lznt1')
+        return {
+            formats = portable.formats,
+            compress = portable.compress,
+            decompress = function(bytes, size, tag)
+                if tag == 'x' then
+                    local xpress = m and m.xpress or require('src.core.xpress')
+                    return xpress.decompress(bytes, size)
+                end
+                return portable.decompress(bytes, size, tag)
+            end,
+        }
+    end
     pcall(
         ffi.cdef,
         [[
@@ -105,25 +146,27 @@ function C.compression(native)
     }
 end
 function C.new(compression, original)
-    compression = compression or C.compression()
+    compression = compression or C.compression(m and m.shared_lut_compression)
     local function word(n)
         assert(type(n) == 'number' and n >= 0 and n < 4294967296 and n % 1 == 0, 'Invalid shared kit')
-        return ffi.string(ffi.new('uint32_t[1]', n), 4)
+        return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216))
     end
-    local function finite(doc)
+    local function finite(doc, checkpoint)
         assert(
             ((doc.width == 23 and doc.height >= 1 and doc.height <= 64) or (doc.width == 3 and doc.height == 1))
                 and doc.height % 1 == 0,
             'Unsupported shared table shape'
         )
         for i = 0, doc.width * doc.height * 4 - 1 do
+            if checkpoint and i % 256 == 0 then checkpoint() end
             local n = tonumber(doc.data[i])
             assert(n == n and math.abs(n) <= 1e10, 'Invalid shared LUT float')
         end
     end
-    local function checksum(bytes)
+    local function checksum(bytes, checkpoint)
         local a, b = 1, 0
         for i = 1, #bytes do
+            if checkpoint and i % 1024 == 1 then checkpoint() end
             a = (a + bytes:byte(i)) % 65521
             b = (b + a) % 65521
         end
@@ -165,12 +208,20 @@ function C.new(compression, original)
         weapon_header = table.concat(weapon_header)
         -- Published texture objects are immutable and can serve hundreds of
         -- bindings. Validate their finite pixels once per packet build.
-        local validated = {}
+        local validated, pixel_cache = {}, {}
         local function finite_once(document)
             if not validated[document] then
-                finite(document)
+                finite(document, checkpoint)
                 validated[document] = true
             end
+        end
+        local function pixels_once(document)
+            local pixels = pixel_cache[document]
+            if not pixels then
+                pixels = buffers.bytes(document.data, document.width * document.height * 4, nil, checkpoint)
+                pixel_cache[document] = pixels
+            end
+            return pixels
         end
         local docs, delta_docs, xor_docs, lookup, bindings, seen = {}, {}, {}, {}, {}, {}
         local decoded_bytes = 0
@@ -207,7 +258,7 @@ function C.new(compression, original)
             local d = entry.document
             finite_once(d)
             assert(d.width == (pattern and 3 or 23), 'Binding slot and table shape disagree')
-            local pixels = ffi.string(d.data, d.width * d.height * 16)
+            local pixels = pixels_once(d)
             local signature = string.char(d.width, d.height) .. pixels
             assert(not seen[key] or seen[key] == signature, 'Conflicting shared destination')
             if not seen[key] then
@@ -241,31 +292,33 @@ function C.new(compression, original)
                         and base.height == d.height
                     then
                         finite_once(base)
-                        local bytes = ffi.string(base.data, #pixels)
+                        local bytes = pixels_once(base)
                         -- Four byte planes retain every IEEE-754 bit; XOR makes
                         -- unchanged bytes zero and groups similarly changing bytes.
                         local planes = {}
                         for lane = 1, 4 do
                             local plane = {}
                             for at = lane, #pixels, 4 do
-                                plane[#plane + 1] = string.char(bit.bxor(pixels:byte(at), bytes:byte(at)))
+                                if math.floor((at - 1) / 4) % 256 == 0 then checkpoint() end
+                                plane[#plane + 1] = string.char(byte_xor(pixels:byte(at), bytes:byte(at)))
                             end
                             planes[#planes + 1] = table.concat(plane)
                             checkpoint()
                         end
                         xor_docs[index] = string.char(2, d.width, d.height)
                             .. base.resource:lower()
-                            .. checksum(bytes)
+                            .. checksum(bytes, checkpoint)
                             .. table.concat(planes)
                         local changes = {}
                         for at = 1, #pixels, 4 do
+                            if math.floor((at - 1) / 4) % 256 == 0 then checkpoint() end
                             if pixels:sub(at, at + 3) ~= bytes:sub(at, at + 3) then
                                 changes[#changes + 1] = short((at - 1) / 4) .. pixels:sub(at, at + 3)
                             end
                         end
                         local delta = string.char(1, d.width, d.height)
                             .. base.resource:lower()
-                            .. checksum(bytes)
+                            .. checksum(bytes, checkpoint)
                             .. short(#changes)
                             .. table.concat(changes)
                         if #delta < #encoded then
@@ -289,6 +342,7 @@ function C.new(compression, original)
             .. (legacy and string.char(#bindings) or short(#bindings))
         local encoded_bindings, packed_bindings, full_docs = {}, {}, {}
         for i, b in ipairs(bindings) do
+            if i % 256 == 1 then checkpoint() end
             local packed = b.index
                 - 1
                 + b.material * 32
@@ -314,7 +368,7 @@ function C.new(compression, original)
             if #raw <= C.MAX_RAW then
                 for _, tag in ipairs(compression.formats or { '' }) do
                     assert(tag == '' or tag == 'x', 'Unsupported LUT compression format')
-                    local ok, bytes = pcall(compression.compress, raw, tag)
+                    local ok, bytes = cooperative.call(compression.compress, raw, tag, checkpoint)
                     if not ok and tag == '' then
                         error(bytes, 0)
                     end
@@ -323,7 +377,7 @@ function C.new(compression, original)
                             type(bytes) == 'string' and #bytes > 0 and #bytes <= C.MAX_RAW + 4096,
                             'Invalid compressed LUT output'
                         )
-                        local packed = version .. tag .. '|' .. #raw .. '|' .. base64(bytes)
+                        local packed = version .. tag .. '|' .. #raw .. '|' .. base64(bytes, checkpoint)
                         self.packet_sizes[name] = math.min(self.packet_sizes[name] or math.huge, #packed)
                         if not text or #packed < #text then
                             text = packed
@@ -349,6 +403,7 @@ function C.new(compression, original)
         for i, doc in ipairs(docs) do
             shapes[i] = doc:sub(1, 2)
             for at = 3, #doc, 4 do
+                if math.floor((at - 1) / 4) % 256 == 0 then checkpoint() end
                 local value = doc:sub(at, at + 3)
                 local index = word_ids[value]
                 if not index then
@@ -362,10 +417,12 @@ function C.new(compression, original)
         assert(word_count <= decoded_bytes / 4, 'Shared word dictionary exceeds reconstructed budget')
         local first, frequencies = {}, {}
         for i, value in ipairs(words) do
+            if i % 256 == 1 then checkpoint() end
             first[i] = value
         end
         for _, doc in ipairs(docs) do
             for at = 3, #doc, 4 do
+                if math.floor((at - 1) / 4) % 256 == 0 then checkpoint() end
                 local value = doc:sub(at, at + 3)
                 frequencies[value] = (frequencies[value] or 0) + 1
             end
@@ -373,7 +430,8 @@ function C.new(compression, original)
         -- Exact sparse destination masks retain every mesh/material assignment.
         -- One 64x64 bit mask per (kind, slot, document), independent of input order.
         local mask_groups, mask_order = {}, {}
-        for _, b in ipairs(bindings) do
+        for mask_index, b in ipairs(bindings) do
+            if mask_index % 256 == 1 then checkpoint() end
             local key = string.char(b.t + (b.pattern and 4 or 0), b.slot, b.index)
             local group = mask_groups[key]
             if not group then
@@ -398,17 +456,20 @@ function C.new(compression, original)
         local function dictionary_candidate(order)
             local ids, planes, low, high = {}, {}, {}, {}
             for i, value in ipairs(order) do
+                if i % 256 == 1 then checkpoint() end
                 ids[value] = i - 1
             end
             for lane = 1, 4 do
                 local plane = {}
                 for i, value in ipairs(order) do
+                    if i % 256 == 1 then checkpoint() end
                     plane[i] = value:sub(lane, lane)
                 end
                 planes[lane] = table.concat(plane)
             end
             for _, doc in ipairs(docs) do
                 for at = 3, #doc, 4 do
+                    if math.floor((at - 1) / 4) % 256 == 0 then checkpoint() end
                     local index = ids[doc:sub(at, at + 3)]
                     low[#low + 1] = string.char(index % 256)
                     if word_count > 256 then
@@ -458,13 +519,27 @@ function C.new(compression, original)
         table.sort(words) -- Keep the established lexical candidate first on ties.
         dictionary_candidate(words)
         dictionary_candidate(first)
-        table.sort(words, function(a, b)
-            if frequencies[a] == frequencies[b] then
-                return a < b
+        -- `words` is already lexical. Stable frequency buckets retain exactly
+        -- the previous descending-frequency/lexical-tie ordering without one
+        -- long, non-yieldable Lua comparator sort in the stock VM.
+        local frequencies_order, maximum_frequency = {}, 0
+        for i, value in ipairs(words) do
+            if i % 256 == 1 then checkpoint() end
+            local frequency = frequencies[value]
+            maximum_frequency = math.max(maximum_frequency, frequency)
+            local bucket = frequencies_order[frequency]
+            if not bucket then bucket = {}; frequencies_order[frequency] = bucket end
+            bucket[#bucket + 1] = value
+        end
+        local ranked = {}
+        for frequency = maximum_frequency, 1, -1 do
+            if frequency % 256 == 0 then checkpoint() end
+            for _, value in ipairs(frequencies_order[frequency] or {}) do
+                ranked[#ranked + 1] = value
+                if #ranked % 256 == 0 then checkpoint() end
             end
-            return frequencies[a] > frequencies[b]
-        end)
-        dictionary_candidate(words)
+        end
+        dictionary_candidate(ranked)
         assert(text, 'Shared LUT raw budget exceeded; local edits are kept')
         assert(
             #text <= C.MAX_TEXT,
@@ -497,9 +572,8 @@ function C.new(compression, original)
             return s
         end
         local function readword()
-            local data = ffi.new('uint32_t[1]')
-            ffi.copy(data, take(4), 4)
-            return tonumber(data[0])
+            local a, b, c, d = take(4):byte(1, 4)
+            return a + b * 256 + c * 65536 + d * 16777216
         end
         local result = { body = readword(), armor = readword(), helmet = readword(), documents = {}, entries = {} }
         local masked_weapons
@@ -552,13 +626,13 @@ function C.new(compression, original)
                 'Invalid shared word dictionary size'
             )
             local planes = take(count * 4)
-            local dictionary = ffi.new('uint8_t[?]', math.max(1, count * 4))
-            for lane = 0, 3 do
-                for i = 0, count - 1 do
-                    dictionary[i * 4 + lane] = planes:byte(lane * count + i + 1)
-                end
+            local words = {}
+            for i = 0, count - 1 do
+                words[i + 1] = string.char(planes:byte(i + 1), planes:byte(count + i + 1),
+                    planes:byte(count * 2 + i + 1), planes:byte(count * 3 + i + 1))
             end
-            local values = ffi.cast('const float *', dictionary)
+            local dictionary = buffers.from_bytes(table.concat(words), count)
+            local values = dictionary
             for i = 0, count - 1 do
                 local value = tonumber(values[i])
                 assert(value == value and math.abs(value) <= 1e10, 'Invalid shared LUT float')
@@ -568,14 +642,14 @@ function C.new(compression, original)
             local flat_index = 0
             for i, shape in ipairs(shapes) do
                 local document_floats = shape.width * shape.height * 4
-                local data = ffi.new('float[?]', document_floats)
+                local data = buffers.new(document_floats)
                 for at = 0, document_floats - 1 do
                     local index = indexes:byte(flat_index + 1)
                     if count > 256 then
                         index = index + indexes:byte(floats + flat_index + 1) * 256
                     end
                     assert(index < count, 'Invalid shared word dictionary index')
-                    ffi.copy(data + at, dictionary + index * 4, 4)
+                    buffers.copy(data, dictionary, 1, at, index)
                     flat_index = flat_index + 1
                 end
                 local document = { width = shape.width, height = shape.height, data = data }
@@ -596,28 +670,29 @@ function C.new(compression, original)
                 )
                 decoded_bytes = decoded_bytes + width * height * 16
                 assert(decoded_bytes <= C.MAX_RAW, 'Reconstructed shared appearance exceeds budget')
-                local data = ffi.new('float[?]', width * height * 4)
+                local data = buffers.new(width * height * 4)
                 if mode == 0 then
-                    ffi.copy(data, take(width * height * 16), width * height * 16)
+                    buffers.copy(data, take(width * height * 16), width * height * 4)
                 else
                     local resource, expected = take(16), take(8)
                     assert(resource:match('^%x+$') and expected:match('^%x+$'), 'Invalid shared baseline identity')
                     local base = original and original(resource)
                     assert(base, 'Sharing: waiting for original LUT ' .. resource)
                     assert(base.width == width and base.height == height, 'Shared baseline dimensions disagree')
-                    local bytes = ffi.string(base.data, width * height * 16)
+                    local bytes = buffers.bytes(base.data, width * height * 4)
                     assert(checksum(bytes) == expected, 'Sharing: original LUT differs from sender ' .. resource)
-                    ffi.copy(data, bytes, #bytes)
+                    buffers.copy(data, bytes, #bytes / 4)
                     if mode == 2 then
                         local planes = take(#bytes)
-                        local target = ffi.cast('uint8_t *', data)
+                        local target = {}
                         local count = width * height * 4
                         for lane = 0, 3 do
                             for i = 0, count - 1 do
                                 local at = i * 4 + lane
-                                target[at] = bit.bxor(bytes:byte(at + 1), planes:byte(lane * count + i + 1))
+                                target[at + 1] = string.char(byte_xor(bytes:byte(at + 1), planes:byte(lane * count + i + 1)))
                             end
                         end
+                        buffers.copy(data, table.concat(target), count)
                     else
                         local lo, hi = take(2):byte(1, 2)
                         local count, prior = lo + hi * 256, -1
@@ -626,7 +701,7 @@ function C.new(compression, original)
                             lo, hi = take(2):byte(1, 2)
                             local index = lo + hi * 256
                             assert(index > prior and index < width * height * 4, 'Invalid shared change index')
-                            ffi.copy(data + index, take(4), 4)
+                            buffers.copy(data, take(4), 1, index)
                             prior = index
                         end
                     end

@@ -1,7 +1,8 @@
 -- Restart intent is palette + equipment slot; patch provenance belongs to export.
 local I = {}
 function I.new(m, host)
-    local M, bit = assert(m.weapon_mapping), require('bit')
+    local M = assert(m.weapon_mapping)
+    local function has_flag(mask, flag) return math.floor(mask / flag) % 2 == 1 end
     local self, saved, remaining, queued = {}, nil, {}, {}
     local function freeze(entries)
         assert(type(entries)=='table' and #entries>0 and #entries<=4096, 'Invalid saved weapon intent')
@@ -78,7 +79,7 @@ function I.new(m, host)
     end
     function self.wake(mask)
         for slot in pairs(remaining) do
-            if not mask or bit.band(mask,2^(slot-1))~=0 or bit.band(mask,8)~=0 then queued[slot]=true end
+            if not mask or has_flag(mask,2^(slot-1)) or has_flag(mask,8) then queued[slot]=true end
         end
     end
     function self.cancel(discard)

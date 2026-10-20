@@ -1,6 +1,6 @@
 -- Scoped material/Basic gear editing. Plans, immutable copies and target proofs
 -- belong here; active-session mutation and owned native writes stay in the host.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local G = {}
 function G.new(modules, host)
     local self = {}
@@ -447,9 +447,9 @@ function G.new(modules, host)
                 end
                 assert(original, 'Armor LUT ' .. index .. ' colors unavailable; no palettes copied')
                 assert(original.width == source.width, 'Armor LUT columns differ; no palettes copied')
-                local data = ffi.new('float[?]', original.width * original.height * 4)
-                ffi.copy(data, original.data, original.width * original.height * 16)
-                ffi.copy(data, source.data, math.min(original.height, source.height) * original.width * 16)
+                local data = buffers.new(original.width * original.height * 4)
+                buffers.copy(data, original.data, original.width * original.height * 4)
+                buffers.copy(data, source.data, math.min(original.height, source.height) * original.width * 4)
                 plans[#plans + 1] = {
                     targets = targets,
                     document = {

@@ -8,7 +8,7 @@ function C.new(deps)
     local remember, change, history = deps.remember, deps.change, deps.history
     local color_columns, color_labels = deps.color_columns, deps.color_labels
     local preset_files = deps.preset_files
-    local ffi = require('ffi')
+    local buffers = m and m.float_buffer or require('src.core.float_buffer')
     local function pages()
         local advanced = {
             { type = 'text', label = 'Material, camo and raw RGBA values. Unknown meanings stay marked unknown.' },
@@ -242,7 +242,7 @@ function C.new(deps)
                         on_activate = function()
                             local d = assert(document(), 'Import first')
                             local at = semantics.index(self.handle.get('edit_row'), 1, 1, d.width, d.height)
-                            self.row_clip = ffi.string(d.data + at, d.width * 16)
+                            self.row_clip = buffers.bytes(d.data, d.width * 4, at)
                             return note(
                                 'Copied row '
                                     .. self.handle.get('edit_row')
@@ -262,11 +262,11 @@ function C.new(deps)
                             assert(not d.read_only and not d.stale, 'Load an editable current LUT first')
                             assert(#self.row_clip == d.width * 16, 'Row clipboard columns differ')
                             local at = semantics.index(self.handle.get('edit_row'), 1, 1, d.width, d.height)
-                            local copied = ffi.new('float[?]', d.width * 4)
-                            ffi.copy(copied, self.row_clip, #self.row_clip)
+                            local copied = buffers.new(d.width * 4)
+                            buffers.copy(copied, self.row_clip, #self.row_clip / 4)
                             deps.dds.validate(copied, d.width, 1)
                             d = remember()
-                            ffi.copy(d.data + at, self.row_clip, #self.row_clip)
+                            buffers.copy(d.data, self.row_clip, #self.row_clip / 4, at)
                             self.sync()
                             return note(
                                 'Pasted into row '
@@ -359,8 +359,8 @@ function C.new(deps)
                                 type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= d.height,
                                 'Invalid preset row'
                             )
-                            local snapshot = { width = d.width, height = 1, data = ffi.new('float[?]', d.width * 4) }
-                            ffi.copy(snapshot.data, d.data + (row - 1) * d.width * 4, d.width * 16)
+                            local snapshot = { width = d.width, height = 1, data = buffers.new(d.width * 4) }
+                            buffers.copy(snapshot.data, d.data, d.width * 4, 0, (row - 1) * d.width * 4)
                             local function commit()
                                 preset_files.save_row(name, snapshot, 1)
                                 self.refresh_presets()
@@ -401,7 +401,7 @@ function C.new(deps)
                             local data = preset_files.load_row(self.handle.get('row_preset'))
                             local d = remember()
                             for row = first, last do
-                                ffi.copy(d.data + (row - 1) * d.width * 4, data, d.width * 16)
+                                buffers.copy(d.data, data, d.width * 4, (row - 1) * d.width * 4)
                             end
                             self.sync()
                             local count = last - first + 1

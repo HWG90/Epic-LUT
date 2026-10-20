@@ -1,6 +1,6 @@
 -- Saved gear application and its per-LUT chooser. The controller owns session
 -- mutation; this service owns planning, frozen receipts and stale-target checks.
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local A = {}
 function A.new(modules, host)
     local function weapons(preset, options)
@@ -320,7 +320,7 @@ function A.new(modules, host)
         local columns = { { title = 'Armor / Cape', items = {} }, { title = 'Helmet', items = {} } }
         local records, saved, saved_pixels = {}, {}, {}
         local function bytes(d)
-            return ffi.string(d.data, d.width * d.height * 16)
+            return buffers.bytes(d.data, d.width * d.height * 4)
         end
         local function metadata(original)
             return original

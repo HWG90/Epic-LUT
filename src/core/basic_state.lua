@@ -1,6 +1,6 @@
 -- Independent editor copies, keyed by target and original resource object.
 local B = {}
-local ffi = require('ffi')
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 local weapon_metadata =
     { 'kind', 'family', 'weapon_slot', 'weapon_resource', 'weapon_resource64', 'source_resource', 'mixed' }
 function B.clone(source, label, skip_binding_documents, seen)
@@ -8,8 +8,8 @@ function B.clone(source, label, skip_binding_documents, seen)
     if seen[source] then
         return seen[source]
     end
-    local data = ffi.new('float[?]', source.width * source.height * 4)
-    ffi.copy(data, source.data, source.width * source.height * 16)
+    local data = buffers.new(source.width * source.height * 4)
+    buffers.copy(data, source.data, source.width * source.height * 4)
     local result =
         { data = data, width = source.width, height = source.height, source = label or source.source, revision = 0 }
     seen[source] = result
@@ -45,8 +45,8 @@ function B.copier()
         copy.resource_object = source.resource_object
         local bytes = source.width * source.height * 16
         if source.original then
-            copy.original = ffi.new('float[?]', source.width * source.height * 4)
-            ffi.copy(copy.original, source.original, bytes)
+            copy.original = buffers.new(source.width * source.height * 4)
+            buffers.copy(copy.original, source.original, bytes / 4)
             self.bytes = self.bytes + bytes
         end
         if source.kind == 'weapon' and source.binding_documents then
@@ -63,7 +63,7 @@ end
 function B.copy(destination, source)
     assert(destination.width == source.width, 'Palette columns differ')
     local rows = math.min(destination.height, source.height)
-    ffi.copy(destination.data, source.data, rows * destination.width * 16)
+    buffers.copy(destination.data, source.data, rows * destination.width * 4)
     destination.revision = (destination.revision or 0) + 1
     return rows
 end

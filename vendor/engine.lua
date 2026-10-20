@@ -48,7 +48,8 @@ Engine.LUT_SLOT = 0x7e662968
 Engine.PATTERN_SLOT = 0x81d4c49d
 Engine.CAPE_LUT_SLOT = 0x0e494183 -- 'cape_lut' (the cape shader's __tex_cape_lut, t2: KB match-your-colors-cape-tint)
 Engine.DECAL_SLOT = 0x632a8b80 -- 'decal_sheet' (the cape shader's __tex_decal_sheet, t9: the emblems' colors)
-Engine.TEXTURE_TYPE = 0xCD4238C6A0C69E32ULL
+-- Exact high/low construction avoids LuaJIT-only integer literal syntax.
+Engine.TEXTURE_TYPE = ffi.new('uint64_t', 0xCD4238C6) * 4294967296 + 0xA0C69E32
 Engine.RGBA32F = 0x80820820
 -- RenderBufferApi's compressed formats are 0x10000000 + n (compressed_format +0x08 = exe 0x1c7480); its format table
 -- (exe 0x190c840, 8 bits per texel for n = 2) gives BC1, BC2, BC3, BC4, BC5, BC6H, BC7 for n = 0-6. A BC3 sheet with
@@ -116,7 +117,7 @@ end
 -- A 64-bit resource name from 16 hex digits, as uint64 cdata.
 function Engine.name64(hex)
     local high, low = tonumber(hex:sub(1, 8), 16), tonumber(hex:sub(9, 16), 16)
-    return ffi.cast('uint64_t', high) * 4294967296ULL + low
+    return ffi.cast('uint64_t', high) * 4294967296 + low
 end
 
 -- The loaded texture object of a texture resource name, or nil when it is not loaded.
