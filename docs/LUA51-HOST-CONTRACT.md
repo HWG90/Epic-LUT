@@ -100,10 +100,13 @@ appears in the engine inventory but folder-opening semantics are unverified.
 Engine memory, texture creation and appearance lifecycle capabilities are a
 separate contract and are not supplied by this filesystem/input helper.
 
-Keep these genuinely unavailable services visible as port work; absence of FFI
-must not be hidden behind a successful syntax test or functions that silently
-drop the requested behavior. A future service must preserve Unicode/path and
-resource ownership, bounded request/data sizes, cancellation, and idle silence.
+Epic LUT now provides an explicit external OS-service backend for these
+operations; it does not borrow the loader's private helper connection. See
+[LUA51-EXTERNAL-PLATFORM.md](LUA51-EXTERNAL-PLATFORM.md) for its authenticated
+ownership, bounded requests, cancellation, idle silence and separate OS-only
+game evidence. The loader's public contract remains unchanged. Engine binding
+and gameplay acceptance remain separate work; a successful parser or OS test
+must not stand in for those functions.
 
 ## Offline evidence
 

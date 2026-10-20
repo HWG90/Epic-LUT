@@ -47,9 +47,47 @@ pages or the focused Epic LUT / canonical LLL source searches. In particular:
 Lua 5.1's [debug information contract](https://www.lua.org/manual/5.1/manual.html#lua_Debug)
 has no general C-function parameter/signature schema. The inspected LLL source
 uses debug information for source/log identity, not engine API documentation.
-No loader-owned argument-metadata service was identified. Calling undocumented
-functions with guessed arguments to obtain errors would be another live probe,
-not a consequence of the metadata-only inventory approval.
+No loader-owned argument-metadata service was identified. A supported signature
+and ownership contract are still required; invoking undocumented functions with
+guessed arguments to obtain errors would not establish either.
+
+## Build-25988413 bounded metadata capture
+
+A completed one-shot capture inspected only the public `Renderer`,
+`RenderBuffer`, `Material`, `Mesh`, `Float32Array`, and `Unit` tables using raw
+iteration/lookup and the built-in `getmetatable`. It made no engine-function or
+metamethod calls. The actual Lua 5.1 result contains 256 entries, seven table
+nodes and 8,778 text bytes, with no truncation. The owned capture project and
+its settings were retired with their hashes verified afterward.
+
+The private R6 artifact is `dist/engine-api-metadata/captured-config.cfg`, SHA256
+`0f79d9f2caf0bd74d6600d443add64ffa94e5d6a4e0fa7ad71a210b8471562db`.
+The loader reported 44 ms for the entire one-shot operation; this is not a LUT
+application or steady-state performance measurement. The capture used the
+original 128 KiB text ceiling; its 8,778-byte result also fits the subsequently
+corrected 24 KiB ceiling. That ceiling reserves space for JSON escaping and
+other configuration under LLL's 64 KiB decode limit.
+
+`Renderer`, `RenderBuffer`, `Material`, `Mesh`, and `Unit` have raw `__index`
+members pointing back to their own tables and no visible metatable.
+`Float32Array` has a visible metatable containing a function-valued `__call`.
+This establishes a callable entry point, without its accepted arguments,
+allocation behavior or compatibility with texture upload.
+
+The capture also establishes these numeric constants for this build:
+
+| Public constant | Value |
+| --- | ---: |
+| `RenderBuffer.RB_FLOAT_COMPONENT` | 0 |
+| `RenderBuffer.RB_VALIDITY_STATIC` | 0 |
+| `RenderBuffer.RB_VALIDITY_UPDATABLE` | 1 |
+| `RenderBuffer.RB_TEXTURE_BUFFER_VIEW` | 3 |
+| `RenderBuffer.RB_TEXTURE_TYPE_2D` | 0 |
+
+No documentation, argument signatures, additional texture-assignment getter,
+or RGBA32F creation/readback contract appeared. The enum values and constructor
+entry point provide no new ownership-safe LUT operation by themselves; the
+remaining engine-provider gap is unchanged.
 
 ## Remaining proof boundary
 

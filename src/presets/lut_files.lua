@@ -1,5 +1,6 @@
 -- Validated named DDS files. UI and gear state are deliberately outside this service.
 local L = {}
+local buffers = m and m.float_buffer or require('src.core.float_buffer')
 -- Shared suffix formatting keeps exact IDs out of the user-name truncation budget.
 function L.naming_suffix(document, original, naming, label, ids, ordinal)
     naming = naming or 1
@@ -72,7 +73,11 @@ function L.new(folder, deps)
     end
     function self.save_row(name, document, row)
         assert(type(row) == 'number' and row % 1 == 0 and row >= 1 and row <= document.height, 'Invalid preset row')
-        return deps.dds.write(path(name, 'row-'), document.data + (row - 1) * document.width * 4, document.width, 1)
+        local destination = path(name, 'row-')
+        local count = document.width * 4
+        local data = buffers.new(count)
+        buffers.copy(data, document.data, count, 0, (row - 1) * count)
+        return deps.dds.write(destination, data, document.width, 1)
     end
     function self.load_row(name)
         local bytes = deps.read(path(name, 'row-'), deps.dds.MAX_BYTES)
