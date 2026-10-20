@@ -75,3 +75,25 @@ do
     assert(current == 999 and writes == 2, 'Restore overwrote a foreign binding after the failed apply')
 end
 print('PASS binding rollback: already-old native state restores prior metadata; foreign replacements remain untouched')
+
+do
+    local current, allocations, writes = 10, 0, 0
+    local retain={cache={},records={},bytes=0}
+    local session=B.new({retain=retain,present=function() return true end,
+        binding=function() return current end,key=function() return 'one' end,
+        create_texture=function(_,_,data) allocations=allocations+1;return {object=100,data=data} end,
+        bind=function(_,object) writes=writes+1;current=object end})
+    local b={current=10,original=10}
+    local doc={width=23,height=8,data=ffi.new('float[736]')}
+    local plan=session.prepare(doc,{b})
+    assert(current==10 and writes==0 and allocations==1,'Preparation changed a material')
+    session.commit(plan)
+    for i=1,1000 do session.apply(doc,{b}) end
+    assert(allocations==1 and writes==1 and #session.owned==1 and #retain.records==1,
+        'Unchanged palette reallocated or rebound')
+    local stale=session.prepare(doc,{b});current=999
+    assert(not pcall(session.commit,stale) and writes==1,'Prepared plan overwrote foreign ownership')
+    local ok=pcall(session.prepare,{width=1/0,height=8,data=doc.data},{b})
+    assert(not ok and allocations==1)
+end
+print('PASS shared apply pipeline: prepare makes no writes, exact reuse stays idle, stale commit and dimensions fail closed')

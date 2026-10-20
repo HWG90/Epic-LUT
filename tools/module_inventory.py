@@ -22,3 +22,12 @@ SOURCE_GROUPS.update({'gear_edit': 'editor', 'editor_actions': 'editor', 'gear_e
 
 OWN.append('shared_targets')
 SOURCE_GROUPS['shared_targets']='gear'
+
+OWN += ['appearance_events', 'appearance_event_binary']
+SOURCE_GROUPS.update({'appearance_events':'gear','appearance_event_binary':'gear'})
+
+OWN += ['appearance_recovery','editor_registration']
+SOURCE_GROUPS.update({'appearance_recovery':'editor','editor_registration':'editor'})
+
+OWN.append('setup_restore')
+SOURCE_GROUPS['setup_restore'] = 'editor'

@@ -4,9 +4,9 @@ local Engine = dofile('vendor/engine.lua')
 local Catalog = dofile('src/gear/gear_catalog.lua')
 local Pattern = dofile('src/editor/pattern_luts.lua')
 local Binding = dofile('src/gear/binding_session.lua')
-local f = assert(io.open('src/editor/direct_editor.lua', 'rb')); local source = f:read('*a'); f:close()
+local f = assert(io.open('src/editor/direct_editor.lua', 'rb')); local source = f:read('*a'):gsub('\r\n', '\n'); f:close()
 local function region(first, last)
-    local a = assert(source:find(first, 1, true)); local b = assert(source:find(last, a, true))
+    local a = assert(source:find(first, 1, true), 'Missing start: '..first); local b = assert(source:find(last, a, true), 'Missing end: '..last)
     return source:sub(a, b - 1)
 end
 local make = assert(loadstring('return function(m,read,small,big) local operations={}\n' .. region('local function binding(', 'local function present(')
@@ -85,7 +85,8 @@ assert(calls.read - before == 192 and #result.owned == 95, 'Changed binding betw
 -- Mutation and restoration use actual, uncached Engine.binding even after discovery.
 target.current = 100; session.owned = {}
 local document = { width = 1, height = 1, data = ffi.new('float[4]') }
-before = calls.read; assert(session.apply(document, { target }) == 1 and calls.read - before == 4)
+-- Prepare, commit revalidation, and write readback each use a fresh binding read.
+before = calls.read; assert(session.apply(document, { target }) == 1 and calls.read - before == 6)
 assert(fresh(target) == 900 and calls.bind == 1)
 before = calls.read; assert(session.restore() and calls.read - before == 4 and fresh(target) == 100)
 assert(calls.bind == 2, 'Uncached restoration did not read back its write')

@@ -12,11 +12,11 @@ local pending, palettes = nil, {}
 local table_index
 local operations = {}
 local import_jobs
-local setup, resume_job, resume_done
+local setup
+local resume_state = {}
 local original_luts
 local appearance
 local appearance_pending = {}
-local appearance_elapsed = 0
 local appearance_read
 local appearance_proof
 local defaults = {}
@@ -352,7 +352,7 @@ local function initialize_import_picker()
         end,
         before_load = function(rows_mode)
             if not rows_mode then
-                resume_done, resume_job = true, nil
+                resume_state.done, resume_state.job = true, nil
             end
         end,
         load_direct = function(name)
@@ -434,106 +434,21 @@ end
 local function recover_appearance(dt)
     operations.appearance_worked = false
     if not appearance then return end
-    -- One recovery stage per update. Keep both scanners and replay work from
-    -- landing in the same gameplay frame; never retain a native read snapshot.
-    local job = operations.appearance_recovery
-    if not job then
-        -- No native reads/scans for unchanged appearance. Only a lifecycle
-        -- notification or a bounded unresolved-source retry can request work.
-        local generation = edit.appearance_generation or 0
-        if generation == (edit.appearance_completed or 0) then
-            -- Legacy loaders without lifecycle events retain automatic recovery.
-            -- Only a changed cheap read-only signature can schedule a full scan.
-            if edit.appearance_has_events or not operations.appearance_changed then return end
-            edit.appearance_fallback_elapsed = (edit.appearance_fallback_elapsed or 0) + math.max(0, dt or 0)
-            if edit.appearance_fallback_elapsed < 0.5 then return end
-            edit.appearance_fallback_elapsed = 0
-            if not operations.appearance_changed() then return end
-            operations.invalidate_appearance()
-            generation = edit.appearance_generation
-        end
-        if (edit.appearance_retry or 0) >= 40 then
-            edit.appearance_completed = generation
-            return
-        end
-        if edit.appearance_wake then
-            appearance_elapsed, edit.appearance_wake = 0.5, nil
-        end
-        appearance_elapsed = appearance_elapsed + math.max(0, dt or 0)
-        if appearance_elapsed < 0.5 then return end
-        appearance_elapsed = 0
+    -- Keep the idle path allocation-free as well as native-read-free.
+    if not operations.appearance_recovery
+        and (edit.appearance_generation or 0) == (edit.appearance_completed or 0) then return end
+    local function replay()
+        return m.appearance_recovery.update({
+            operations = operations, edit = edit, appearance = appearance, pending = appearance_pending,
+            indicator = region_indicator, patterns = pattern_editor, frontend = frontend,
+            resource = appearance_resource, proof = appearance_proof, refresh = refresh,
+            groups = groups, bindings = bindings,
+        }, dt)
     end
-    if (region_indicator and region_indicator.job)
-        or (pattern_editor and pattern_editor.flashing())
-        or (frontend and frontend.menu and frontend.menu.visible
-            and frontend.menu.is_interacting and frontend.menu.is_interacting()) then
-        operations.appearance_recovery = nil
-        return
-    end
-    if not job then
-        edit.appearance_retry = (edit.appearance_retry or 0) + 1
-        for key, pending in pairs(appearance_pending) do
-            local b = { original = pending.original, save_key = pending.save_key,
-                kind = pending.kind, texture = pending.texture }
-            local count = appearance.remember({ b }, pending.pattern,
-                { [pending.kind] = pending.proof }, appearance_resource)
-            if count > 0 then appearance_pending[key] = nil end
-        end
-    end
-    if appearance.count() == 0 and not (edit.editor_target and edit.editor_target.kind == 'cape') then
-        operations.appearance_recovery = nil
-        edit.appearance_completed = edit.appearance_generation or 0
-        return
-    end
-    local proof = appearance_proof()
-    if not proof then operations.appearance_recovery = nil; return end
-    if job and (job.proof.armor ~= proof.armor or job.proof.helmet ~= proof.helmet
-        or job.proof.cape ~= proof.cape) then
-        operations.appearance_recovery = nil
-        appearance_elapsed = 0.5 -- Restart promptly with current gear.
-        return
-    end
-    if not job then
-        job = { phase = 1, proof = proof, generation = edit.appearance_generation or 0, pattern_ready = true }
-        operations.appearance_recovery = job
-    end
-    operations.appearance_worked = true
-    local function replay(collection, pattern, session)
-        local targets = {}
-        for _, group in ipairs(collection or {}) do
-            for _, b in ipairs(group.bindings) do targets[#targets + 1] = b end
-        end
-        -- Fresh binding reads and the session's present/ownership/readback
-        -- checks still run immediately before every write.
-        local observe = operations.discovery_binding()
-        for _, batch in ipairs(appearance.batches(targets, pattern, proof, appearance_resource, observe)) do
-            session.apply(batch.document, batch.targets)
-            for _, b in ipairs(batch.targets) do
-                if b.cape then b.applied_cape_proof = proof.cape end
-            end
-        end
-    end
-    local phase = job.phase
-    job.phase = phase + 1 -- Errors cannot pin a failed stage to every frame.
-    if phase == 1 then
-        job.material_ready = pcall(refresh, true)
-    elseif phase == 2 then
-        if job.material_ready then replay(groups, false, bindings) end
-    elseif phase == 3 then
-        if pattern_editor and operations.pattern_session then
-            local ok, discovered = pcall(pattern_editor.scan, true)
-            job.pattern_ready = ok
-            if ok then job.pattern_groups = discovered end
-        end
-    else
-        operations.appearance_recovery = nil
-        if job.pattern_groups and operations.pattern_session then
-            replay(job.pattern_groups, true, operations.pattern_session)
-        end
-        if job.material_ready and job.pattern_ready and not next(appearance_pending) then
-            edit.appearance_completed = job.generation
-        end
-    end
+    -- Recovery is outside the user-action wrapper. Coalesce its validated
+    -- material writes to one commit per affected mesh in this stage too.
+    if m.engine.batch_commits then return m.engine.batch_commits(native, replay) end
+    return replay()
 end
 local function initialize_editor_state()
     operations.live_edit = m.live_edit and m.live_edit.new()
@@ -741,8 +656,8 @@ local function apply(document, selected_kind)
     end
     document = document or edit.loaded or edit.imported
     assert(document, 'Load a DDS first')
-    resume_done = true
-    resume_job = nil
+    resume_state.done = true
+    resume_state.job = nil
     if #groups == 0 then
         refresh()
     end
@@ -887,7 +802,7 @@ local function load_debug_lut()
     return action(function()
         assert(not pending and not index_job, 'Wait for the current import to finish')
         load_dds(DEBUG_SOURCE)
-        resume_done, resume_job, populate_request = true, nil, nil
+        resume_state.done, resume_state.job, populate_request = true, nil, nil
         edit.populate_manual_request = nil
         basic_selected, m.quick_source, edit.quick_selection = nil, nil, nil
         basic_imported = edit.imported
@@ -1042,8 +957,8 @@ local function apply_matching()
         end
         batches[#batches + 1] = { document = document, targets = p.targets, pattern = p.pattern }
     end
-    resume_done = true
-    resume_job = nil
+    resume_state.done = true
+    resume_state.job = nil
     local bindings = 0
     for _, p in ipairs(batches) do
         if p.pattern then
@@ -1279,7 +1194,7 @@ gear_edits = function()
                 end
             end,
             resume = function()
-                resume_done, resume_job = true, nil
+                resume_state.done, resume_state.job = true, nil
             end,
             commit_copied_armor = function()
                 if basic_selected and basic_selected.kind == 'armor' then
@@ -1365,8 +1280,8 @@ local function copy_helmet_all()
     return gear_edits().copy_helmet_all()
 end
 local function remove_lut()
-    resume_done = true
-    resume_job = nil
+    resume_state.done = true
+    resume_state.job = nil
     assert(restore(), 'Restoration pending')
     if pattern_editor then
         assert(pattern_editor.close(), 'Pattern restoration pending')
@@ -1385,221 +1300,30 @@ local function remove_lut()
     return message('All applied LUTs removed; original bindings restored and saved application cleared.')
 end
 local function resume_setup()
-    if resume_done or not setup then
-        return
+    if resume_state.done or not setup then return end
+    if not operations.setup_restore then
+        operations.setup_restore = m.setup_restore.new(m, {
+            edit = edit, operations = operations, resume_state = resume_state,
+            setup = function() return setup end,
+            memory = function() return memory end,
+            game = function() return game end,
+            paths = function() return paths end,
+            original_luts = function() return original_luts end,
+            pattern_editor = function() return pattern_editor end,
+            groups = function() return groups end,
+            palette_editor = function() return palette_editor end,
+            message = message,
+            appearance_proof = appearance_proof,
+            disable_matching = disable_matching,
+            refresh = refresh,
+            apply_bindings = apply_bindings,
+            set_default = set_default,
+            remember_appearance = remember_appearance,
+            palette_choices = palette_choices,
+            set_palettes = function(value) palettes = value end,
+        })
     end
-    if not resume_job then
-        local identity = m.avatar.resolve_live(memory, game)
-        if not identity then
-            return
-        end
-        local valid, plan, capes = pcall(setup.read)
-        if not valid then
-            resume_done = true
-            return message('Saved setup is invalid: ' .. tostring(plan))
-        end
-        if not next(plan) then
-            resume_done = true
-            return
-        end
-        capes = capes or {}
-        local function matches(key, b)
-            local captured = capes[key]
-            if not b.cape then
-                return captured == nil
-            end
-            if not captured then
-                return false
-            end
-            local proof = appearance_proof()
-            if not proof or not proof.cape then
-                return nil
-            end
-            if proof.cape ~= captured.proof then
-                return false
-            end
-            local original = original_luts and original_luts.get(b.original)
-            if not original then
-                return nil
-            end
-            return original.resource == captured.resource
-        end
-        resume_job = coroutine.create(function()
-            local documents = {}
-            local total = 0
-            for _, file in pairs(plan) do
-                if not documents[file] then
-                    local f = assert(io.open(paths.presets .. '/' .. file, 'rb'), 'Saved palette missing')
-                    local bytes = f:read(m.dds.MAX_BYTES + 1)
-                    f:close()
-                    local data, w, h = m.dds.decode(bytes)
-                    assert(w == 23 or (w == 3 and h == 1), 'Saved palette is not a material or Pattern LUT')
-                    total = total + w * h * 16
-                    assert(total <= 8 * 1024 * 1024, 'Saved palette budget exceeded')
-                    documents[file] = { data = data, width = w, height = h }
-                    coroutine.yield()
-                end
-            end
-            local files = {}
-            local has_patterns = false
-            for key, file in pairs(plan) do
-                local pattern = key:sub(1, 2) == 'p:'
-                local document = documents[file]
-                assert(
-                    (pattern and document.width == 3 and document.height == 1) or (not pattern and document.width == 23),
-                    'Saved LUT layout does not match its destination'
-                )
-                has_patterns = has_patterns or pattern
-            end
-            if has_patterns then
-                assert(pattern_editor and operations.pattern_session, 'Pattern setup restoration unavailable')
-            end
-            for file, document in pairs(documents) do
-                if document.width == 23 then
-                    files[#files + 1] = file
-                end
-            end
-            table.sort(files)
-            palettes = {}
-            local labels = {}
-            for i, file in ipairs(files) do
-                palettes[i] = paths.presets .. '/' .. file
-                labels[i] = file == plan['armor-all']
-                        and (file == plan['helmet-all'] and 'Saved Armor + Helmet' or 'Saved Armor')
-                    or file == plan['helmet-all'] and 'Saved Helmet'
-                    or 'Saved LUT override ' .. i
-            end
-            palette_choices(#labels > 0 and labels or { 'Import first' })
-            if not edit.loaded and files[1] then
-                edit.loaded = documents[files[1]]
-                if palette_editor then
-                    palette_editor.sync()
-                end
-            end
-            local ok, changed = disable_matching()
-            assert(ok, changed)
-            coroutine.yield()
-            coroutine.yield() -- Let the original provider release its bindings.
-            local by_file = {}
-            local pattern_files = {}
-            local began = os.time()
-            local expected = 0
-            local next_scan = 0
-            for key in pairs(plan) do
-                if key ~= 'armor-all' and key ~= 'helmet-all' then
-                    expected = expected + 1
-                end
-            end
-            repeat
-                local now = memory.time and memory.time() or os.clock()
-                if now < next_scan then
-                    coroutine.yield()
-                else
-                    next_scan = now + 0.25
-                    local scanned = pcall(refresh)
-                    local matched, seen = 0, {}
-                    by_file = {}
-                    pattern_files = {}
-                    if scanned then
-                        for _, group in ipairs(groups) do
-                            for _, b in ipairs(group.bindings) do
-                                local accepted = matches(b.save_key, b)
-                                if plan[b.save_key] and accepted ~= nil and not seen[b.save_key] then
-                                    matched = matched + 1
-                                    seen[b.save_key] = true
-                                end
-                                local file = accepted and plan[b.save_key]
-                                    or (b.armor and plan['armor-all'])
-                                    or (b.helmet and plan['helmet-all'])
-                                if file then
-                                    by_file[file] = by_file[file] or {}
-                                    table.insert(by_file[file], b)
-                                end
-                            end
-                        end
-                    end
-                    local patterns_ready = not has_patterns or pcall(pattern_editor.scan)
-                    if has_patterns and patterns_ready then
-                        for _, group in ipairs(pattern_editor.all_groups or {}) do
-                            for _, b in ipairs(group.bindings) do
-                                local key = 'p:' .. b.save_key
-                                local accepted = matches(key, b)
-                                local file = accepted and plan[key]
-                                if plan[key] and accepted == false and not seen[key] then
-                                    matched = matched + 1
-                                    seen[key] = true
-                                end
-                                if file then
-                                    if not seen[key] then
-                                        matched = matched + 1
-                                        seen[key] = true
-                                    end
-                                    pattern_files[file] = pattern_files[file] or {}
-                                    table.insert(pattern_files[file], b)
-                                end
-                            end
-                        end
-                    end
-                    if scanned and patterns_ready and (matched >= expected or os.time() - began >= 10) then
-                        break
-                    end
-                    assert(os.time() - began < 15, 'Local LUTs are not ready for the saved setup')
-                    coroutine.yield()
-                end
-            until false
-            local applied = 0
-            for file, targets in pairs(by_file) do
-                local checked = {}
-                for _, b in ipairs(targets) do
-                    if matches(b.save_key, b) then
-                        checked[#checked + 1] = b
-                    end
-                end
-                local count, texture = 0
-                if #checked > 0 then
-                    count, texture = apply_bindings(documents[file], checked)
-                end
-                applied = applied + count
-                if file == plan['armor-all'] then
-                    set_default('armor', texture)
-                end
-                if file == plan['helmet-all'] then
-                    set_default('helmet', texture)
-                end
-                if not edit.loaded then
-                    edit.loaded = documents[file]
-                    if palette_editor then
-                        palette_editor.sync()
-                    end
-                end
-                coroutine.yield()
-            end
-            for file, targets in pairs(pattern_files) do
-                local checked = {}
-                for _, b in ipairs(targets) do
-                    if matches('p:' .. b.save_key, b) then
-                        checked[#checked + 1] = b
-                    end
-                end
-                if #checked > 0 then
-                    applied = applied + operations.pattern_session.apply(documents[file], checked)
-                    remember_appearance(checked, true)
-                end
-                coroutine.yield()
-            end
-            edit.remember_application = applied > 0
-            message('Saved setup restored to ' .. applied .. ' local bindings. Unmatched slots were skipped.')
-        end)
-    end
-    local ok, why = coroutine.resume(resume_job)
-    if not ok then
-        resume_done = true
-        resume_job = nil
-        message('Saved setup could not resume: ' .. tostring(why))
-    elseif coroutine.status(resume_job) == 'dead' then
-        resume_done = true
-        resume_job = nil
-    end
+    return operations.setup_restore.update()
 end
 local function commit_history_snapshot(snapshot)
     edit.imported = snapshot.imported
@@ -2012,7 +1736,7 @@ local function armory_actions()
                 history.record(before, history.capture())
             end,
             begin_application = function()
-                resume_done, resume_job = true, nil
+                resume_state.done, resume_state.job = true, nil
             end,
             remember_basic = function(b, d)
                 basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)] =
@@ -2157,7 +1881,7 @@ local function import_mapping()
                     return ok, value
                 end,
                 finish = function()
-                    edit.remember_application, resume_done, resume_job = true, true, nil
+                    edit.remember_application, resume_state.done, resume_state.job = true, true, nil
                     save_setup()
                 end,
             },
@@ -2400,92 +2124,39 @@ local function select_import_cell(entry, row, column, identify, kind)
     edit.quick_selection = { row = row, column = column, document = edit.loaded }
 end
 local function register(current)
-    if api == current and handle then
-        return
-    end
-    if handle then
-        handle.unregister()
-    end
-    api = current
-    local callbacks = m.editor_actions.new({
+    return m.editor_registration.register(m, {
+        edit = edit, operations = operations,
+        api = function() return api end,
+        handle = function() return handle end,
+        frontend = function() return frontend end,
+        preferences = function() return preferences end,
+        palette_editor = function() return palette_editor end,
+        pattern_editor = function() return pattern_editor end,
+        import_view = function() return import_view end,
+        history = function() return history end,
+        armory_collection = function() return armory_collection end,
+        outfits = function() return outfits end,
+        groups = function() return groups end,
+        original_luts = function() return original_luts end,
+        basic_documents = function() return basic_documents end,
+        basic_names = function() return basic_names end,
+        paths = function() return paths end,
+        live_select_suppressed = function() return live_select_suppressed end,
+        select_suppressed = function() return select_suppressed end,
+        pending = function() return pending end,
+        palettes = function() return palettes end,
+        basic_state = function() return basic_state end,
+        basic_selected = function() return basic_selected end,
+        status = function() return status end,
+        updates = function() return updates end,
         action = action,
         message = message,
-        dds = m.dds,
-        handle = function()
-            return handle
-        end,
-        mod = function()
-            return api.mods[handle.id]
-        end,
-        frontend = function()
-            return frontend
-        end,
-        preferences = function()
-            return preferences
-        end,
-        palette_editor = function()
-            return palette_editor
-        end,
-        import_view = function()
-            return import_view
-        end,
-        history = function()
-            return history
-        end,
-        armory_collection = function()
-            return armory_collection
-        end,
-        outfits = function()
-            return outfits
-        end,
-        quick_selection = function()
-            return edit.quick_selection
-        end,
-        loaded_document = function()
-            return edit.loaded
-        end,
-        imported_document = function()
-            return edit.imported
-        end,
-        group = function(index)
-            return groups[index]
-        end,
-        original = function(object)
-            return original_luts and original_luts.get(object)
-        end,
-        group_original = function(index)
-            return original_luts and original_luts.get(groups[index].object)
-        end,
-        basic_document = function(b)
-            return basic_documents[m.gear_catalog.kind(b) .. ':' .. tostring(b.original)]
-        end,
-        current_page = function()
-            return frontend.menu and api.mods[handle.id].pages[frontend.menu.page].id
-        end,
-        lut_label_resource = function()
-            local panel = import_state().raw.basic[palette_editor and palette_editor.gear or 'armor']
-            local original = panel and panel.group and original_luts and original_luts.get(groups[panel.group].object)
-            return original and original.resource
-        end,
-        lut_labels = function()
-            return operations.lut_names
-        end,
         import_state = import_state,
         load = load,
         cancel_import = cancel_import,
-        load_debug_lut = operations.load_debug_lut,
-        paint_quick = operations.paint_quick,
-        apply_matching = operations.apply_matching,
-        open_editor = function()
-            return api.focus_page(handle.id, 'colors')
-        end,
-        manage_outfit = operations.manage_outfit,
         select_outfit = select_outfit,
         sync_armory_export = sync_armory_export,
         apply_outfit = apply_outfit,
-        armory_cape_available = operations.armory_cape_available,
-        choose_outfit_luts = operations.choose_outfit_luts,
-        open_import_map = operations.open_import_map,
         mark_current_load = mark_current_load,
         load_editor_target = load_editor_target,
         apply_editor_target = apply_editor_target,
@@ -2493,25 +2164,8 @@ local function register(current)
         copy_basic_palette = copy_basic_palette,
         copy_helmet_all = copy_helmet_all,
         identify_region = identify_region,
-        stop_identification = function()
-            return stop_identification()
-        end,
+        stop_identification = stop_identification,
         populate_worn = populate_worn,
-        refreshing_basic_presets = function()
-            return edit.refreshing_basic_presets
-        end,
-        basic_preset_name = function(index)
-            return basic_names[index - 1]
-        end,
-        presets_directory = function()
-            return paths.presets
-        end,
-        preset_files = function()
-            return operations.preset_files
-        end,
-        refresh_basic_presets = function(name)
-            return operations.refresh_basic_presets(name)
-        end,
         save_palette = save_palette,
         apply_checked = apply_checked,
         refresh = refresh,
@@ -2519,290 +2173,34 @@ local function register(current)
         remove_lut = remove_lut,
         save_setup = save_setup,
         keep_outfit = keep_outfit,
-        appearance_proof = function()
-            return operations.appearance_proof()
-        end,
-        live_selection_suppressed = function()
-            return live_select_suppressed
-        end,
-        palette_path = function(index)
-            return not select_suppressed and not pending and palettes[index] or nil
-        end,
-        queue_editor_target = function(kind)
-            editor_pending = { kind = kind, began = os.time() }
-        end,
-        request_population = function()
-            if original_luts and original_luts.retry then
-                original_luts.retry()
-            end
-            populate_request = os.time()
-            edit.populate_manual_request = true
-        end,
-        accept_basic_preset = function(document)
-            edit.loaded = document
-        end,
-        resume_palette = function(path)
-            resume_done = true
-            resume_job = nil
-            return load_dds(path)
-        end,
-        clear_live_draft = function()
-            edit.loaded = nil
-            basic_selected = nil
-            edit.quick_selection = nil
-        end,
-        accept_live_draft = function(document)
-            edit.loaded = document
-            edit.preview_document = edit.loaded
-            edit.preview_revision = 0
-        end,
-        accept_applied_draft = function(document)
-            edit.loaded = document
-            edit.preview_document = edit.loaded
-            edit.preview_revision = 0
-            edit.quick_selection = nil
-        end,
-        clear_removed_draft = function()
-            edit.loaded = nil
-            edit.imported = nil
-            palettes = {}
-        end,
-        restoration_selection = function()
-            return basic_selected,
-                (edit.editor_target and edit.editor_target.kind) or (basic_selected and basic_selected.kind)
-        end,
-        clear_restoration_draft = function()
-            basic_state.clear()
-            basic_missing_reported = {}
-            edit.quick_selection = nil
-            edit.loaded = nil
-        end,
-        clear_basic_selection = function()
-            basic_selected = nil
-        end,
-        accept_restored_draft = function(document, selected)
-            edit.loaded = document
-            basic_selected = selected
-            basic_imported = edit.imported
-            edit.preview_document = edit.loaded
-            edit.preview_revision = edit.loaded and (edit.loaded.revision or 0) or 0
-        end,
-        export_armory = function()
-            local preset =
-                assert(armory_collection and armory_collection.selected, 'Choose a saved Armory preset first')
-            local exporter = assert(m.preset_export, 'Armory exporter unavailable').new(m, paths, {
-                lut_label = function(hash) return operations.lut_names and operations.lut_names.get(hash) end,
-                include_capes = function()
-                    return operations.include_capes_in_exports()
-                end,
-                include_patterns = operations.include_patterns_in_exports,
-                binding_provenance = operations.binding_export_provider(preset),
-                original_patch = operations.export_original_patch,
-                material_source = operations.export_material_source,
-                unit_layout = m.binding_unit_layout,
-                resource_id_available = function(kind, id)
-                    return operations.export_id_available(kind, id)
-                end,
-            })
-            local output, description, sharefile = exporter.save(
-                handle.get('armory_export_name'),
-                preset,
-                handle.get('armory_export_format'),
-                handle.get('armory_export_lut'),
-                handle.get('armory_dds_naming')
-            )
-            return message('Exported ' .. preset.name .. ' (' .. description .. ') to ' .. (sharefile or output))
-        end,
-    })
-    local composition = m.editor_composition.new({
-        registry = m.editor_registry,
-        configuration = m.configuration,
-        configuration_view = m.configuration_view,
-        basic_view = m.basic_view,
-        basic_camo = m.basic_camo,
-        armory_view = m.armory_view,
-        import_view = m.import_view,
-        table_groups = m.table_groups,
-        ui_core = m.ui_core,
-        control_help = m.control_help,
-        value_tooltip = m.palette.value_tooltip,
-        key_name = m.ui_menu and m.ui_menu.key_name,
-        sharing_enabled = not not m.shared_appearance,
-        preferences = preferences,
-        updates = updates,
-        action = action,
-        message = message,
-        info = import_state,
-        palette_editor = function()
-            return palette_editor
-        end,
-        pattern_editor = function()
-            return pattern_editor
-        end,
-        auto_populate_changed = function(enabled)
-            edit.auto_signature = nil
-            if enabled then
-                edit.populate_manual_request = nil
-                populate_request = os.time()
-                populate_next = 0
-            end
-            return true
-        end,
-        resource_changed = function()
-            if handle then
-                import_state()
-                if frontend.menu then
-                    frontend.menu.redraw_revision = (frontend.menu.redraw_revision or 0) + 1
-                end
-            end
-        end,
-        apply_camo = function(kind, value, mode, color)
-            if not operations.syncing_basic_camo then
-                local completed
-                local result = action(function()
-                    local text = operations.apply_basic_camo(kind, value, mode, color)
-                    completed = true
-                    return text
-                end)
-                if mode == 'color' then
-                    return completed == true, result
-                end
-                return result
-            end
-        end,
-        search_armory = function(value)
-            armory_collection.filter(value, handle.get('armory_sort'))
-        end,
-        sort_armory = function(value)
-            armory_collection.filter(handle.get('armory_search'), value)
-        end,
-        sharing_status_control = function(control)
-            edit.sharing_status_control = control
-        end,
-        default_mod = function(id)
-            frontend.default_mod_id = id
-        end,
-        remove_outfit_choice = armory_collection and function(index, label)
-            local ok, result = armory_collection.remove_choice(index, label)
-            sync_armory_export()
-            return ok, result
-        end,
-        gear_ready = function()
-            return edit.loaded ~= nil or edit.imported ~= nil
-        end,
-        load_seen = function()
-            return edit.load_seen or (preferences and preferences.load_seen and preferences.load_seen(false)) or false
-        end,
-        camo_picker_guard = function(control, container)
-            return operations.basic_camo_picker_guard(control, container)
-        end,
-        quick_selection = function()
-            return edit.quick_selection
-        end,
-        loaded_document = function()
-            return edit.loaded
-        end,
-        validate_quick_target = function()
-            if edit.editor_target then
-                return pcall(operations.checked_editor_target, edit.editor_target)
-            end
-            return true
-        end,
-        refresh_outfits = m.outfit_presets and refresh_outfits or nil,
-        select_basic = function(row, kind)
-            if kind then
-                local panel = import_state().raw.basic[kind]
-                if not panel or not panel.document then
-                    message('Reading worn ' .. kind .. ' colors; try again when ready.')
-                    return false
-                end
-                local proof = operations.appearance_proof()
-                local original = original_luts and original_luts.get(groups[panel.group].object)
-                if panel.kind == 'cape' then
-                    assert(
-                        proof and proof.cape and original and original.resource,
-                        'Current Cape identity is still loading; load current colors again'
-                    )
-                end
-                edit.editor_target = nil
-                basic_selected = {
-                    kind = panel.kind or kind,
-                    container = kind,
-                    key = panel.key,
-                    group = panel.group,
-                    cape_proof = panel.kind == 'cape' and proof and proof.cape or nil,
-                    resource = original and original.resource,
-                }
-                edit.loaded = panel.document
-                basic_imported = edit.imported
-                edit.preview_document = edit.loaded
-                edit.preview_revision = edit.loaded.revision or 0
-                palette_editor.sync()
-            end
-            if edit.loaded and palette_editor then
-                palette_editor.focus_cell(row, 1)
-                return true
-            end
-        end,
-        set_camo_row = function(...)
-            return operations.set_basic_camo_row(...)
-        end,
-        initialize_basic_presets = function()
-            operations.refresh_basic_presets = function(previous)
-                local selector = api.mods[handle.id].controls.basic_preset
-                previous = previous or selector.choices[handle.get('basic_preset')]
-                basic_names = {}
-                local choices, selected = { 'New preset...' }, 1
-                for _, file in
-                    ipairs(m.windows and m.windows.files and m.windows.files(paths.presets, 'palette-*.dds') or {})
-                do
-                    local name = file:match('^palette%-([%w _-]+)%.dds$')
-                    if name then
-                        basic_names[#basic_names + 1] = name
-                        choices[#choices + 1] = name
-                        if name == previous then
-                            selected = #choices
-                        end
-                    end
-                end
-                selector.choices = choices
-                edit.refreshing_basic_presets = true
-                local called, ok, why = pcall(handle.set, 'basic_preset', selected)
-                edit.refreshing_basic_presets = false
-                assert(called and ok, called and why or ok)
-            end
-            api.mods[handle.id].controls.basic_preset.on_delete_choice = function(index, label)
-                local name = assert(basic_names[index - 1], 'Choose a saved palette preset')
-                assert(name == label, 'Preset list changed; reopen it before removing a preset')
-                operations.preset_files.delete_palette(name)
-                if handle.get('basic_preset_name') == name then
-                    assert(handle.set('basic_preset_name', ''))
-                end
-                operations.refresh_basic_presets()
-                return true, 'Removed saved palette preset: ' .. name
-            end
-            operations.refresh_basic_presets()
-        end,
-        select_import_cell = function(...)
-            return operations.select_import_cell(...)
-        end,
-    })
-    local pages = composition.pages(callbacks, current, {
-        ui_scale = preferences.scale and preferences.scale() or 100,
-        status = status,
-    })
-    handle = api.register({ id = 'epic_direct_lut', name = 'Epic LUT', pages = pages })
-    local mounted_import_view = composition.mount(api, handle)
-    if m.import_view then
-        import_view = mounted_import_view
-    end
-    groups = {}
+        load_dds = load_dds,
+        refresh_outfits = refresh_outfits,
+        weapon_editor = nil,
+        set_api = function(value) api = value end,
+        set_handle = function(value) handle = value end,
+        set_import_view = function(value) import_view = value end,
+        clear_groups = function() groups = {} end,
+        queue_editor_target = function(kind) editor_pending = {kind=kind,began=os.time()} end,
+        request_population = function() populate_request = os.time() end,
+        reset_population_delay = function() populate_next = 0 end,
+        stop_resume = function() resume_state.done, resume_state.job = true, nil end,
+        clear_basic_selection = function() basic_selected = nil end,
+        clear_palettes = function() palettes = {} end,
+        clear_missing = function() basic_missing_reported = {} end,
+        select_basic = function(value) basic_selected = value end,
+        sync_basic_imported = function() basic_imported = edit.imported end,
+        set_basic_names = function(value) basic_names = value end,
+    }, current)
 end
 local function close()
     for _, token in ipairs(operations.appearance_subscriptions or {}) do
         if token.unsubscribe then pcall(token.unsubscribe, token) end
     end
     operations.appearance_subscriptions = nil
+    if operations.appearance_events then
+        operations.appearance_events.close()
+        operations.appearance_events = nil
+    end
     operations.appearance_recovery = nil
     operations.appearance_worked = false
     -- Loader cleanup polls replace normal updates. Hide retained UI and release
@@ -2943,14 +2341,15 @@ local function reset_transient_state()
     edit, groups, operations, defaults, default_proofs = {}, {}, export_helpers, {}, {}
     status = 'Load a DDS or ZIP, then refresh the live LUT list.'
     pending, palettes, table_index, import_jobs = nil, {}, nil, nil
-    setup, resume_job, resume_done, original_luts = nil
+    setup, resume_state.job, resume_state.done, original_luts = nil
     select_suppressed, live_select_suppressed = false, false
     basic_imported, basic_names, basic_state, basic_documents, basic_selected = nil
     basic_missing_reported, myc_warned = {}, false
     populate_request, populate_next = nil, 0
     region_indicator, stop_identification, identify_kind, editor_pending = nil
     history, outfits, armory_collection, import_view = nil
-    appearance, appearance_pending, appearance_elapsed, appearance_read = nil, {}, 0, nil
+    appearance, appearance_pending, appearance_read = nil, {}, nil
+    operations.appearance_elapsed = 0
     source_tables, editor_tables, import_ids = {}, {}, {}
     index_job, refresh_needed, next_refresh = nil, false, 0
     m.quick_source, m.import_description = nil, nil
@@ -2988,6 +2387,12 @@ return {
                 edit.appearance_retry = 0
                 edit.appearance_wake = true
             end
+            local lifecycle_engine = rawget(_G, 'stingray')
+            if m.appearance_events and m.appearance_event_binary
+                and lifecycle_engine and lifecycle_engine.PluginManager then
+                operations.appearance_events = m.appearance_events.new(m.appearance_event_binary,
+                    lifecycle_engine, paths.cache, game, operations.invalidate_appearance)
+            end
             operations.appearance_subscriptions = {}
             local available, runtime = pcall(require, 'mods/skyeshade/hd2runtime')
             if available and runtime.events and runtime.events.on then
@@ -2997,34 +2402,7 @@ return {
                     if ok and token then operations.appearance_subscriptions[#operations.appearance_subscriptions + 1] = token end
                 end
             end
-            edit.appearance_has_events = #operations.appearance_subscriptions == 4
-            if not edit.appearance_has_events then
-                operations.appearance_changed = function()
-                    local identity = m.avatar.resolve(memory, game, appearance_read)
-                    local parts = { identity and identity.unit or 'absent' }
-                    if identity then
-                        parts[#parts + 1] = tostring(identity.body) .. ':' .. tostring(identity.armor)
-                            .. ':' .. tostring(identity.helmet) .. ':' .. tostring(identity.cape)
-                        for _, piece in ipairs(m.avatar.units(memory, identity, nil, 0, 9)) do
-                            parts[#parts + 1] = tostring(piece.unit)
-                        end
-                        local observe = operations.discovery_binding()
-                        local function inspect(owned)
-                            for _, b in ipairs(owned or {}) do
-                                if b.current ~= b.original then
-                                    parts[#parts + 1] = tostring(b.material) .. ':' .. tostring(observe(b))
-                                end
-                            end
-                        end
-                        inspect(bindings.owned)
-                        inspect(operations.pattern_session and operations.pattern_session.owned)
-                    end
-                    local signature = table.concat(parts, '|')
-                    if edit.appearance_signature == signature then return false end
-                    edit.appearance_signature = signature
-                    return true
-                end
-            end
+            edit.appearance_has_events = operations.appearance_events ~= nil or #operations.appearance_subscriptions == 4
             operations.invalidate_appearance()
         end
         if m.avatar.reader then
@@ -3812,7 +3190,7 @@ return {
             if updates and not updates.started and preferences.auto_updates and preferences.auto_updates() then
                 pcall(updates.check)
             end
-            if setup and not resume_done then
+            if setup and not resume_state.done then
                 action(resume_setup)
             end
             if refresh_needed then

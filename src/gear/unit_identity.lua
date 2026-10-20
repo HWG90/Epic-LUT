@@ -38,7 +38,7 @@ function I.new(E, deps)
         'Lua Unit identity APIs unavailable'
     )
     local receipts = setmetatable({}, { __mode = 'k' })
-    local self = {}
+    local self, handles = {}, {}
     local function token(unit)
         -- World.units returns Lua handles, not the numeric references read from
         -- avatar memory. Do not cast a caller's number into a Unit argument.
@@ -80,7 +80,7 @@ function I.new(E, deps)
         end
         return out
     end
-    local function scan(ref, expected)
+    local function scan(ref, expected, kept)
         assert(reference(ref), 'Invalid native Unit reference')
         -- resolve_live proves local machine ownership; remote/preview resolver
         -- callbacks are deliberately not accepted in this helper's interface.
@@ -96,6 +96,18 @@ function I.new(E, deps)
             end
         end
         assert(found, 'Unit reference is not a current local garment')
+        if kept and type(U.world) == 'function' then
+            -- A receipt retains the genuine engine handle acquired by the
+            -- initial census. Recheck current ownership directly rather than
+            -- allocate every mission Unit again to validate that one handle.
+            assert(token(kept.unit) == ref and U.alive(kept.unit) == true, 'Local garment Unit disappeared')
+            assert(U.world(kept.unit) == kept.world, 'Lua Unit handle or world changed')
+            assert(not deps.excluded or not deps.excluded(kept.unit, ref, kept.world), 'Preview-owned Unit refused')
+            local live_world = false
+            for _, world in ipairs(worlds()) do live_world = live_world or world == kept.world end
+            assert(live_world, 'Garment world disappeared')
+            return kept.unit, kept.world, proof
+        end
         local handle, owner
         for _, world in ipairs(worlds()) do
             local units = W.units(world)
@@ -118,9 +130,23 @@ function I.new(E, deps)
         return handle, owner, proof
     end
     function self.handle(ref, expected)
+        local cached = handles[ref]
+        if cached and type(U.world) == 'function' then
+            local kept = receipts[cached]
+            if (not expected or same(snapshot(expected), kept.identity)) and pcall(self.validate, cached) then
+                return cached.unit, cached
+            end
+            handles[ref] = nil
+        end
         local handle, world, proof = scan(ref, expected and snapshot(expected))
         local receipt = { unit = handle, world = world, reference = ref }
         receipts[receipt] = { unit = handle, world = world, reference = ref, identity = proof }
+        if type(U.world) == 'function' then
+            local count = 0
+            for _ in pairs(handles) do count = count + 1 end
+            if count >= I.MAX_GARMENTS then handles = {} end
+            handles[ref] = receipt
+        end
         return handle, receipt
     end
     function self.validate(receipt)
@@ -129,7 +155,7 @@ function I.new(E, deps)
             kept and receipt.unit == kept.unit and receipt.world == kept.world and receipt.reference == kept.reference,
             'Unknown or altered Lua Unit receipt'
         )
-        local handle, world = scan(kept.reference, kept.identity)
+        local handle, world = scan(kept.reference, kept.identity, kept)
         assert(handle == kept.unit and world == kept.world, 'Lua Unit handle or world changed')
         return true
     end

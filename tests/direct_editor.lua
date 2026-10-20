@@ -46,6 +46,9 @@ local pattern_deps
 local bulk_entries, bulk_naming
 local Pattern = dofile('src/editor/pattern_luts.lua')
 local m = {
+    appearance_recovery = dofile('src/editor/appearance_recovery.lua'),
+    editor_registration = dofile('src/editor/editor_registration.lua'),
+    setup_restore = dofile('src/editor/setup_restore.lua'),
     gear_edit = dofile('src/editor/gear_edit.lua'),
     editor_actions = dofile('src/editor/editor_actions.lua'),
     gear_export = dofile('src/presets/gear_export.lua'),
@@ -299,7 +302,7 @@ assert(
     'Loading worn colors changed target choices'
 )
 assert(bound[3] == 100, 'Population wrote game bindings')
--- Export must resolve highlight cleanup after startup initializes the binding session.
+-- Export must retain its callback through activation service resets.
 assert(handle.set('export_format', 5))
 local choose_status = activate('export_selected')
 assert(test_frontend.menu.lut_apply_dialog, 'Production export chooser failed: ' .. tostring(choose_status))

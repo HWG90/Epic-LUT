@@ -74,7 +74,7 @@ local function actor(generation, armor_materials)
     for index = 2, armor_materials or 1 do
         local material = generation * 1000 + 100 + index
         materials[armor_unit][index] = {
-            mesh = material + 20,
+            mesh = generation * 1000 + 21 + math.floor((index - 1) / 64),
             material = material,
             mesh_index = math.floor((index - 1) / 64),
             material_index = (index - 1) % 64,
@@ -84,11 +84,12 @@ local function actor(generation, armor_materials)
     emit('player_spawned')
 end
 actor(1)
+local committed_meshes = {}
 local native = {
     alive = function(unit)
         return live[unit] and 1 or 0
     end,
-    commit = function() end,
+    commit = function(mesh) committed_meshes[#committed_meshes+1] = mesh end,
 }
 local memory = {
     verify_build = function()
@@ -110,6 +111,9 @@ local pattern_doc = { width = 3, height = 1, data = ffi.new('float[12]') }
 pattern_doc.data[0], pattern_doc.data[3], pattern_doc.data[7], pattern_doc.data[11] = 0.875, -0.125, 0.75, 17.5
 local files = { material = D.encode(material_doc.data, 23, 8), pattern = D.encode(pattern_doc.data, 3, 1) }
 local m = {
+    appearance_recovery = dofile('src/editor/appearance_recovery.lua'),
+    editor_registration = dofile('src/editor/editor_registration.lua'),
+    setup_restore = dofile('src/editor/setup_restore.lua'),
     gear_edit = dofile('src/editor/gear_edit.lua'),
     editor_actions = dofile('src/editor/editor_actions.lua'),
     gear_export = dofile('src/presets/gear_export.lua'),
@@ -209,7 +213,7 @@ local m = {
         end,
         create_texture = function(_, width, height, data)
             created = created + 1
-            return { object = 90000 + created, data = data, width = width, height = height }
+            return { object = 900000 + created, data = data, width = width, height = height }
         end,
         bind = function(_, material, slot, object)
             binds = binds + 1
@@ -502,7 +506,10 @@ live = {}
 recover()
 actor(9, 256)
 scene = true
+local commits_before_large = #committed_meshes
 recover()
+assert(#committed_meshes - commits_before_large == 4,
+    '256 recovered armor materials must commit exactly four meshes, not one per material')
 for _, material in ipairs(materials[units[1].unit]) do
     assert(bound[material.material][1] == owned_material, 'Large Armor recovery lost a Transmog destination')
 end
@@ -560,3 +567,5 @@ assert(runtime.on_disable(ctx))
 print(
     'PASS direct appearance runtime: user material/Pattern application, closed-menu actor gap/replacement, game reset recovery, exact cached texture reuse, no automatic history, foreign/changed-kit protection, delayed metadata and Undo/Redo/Restore intent'
 )
+
+print('PASS armor recovery commit batching: 256 material destinations -> four mesh commits; exact immutable texture reuse retained')
