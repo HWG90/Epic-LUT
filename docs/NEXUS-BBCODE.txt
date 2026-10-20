@@ -59,7 +59,7 @@ Updated War Journalist Photo Mode builds can lend input to Epic LUT while keepin
 [*][b]Copy like you expect.[/b] Text selection, clipboard colors and held-key repeat. Ctrl+C/V, Undo/Redo, drag selection and full multi-row copy/paste in the grid.[/*]
 [*][b]Bring your palette loot.[/b] Import DDS, ZIP or RAR. Match texture IDs or map numbered tables to Armor, Helmet and Cape with manual assignment or Auto-map.[/*]
 [*][b]Build your Armory.[/b] Save named looks, mix Armor, Helmet and Cape with their Patterns, and share importable preset ZIPs.[/*]
-[*][u][color=#f1c232][size=4][b]Export your work.[/b][i] LUT patches, complete palette patches and raw DDS. Export every custom LUT in one click, with five naming formats and timestamped folders.[/i][/size][/color][/u][/*]
+[*][u][color=#f1c232][size=4][b]Export your work.[/b][i] LUT patches, complete palette patches and raw DDS. Export every custom LUT in one click, with six naming formats and timestamped folders.[/i][/size][/color][/u][/*]
 [*][b]See the fit.[/b] Dock or pop out Player Preview. Pan, rotate and zoom using the game's Game Default rendering path.[/*]
 [*][b]Make it yours.[/b] Organized Configuration, optional MCM integration, synchronized UI scale, shortcuts and a permanent Preview-off setting.[/*]
 [*][b]Find your region.[/b] Flash it magenta, inspect swatch RGBA values, or load the bundled Debug LUT from Tools > Options.[/*]
